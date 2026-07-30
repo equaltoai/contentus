@@ -114,11 +114,24 @@
       "",
       "The minimums sit at the current counts. They ratchet up with new coverage and",
       "are lowered only with a stated reason — lowering one is how coverage is retired,",
-      "and it is meant to be visible when it happens."
+      "and it is meant to be visible when it happens.",
+      "",
+      "A count is still not coverage: sixteen assertions that assert nothing satisfy a",
+      "minimum of sixteen, and one probe symlinked to another satisfies two entries from",
+      "one file. So each entry pins the probe's SHA-256 as well, symlinked probes are",
+      "rejected on lstat, and two entries naming one path are rejected outright."
     ],
     "expected": [
-      { "file": "tests/ssr-probe.test.mjs", "min_test_points": 16 },
-      { "file": "tests/origin.test.mjs", "min_test_points": 11 }
+      {
+        "file": "tests/ssr-probe.test.mjs",
+        "min_test_points": 16,
+        "sha256": "266cb3a605a3a190350a5ba1311f088d0f6a3584b510d237b16039b6083bf34b"
+      },
+      {
+        "file": "tests/origin.test.mjs",
+        "min_test_points": 11,
+        "sha256": "8dc087d361fce1c0a65f633fd5a8de948f205796f90d8155e616c712c42b23c5"
+      }
     ]
   },
   "supply_chain": {

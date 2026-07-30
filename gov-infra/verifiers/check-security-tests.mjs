@@ -17,16 +17,26 @@
  *
  * The minimums ratchet: they sit at the current counts, rise with new coverage,
  * and are lowered only deliberately, in the pin, with a reason.
+ *
+ * A count is still not coverage. Sixteen assertions that assert nothing satisfy a
+ * minimum of sixteen, and `origin.test.mjs` symlinked to `ssr-probe.test.mjs`
+ * satisfies both entries from one file — the inventory reports two probes and one
+ * ran twice. So each entry also pins the probe's SHA-256, and a probe that is a
+ * symlink is rejected on `lstatSync` (never `statSync`, which follows the link
+ * this is looking for). Two entries naming the same path are rejected outright.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
+
+import { readStrictJson } from './strict-json.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 const findings = [];
 
 let contract;
 try {
-	contract = JSON.parse(readFileSync(CONTRACT, 'utf8'));
+	contract = readStrictJson(CONTRACT);
 } catch (error) {
 	console.error(`${CONTRACT} is missing or unparseable: ${error.message}`);
 	process.exit(1);
@@ -37,6 +47,17 @@ if (!Array.isArray(inventory) || inventory.length === 0) {
 	console.error(`${CONTRACT}: security_tests.expected must be a non-empty array`);
 	console.error('An empty inventory would make SEC-6 assert nothing.');
 	process.exit(1);
+}
+
+// Two entries for one path is not two probes. Whatever the second entry pins —
+// a lower minimum, a different hash — the file runs twice and the inventory
+// count overstates the coverage by one.
+const seenPaths = new Set();
+for (const entry of inventory) {
+	if (typeof entry?.file !== 'string') continue;
+	if (seenPaths.has(entry.file))
+		findings.push(`${CONTRACT}: security_tests.expected lists ${entry.file} more than once`);
+	seenPaths.add(entry.file);
 }
 
 /** Parse node:test's TAP trailer. A counter that is absent is not a zero. */
@@ -62,12 +83,36 @@ for (const entry of inventory) {
 		findings.push(`${CONTRACT}: "${file}" must pin an integer min_test_points >= 1`);
 		continue;
 	}
-	if (!existsSync(file) || !statSync(file).isFile()) {
+	if (!existsSync(file)) {
 		findings.push(`${file}: pinned SEC-6 probe is missing`);
+		continue;
+	}
+	if (lstatSync(file).isSymbolicLink()) {
+		findings.push(
+			`${file}: pinned SEC-6 probe is a symlink; the inventory would count one file twice`
+		);
+		continue;
+	}
+	if (!statSync(file).isFile()) {
+		findings.push(`${file}: pinned SEC-6 probe is not a regular file`);
 		continue;
 	}
 	if (statSync(file).size === 0) {
 		findings.push(`${file}: pinned SEC-6 probe is empty`);
+		continue;
+	}
+	if (typeof entry?.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(entry.sha256)) {
+		findings.push(`${CONTRACT}: "${file}" must pin a 64-hex sha256 of the probe's content`);
+		continue;
+	}
+	const digest = createHash('sha256').update(readFileSync(file)).digest('hex');
+	if (digest !== entry.sha256) {
+		findings.push(
+			`${file}: probe content does not match its pin\n` +
+				`    pinned: ${entry.sha256}\n` +
+				`    actual: ${digest}\n` +
+				'    a passing count is not coverage; the assertions themselves are pinned'
+		);
 		continue;
 	}
 
@@ -107,7 +152,9 @@ for (const entry of inventory) {
 		findings.push(
 			`${file}: TAP plan 1..${counters.plan} disagrees with ${counters.tests} reported tests`
 		);
-	summaries.push(`  = ${file}: ${counters.pass} passing test points (minimum ${minimum})`);
+	summaries.push(
+		`  = ${file}: ${counters.pass} passing test points (minimum ${minimum}), content ${entry.sha256.slice(0, 16)}…`
+	);
 }
 
 if (findings.length) {
@@ -122,3 +169,4 @@ if (findings.length) {
 console.log('');
 console.log(`SEC-6 inventory complete: ${summaries.length} pinned probe file(s), all passing.`);
 for (const line of summaries) console.log(line);
+console.log('Each probe is a regular file, not a symlink, and matches its pinned content hash.');
