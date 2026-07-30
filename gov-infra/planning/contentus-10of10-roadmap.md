@@ -20,6 +20,14 @@ the application tree and this spine are on the same ref.
   tree. A gate that skips itself when its subject is missing is a gate that a deletion
   can satisfy.
 
+The gates were nevertheless verified against a real application tree before this spine
+was proposed, so that "FAIL at this ref" is known to mean "no subject here" rather than
+"never exercised". Applying this exact `gov-infra/` and `.github/` to a detached checkout
+of the M1 head `c0e39ce`, after a clean `pnpm install --frozen-lockfile` and the pinned
+CLI install, produced `PASS (31 pass, 0 fail, 0 blocked)`. That run is recorded in the
+pull request rather than committed here, because evidence belongs to the ref it was
+produced at and this ref is not that one.
+
 ## M2 — Retire the disclosed upstream findings
 
 - Route the `ws` advisory (`GHSA-96hv-2xvq-fx4p`, reached through the pinned adapters
