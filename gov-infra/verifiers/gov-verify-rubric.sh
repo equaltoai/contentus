@@ -4,7 +4,22 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+# Evidence lands in gov-infra/evidence by default. GOV_EVIDENCE_DIR selects a
+# direct subdirectory of it instead, which is how a composite run (these verifiers
+# against another tree) keeps its logs beside — never on top of — the logs for this
+# ref. Regenerating evidence deletes what it is about to replace, so two runs
+# sharing one directory means the second run's report cites the first run's logs.
+# The value is constrained to a direct child so it can never redirect evidence
+# outside the tree the CI artifact upload covers, and it can only relocate output:
+# no control's PASS/FAIL depends on it.
 EVIDENCE=gov-infra/evidence
+if [[ -n "${GOV_EVIDENCE_DIR:-}" ]]; then
+  case "$GOV_EVIDENCE_DIR" in
+    gov-infra/evidence/*/*|*..*|/*) echo "GOV_EVIDENCE_DIR must be gov-infra/evidence or a direct subdirectory of it (got $GOV_EVIDENCE_DIR)" >&2; exit 2;;
+    gov-infra/evidence|gov-infra/evidence/*) EVIDENCE="$GOV_EVIDENCE_DIR";;
+    *) echo "GOV_EVIDENCE_DIR must be gov-infra/evidence or a direct subdirectory of it (got $GOV_EVIDENCE_DIR)" >&2; exit 2;;
+  esac
+fi
 PLAN=gov-infra/planning
 VERIFY=gov-infra/verifiers
 TOOLS=gov-infra/.tools
@@ -181,6 +196,10 @@ printf -v joined '%s,' "${RESULTS[@]}"; joined="[${joined%,}]"
 cat > "$REPORT" <<EOF2
 {"\$schema":"https://gov.pai.dev/schemas/gov-rubric-report.schema.json","schemaVersion":1,"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pack":{"version":"bc41187efb6f5b3c3bfb4d9295836d4e071941d7","digest":"a613e19a4367d98a8f4b45f7c19c11881d21491eb55b8409446ca4a10d4e5cd7"},"project":{"name":"contentus","slug":"contentus"},"summary":{"status":"$status","pass":$pass,"fail":$fail,"blocked":$blocked},"results":$joined}
 EOF2
-node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]));' "$REPORT"
+# Validate the document, then rewrite it indented. Evidence is committed and this
+# repository lints everything it commits, so a report that is only valid JSON puts
+# the next run's CON-1 at odds with the previous run's output. Two-space indent is
+# what Prettier produces for this shape, so the generated file is already clean.
+node -e 'const fs=require("fs"),p=process.argv[1];fs.writeFileSync(p, JSON.stringify(JSON.parse(fs.readFileSync(p,"utf8")),null,2)+"\n");' "$REPORT"
 echo "Report written to $REPORT: $status ($pass pass, $fail fail, $blocked blocked)"
 [[ $status == PASS ]]
