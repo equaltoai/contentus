@@ -153,6 +153,35 @@ was corrected in place (package.json is contentus-owned); the second is
 absorbed by a resolve alias in `vite.config.ts` and `tsconfig.json`, because
 vendored source is never hand-edited.
 
+## FaceTheory
+
+**Strict CSP makes an absolute canonical `<link>` unemittable.** At FaceTheory
+v4.0.1, `renderFaceHead` validates every head `<link href>` under a strict
+policy as same-origin-or-relative, resolving "same origin" against an
+`allowedOrigin` option — but `FaceApp` never forwards one. `dist/app.js` calls
+`renderFaceHead(out, { cspNonce: req.cspNonce })` and nothing else, so
+`allowedOrigin` is always undefined and the only shape that passes is a relative
+URL. Any absolute href throws, and the throw is not local to the tag: it takes
+the whole route to a 500.
+
+This is not a hypothetical. `<link rel="canonical" href="https://…">` is exactly
+what lesser's Article identity contract asks a reading surface to advertise, so
+the loaded-article path 500'd before the reader component ever ran — a branch
+the degraded-path audits could not reach, because an article that fails to load
+emits no canonical tag at all.
+
+Contentus's handling, at `headTagsForRoute` in `src/facetheory/entry-server.ts`:
+`og:url` keeps lesser's absolute identity (meta content is not subject to the
+check), and the `<link>` carries the same-origin identity in relative form,
+which resolves byte-identically against the document base. A genuinely
+cross-origin canonical — a syndicated `article.canonicalUrl` — cannot be
+expressed relatively and gets no link tag. That is a real loss of fidelity, and
+the reason this is written down rather than absorbed silently.
+
+Sunset: delete `canonicalLinkHref` and emit the absolute href the day FaceTheory
+forwards a per-request `allowedOrigin` into `renderFaceHead`. The framework
+already has the option and the parameter — only the call site is missing.
+
 ## Routing these upstream
 
 Contentus's GitHub binding covers `equaltoai/contentus` only, so none of the

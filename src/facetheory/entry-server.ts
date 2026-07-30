@@ -101,6 +101,41 @@ function hydrationDataUrlForRequest(path: string, query?: Query): string {
 	return `${PUBLIC_HYDRATION_DATA_PATH}?${params.toString()}`;
 }
 
+/**
+ * The form of a canonical URL that FaceTheory's strict CSP will accept in a
+ * `<link href>`, or null if there is none.
+ *
+ * FaceTheory validates every head `<link href>` under strict CSP as
+ * same-origin-or-relative, and resolves "same origin" against an `allowedOrigin`
+ * that `FaceApp` never forwards from the face (`dist/app.js` calls
+ * `renderFaceHead(out, { cspNonce })` and nothing else). With no allowedOrigin
+ * the only accepted shape is a relative URL, so an ABSOLUTE href throws — even
+ * the page's own origin — and takes the whole route to a 500. That is what the
+ * loaded-article path was hitting before the reader ever ran.
+ *
+ * So the link carries the same-origin identity in its relative form, which
+ * resolves byte-identically against the document base: contentus is not
+ * rewriting lesser's Article identity, it is spelling it the only way the
+ * framework permits. A genuinely cross-origin canonical (a syndicated
+ * `article.canonicalUrl`) cannot be expressed relatively and gets no link tag at
+ * all — `og:url` still carries the absolute identity, since meta content is not
+ * subject to this check.
+ *
+ * Sunset: delete this and emit the absolute href once FaceTheory forwards a
+ * per-request allowedOrigin into `renderFaceHead`. Reported to the FaceTheory
+ * steward; see docs/consumption/renderer-authority.md.
+ */
+function canonicalLinkHref(canonical: string | null, origin: string | null): string | null {
+	if (!canonical || !origin) return null;
+	try {
+		const url = new URL(canonical);
+		if (url.origin !== new URL(origin).origin) return null;
+		return `${url.pathname}${url.search}${url.hash}`;
+	} catch {
+		return null;
+	}
+}
+
 /** Head tags derived from the loaded route: title, description, OG, canonical. */
 function headTagsForRoute(props: RouteProps, origin: string | null) {
 	const article = props.reader?.article ?? null;
@@ -132,8 +167,12 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
 	];
 
 	if (canonical) {
-		tags.push({ type: 'link', attrs: { rel: 'canonical', href: canonical } });
 		tags.push({ type: 'meta', attrs: { property: 'og:url', content: canonical } });
+
+		const canonicalHref = canonicalLinkHref(canonical, origin);
+		if (canonicalHref) {
+			tags.push({ type: 'link', attrs: { rel: 'canonical', href: canonicalHref } });
+		}
 	}
 	if (article?.ogImage) {
 		tags.push({ type: 'meta', attrs: { property: 'og:image', content: article.ogImage } });
