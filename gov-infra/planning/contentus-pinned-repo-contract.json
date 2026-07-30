@@ -1,0 +1,128 @@
+{
+  "$comment": [
+    "Pinned repo-side contract for the controls that would otherwise trust a",
+    "repository-controlled artifact at its word.",
+    "",
+    "The rubric invokes package.json scripts, reads facetheory.lesser.json, and runs a",
+    "named set of security tests. Every one of those is editable in the same pull",
+    "request as the change being gated, so 'the command exited 0' is not by itself",
+    "evidence: a script rewritten to `true` exits 0, an emptied test file exits 0, and a",
+    "retargeted manifest path exits 0. This file is the expected value each of those",
+    "controls asserts against.",
+    "",
+    "What this does buy: a bypass can no longer hide inside an application-shaped file.",
+    "Stubbing `pnpm run build` now requires editing gov-infra/planning in the same diff,",
+    "at the governance boundary, where the change is the review's subject rather than",
+    "incidental. What it does NOT buy: this is not a cryptographic binding, and an",
+    "author who edits both sides can still move the pin. The control it composes with is",
+    "cross-client adversarial review of the gov-infra diff, not this file alone.",
+    "",
+    "Changing any value here is a governance change. It travels with the reason, in the",
+    "commit that needs it, and never as drive-by maintenance."
+  ],
+  "package_scripts": {
+    "rubric_items": ["CON-5"],
+    "$comment": [
+      "Exact expected text of every script the rubric's exit-code trust depends on,",
+      "including the transitive closure reached through `pnpm run`. CON-5 asserts each",
+      "pinned script matches byte-for-byte, and that no pinned script delegates to a",
+      "script outside this map — a sub-script is otherwise a hole under a pinned parent."
+    ],
+    "expected": {
+      "typecheck": "tsc --noEmit",
+      "svelte-check": "svelte-check --tsconfig tsconfig.json --threshold error",
+      "lint": "prettier --check .",
+      "build:client": "vite build",
+      "build:server": "vite build --ssr src/facetheory/entry-server.ts",
+      "build:assets": "node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs",
+      "build": "pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate",
+      "validate": "pnpm run validate:renderer-authority && pnpm run validate:csp",
+      "validate:csp": "node scripts/audit-csp.mjs",
+      "validate:renderer-authority": "node scripts/audit-renderer-authority.mjs",
+      "test": "node --test --experimental-strip-types 'tests/*.test.mjs' 'scripts/*.test.mjs'"
+    }
+  },
+  "install_manifest": {
+    "rubric_items": ["CON-3", "COM-1"],
+    "$comment": [
+      "`build.command` is what `lesser client install` executes. An allowlist of exact",
+      "invocations is the only form of this check that means anything: any non-empty",
+      "string array satisfies a shape check, including one that runs something else",
+      "entirely. Path keys are validated structurally (no absolute path, no `..`,",
+      "resolved beneath the repository root, entry beneath the server dir) rather than",
+      "pinned, so the layout can move without a governance edit while containment holds."
+    ],
+    "allowed_build_commands": [
+      ["pnpm", "build"],
+      ["pnpm", "run", "build"]
+    ]
+  },
+  "security_tests": {
+    "rubric_items": ["SEC-6"],
+    "$comment": [
+      "SEC-6's inventory. `node --test <files>` exits 0 on a file containing no tests,",
+      "so existence is not coverage. Each file below must be present and must report at",
+      "least `min_test_points` passing TAP test points (TAP's own name for the ok/not ok",
+      "assertions a run emits, counting nested subtests). Deleting a test, emptying a",
+      "file, or dropping one from the invocation all fail the control.",
+      "",
+      "The minimums sit at the current counts. They ratchet up with new coverage and",
+      "are lowered only with a stated reason — lowering one is how coverage is retired,",
+      "and it is meant to be visible when it happens."
+    ],
+    "expected": [
+      { "file": "tests/ssr-probe.test.mjs", "min_test_points": 16 },
+      { "file": "tests/origin.test.mjs", "min_test_points": 11 }
+    ]
+  },
+  "supply_chain": {
+    "rubric_items": ["SEC-3"],
+    "$comment": [
+      "The hard boundary is that no install in this rubric or in CI runs lifecycle",
+      "scripts: every `pnpm install` carries `--ignore-scripts`. The scans below are",
+      "heuristic screening layered on top of that boundary, never a substitute for it.",
+      "",
+      "`--ignore-scripts` does NOT disable pnpm's own `.pnpmfile.cjs` hooks, so their",
+      "presence is a finding in its own right unless disclosed here. `onlyBuiltDependencies`",
+      "is pnpm 10's opt-back-in for lifecycle scripts and is likewise a finding unless",
+      "disclosed. Both lists are empty: contentus runs no install-time code."
+    ],
+    "root_lifecycle_hooks_allowed": [],
+    "only_built_dependencies_disclosed": [],
+    "pnpmfile_disclosed": []
+  },
+  "greater": {
+    "rubric_items": ["CON-4", "SEC-7"],
+    "$comment": [
+      "Binds the two greater channels to each other and to a named release, rather than",
+      "to a shape. A 40-hex-shaped ref is not evidence of anything: every commit in every",
+      "repository is 40 hex. `vendored_ref` is the greater-components commit the",
+      "greater-v0.11.9 vendoring came from, recorded at the M1 `greater add` run.",
+      "",
+      "Both values move together at a CLI pin bump and only through the CLI.",
+      "`cli_version` is the version string `greater --version` must print; a PATH CLI at",
+      "any other version FAILS SEC-7 rather than reporting on a tree it does not match."
+    ],
+    "release_tag": "greater-v0.11.9",
+    "vendored_ref": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+    "cli_version": "0.11.9"
+  },
+  "workflows": {
+    "rubric_items": ["SEC-3"],
+    "$comment": [
+      "Least-privilege GitHub Actions permissions. Every workflow must declare an",
+      "explicit top-level `permissions:` block, and every scope in it — top-level or",
+      "job-level — must be `read` or `none`, except the exact write grants listed here.",
+      "CodeQL's `security-events: write` is the one exception: uploading a SARIF result",
+      "requires it, and the alternative is not running CodeQL."
+    ],
+    "allowed_write_permissions": [
+      {
+        "workflow": "codeql.yml",
+        "scope": "security-events",
+        "value": "write",
+        "reason": "github/codeql-action/analyze uploads SARIF to the security-events API."
+      }
+    ]
+  }
+}
