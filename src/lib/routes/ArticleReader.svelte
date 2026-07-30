@@ -4,9 +4,10 @@ Face 1 — the article reader.
 RENDERER AUTHORITY. lesser's server-side renderer/sanitizer is the only source
 of article HTML. This component displays that output; it never renders Markdown
 and never shows raw source. The decision of whether a body may be displayed at
-all is made once, in `resolveArticleBody`, and this component only presents the
-result — so there is exactly one place to audit rather than a judgement spread
-across the template.
+all is made once, in `resolveArticleBody`, and ENFORCED where the data is built
+(`withholdUnrenderableSource`, applied in the loader) — so a withheld body is
+already gone by the time it reaches here, rather than merely unrendered. This
+component presents the decision; it does not re-take it.
 
 When the body is withheld, the reader still renders everything lesser HAS
 rendered authoritatively — title, subtitle, byline, dates, reading time, word
@@ -19,7 +20,7 @@ that quietly prints Markdown source.
 <script lang="ts">
 	import { ArticleReader as BlogArticleReader } from '$lib/greater/faces/blog/components/Article/index.js';
 
-	import { resolveArticleBody, toBlogFaceArticle } from '$lib/cms/articles';
+	import { toBlogFaceArticle } from '$lib/cms/articles';
 	import { seriesHref } from '../../facetheory/routing';
 	import type { AppPageDescriptor, ArticleReaderData } from '../../facetheory/types';
 	import Notice from './Notice.svelte';
@@ -31,7 +32,10 @@ that quietly prints Markdown source.
 
 	let { page, data }: Props = $props();
 
-	const body = $derived(data.article ? resolveArticleBody(data.article) : null);
+	// The gate already ran in the loader, which is also where the withheld source
+	// was dropped. Re-deriving it here would be a second opinion on a decision
+	// that has already been enforced — and by now `content` is empty either way.
+	const body = $derived(data.body);
 	const faceArticle = $derived(
 		data.article && body ? toBlogFaceArticle(data.article, body) : null
 	);

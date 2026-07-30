@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { resolveArticleBody, toArticleDetail, toBlogFaceArticle } from '../src/lib/cms/articles.ts';
+import {
+	resolveArticleBody,
+	toArticleDetail,
+	toBlogFaceArticle,
+	withholdUnrenderableSource,
+} from '../src/lib/cms/articles.ts';
 
 /**
  * Renderer authority is the invariant contentus exists to keep, so it gets
@@ -63,8 +68,43 @@ test('server-rendered HTML is passed through', () => {
 	const decision = resolveArticleBody(article);
 
 	assert.equal(decision.kind, 'render');
-	assert.equal(decision.html, '<h1>Heading</h1><p>Rendered by lesser.</p>');
-	assert.equal(toBlogFaceArticle(article, decision).content, decision.html);
+	assert.equal(
+		toBlogFaceArticle(article, decision).content,
+		'<h1>Heading</h1><p>Rendered by lesser.</p>'
+	);
+});
+
+test('a withheld body is dropped from the article, not merely unrendered', () => {
+	// The reader declining to display source is a template decision; this is the
+	// data decision behind it. Route props are serialized into the public
+	// hydration endpoint, so source that survives here is source that ships.
+	const { article, body } = withholdUnrenderableSource(articleFixture());
+
+	assert.equal(body.kind, 'withhold');
+	assert.equal(article.content, '', 'withheld source must not survive into the props');
+	assert.ok(!JSON.stringify(article).includes('markdown'), 'no source anywhere in the payload');
+});
+
+test('withholding keeps everything the reader legitimately shows', () => {
+	const original = articleFixture();
+	const { article } = withholdUnrenderableSource(original);
+
+	assert.equal(article.title, original.title);
+	assert.equal(article.excerpt, original.excerpt);
+	assert.equal(article.readingTimeMinutes, original.readingTimeMinutes);
+	assert.equal(article.wordCount, original.wordCount);
+	assert.equal(article.publishedAt, original.publishedAt);
+	assert.deepEqual(article.author, original.author);
+	assert.deepEqual(article.tableOfContents, original.tableOfContents);
+});
+
+test('a renderable body is left intact', () => {
+	const { article, body } = withholdUnrenderableSource(
+		articleFixture({ content: '<p>Rendered by lesser.</p>', contentFormat: 'HTML' })
+	);
+
+	assert.equal(body.kind, 'render');
+	assert.equal(article.content, '<p>Rendered by lesser.</p>');
 });
 
 test('an empty body is withheld distinctly from unrendered source', () => {

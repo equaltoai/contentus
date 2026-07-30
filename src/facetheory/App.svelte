@@ -20,7 +20,7 @@ is no catch-all render path that could silently show the wrong surface.
 
 <AppShell {page}>
 	{#if page.key === 'article-reader'}
-		<ArticleReaderRoute {page} data={reader ?? { article: null, unavailable: null }} />
+		<ArticleReaderRoute {page} data={reader ?? { article: null, body: null, unavailable: null }} />
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />
 	{:else if page.key === 'not-found'}

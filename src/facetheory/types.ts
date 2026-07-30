@@ -1,3 +1,4 @@
+import type { ArticleBodyDecision } from '$lib/cms/articles';
 import type { ArticleSummary, ArticleDetail, CategorySummary, SeriesSummary } from '$lib/cms/types';
 
 /** Stable identifier for each contentus surface in the M1 route table. */
@@ -46,7 +47,20 @@ export interface ArticlesIndexData {
 }
 
 export interface ArticleReaderData {
+	/**
+	 * The article as it may leave the server. When `body` withholds, `content`
+	 * has already been emptied — these props are serialized into the public
+	 * hydration endpoint, so a body the reader declines to show must not be
+	 * sitting in the payload behind it.
+	 */
 	article: ArticleDetail | null;
+	/**
+	 * Why the body is or is not displayable, decided once in
+	 * `withholdUnrenderableSource`. The reader presents this rather than
+	 * re-deriving it — by the time props arrive, an emptied `content` is
+	 * indistinguishable from an article lesser returned empty.
+	 */
+	body: ArticleBodyDecision | null;
 	unavailable: ContentUnavailable | null;
 }
 

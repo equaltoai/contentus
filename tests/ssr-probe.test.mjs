@@ -34,7 +34,7 @@ function articleFixture(overrides = {}) {
 		author: { id: 'actor-1', username: 'ada', displayName: 'Ada', avatarUrl: null },
 		featuredImage: null,
 		categories: [],
-		content: '# Heading\n\nSome *markdown* source.',
+		content: '# Heading\n\nSome unrendered SOURCE-SENTINEL prose.',
 		contentFormat: 'MARKDOWN',
 		canonicalUrl: null,
 		seoTitle: null,
@@ -178,6 +178,57 @@ test('an HTML article renders its body through the vendored blog face', async ()
 	assert.equal(value.status, 200, 'the HTML-article path must render, not error');
 	assert.match(value.html, /gr-blog-article__content/, 'the vendored face must have rendered');
 	assert.ok(value.html.includes('Rendered by lesser.'), 'the server-rendered body must be shown');
+});
+
+test('a withheld body is absent from the public hydration payload', async () => {
+	// The reader's withhold stance is only real if the source is not sitting one
+	// fetch away in the hydration JSON. Anonymous request, no session, no token.
+	const { value } = await probe(
+		{ path: '/l/_facetheory/hydration?path=%2Farticles%2Fhello', headers: INSTANCE_HEADERS },
+		{ article: articleFixture() }
+	);
+
+	assert.equal(value.status, 200);
+	assert.match(value.headers['content-type'] ?? '', /application\/json/);
+
+	const props = JSON.parse(value.html);
+	assert.equal(props.reader.article.content, '', 'no article source may leave the server');
+	assert.equal(props.reader.body.kind, 'withhold');
+	assert.equal(props.reader.body.reason, 'unrendered-source');
+	assert.doesNotMatch(value.html, /SOURCE-SENTINEL/, 'no fragment of the source may survive');
+	// `contentFormat` itself stays: it is metadata describing what lesser holds,
+	// which is exactly what the reader needs to explain the withhold.
+	assert.equal(props.reader.article.contentFormat, 'MARKDOWN');
+
+	// Everything the reader legitimately shows still travels.
+	assert.equal(props.reader.article.title, 'Hello');
+	assert.equal(props.reader.article.readingTimeMinutes, 4);
+	assert.equal(props.reader.article.tableOfContents.length, 1);
+});
+
+test('a withheld body is absent from the SSR document too', async () => {
+	const { value } = await probe(
+		{ path: '/l/articles/hello', headers: INSTANCE_HEADERS },
+		{ article: articleFixture() }
+	);
+
+	assert.equal(value.status, 200);
+	assert.doesNotMatch(value.html, /SOURCE-SENTINEL/);
+	assert.match(value.html, /awaiting server-rendered output/i, 'the reason must still be stated');
+});
+
+test('a displayable body still reaches hydration, since the page shows it', async () => {
+	// The rule is renderer authority, not secrecy: HTML that cleared the gate is
+	// what the document already renders, so withholding it from hydration would
+	// only break the client without protecting anything.
+	const { value } = await probe(
+		{ path: '/l/_facetheory/hydration?path=%2Farticles%2Fhello', headers: INSTANCE_HEADERS },
+		{ article: articleFixture({ content: '<p>Rendered by lesser.</p>', contentFormat: 'HTML' }) }
+	);
+
+	const props = JSON.parse(value.html);
+	assert.equal(props.reader.body.kind, 'render');
+	assert.equal(props.reader.article.content, '<p>Rendered by lesser.</p>');
 });
 
 test('canonical identity is advertised in both forms lesser expects', async () => {

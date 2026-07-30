@@ -8,6 +8,7 @@ import {
 	toArticleDetail,
 	toCategorySummary,
 	toSeriesSummary,
+	withholdUnrenderableSource,
 } from './articles';
 import { GraphQLTransportError, graphqlRequest, isFeatureDisabledError } from './graphql';
 import {
@@ -205,6 +206,7 @@ export async function loadArticleBySlug(
 	if (!slug) {
 		return {
 			article: null,
+			body: null,
 			unavailable: { reason: 'not-found', message: 'No article was requested.' },
 		};
 	}
@@ -217,7 +219,7 @@ export async function loadArticleBySlug(
 		);
 
 		if (isFeatureDisabledError(result.errors)) {
-			return { article: null, unavailable: CMS_DISABLED };
+			return { article: null, body: null, unavailable: CMS_DISABLED };
 		}
 
 		const article = toArticleDetail(result.data?.articleBySlug);
@@ -229,12 +231,16 @@ export async function loadArticleBySlug(
 			// upstream; this is where a tombstone signal would land.
 			return {
 				article: null,
+				body: null,
 				unavailable: { reason: 'not-found', message: 'No article matches this address.' },
 			};
 		}
 
-		return { article, unavailable: null };
+		// Renderer authority is applied HERE, not in the template: these props are
+		// serialized into the public hydration endpoint, so a withheld body has to
+		// be gone before it leaves the loader.
+		return { ...withholdUnrenderableSource(article), unavailable: null };
 	} catch (error) {
-		return { article: null, unavailable: unavailableFromFailure(error) };
+		return { article: null, body: null, unavailable: unavailableFromFailure(error) };
 	}
 }

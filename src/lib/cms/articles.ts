@@ -173,7 +173,7 @@ export function toArticleConnection(raw: unknown): {
 // ---------------------------------------------------------------------------
 
 export type ArticleBodyDecision =
-	{ kind: 'render'; html: string } | { kind: 'withhold'; reason: 'unrendered-source' | 'empty' };
+	{ kind: 'render' } | { kind: 'withhold'; reason: 'unrendered-source' | 'empty' };
 
 /**
  * Decide whether an article body may be displayed.
@@ -209,7 +209,34 @@ export function resolveArticleBody(article: ArticleDetail): ArticleBodyDecision 
 	if (article.contentFormat !== 'HTML') {
 		return { kind: 'withhold', reason: 'unrendered-source' };
 	}
-	return { kind: 'render', html: article.content };
+	return { kind: 'render' };
+}
+
+/**
+ * Apply the renderer-authority decision to the article itself.
+ *
+ * Deciding not to DISPLAY source is not the same as not SENDING it. Contentus
+ * server-renders, and its render props travel on to the browser as hydration
+ * JSON — so an article whose body the reader withholds was still shipping that
+ * body verbatim to every anonymous viewer, one fetch away from the page that
+ * politely declined to show it. A withhold that only holds in the template is
+ * decoration.
+ *
+ * So the decision is made once, here, at the point the article is constructed,
+ * and the withheld source is dropped rather than carried. Everything the reader
+ * legitimately shows — title, byline, dates, reading time, excerpt, table of
+ * contents — is server-derived scalar data and is untouched.
+ *
+ * Callers get the decision back because the reader still needs to say WHY the
+ * body is missing, and by then `content` is empty and no longer able to tell it
+ * apart from an article lesser returned empty.
+ */
+export function withholdUnrenderableSource(article: ArticleDetail): {
+	article: ArticleDetail;
+	body: ArticleBodyDecision;
+} {
+	const body = resolveArticleBody(article);
+	return { article: body.kind === 'render' ? article : { ...article, content: '' }, body };
 }
 
 /**
@@ -254,14 +281,16 @@ export interface BlogFaceArticleInput {
  *
  * `content` is passed only for bodies that cleared `resolveArticleBody`; a
  * withheld body is passed as an empty string so no source can reach the DOM
- * even if a future face revision changes its fallback rendering.
+ * even if a future face revision changes its fallback rendering. By this point
+ * `withholdUnrenderableSource` has already emptied it — this is the second of
+ * the two locks, not the only one.
  */
 export function toBlogFaceArticle(
 	article: ArticleSummary | ArticleDetail,
 	body?: ArticleBodyDecision
 ): BlogFaceArticleInput {
 	const detail = 'content' in article ? article : null;
-	const renderedBody = body?.kind === 'render' ? body.html : '';
+	const renderedBody = body?.kind === 'render' ? (detail?.content ?? '') : '';
 
 	return {
 		id: article.id,
