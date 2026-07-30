@@ -135,6 +135,29 @@ holding the packages `greater add` had installed before contentus's pins were
 restored — the same stale-tree trap emdash recorded. Build evidence is only
 trustworthy from a clean install.
 
+**The blog face's Article context uses runes in a plain `.ts` module.** At
+greater-v0.11.9, `faces/blog/components/Article/context.ts` calls `$state(...)`,
+but Svelte 5 runes are compiler directives — they only exist if something
+compiles them. vite-plugin-svelte compiles runes in non-component modules only
+when the filename carries the `.svelte.` infix, which this file does not have.
+Nothing compiles it, `$state` survives verbatim into the bundle, and the article
+reader throws `ReferenceError: $state is not defined` the first time an article
+actually loads. Two sibling vendored modules get this right
+(`utils/use-stable-id.svelte.ts`, `primitives/components/Menu/context.svelte.ts`),
+so the convention is understood upstream — this one file misses it.
+
+The defect is invisible in `pnpm dev`, where Vite's SSR resolves the rune through
+Svelte's runtime import graph. Only the built artifact fails, which is why the
+probes in `tests/ssr-probe.test.mjs` drive `build/server/handler.mjs` rather
+than a dev server.
+
+Contentus absorbs it in `vite.config.ts` through the plugin's own supported hook
+(`experimental.compileModule.include`), scoped to the whole vendored tree so a
+CLI pin bump that adds another such module keeps working. No vendored byte
+changes — the file is checksummed, and the fix it actually wants is a rename to
+`context.svelte.ts`. `tests/vendored-runes.test.mjs` asserts no shipped bundle
+carries an uncompiled rune.
+
 **Dark theme still incomplete (emdash's U-18, re-confirmed).** At
 greater-v0.11.9 the blog face carries seven `[data-theme='dark']` rules, all
 scoped to `.gr-blog-article-card`. Article prose and headings remain pinned to

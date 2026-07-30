@@ -160,6 +160,26 @@ test('a loaded article renders rather than 500ing on its own canonical tag', asy
 	assert.ok(value.html.includes('Hello'), 'the article title should reach the document');
 });
 
+test('an HTML article renders its body through the vendored blog face', async () => {
+	// The one body class contentus currently displays. It reaches the vendored
+	// face, whose Article context uses Svelte-5 runes in a plain `.ts` module —
+	// so this is also the regression test for that module reaching the bundle
+	// uncompiled.
+	const { value } = await probe(
+		{ path: '/l/articles/hello', headers: INSTANCE_HEADERS },
+		{
+			article: articleFixture({
+				content: '<h2 id="heading">Heading</h2><p>Rendered by lesser.</p>',
+				contentFormat: 'HTML',
+			}),
+		}
+	);
+
+	assert.equal(value.status, 200, 'the HTML-article path must render, not error');
+	assert.match(value.html, /gr-blog-article__content/, 'the vendored face must have rendered');
+	assert.ok(value.html.includes('Rendered by lesser.'), 'the server-rendered body must be shown');
+});
+
 test('canonical identity is advertised in both forms lesser expects', async () => {
 	const { value } = await probe(
 		{ path: '/l/articles/hello', headers: INSTANCE_HEADERS },

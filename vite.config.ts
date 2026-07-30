@@ -7,6 +7,29 @@ import { defineConfig } from 'vite';
 const root = fileURLToPath(new URL('.', import.meta.url));
 
 /**
+ * Vendored greater modules that must go through Svelte's module compiler.
+ *
+ * vite-plugin-svelte compiles runes in plain modules only when the filename
+ * carries the `.svelte.` infix. At greater-v0.11.9 the blog face's Article
+ * context is `components/Article/context.ts` — no infix — and it calls
+ * `$state(...)`. Nothing compiles it, so `$state` survives verbatim into the
+ * bundle and the article reader dies at runtime with `ReferenceError: $state is
+ * not defined` the first time an article actually loads. `pnpm dev` hides it:
+ * Vite's dev SSR resolves the rune through Svelte's runtime import graph, and
+ * the built artifact does not.
+ *
+ * The fix is the plugin's own supported hook — `experimental.compileModule.include`
+ * — pointed at the vendored tree, so the vendored source stays byte-identical
+ * and checksummed. Scoped to the whole tree rather than the one offending file
+ * on purpose: a `greater` CLI pin bump that adds another rune-bearing module
+ * under a plain name should keep working, not reintroduce a runtime crash.
+ *
+ * `tests/vendored-runes.test.mjs` keeps this honest, and the naming defect is
+ * reported upstream — the file wants to be `context.svelte.ts`.
+ */
+const VENDORED_GREATER_MODULES = /\/src\/lib\/greater\/.*\.(?:js|ts)(?:[?#]|$)/;
+
+/**
  * Two-pass build, matching the proven simulacrum skeleton:
  *
  *   pass 1 (client) → build/client, assets served from /l/_assets/
@@ -24,7 +47,11 @@ export default defineConfig(({ command, isSsrBuild }) => {
 	return {
 		appType: ssr ? 'custom' : 'spa',
 		base: !ssr && command === 'build' ? '/l/_assets/' : '/',
-		plugins: [svelte()],
+		plugins: [
+			svelte({
+				experimental: { compileModule: { include: [VENDORED_GREATER_MODULES] } },
+			}),
+		],
 		resolve: {
 			alias: [
 				// The `greater` CLI emits vendored imports as bare specifiers built from
