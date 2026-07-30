@@ -1,0 +1,222 @@
+{
+  "$schema": "https://greater.components.dev/schema.json",
+  "version": "1.0.0",
+  "ref": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+  "installMode": "vendored",
+  "style": "default",
+  "rsc": false,
+  "tsx": true,
+  "aliases": {
+    "components": "src/lib/components",
+    "utils": "src/lib/utils",
+    "ui": "src/lib/components/ui",
+    "lib": "src/lib",
+    "hooks": "src/lib/primitives",
+    "greater": "src/lib/greater"
+  },
+  "css": {
+    "tokens": true,
+    "primitives": true,
+    "face": "blog",
+    "source": "local",
+    "localDir": "styles/greater"
+  },
+  "installed": [
+    {
+      "name": "social-types",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "icons",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "tokens",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "utils",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "social-renderers",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "social-generics",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "primitives",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "adapters",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "status",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "blog-types",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "blog-share",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "content",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "headless",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "auth",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "compose",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "notifications",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "search",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "thread-view",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "content-warning-handler",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "media-composer",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "bookmark-manager",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "article",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "author",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "publication",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "navigation",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "editor",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "faces/blog",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "shell",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-30T19:28:20.828Z",
+      "modified": false,
+      "checksums": []
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "$lib": ["src/lib"],
+      "$lib/*": ["src/lib/*"],
+      "$app/environment": ["src/facetheory/shims/app-environment.ts"],
+      "$app/paths": ["src/facetheory/shims/app-paths.ts"],
+      "src/*": ["src/*"]
+    }
+  },
+  "//": "Typecheck covers CONTENTUS-OWNED source only. The vendored greater tree (src/lib/{components,greater,generics,patterns}, blog-types.ts, types.ts) is upstream-owned, CLI-managed, and never hand-edited here; its integrity is verified by `greater doctor` checksums, not by our compiler settings. Typechecking it would either fail on dormant modules whose renderer dependencies contentus deliberately does not ship, or pressure us into editing vendored files to satisfy our own config — both are refused.",
+  "include": [
+    "src/types/**/*.d.ts",
+    "src/facetheory/**/*.ts",
+    "src/facetheory/**/*.svelte",
+    "src/lib/auth/**/*.ts",
+    "src/lib/brand/**/*.ts",
+    "src/lib/cms/**/*.ts",
+    "src/lib/shell/**/*.ts",
+    "src/lib/shell/**/*.svelte",
+    "src/lib/routes/**/*.ts",
+    "src/lib/routes/**/*.svelte",
+    "vite.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "src/lib/components",
+    "src/lib/greater",
+    "src/lib/generics",
+    "src/lib/patterns",
+    "src/lib/blog-types.ts",
+    "src/lib/types.ts",
+    "styles"
+  ]
+}

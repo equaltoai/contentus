@@ -11,16 +11,43 @@ Contentus ships only through the installed-client flow:
 
 - build outputs live under `build/server` and `build/client`
 - installation uses `lesser client install`
-- the checked-in manifest template is `facetheory.lesser.json`
-- installs to a specific instance use an instance-specific manifest
-  `facetheory.<instance>.lesser.json` (gitignored) whose `app_name` matches the
-  target instance slug
+- the checked-in manifest is `facetheory.lesser.json`
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm build
-lesser client install --manifest facetheory.<instance>.lesser.json --target <instance>
+lesser client install \
+  --app <instance-slug> \
+  --base-domain <base-domain> \
+  --aws-profile <profile> \
+  --stage dev \
+  --config ./facetheory.lesser.json
 ```
+
+### How instance targeting actually works
+
+Verified against `cmd/lesser/client_install.go` at the pinned lesser checkout,
+which is authoritative over any prose here:
+
+- Required flags are `--app`, `--base-domain`, and `--aws-profile`. There is no
+  `--manifest` flag and no `--target` flag; the manifest is passed with
+  `--config`, and the instance is chosen by `--app` + `--base-domain`.
+- The manifest's `app_name` is the **client** app name (`contentus`) — it is
+  recorded as `stages.<stage>.client_install.app_name` in the receipt. It is
+  **not** the instance slug.
+
+So **one committed manifest serves every instance**: targeting is entirely a
+matter of command-line flags. This is stronger instance-parameterization than
+per-instance manifest files, and it means no instance name appears anywhere in
+the repo. `facetheory.*.lesser.json` remains gitignored for the case where an
+operator needs a one-off local override via `--config`.
+
+> Note for the operator: product design §3 describes per-instance manifests
+> "differing only in `app_name`". That reading does not match
+> `client_install.go` — `app_name` does not select an instance. The design doc
+> defers the mechanism to this runbook, so this section is the operative
+> description; the discrepancy is reported rather than silently resolved in the
+> design doc.
 
 ## Prereqs
 
@@ -36,9 +63,9 @@ lesser client install --manifest facetheory.<instance>.lesser.json --target <ins
 
 v1 verification target:
 
-| instance | stage | notes |
-| --- | --- | --- |
-| `trenchcoat` | dev | deployed from `lab.lesser.host`; CMS long-form gates enabled. Stage URL and local receipt path are recorded here at first verified install. |
+| instance     | stage | notes                                                                                                                                       |
+| ------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trenchcoat` | dev   | deployed from `lab.lesser.host`; CMS long-form gates enabled. Stage URL and local receipt path are recorded here at first verified install. |
 
 The manifest and this runbook are instance-parameterized from day one:
 expanding to further dev instances is a new manifest file plus a row in this
@@ -63,6 +90,46 @@ instance:
 
 Record the install outcome (instance, manifest `app_name`, version, evidence)
 in the steward's memory ledger.
+
+### M1 scope of that checklist
+
+M1 ships the brand layer, the shell, and Face 1 (Articles). Items 3 is not yet
+in scope — the authoring and review surfaces are Face 2 (M2). For the M1
+install, verify items 1, 2, 4, and 5, plus:
+
+```bash
+# 1. Public index server-renders (no SPA fallback exists under /l/*).
+curl -sS -D- https://dev.<base-domain>/l/ -o /dev/null
+
+# 2. A deep route server-renders cold, and carries a strict CSP.
+curl -sS -D- https://dev.<base-domain>/l/articles/<slug> -o /dev/null \
+  | grep -i content-security-policy
+
+# 3. An unknown surface is a real 404, not a 200 with apologetic copy.
+curl -sS -o /dev/null -w '%{http_code}\n' https://dev.<base-domain>/l/no-such-surface
+
+# 4. The brand stylesheet and assets resolve from /l/_assets/.
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://dev.<base-domain>/l/_assets/brand/contentus.css
+
+# 5. Hydration data is external, same-origin JSON, and uncached.
+curl -sS -D- 'https://dev.<base-domain>/l/_facetheory/hydration?path=%2F' -o /dev/null
+```
+
+Then in a browser, on `/l/` and `/l/articles/<slug>`:
+
+- the console reports **no CSP violations**;
+- the page renders on the Midnight ground with the journal (Phi Gold) accent —
+  if it renders light-themed, the brand bridge did not load;
+- the nav shows Articles / Timelines / Agents while signed out, and adds
+  Review / Messages after sign-in;
+- narrowing the viewport below 960px collapses the shell to one column.
+
+**Expected M1 caveat.** If the instance's articles were authored as Markdown,
+the reader will show "This article is awaiting server-rendered output" rather
+than prose. That is correct, deliberate behaviour, not an install failure — see
+`docs/consumption/renderer-authority.md`. Verifying the rendered-prose path
+requires either an HTML-format article or the upstream lesser fix.
 
 ## Milestone-zero discipline
 

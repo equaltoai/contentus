@@ -1,0 +1,37 @@
+# Build output
+build/
+
+# Vendored greater-components source — CLI-managed, never hand-edited or reformatted
+src/lib/greater/
+src/lib/components/
+src/lib/generics/
+src/lib/patterns/
+src/lib/blog-types.ts
+src/lib/blog-share.ts
+src/lib/types.ts
+styles/greater/
+
+# Theory Cloud brand pack — copied verbatim from the design pack
+colors_and_type.css
+assets/
+
+# Lockfile
+pnpm-lock.yaml
+
+# Agent materials — steward-owned, outside this repo's app write scope.
+# `greater doctor`/install markers carry checksums; reformatting them is not
+# cosmetic, it edits governed state.
+.codex/
+.agents/
+.claude/
+.kimi-code/
+.theorymcp/
+GEMINI.md
+AGENTS.md
+README.md
+
+# greater CLI state — written and rewritten by the CLI, never hand-formatted.
+components.json
+
+# Design authority — operator-owned baseline.
+docs/product-design.md
