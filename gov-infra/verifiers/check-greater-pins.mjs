@@ -23,16 +23,16 @@
  * `installed[]` must carry that same commit — a single re-vendored module from a
  * different ref is exactly the skew this control claims to catch.
  */
-import { readFileSync } from 'node:fs';
+import { readStrictJson } from './strict-json.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 const findings = [];
-const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+const pkg = readStrictJson('package.json');
 const RELEASE = /greater-components\/releases\/download\/(greater-v[0-9][^/]*)\//;
 
 let contract;
 try {
-	contract = JSON.parse(readFileSync(CONTRACT, 'utf8'));
+	contract = readStrictJson(CONTRACT);
 } catch (error) {
 	console.error(`${CONTRACT} is missing or unparseable: ${error.message}`);
 	process.exit(1);
@@ -75,7 +75,7 @@ for (const tag of tags.keys())
 
 let components;
 try {
-	components = JSON.parse(readFileSync('components.json', 'utf8'));
+	components = readStrictJson('components.json');
 } catch (error) {
 	findings.push(`components.json is missing or unreadable: ${error.message}`);
 }

@@ -14,7 +14,7 @@
  * unrecognized key is an error rather than a warning — it is exactly what a typo
  * looks like, and guessing which of the two it is has no safe answer.
  */
-import { readFileSync } from 'node:fs';
+import { readStrictJson } from './strict-json.mjs';
 
 export const PIN = 'gov-infra/planning/contentus-disclosed-upstream-findings.json';
 
@@ -185,7 +185,7 @@ export function validatePin(pin) {
 export function loadPin() {
 	let pin;
 	try {
-		pin = JSON.parse(readFileSync(PIN, 'utf8'));
+		pin = readStrictJson(PIN);
 	} catch (error) {
 		console.error(`${PIN} is missing or unparseable: ${error.message}`);
 		process.exit(1);
