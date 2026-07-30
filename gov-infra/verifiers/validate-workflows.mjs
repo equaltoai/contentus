@@ -19,6 +19,23 @@
  * undefined aliases, failed merge keys, duplicate job/root keys, and non-mapping step
  * entries; branch protection contains them because an unloadable workflow reports no
  * check. This is not a general Bash or YAML interpreter.
+ *
+ * Three properties beyond the pin check, each closing a place where "the workflow file
+ * looks fine" was standing in for "the workflow is constrained":
+ *
+ *   - Local actions are followed. `uses: ./path` was exempt from pinning, which is
+ *     correct for the reference itself and wrong for what it reaches: a composite
+ *     action in-tree can carry `uses: attacker/action@main` and inherit the exemption.
+ *     Every `./` reference now has to resolve to an action manifest, and that manifest
+ *     is scanned under the same rules, recursively.
+ *   - Permissions are least-privilege by assertion. A workflow with no `permissions:`
+ *     block inherits whatever the repository default is — a repository setting, not a
+ *     repository invariant. Every workflow must declare one, and every scope in it must
+ *     be read or none except the write grants pinned in the contract.
+ *   - `run:` blocks may not interpolate `${{ github.event.* }}`. Event payload fields are
+ *     attacker-authored text spliced into a shell script before the shell ever sees it;
+ *     quoting cannot fix it. Passing through `env:` is the accepted pattern and the one
+ *     this repository's workflows already use.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -298,14 +315,53 @@ export function findUses(content) {
 	return uses;
 }
 
-export function validateActionPins(directory = workflowDirectory) {
+// A `./` reference names a directory holding an action manifest, or the manifest
+// itself. Anything that does not resolve is a finding: an unresolvable local
+// action is not a safe local action, it is an unscanned one.
+function resolveLocalAction(reference, root) {
+	const relativePath = reference.replace(/^\.\/?/, '');
+	for (const name of ['action.yml', 'action.yaml']) {
+		const candidate = join(root, relativePath, name);
+		if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+	}
+	const direct = join(root, relativePath);
+	if (/\.ya?ml$/i.test(direct) && existsSync(direct) && statSync(direct).isFile()) return direct;
+	return null;
+}
+
+// Composite actions nest. A local action inherits no exemption for what it in turn
+// uses, so each manifest is scanned under exactly these rules; `seen` keeps a cycle
+// from recursing forever without letting it skip a first visit.
+function collectUsesFindings(values, file, root, seen, findings) {
+	for (const value of values) {
+		if (!value.startsWith('./')) {
+			if (!/^[^\s@]+@[0-9a-f]{40}$/i.test(value))
+				findings.push(`${file}: non-immutable uses reference ${value}`);
+			continue;
+		}
+		const manifest = resolveLocalAction(value, root);
+		if (!manifest) {
+			findings.push(
+				`${file}: local action ${value} resolves to no action.yml/action.yaml manifest`
+			);
+			continue;
+		}
+		if (seen.has(manifest)) continue;
+		seen.add(manifest);
+		try {
+			collectUsesFindings(findUses(readFileSync(manifest, 'utf8')), manifest, root, seen, findings);
+		} catch (error) {
+			findings.push(`${manifest}: invalid or unterminated YAML lexical state (${error.message})`);
+		}
+	}
+}
+
+export function validateActionPins(directory = workflowDirectory, root = '.') {
 	const findings = [];
+	const seen = new Set();
 	for (const file of yamlFiles(directory)) {
 		try {
-			for (const value of findUses(readFileSync(file, 'utf8'))) {
-				if (!value.startsWith('./') && !/^[^\s@]+@[0-9a-f]{40}$/i.test(value))
-					findings.push(`${file}: non-immutable uses reference ${value}`);
-			}
+			collectUsesFindings(findUses(readFileSync(file, 'utf8')), file, root, seen, findings);
 		} catch (error) {
 			findings.push(`${file}: invalid or unterminated YAML lexical state (${error.message})`);
 		}
@@ -1362,16 +1418,202 @@ export function validatePullRequestTriggers(directory = workflowDirectory) {
 	return findings;
 }
 
+/**
+ * One structural pass that yields the mapping lines outside block scalars and the
+ * text of every `run:` value. Both consumers below need to tell a mapping key from
+ * shell text; a `permissions:` line inside a script is not a permissions block, and
+ * a `${{ }}` in a comment above a job is not an injected command.
+ */
+function scanWorkflowLines(content) {
+	const lines = content.split(/\r\n|\r|\n/);
+	const mappingLines = [];
+	const runTexts = [];
+	let block = null;
+	const closeBlock = () => {
+		if (block?.isRun) runTexts.push({ line: block.headerLine, text: block.body.join('\n') });
+		block = null;
+	};
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index];
+		const indent = line.match(/^\s*/)[0].length;
+		const nonBlank = /\S/.test(line);
+		if (block) {
+			if (!nonBlank) {
+				if (block.isRun) block.body.push('');
+				continue;
+			}
+			if (block.contentIndent === null && indent > block.headerIndent)
+				block.contentIndent = block.explicitIndent ?? indent;
+			if (block.contentIndent !== null && indent >= block.contentIndent) {
+				if (block.isRun) block.body.push(line.slice(block.contentIndent));
+				continue;
+			}
+			closeBlock();
+		}
+		if (!nonBlank || /^\s*#/.test(line)) continue;
+		const mapping = line.match(/^\s*(?:-\s*)?([^:#]+?)\s*:\s*(.*)$/);
+		if (!mapping) continue;
+		const key = mapping[1].replace(/^['"]|['"]$/g, '');
+		const rawValue = mapping[2];
+		mappingLines.push({ index, indent, line, key, rawValue });
+		let header = null;
+		try {
+			header = blockScalarHeader(rawValue.trimStart());
+		} catch {
+			// An invalid block scalar header is already a finding in the pin scanner;
+			// here it only means this line opens nothing we can attribute.
+		}
+		if (header) {
+			block = {
+				headerIndent: indent,
+				headerLine: index,
+				explicitIndent: header.explicitIndent === null ? null : indent + header.explicitIndent,
+				contentIndent: null,
+				isRun: key === 'run',
+				body: [],
+			};
+			continue;
+		}
+		if (key === 'run' && rawValue.trim()) runTexts.push({ line: index, text: rawValue });
+	}
+	closeBlock();
+	return { mappingLines, runTexts };
+}
+
+const READ_ONLY_VALUES = new Set(['read', 'none']);
+
+function permissionEntries(mappingLines, position) {
+	const declaration = mappingLines[position];
+	const value = declaration.rawValue.replace(/\s+#.*$/, '').trim();
+	if (value === '') {
+		const entries = [];
+		for (let index = position + 1; index < mappingLines.length; index += 1) {
+			const child = mappingLines[index];
+			if (child.indent <= declaration.indent) break;
+			const scalar = child.rawValue.replace(/\s+#.*$/, '').trim();
+			if (!/^[A-Za-z][A-Za-z-]*$/.test(child.key) || !/^[a-z-]+$/.test(scalar))
+				return { error: `unreadable permission entry \`${child.line.trim()}\`` };
+			entries.push({ scope: child.key, value: scalar });
+		}
+		if (!entries.length) return { error: 'empty block-form permissions:' };
+		return { entries };
+	}
+	if (value === '{}') return { entries: [] };
+	if (value === 'read-all') return { entries: [], readAll: true };
+	if (value === 'write-all') return { error: 'permissions: write-all' };
+	const flow = value.match(/^\{(.*)\}$/s);
+	if (flow) {
+		const entries = [];
+		for (const pair of flow[1].split(',')) {
+			if (!pair.trim()) continue;
+			const parts = pair.split(':');
+			if (parts.length !== 2) return { error: `unreadable flow permission \`${pair.trim()}\`` };
+			const scope = parts[0].trim().replace(/^['"]|['"]$/g, '');
+			const scalar = parts[1].trim().replace(/^['"]|['"]$/g, '');
+			if (!/^[A-Za-z][A-Za-z-]*$/.test(scope) || !/^[a-z-]+$/.test(scalar))
+				return { error: `unreadable flow permission \`${pair.trim()}\`` };
+			entries.push({ scope, value: scalar });
+		}
+		return { entries };
+	}
+	return { error: `unreadable permissions value \`${value}\`` };
+}
+
+/**
+ * Every workflow declares an explicit top-level `permissions:` block, and no scope
+ * anywhere in the file — top-level or job-level — grants write, unless that exact
+ * (workflow, scope, value) triple is pinned. Absent means "inherit the repository
+ * default", which is a setting somebody can change without touching this repository.
+ */
+export function validateWorkflowPermissions(
+	directory = workflowDirectory,
+	allowedWrites = [],
+	fileLabel = (file) => file.split('/').pop()
+) {
+	const findings = [];
+	const allowed = new Set(
+		allowedWrites.map((entry) => `${entry.workflow} ${entry.scope} ${entry.value}`)
+	);
+	for (const file of yamlFiles(directory)) {
+		const { mappingLines } = scanWorkflowLines(readFileSync(file, 'utf8'));
+		const declarations = mappingLines
+			.map((mapping, position) => ({ mapping, position }))
+			.filter(({ mapping }) => mapping.key === 'permissions');
+		if (!declarations.some(({ mapping }) => mapping.indent === 0)) {
+			findings.push(
+				`${file}: no explicit top-level permissions: block; the workflow would inherit the repository default`
+			);
+			continue;
+		}
+		for (const { mapping, position } of declarations) {
+			const parsed = permissionEntries(mappingLines, position);
+			if (parsed.error) {
+				findings.push(`${file}:${mapping.index + 1}: ${parsed.error}`);
+				continue;
+			}
+			for (const { scope, value } of parsed.entries) {
+				if (READ_ONLY_VALUES.has(value)) continue;
+				if (allowed.has(`${fileLabel(file)} ${scope} ${value}`)) continue;
+				findings.push(
+					`${file}:${mapping.index + 1}: permission ${scope}: ${value} is not read/none and is not a pinned exception`
+				);
+			}
+		}
+	}
+	return findings;
+}
+
+/**
+ * `${{ github.event.* }}` inside a `run:` block is attacker-authored text spliced
+ * into the script before the shell parses it — a PR title closing the quote runs
+ * whatever follows. The accepted pattern, used by every workflow here, is to pass
+ * the value through `env:` and reference it as a shell variable.
+ */
+export function validateRunExpressions(directory = workflowDirectory) {
+	const findings = [];
+	for (const file of yamlFiles(directory)) {
+		const { runTexts } = scanWorkflowLines(readFileSync(file, 'utf8'));
+		for (const { line, text } of runTexts) {
+			for (const [expression, body] of text.matchAll(/\$\{\{([^}]*)\}\}/g)) {
+				if (!/\bgithub\s*\.\s*event\b/.test(body)) continue;
+				findings.push(
+					`${file}:${line + 1}: run: interpolates ${expression.trim()} directly; ` +
+						'pass it through env: and reference the shell variable instead'
+				);
+			}
+		}
+	}
+	return findings;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
 	const [mode, directory] = process.argv.slice(2);
+	const contractPath = 'gov-infra/planning/contentus-pinned-repo-contract.json';
+	const policy = () => {
+		let allowedWrites;
+		try {
+			allowedWrites = JSON.parse(readFileSync(contractPath, 'utf8')).workflows
+				?.allowed_write_permissions;
+		} catch (error) {
+			return [`${contractPath} is missing or unparseable: ${error.message}`];
+		}
+		if (!Array.isArray(allowedWrites))
+			return [`${contractPath}: workflows.allowed_write_permissions must be an array`];
+		return [
+			...validateWorkflowPermissions(directory, allowedWrites),
+			...validateRunExpressions(directory),
+		];
+	};
 	const findings =
 		mode === '--uses'
 			? validateActionPins(directory)
 			: mode === '--triggers'
 				? validatePullRequestTriggers(directory)
-				: null;
+				: mode === '--policy'
+					? policy()
+					: null;
 	if (!findings || process.argv.length > 4) {
-		console.error('Usage: validate-workflows.mjs --uses|--triggers [workflow-directory]');
+		console.error('Usage: validate-workflows.mjs --uses|--triggers|--policy [workflow-directory]');
 		process.exitCode = 2;
 	} else if (findings.length) {
 		console.error(findings.join('\n'));
