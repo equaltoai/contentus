@@ -78,11 +78,76 @@ const INSTANCE_HEADERS = {
 	'x-lesser-forwarded-proto': 'https',
 };
 
+/**
+ * The same request with every viewer-settable forwarding header pointed
+ * somewhere else. CloudFront forwards viewer headers to `/l/*` verbatim, so this
+ * is a bag an anonymous request can actually produce — only the
+ * `x-lesser-*` pair is overwritten at the edge and therefore believable.
+ */
+const SPOOFED_HEADERS = {
+	...INSTANCE_HEADERS,
+	host: 'origin.internal',
+	'x-forwarded-host': 'evil.example',
+	'x-forwarded-proto': 'http',
+	forwarded: 'host=evil.example;proto=http',
+};
+
 function probe(route, fixtures) {
 	return withStubbedGraphql(respondWith(fixtures), () =>
 		renderRoute(handler, { name: 'probe', expectStatus: 200, ...route })
 	);
 }
+
+test('a spoofed forwarding header never becomes the server-side fetch target', async () => {
+	const { value, requests } = await probe(
+		{ path: '/l/articles/hello', headers: SPOOFED_HEADERS },
+		{ article: articleFixture() }
+	);
+
+	assert.ok(requests.length > 0, 'the probe must have driven at least one GraphQL request');
+	for (const request of requests) {
+		assert.equal(
+			request.url,
+			'https://instance.example.com/api/graphql',
+			'the server must fetch the edge-verified host, never a viewer-supplied one'
+		);
+	}
+	assert.equal(value.status, 200);
+});
+
+test('a spoofed forwarding header never reaches the advertised identity', async () => {
+	const { value } = await probe(
+		{ path: '/l/articles/hello', headers: SPOOFED_HEADERS },
+		{ article: articleFixture() }
+	);
+
+	assert.match(
+		value.html,
+		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
+	);
+	assert.doesNotMatch(value.html, /evil\.example/, 'a spoofed host must not reach the document');
+});
+
+test('with no trusted host at all, no viewer-supplied host is substituted', async () => {
+	const { value, requests } = await probe(
+		{ path: '/l/articles/hello', headers: { 'x-forwarded-host': 'evil.example' } },
+		{ article: articleFixture() }
+	);
+
+	// No resolvable origin means no absolute endpoint, so the request keeps the
+	// relative path — which has no host to be pointed at, and on a real server
+	// fails rather than resolving anywhere. Either way it is not aimed wherever
+	// the viewer said.
+	for (const request of requests) {
+		assert.equal(
+			request.url,
+			'/api/graphql',
+			'an unresolvable origin must not fall back to a viewer-supplied host'
+		);
+	}
+	assert.equal(value.status, 200);
+	assert.doesNotMatch(value.html, /evil\.example/);
+});
 
 test('a loaded article renders rather than 500ing on its own canonical tag', async () => {
 	const { value } = await probe(

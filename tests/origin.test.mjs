@@ -9,30 +9,60 @@ import {
 
 /**
  * No hard-coded domains is a non-negotiable (product design §8), which makes
- * origin derivation security-relevant: a spoofed Host header would otherwise
- * land in a canonical URL, an OG tag, or a server-side fetch target.
+ * origin derivation security-relevant: this value becomes the URL the SERVER
+ * fetches GraphQL from, plus the canonical URL and OG tags the page advertises.
+ * Which header is allowed to decide it is therefore a security boundary, not a
+ * detail of deployment plumbing.
  */
 
 test('origin derives from the Host header', () => {
 	assert.equal(resolveRequestOrigin({ host: 'dev.example.com' }), 'https://dev.example.com');
 });
 
-test('x-forwarded-host wins over host', () => {
+test('the edge-injected host wins over host', () => {
+	// lesser's CloudFront function overwrites x-lesser-forwarded-host with the
+	// verified viewer Host, so it is the only forwarded host worth believing.
 	assert.equal(
-		resolveRequestOrigin({ host: 'internal.local', 'x-forwarded-host': 'dev.example.com' }),
+		resolveRequestOrigin({ host: 'internal.local', 'x-lesser-forwarded-host': 'dev.example.com' }),
 		'https://dev.example.com'
 	);
 });
 
-test('scheme honours x-forwarded-proto but defaults to https', () => {
+test('viewer-controlled forwarding headers never steer the origin', () => {
+	// CloudFront forwards viewer headers to /l/* verbatim. If x-forwarded-host
+	// could win, an anonymous request would choose the host the server fetches
+	// GraphQL from — SSRF — and the canonical/OG host the page advertises.
 	assert.equal(
-		resolveRequestOrigin({ host: 'localhost:5173', 'x-forwarded-proto': 'http' }),
+		resolveRequestOrigin({
+			host: 'instance.example.com',
+			'x-forwarded-host': 'evil.example',
+		}),
+		'https://instance.example.com'
+	);
+	assert.equal(
+		resolveRequestOrigin({
+			host: 'origin.internal',
+			'x-lesser-forwarded-host': 'instance.example.com',
+			'x-forwarded-host': 'evil.example',
+		}),
+		'https://instance.example.com'
+	);
+	// Nor may a viewer downgrade the scheme of a server-side fetch.
+	assert.equal(
+		resolveRequestOrigin({ host: 'instance.example.com', 'x-forwarded-proto': 'http' }),
+		'https://instance.example.com'
+	);
+});
+
+test('scheme honours the edge-injected proto but defaults to https', () => {
+	assert.equal(
+		resolveRequestOrigin({ host: 'localhost:5173', 'x-lesser-forwarded-proto': 'http' }),
 		'http://localhost:5173'
 	);
 	assert.equal(resolveRequestOrigin({ host: 'example.com' }), 'https://example.com');
 	// An unrecognised proto must not be echoed into the URL.
 	assert.equal(
-		resolveRequestOrigin({ host: 'example.com', 'x-forwarded-proto': 'javascript' }),
+		resolveRequestOrigin({ host: 'example.com', 'x-lesser-forwarded-proto': 'javascript' }),
 		'https://example.com'
 	);
 });
@@ -43,10 +73,31 @@ test('a malformed or injected host is rejected rather than guessed', () => {
 		'example.com evil.com',
 		'https://example.com',
 		'example.com\r\nX-Injected: 1',
+		'user@example.com',
 		'',
 	]) {
 		assert.equal(resolveRequestOrigin({ host }), null, `expected null for host: ${host}`);
 	}
+});
+
+test('a malformed trusted host fails closed instead of falling through', () => {
+	// Matching lesser's SSR host: the first PRESENT forwarded host is the one
+	// that gets sanitized. A spoofed-looking value is a reason to stop, not a
+	// reason to try the next header.
+	assert.equal(
+		resolveRequestOrigin({
+			host: 'instance.example.com',
+			'x-lesser-forwarded-host': 'evil.example/path',
+		}),
+		null
+	);
+});
+
+test('a forwarded host list collapses to its first entry, lower-cased', () => {
+	assert.equal(
+		resolveRequestOrigin({ 'x-lesser-forwarded-host': 'Dev.Example.COM, proxy.internal' }),
+		'https://dev.example.com'
+	);
 });
 
 test('a missing host yields null rather than a fabricated origin', () => {
