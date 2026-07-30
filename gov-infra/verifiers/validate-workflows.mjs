@@ -35,14 +35,30 @@
  *   - `run:` blocks may not interpolate `${{ github.event.* }}`. Event payload fields are
  *     attacker-authored text spliced into a shell script before the shell ever sees it;
  *     quoting cannot fix it. Passing through `env:` is the accepted pattern and the one
- *     this repository's workflows already use.
+ *     this repository's workflows already use. This applies to every local composite
+ *     action manifest the recursive scan reaches, not only to the workflow files: a
+ *     composite action's `run:` is a workflow's `run:` one indirection later.
+ *   - Every package-manager install in CI is exactly one of the pinned invocations. The
+ *     boundary SEC-3 rests on is that no install anywhere runs dependency lifecycle
+ *     scripts. The rubric could only ever fix its own install; the three installs in the
+ *     workflows run *before* the rubric starts, so dropping `--ignore-scripts` from one
+ *     of them executes dependency code and the rubric then reports green on the tree
+ *     that code produced. An unasserted boundary is not a boundary.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { readStrictJson } from './strict-json.mjs';
+
 const workflowDirectory = '.github/workflows';
 const requiredWorkflows = {
-	'gov-rubric.yml': ['bash gov-infra/verifiers/gov-verify-rubric.sh'],
+	'gov-rubric.yml': [
+		'bash gov-infra/verifiers/gov-verify-rubric.sh',
+		// The digest-verifying CLI install. Without this step SEC-7 has no CLI whose
+		// provenance it can check and reports BLOCKED; MAI-4 binds the step so it
+		// cannot be quietly dropped to convert a hard gate into a soft one.
+		'node gov-infra/verifiers/install-greater-cli.mjs',
+	],
 	'dco.yml': ['Signed-off-by'],
 	'lint.yml': ['pnpm run lint'],
 	'test.yml': ['pnpm test'],
@@ -367,6 +383,39 @@ export function validateActionPins(directory = workflowDirectory, root = '.') {
 		}
 	}
 	return findings;
+}
+
+/**
+ * Every local composite action manifest reachable from the workflow set, found by
+ * the same recursive `uses: ./` walk the pin scanner performs. `validateActionPins`
+ * follows these to check what they *use*; the policy scans below follow them to
+ * check what they *run*. A composite action's `run:` is a workflow's `run:` one
+ * indirection later, and an indirection is not an exemption.
+ */
+export function localActionManifests(directory = workflowDirectory, root = '.') {
+	const seen = new Set();
+	const walk = (values) => {
+		for (const value of values) {
+			if (!value.startsWith('./')) continue;
+			const manifest = resolveLocalAction(value, root);
+			if (!manifest || seen.has(manifest)) continue;
+			seen.add(manifest);
+			try {
+				walk(findUses(readFileSync(manifest, 'utf8')));
+			} catch {
+				// Unparseable manifests are already a finding in validateActionPins;
+				// here they simply reach nothing further.
+			}
+		}
+	};
+	for (const file of yamlFiles(directory)) {
+		try {
+			walk(findUses(readFileSync(file, 'utf8')));
+		} catch {
+			// Same: the pin scanner owns reporting the lexical failure.
+		}
+	}
+	return [...seen];
 }
 
 function disabledIfValue(value) {
@@ -1145,6 +1194,7 @@ const execSentinels = new Set([
 	'pnpm test',
 	'pnpm run lint',
 	'bash gov-infra/verifiers/gov-verify-rubric.sh',
+	'node gov-infra/verifiers/install-greater-cli.mjs',
 	'test "${BASE_REF}" = main',
 	'test "${HEAD_REF}" = staging',
 	'test "${HEAD_REPOSITORY}" = "${CURRENT_REPOSITORY}"',
@@ -1569,9 +1619,9 @@ export function validateWorkflowPermissions(
  * whatever follows. The accepted pattern, used by every workflow here, is to pass
  * the value through `env:` and reference it as a shell variable.
  */
-export function validateRunExpressions(directory = workflowDirectory) {
+export function validateRunExpressions(directory = workflowDirectory, root = '.') {
 	const findings = [];
-	for (const file of yamlFiles(directory)) {
+	for (const file of [...yamlFiles(directory), ...localActionManifests(directory, root)]) {
 		const { runTexts } = scanWorkflowLines(readFileSync(file, 'utf8'));
 		for (const { line, text } of runTexts) {
 			for (const [expression, body] of text.matchAll(/\$\{\{([^}]*)\}\}/g)) {
@@ -1586,22 +1636,148 @@ export function validateRunExpressions(directory = workflowDirectory) {
 	return findings;
 }
 
+const packageManagers = new Set(['pnpm', 'npm', 'yarn', 'bun']);
+const installVerbs = new Set(['install', 'i', 'ci', 'add', 'import']);
+
+/**
+ * Split one `run:` script into shell segments, tracking whether each token was
+ * quoted. Only unquoted tokens can name a command, so `echo "pnpm install"` is
+ * text rather than an install. Continuations are joined; comments are stripped.
+ */
+function runSegments(text) {
+	const logical = [];
+	let pending = '';
+	for (const physical of text.split('\n')) {
+		const { command } = stripRunBlockComment(physical);
+		const line = `${pending}${command}`;
+		if (
+			/\\$/.test(line.trimEnd()) &&
+			escapedByOddBackslashes(line.trimEnd(), line.trimEnd().length)
+		) {
+			pending = `${line.trimEnd().slice(0, -1)} `;
+			continue;
+		}
+		pending = '';
+		if (line.trim()) logical.push(line);
+	}
+	if (pending.trim()) logical.push(pending);
+
+	const segments = [];
+	for (const line of logical) {
+		let current = [];
+		let token = '';
+		let quoted = false;
+		let started = false;
+		let quote = null;
+		const endToken = () => {
+			if (started || token) current.push({ value: token, quoted });
+			token = '';
+			quoted = false;
+			started = false;
+		};
+		const endSegment = () => {
+			endToken();
+			if (current.length) segments.push(current);
+			current = [];
+		};
+		for (let index = 0; index < line.length; index += 1) {
+			const char = line[index];
+			if (quote) {
+				if (char === quote) quote = null;
+				else token += char;
+				continue;
+			}
+			if (char === '"' || char === "'") {
+				quote = char;
+				quoted = true;
+				started = true;
+				continue;
+			}
+			const pair = line.slice(index, index + 2);
+			if (pair === '&&' || pair === '||') {
+				endSegment();
+				index += 1;
+				continue;
+			}
+			if (char === ';' || char === '|' || char === '&') {
+				endSegment();
+				continue;
+			}
+			if (/\s/.test(char)) {
+				endToken();
+				continue;
+			}
+			token += char;
+			started = true;
+		}
+		endSegment();
+	}
+	return segments;
+}
+
+/**
+ * Every package-manager install in every workflow and every local composite action
+ * must be one of the exact invocations pinned in the repo contract. `--ignore-scripts`
+ * is the boundary the whole supply-chain claim rests on, and the installs that run
+ * before the rubric are the ones the rubric cannot police from inside.
+ */
+export function validateInstallInvocations(
+	directory = workflowDirectory,
+	allowed = [],
+	root = '.'
+) {
+	const findings = [];
+	const permitted = new Set(allowed);
+	for (const file of [...yamlFiles(directory), ...localActionManifests(directory, root)]) {
+		const { runTexts } = scanWorkflowLines(readFileSync(file, 'utf8'));
+		for (const { line, text } of runTexts) {
+			for (const segment of runSegments(text)) {
+				const isInstall = segment.some(
+					(entry, index) =>
+						!entry.quoted &&
+						packageManagers.has(entry.value) &&
+						!segment[index + 1]?.quoted &&
+						installVerbs.has(segment[index + 1]?.value ?? '')
+				);
+				if (!isInstall) continue;
+				const rendered = segment
+					.map((entry) => entry.value)
+					.join(' ')
+					.trim();
+				if (permitted.has(rendered)) continue;
+				findings.push(
+					`${file}:${line + 1}: install invocation \`${rendered}\` is not a pinned invocation; ` +
+						`allowed: ${[...permitted].map((entry) => `\`${entry}\``).join(', ') || 'none'}`
+				);
+			}
+		}
+	}
+	return findings;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
 	const [mode, directory] = process.argv.slice(2);
 	const contractPath = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 	const policy = () => {
-		let allowedWrites;
+		let workflows;
 		try {
-			allowedWrites = JSON.parse(readFileSync(contractPath, 'utf8')).workflows
-				?.allowed_write_permissions;
+			workflows = readStrictJson(contractPath).workflows;
 		} catch (error) {
 			return [`${contractPath} is missing or unparseable: ${error.message}`];
 		}
+		const allowedWrites = workflows?.allowed_write_permissions;
+		const allowedInstalls = workflows?.allowed_install_invocations;
 		if (!Array.isArray(allowedWrites))
 			return [`${contractPath}: workflows.allowed_write_permissions must be an array`];
+		if (!Array.isArray(allowedInstalls) || allowedInstalls.length === 0)
+			return [
+				`${contractPath}: workflows.allowed_install_invocations must be a non-empty array; ` +
+					'an empty allowlist would let any install shape pass',
+			];
 		return [
 			...validateWorkflowPermissions(directory, allowedWrites),
 			...validateRunExpressions(directory),
+			...validateInstallInvocations(directory, allowedInstalls),
 		];
 	};
 	const findings =

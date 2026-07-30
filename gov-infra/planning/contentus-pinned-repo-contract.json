@@ -173,8 +173,18 @@
       "explicit top-level `permissions:` block, and every scope in it — top-level or",
       "job-level — must be `read` or `none`, except the exact write grants listed here.",
       "CodeQL's `security-events: write` is the one exception: uploading a SARIF result",
-      "requires it, and the alternative is not running CodeQL."
+      "requires it, and the alternative is not running CodeQL.",
+      "",
+      "`allowed_install_invocations` is the exact set of package-manager installs any",
+      "workflow — or any local composite action a workflow reaches — may run. The whole",
+      "supply-chain claim rests on `--ignore-scripts`, and the rubric can only ever fix",
+      "its own install: the workflow installs run before the rubric starts, so dropping",
+      "the flag from one of them executes dependency lifecycle code and the rubric then",
+      "reports green on the tree that code produced. The greater CLI no longer appears",
+      "here because it installs through `node gov-infra/verifiers/install-greater-cli.mjs`,",
+      "which verifies the release-asset digest first and passes `--ignore-scripts` itself."
     ],
+    "allowed_install_invocations": ["pnpm install --frozen-lockfile --ignore-scripts"],
     "allowed_write_permissions": [
       {
         "workflow": "codeql.yml",
