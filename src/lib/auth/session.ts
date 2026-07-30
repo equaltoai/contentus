@@ -142,13 +142,18 @@ async function registerOAuthClient(redirectUri: string, scope: string): Promise<
 		body: JSON.stringify(body),
 	});
 
-	const data = (await response.json().catch(() => null)) as
-		| { client_id?: string; client_secret?: string; error_description?: string; error?: string }
-		| null;
+	const data = (await response.json().catch(() => null)) as {
+		client_id?: string;
+		client_secret?: string;
+		error_description?: string;
+		error?: string;
+	} | null;
 
 	if (!response.ok || !data?.client_id) {
 		throw new Error(
-			data?.error_description ?? data?.error ?? `OAuth client registration failed (${response.status})`
+			data?.error_description ??
+				data?.error ??
+				`OAuth client registration failed (${response.status})`
 		);
 	}
 
@@ -156,7 +161,9 @@ async function registerOAuthClient(redirectUri: string, scope: string): Promise<
 	// one, the registration was not the public flow we asked for — fail closed
 	// rather than proceed with credentials we would have to store.
 	if (data.client_secret) {
-		throw new Error('Refusing a confidential OAuth client: contentus registers as a public client.');
+		throw new Error(
+			'Refusing a confidential OAuth client: contentus registers as a public client.'
+		);
 	}
 
 	const client: StoredOAuthClient = {
@@ -236,9 +243,7 @@ export async function startLogin(
 	window.location.assign(`/auth/login?${params.toString()}`);
 }
 
-export type CallbackResult =
-	| { ok: true; returnTo: string }
-	| { ok: false; error: string };
+export type CallbackResult = { ok: true; returnTo: string } | { ok: false; error: string };
 
 export async function completeLogin(searchParams: URLSearchParams): Promise<CallbackResult> {
 	if (!browser) return { ok: false, error: 'OAuth callback must run in the browser' };
@@ -293,17 +298,15 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		}),
 	});
 
-	const tokenJson = (await tokenResponse.json().catch(() => null)) as
-		| {
-				access_token?: string;
-				token_type?: string;
-				scope?: string;
-				created_at?: number;
-				expires_in?: number;
-				error?: string;
-				error_description?: string;
-		  }
-		| null;
+	const tokenJson = (await tokenResponse.json().catch(() => null)) as {
+		access_token?: string;
+		token_type?: string;
+		scope?: string;
+		created_at?: number;
+		expires_in?: number;
+		error?: string;
+		error_description?: string;
+	} | null;
 
 	if (!tokenResponse.ok || !tokenJson?.access_token) {
 		return {
@@ -336,5 +339,8 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 
 	// Only ever return to an app-relative path — an attacker-supplied absolute
 	// URL in storage must not become an open redirect.
-	return { ok: true, returnTo: returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : `${base}/` };
+	return {
+		ok: true,
+		returnTo: returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : `${base}/`,
+	};
 }

@@ -200,7 +200,9 @@ function scanOrigins(route) {
 		if (tag.malformed) continue;
 		const attrs = attributesFor(tag.markup);
 		const source = attrs.find((a) => a.name === (tag.name === 'script' ? 'src' : 'href'));
-		const rel = new Set((attrs.find((a) => a.name === 'rel')?.value ?? '').toLowerCase().split(/\s+/));
+		const rel = new Set(
+			(attrs.find((a) => a.name === 'rel')?.value ?? '').toLowerCase().split(/\s+/)
+		);
 		const as = attrs.find((a) => a.name === 'as')?.value?.toLowerCase();
 		const scriptLink = rel.has('modulepreload') || (rel.has('preload') && as === 'script');
 		if (!source || (tag.name === 'link' && !rel.has('stylesheet') && !scriptLink)) continue;
@@ -213,7 +215,9 @@ function scanOrigins(route) {
 function scanCspHeader(route) {
 	const header = route.headers['content-security-policy'];
 	if (!header) {
-		return [{ route: route.name, path: route.path, line: 0, type: 'missing-csp-header', snippet: '' }];
+		return [
+			{ route: route.name, path: route.path, line: 0, type: 'missing-csp-header', snippet: '' },
+		];
 	}
 
 	const problems = [];
@@ -239,9 +243,7 @@ async function main() {
 
 	for (const route of rendered) {
 		if (route.status !== route.expectStatus) {
-			statusProblems.push(
-				`${route.path} returned ${route.status}, expected ${route.expectStatus}`
-			);
+			statusProblems.push(`${route.path} returned ${route.status}, expected ${route.expectStatus}`);
 		}
 		// The hydration endpoint is JSON, not a document; only its header is
 		// meaningful to this audit.

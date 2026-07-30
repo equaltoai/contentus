@@ -35,12 +35,26 @@ export default defineConfig(({ command, isSsrBuild }) => {
 				// it here. Routed upstream to greater-components; remove when the CLI
 				// emits relative or alias-prefixed paths.
 				{ find: /^src\//, replacement: `${path.resolve(root, 'src')}/` },
+				// Markdown-conversion modules contentus deliberately does not ship.
+				// A dormant vendored module (`greater/utils/html-to-markdown.ts`)
+				// imports them via the same barrel that exports `sanitizeHtml`, and
+				// the bundler resolves the whole graph before tree-shaking drops the
+				// dead branch. Aliased to a throwing stub rather than installing a
+				// Markdown renderer, because rendering authority is lesser's.
+				// See src/lib/build/absent-renderer-module.ts.
+				...['hast-util-to-mdast', 'mdast-util-to-markdown', 'mdast-util-gfm'].map((name) => ({
+					find: name,
+					replacement: path.resolve(root, 'src/lib/build/absent-renderer-module.ts'),
+				})),
 				{ find: '$lib', replacement: path.resolve(root, 'src/lib') },
 				{
 					find: '$app/environment',
 					replacement: path.resolve(root, 'src/facetheory/shims/app-environment.ts'),
 				},
-				{ find: '$app/paths', replacement: path.resolve(root, 'src/facetheory/shims/app-paths.ts') },
+				{
+					find: '$app/paths',
+					replacement: path.resolve(root, 'src/facetheory/shims/app-paths.ts'),
+				},
 			],
 		},
 		ssr: {

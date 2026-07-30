@@ -1,17 +1,17 @@
 {
-	"schema_version": 1,
-	"app_name": "contentus",
-	"display_name": "Contentus",
-	"version": "0.1.0",
-	"build": {
-		"command": ["pnpm", "build"]
-	},
-	"server": {
-		"dir": "build/server",
-		"entry": "handler.mjs",
-		"export": "handler"
-	},
-	"assets": {
-		"dir": "build/client"
-	}
+  "schema_version": 1,
+  "app_name": "contentus",
+  "display_name": "Contentus",
+  "version": "0.1.0",
+  "build": {
+    "command": ["pnpm", "build"]
+  },
+  "server": {
+    "dir": "build/server",
+    "entry": "handler.mjs",
+    "export": "handler"
+  },
+  "assets": {
+    "dir": "build/client"
+  }
 }

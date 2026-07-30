@@ -63,9 +63,9 @@ operator needs a one-off local override via `--config`.
 
 v1 verification target:
 
-| instance | stage | notes |
-| --- | --- | --- |
-| `trenchcoat` | dev | deployed from `lab.lesser.host`; CMS long-form gates enabled. Stage URL and local receipt path are recorded here at first verified install. |
+| instance     | stage | notes                                                                                                                                       |
+| ------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trenchcoat` | dev   | deployed from `lab.lesser.host`; CMS long-form gates enabled. Stage URL and local receipt path are recorded here at first verified install. |
 
 The manifest and this runbook are instance-parameterized from day one:
 expanding to further dev instances is a new manifest file plus a row in this

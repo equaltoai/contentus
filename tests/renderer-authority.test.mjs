@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import {
-	resolveArticleBody,
-	toArticleDetail,
-	toBlogFaceArticle,
-} from '../src/lib/cms/articles.ts';
+import { resolveArticleBody, toArticleDetail, toBlogFaceArticle } from '../src/lib/cms/articles.ts';
 
 /**
  * Renderer authority is the invariant contentus exists to keep, so it gets

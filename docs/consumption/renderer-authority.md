@@ -29,11 +29,11 @@ Contentus consumes that output and adds nothing to it.
 At the pinned lesser checkout, the GraphQL article read path does **not** run
 the publication renderer:
 
-| Path | Renders? | Evidence |
-| --- | --- | --- |
-| ActivityPub serialization | yes | `pkg/storage/repositories/object_repository.go` substitutes `rendered.HTML` from `cmsrender.RenderArticleContent` |
-| `draftPreview` | yes | `graph/cms_converters.go` builds `DraftPreview` from `cmsrender` output |
-| GraphQL `Article.content` | **no** | `graph/cms_converters.go` assigns `Content: article.Content` — the stored value, unrendered |
+| Path                      | Renders? | Evidence                                                                                                          |
+| ------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| ActivityPub serialization | yes      | `pkg/storage/repositories/object_repository.go` substitutes `rendered.HTML` from `cmsrender.RenderArticleContent` |
+| `draftPreview`            | yes      | `graph/cms_converters.go` builds `DraftPreview` from `cmsrender` output                                           |
+| GraphQL `Article.content` | **no**   | `graph/cms_converters.go` assigns `Content: article.Content` — the stored value, unrendered                       |
 
 Two supporting details:
 
@@ -112,12 +112,35 @@ reports missing npm dependencies; the alternative is shipping a second
 canonical renderer to satisfy a checker. Checksums, component files, and
 orphan detection are all clean — the integrity properties the gate exists for.
 
+Declining has a second cost worth recording, because it is not obvious. The
+face's `Article.Content` imports `sanitizeHtml` from the
+`src/lib/greater/utils` barrel, and that same barrel re-exports
+`html-to-markdown.ts`. Vite tree-shakes the dead branch out of the bundle, but
+both the typechecker and the bundler resolve the whole import graph first — so
+an absent package fails the build even though nothing calls it. Contentus
+handles that by declaring the three modules absent rather than installing them:
+
+- `src/types/absent-renderer-modules.d.ts` for the typechecker, and
+- a `vite.config.ts` alias onto `src/lib/build/absent-renderer-module.ts`
+  for the bundler.
+
+The stub throws rather than returning empty values: if that branch ever stops
+being dead, it must fail loudly at the call site instead of silently behaving
+like a renderer that produced nothing. Both files are deleted the day the blog
+face stops requiring `content`.
+
+This was caught only by a clean `rm -rf node_modules && pnpm install
+--frozen-lockfile`. An earlier build passed against a `node_modules` still
+holding the packages `greater add` had installed before contentus's pins were
+restored — the same stale-tree trap emdash recorded. Build evidence is only
+trustworthy from a clean install.
+
 **Dark theme still incomplete (emdash's U-18, re-confirmed).** At
 greater-v0.11.9 the blog face carries seven `[data-theme='dark']` rules, all
 scoped to `.gr-blog-article-card`. Article prose and headings remain pinned to
 light neutrals with no dark counterpart, so `data-theme="dark"` would render
 near-black text on the Midnight ground. Product design §2 asks for a straight
-ramp map *if* the faces now ship full dark themes; they do not, so contentus
+ramp map _if_ the faces now ship full dark themes; they do not, so contentus
 keeps the ramp inversion in `src/lib/brand/bridge.css`.
 
 **CLI defects at greater-v0.11.9.** `greater add` rewrote contentus-owned
@@ -125,7 +148,7 @@ keeps the ramp inversion in `src/lib/brand/bridge.css`.
 `@types/node ^3.1.0`, `typescript ^6.0.0`, and others) and replaced a pinned
 tarball dependency with a nonexistent semver range. Separately, it emits
 vendored imports as bare, unresolvable specifiers (`from 'src/lib/greater/utils'`)
-in 65 files — the alias *target* rather than an alias-prefixed path. The first
+in 65 files — the alias _target_ rather than an alias-prefixed path. The first
 was corrected in place (package.json is contentus-owned); the second is
 absorbed by a resolve alias in `vite.config.ts` and `tsconfig.json`, because
 vendored source is never hand-edited.
@@ -135,5 +158,5 @@ vendored source is never hand-edited.
 Contentus's GitHub binding covers `equaltoai/contentus` only, so none of the
 above can be filed directly against `equaltoai/lesser` or
 `equaltoai/greater-components`. They are reported to Factory for routing to the
-owning stewards, per the M1 brief: *a missing capability is an upstream issue
-reported back to Factory, never a local workaround.*
+owning stewards, per the M1 brief: _a missing capability is an upstream issue
+reported back to Factory, never a local workaround._

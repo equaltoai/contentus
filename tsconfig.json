@@ -25,6 +25,7 @@
   },
   "//": "Typecheck covers CONTENTUS-OWNED source only. The vendored greater tree (src/lib/{components,greater,generics,patterns}, blog-types.ts, types.ts) is upstream-owned, CLI-managed, and never hand-edited here; its integrity is verified by `greater doctor` checksums, not by our compiler settings. Typechecking it would either fail on dormant modules whose renderer dependencies contentus deliberately does not ship, or pressure us into editing vendored files to satisfy our own config — both are refused.",
   "include": [
+    "src/types/**/*.d.ts",
     "src/facetheory/**/*.ts",
     "src/facetheory/**/*.svelte",
     "src/lib/auth/**/*.ts",

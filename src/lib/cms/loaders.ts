@@ -1,4 +1,8 @@
-import type { ArticlesIndexData, ArticleReaderData, ContentUnavailable } from '../../facetheory/types';
+import type {
+	ArticlesIndexData,
+	ArticleReaderData,
+	ContentUnavailable,
+} from '../../facetheory/types';
 import {
 	toArticleConnection,
 	toArticleDetail,

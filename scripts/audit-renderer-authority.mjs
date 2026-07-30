@@ -112,8 +112,7 @@ function checkDependencies() {
 	]);
 
 	return FORBIDDEN_RENDERER_PACKAGES.filter((name) => declared.has(name)).map(
-		(name) =>
-			`package.json declares "${name}" — contentus must not ship a Markdown/HTML renderer.`
+		(name) => `package.json declares "${name}" — contentus must not ship a Markdown/HTML renderer.`
 	);
 }
 

@@ -173,8 +173,7 @@ export function toArticleConnection(raw: unknown): {
 // ---------------------------------------------------------------------------
 
 export type ArticleBodyDecision =
-	| { kind: 'render'; html: string }
-	| { kind: 'withhold'; reason: 'unrendered-source' | 'empty' };
+	{ kind: 'render'; html: string } | { kind: 'withhold'; reason: 'unrendered-source' | 'empty' };
 
 /**
  * Decide whether an article body may be displayed.

@@ -2,12 +2,7 @@ import type { ArticleSummary, ArticleDetail, CategorySummary, SeriesSummary } fr
 
 /** Stable identifier for each contentus surface in the M1 route table. */
 export type AppPageKey =
-	| 'articles-index'
-	| 'article-reader'
-	| 'series'
-	| 'category'
-	| 'auth-callback'
-	| 'not-found';
+	'articles-index' | 'article-reader' | 'series' | 'category' | 'auth-callback' | 'not-found';
 
 /**
  * Brand surface variant, applied as `data-surface` on the shell root. Face 1
@@ -33,11 +28,7 @@ export interface AppPageDescriptor {
  * upstream defect, and a transport failure is transient.
  */
 export type ContentUnavailableReason =
-	| 'cms-disabled'
-	| 'not-found'
-	| 'tombstoned'
-	| 'unrendered-source'
-	| 'transport';
+	'cms-disabled' | 'not-found' | 'tombstoned' | 'unrendered-source' | 'transport';
 
 export interface ContentUnavailable {
 	reason: ContentUnavailableReason;

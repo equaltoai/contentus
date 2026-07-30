@@ -13,7 +13,11 @@ import {
 } from '@theory-cloud/facetheory';
 import { createSvelteFace } from '@theory-cloud/facetheory/svelte';
 
-import { canonicalArticleUrl, graphqlEndpointForOrigin, resolveRequestOrigin } from '$lib/cms/origin';
+import {
+	canonicalArticleUrl,
+	graphqlEndpointForOrigin,
+	resolveRequestOrigin,
+} from '$lib/cms/origin';
 import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cms/loaders';
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
 
@@ -187,9 +191,7 @@ function createFaceForRoute(route: string) {
  */
 const hydrationResource = {
 	route: HYDRATION_DATA_PATH,
-	handle: async (ctx: {
-		request: { query?: Query; headers?: HeaderBag };
-	}) => {
+	handle: async (ctx: { request: { query?: Query; headers?: HeaderBag } }) => {
 		const params = new URLSearchParams();
 		for (const key of Object.keys(ctx.request.query ?? {})) {
 			for (const value of ctx.request.query?.[key] ?? []) params.append(key, value);
