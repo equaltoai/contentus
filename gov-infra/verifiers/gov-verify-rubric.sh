@@ -72,28 +72,31 @@ check_disclosed_audit() {
 }
 
 # SEC-7: vendored integrity through the pinned `greater` CLI. The CLI is not on
-# the npm registry, so the repo-local pinned install is preferred and PATH is a
-# fallback. Neither resolving is BLOCKED, never PASS — but a CLI that resolves at
-# the wrong version is a different thing entirely: it reports on a tree it does
-# not match, so a version mismatch is a FAIL, not a BLOCKED.
+# the npm registry, so provenance cannot come from a package manager and must not
+# come from the tool's own `--version` output — any binary can print a version.
+# The repo-local install is now the only accepted origin, and the release asset it
+# came from is re-verified against its pinned SHA-256 here, at gate time. No
+# verifiable provenance is BLOCKED, never PASS; a digest or version that resolves
+# and disagrees is a FAIL, because the gate ran.
 check_greater_integrity() {
-  local cli="" origin=""
-  if [[ -x "$TOOLS/node_modules/.bin/greater" ]]; then cli="$TOOLS/node_modules/.bin/greater"; origin="repo-local pinned install"
-  elif command -v greater >/dev/null 2>&1; then cli="$(command -v greater)"; origin="PATH fallback"; fi
-  if [[ -z "$cli" ]]; then
-    echo "${BLOCKED_SENTINEL} greater CLI not resolvable; SEC-7 could not run"
-    echo "The CLI is not published to the npm registry. Install the pinned release asset:"
-    echo "  npm install --no-save --prefix $TOOLS \\"
-    echo "    https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz"
-    echo "BLOCKED is not green: this report will not pass."
-    return $BLOCKED_RC
+  local cli="$TOOLS/node_modules/.bin/greater"
+  if command -v greater >/dev/null 2>&1 && [[ ! -x "$cli" ]]; then
+    echo "note: a PATH \`greater\` exists ($(command -v greater)) and is deliberately not used."
+  fi
+  set +e
+  node "$VERIFY/check-greater-provenance.mjs"
+  local provenance_rc=$?
+  set -e
+  if [[ $provenance_rc -ne 0 ]]; then
+    if [[ $provenance_rc -eq $BLOCKED_RC ]]; then return $BLOCKED_RC; fi
+    return 1
   fi
   local want; want="$(node -p 'JSON.parse(require("fs").readFileSync("gov-infra/planning/contentus-pinned-repo-contract.json","utf8")).greater?.cli_version ?? ""' 2>/dev/null)" || want=""
   local got; got="$("$cli" --version 2>/dev/null | tr -d '[:space:]')"
-  echo "greater CLI: $cli ($origin) version=${got:-unavailable}, pinned ${want:-unset}"
+  echo "  version=${got:-unavailable}, pinned ${want:-unset}"
   if [[ -z "$want" ]]; then echo 'greater.cli_version is not pinned in the repo contract' >&2; return 1; fi
   if [[ "$got" != "$want" ]]; then
-    echo "greater CLI version mismatch: resolved '${got:-none}' via $origin, pin requires '$want'." >&2
+    echo "greater CLI version mismatch: digest-verified install reports '${got:-none}', pin requires '$want'." >&2
     echo "A CLI at another version audits the vendored tree against the wrong manifest." >&2
     echo "This is a FAIL, not BLOCKED: the gate ran and disagreed." >&2
     return 1

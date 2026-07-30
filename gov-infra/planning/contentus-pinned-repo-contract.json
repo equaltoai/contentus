@@ -159,12 +159,23 @@
       "greater-v0.11.9 vendoring came from, recorded at the M1 `greater add` run.",
       "",
       "Both values move together at a CLI pin bump and only through the CLI.",
-      "`cli_version` is the version string `greater --version` must print; a PATH CLI at",
-      "any other version FAILS SEC-7 rather than reporting on a tree it does not match."
+      "`cli_version` is the version string the CLI must print; a digest-verified install",
+      "at any other version FAILS SEC-7 rather than reporting on a tree it does not match.",
+      "",
+      "`cli_asset` is the provenance of the tool itself. The CLI is not on the npm",
+      "registry, so nothing about the downloaded bytes is checked by a package manager,",
+      "and `--version` is the tool describing itself — any executable can print `0.11.9`",
+      "and emit a plausible doctor document. The installer verifies this digest before",
+      "unpacking and SEC-7 re-verifies it at gate time. A PATH `greater` is not accepted",
+      "at all: unverifiable provenance is BLOCKED, never PASS."
     ],
     "release_tag": "greater-v0.11.9",
     "vendored_ref": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-    "cli_version": "0.11.9"
+    "cli_version": "0.11.9",
+    "cli_asset": {
+      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz",
+      "sha256": "cc16a72cfe516ceaf39699a6b9c98398aeb93451d5c066559bfe8720452385eb"
+    }
   },
   "workflows": {
     "rubric_items": ["SEC-3"],

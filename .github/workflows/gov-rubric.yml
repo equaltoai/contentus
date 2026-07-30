@@ -23,11 +23,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
       # The greater CLI is not published to the npm registry; it ships as a
-      # release asset. Pinned to the same release the vendored tree came from so
-      # SEC-7 checks the tree against its own CLI. Without this step SEC-7 is
-      # BLOCKED and the report does not pass.
+      # release asset, so nothing about the bytes that arrive is checked by a
+      # package manager. The installer verifies the asset against the SHA-256
+      # pinned in the repo contract before anything unpacks, and leaves the
+      # tarball for SEC-7 to re-verify at gate time. Without this step SEC-7 is
+      # BLOCKED and the report does not pass; MAI-4 binds the step so it cannot be
+      # dropped to turn a hard gate into a soft one.
       - name: Install pinned greater CLI
-        run: npm install --no-save --prefix gov-infra/.tools https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz
+        run: node gov-infra/verifiers/install-greater-cli.mjs
       - name: Run governance rubric
         run: bash gov-infra/verifiers/gov-verify-rubric.sh
       - name: Upload governance evidence
