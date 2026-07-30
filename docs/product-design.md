@@ -65,11 +65,11 @@ no light theme ships in v1 (matches emdash's decision and the brand pack).
 The brand pack defines per-surface accent swaps. Contentus maps its faces onto
 them:
 
-| Surface | Accent | Contentus faces |
-| --- | --- | --- |
-| `journal` | Phi Gold tint | Articles (face 1), Review/Edit (face 2) |
-| `core` | Core Blue | Post to Timeline, Timelines (faces 3–4) |
-| `mcp` | Violet Signal | Direct Messaging, Agent List, Drone Creation (faces 5–7) |
+| Surface   | Accent        | Contentus faces                                          |
+| --------- | ------------- | -------------------------------------------------------- |
+| `journal` | Phi Gold tint | Articles (face 1), Review/Edit (face 2)                  |
+| `core`    | Core Blue     | Post to Timeline, Timelines (faces 3–4)                  |
+| `mcp`     | Violet Signal | Direct Messaging, Agent List, Drone Creation (faces 5–7) |
 
 The editorial/CMS half of the product reads as the journal surface (quiet,
 gold-accented, reading-first); the social half reads as core; everything
@@ -123,7 +123,7 @@ Contentus copies the **proven simulacrum FaceTheory skeleton**, not emdash's:
   endpoint (`/l/_facetheory/hydration`), never inline scripts.
 - **Strict CSP from our own origin** on every SSR response
   (`buildStrictCspHeader`, `inlineScripts: false, inlineStyles: false,
-  rawHead: false`). lesser does not inject CSP on `/l` routes; the SSR host's
+rawHead: false`). lesser does not inject CSP on `/l` routes; the SSR host's
   fallback pages are deny-all. No inline `<script>`/`<style>`, no third-party
   origins.
 - **GraphQL-first** against same-origin `/api/graphql` (relative URL; depth
@@ -202,7 +202,7 @@ reads when `CMSLongFormEnabled`.
   `articleBySlug(slug)`, `series*`, `categories`, `publication`.
 - Components: vendored `faces/blog` — `ArticleReader`, `ArticleIndexCard`,
   `Article` compound (`Header/Content/Footer/TableOfContents/ReadingProgress/
-  ShareBar/RelatedPosts`), `normalizeArticleData`. Proven SSR-safe by emdash.
+ShareBar/RelatedPosts`), `normalizeArticleData`. Proven SSR-safe by emdash.
 - Renderer authority: article HTML is **lesser's rendered/sanitized output,
   always**. Never client-render Markdown; never show raw source. (greater's
   `MarkdownRenderer` is not for article content.)
@@ -235,8 +235,11 @@ steward, consumed by contentus and exposed to agents by lesser-body:
   `draftReview(id)` queries, `shareDraftForReview(draftId, reviewer)` and
   `submitDraftReview(draftId, verdict, notes)` mutations, with verdicts
   landing in the existing attribution metadata (`reviewedBy`, `reviewStatus`,
-  `editorNotes`). Publish remains a distinct explicit action gated on a
-  recorded approval for agent-generated drafts. The exact operation names and
+  `editorNotes`). Publish remains a distinct explicit action, gated (operator
+  rule, 2026-07-30): **all active invited reviewers must hold a current
+  approval in all cases** (invites are revocable; revoked reviewers drop out
+  of the required set), and **agent-generated content additionally always
+  requires the instance principal's approval**. The exact operation names and
   authZ are the lesser steward's; contentus consumes, never defines.
 - **MCP parity (lesser-body).** The same workflow is exposed as MCP tools on
   the body contract — an agent submits a draft for review, lists its review
@@ -275,11 +278,11 @@ Route: `/compose` (also reachable as reply/quote context from timelines).
 Auth: **required**.
 
 - Lesser operations: `createNote(input: { content, visibility
-  (PUBLIC|UNLISTED|FOLLOWERS|DIRECT), sensitive, spoilerText, attachmentIds,
-  mentions, tags, poll, inReplyToId, quoteId, agentAttribution })`,
+(PUBLIC|UNLISTED|FOLLOWERS|DIRECT), sensitive, spoilerText, attachmentIds,
+mentions, tags, poll, inReplyToId, quoteId, agentAttribution })`,
   `uploadMedia`, `updateStatus`, `deleteObject`, `scheduleStatus`.
 - Components: `shared/compose` compound (`Root/Editor/Submit/CharacterCount/
-  VisibilitySelect/MediaUpload/ThreadComposer/Autocomplete`) + social
+VisibilitySelect/MediaUpload/ThreadComposer/Autocomplete`) + social
   patterns `MediaComposer`, `PollComposer`, `CustomEmojiPicker`.
   (`ComposeBox` is deprecated upstream — do not use.)
 - Design: Core Blue surface; composer as a full-screen sheet on mobile
@@ -297,7 +300,7 @@ authenticated), `/profiles/{username}` (profile timeline + actor card).
 Auth: `LOCAL`/`PUBLIC`/`ACTOR` are anonymous-safe; `HOME` requires auth.
 
 - Lesser operations: the single query `timeline(type: TimelineType!, hashtag,
-  listId, actorId, first, after, mediaOnly, excludeAgents)` with
+listId, actorId, first, after, mediaOnly, excludeAgents)` with
   `TimelineType = HOME | LOCAL | PUBLIC | ACTOR | HASHTAG | LIST | DIRECT`;
   `actor(id|username)` for profile headers. Realtime:
   `subscription timelineUpdates(type, listId)` for prepend.
@@ -323,7 +326,7 @@ Routes: `/messages` (conversation list, Inbox | Requests tabs),
   `declineMessageRequest`, `markConversationAsRead`, `deleteConversation`;
   realtime `conversationUpdates`.
 - Components: `shared/messaging` full suite (`Root/Conversations/Thread/
-  Composer/Message/NewConversation/UnreadIndicator`) +
+Composer/Message/NewConversation/UnreadIndicator`) +
   `createLesserMessagesHandlers` adapter binding — sim's exact wiring.
 - Design: Violet surface; message requests are a first-class tab with
   accept/decline actions on the card (`viewerMetadata.requestState`), not a
@@ -339,9 +342,9 @@ Auth: roster/detail reads anonymous-safe (consistent with `agents`/`agent`
 read behavior); `myAgents` and lease operations authenticated.
 
 - Lesser operations: `agents(first, after, type, query, verified,
-  ownerUsername)`, `agent(username)`, `myAgents`, `agentActivity(username)`;
+ownerUsername)`, `agent(username)`, `myAgents`, `agentActivity(username)`;
   the MCP details come from `Agent.mcpAccess { mcpURL, protectedResourceURL,
-  authorizationServerURL, registrationURL, scopes, guidance }`, capability
+authorizationServerURL, registrationURL, scopes, guidance }`, capability
   badges from `agentCapabilities`, trust state from `verified`/`quarantine*`.
 - Components: the agent-roster and MCP-detail components are **planned
   greater-components design work** against `Agent.mcpAccess`; until vendored,
@@ -366,7 +369,7 @@ Auth: **required** (`write` scope); availability depends on instance policy
   the soul-promotion flow links out to the identity surface rather than
   re-implementing it.
 - Lesser operations: `delegateToAgent(username, displayName, bio, agentType,
-  version, scopes)`, `myAgents`, optionally `droneWorkflow(username)` for
+version, scopes)`, `myAgents`, optionally `droneWorkflow(username)` for
   status display on the roster.
 - Components: sim's `DronesPage.svelte` is the proven reference (form →
   `delegateToAgent` → roster refresh). greater's `faces/agent`
@@ -386,22 +389,22 @@ The install path is milestone zero and stays green at every boundary
 milestone is independently installable and verifiable against the dev
 instance. The shareable-review requirement pulls three upstream milestones
 onto the critical path — they are owned by the lesser, greater, and body
-stewards and sequenced by the factory roadmap; Face 2's *completion* (not
+stewards and sequenced by the factory roadmap; Face 2's _completion_ (not
 its start) is gated on them.
 
-| M | Scope | Owner | Exit evidence |
-| --- | --- | --- | --- |
-| 0 | Install path: manifest, build, `lesser client install` to dev | contentus | runbook smoke test green |
-| 1 | Brand + shell + Face 1 (Articles) | contentus | token integrity assertion, anonymous reading verified on instance |
-| 2a | Shareable draft review contract (queue, grants, verdicts) | lesser | contract ops live on dev instance; documented in CMS contract doc |
-| 2b | CMS review workflow over MCP | lesser-body | MCP tools submit-for-review / queue / verdict verified against dev instance |
-| 2c | Review-workflow chrome (queue cards, attribution strip, verdict actions) | greater-components | components released + vendored, contract-synced to lesser |
-| 2d | Face 2 (Review/Edit) consuming 2a–2c | contentus | shared draft → `draftPreview` → verdict → explicit publish verified; gate honesty |
-| 3 | Mobile chrome (tab bar, FAB, sheets) + Face 3 (Compose) | contentus (chrome offered upstream) | composer round-trip on a phone viewport |
-| 4 | Face 4 (Timelines) | contentus | LOCAL/PUBLIC/ACTOR anonymous reads, HOME auth, realtime prepend |
-| 5 | Face 5 (Messages) | contentus | DM round-trip + request accept/decline |
-| 6 | Face 6 (Agents + MCP) | contentus (roster/MCP components from greater milestone) | roster + MCP detail panel with live discovery |
-| 7 | Face 7 (Drones) | contentus | `delegateToAgent` creation + roster, policy-disabled state |
+| M   | Scope                                                                    | Owner                                                    | Exit evidence                                                                     |
+| --- | ------------------------------------------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 0   | Install path: manifest, build, `lesser client install` to dev            | contentus                                                | runbook smoke test green                                                          |
+| 1   | Brand + shell + Face 1 (Articles)                                        | contentus                                                | token integrity assertion, anonymous reading verified on instance                 |
+| 2a  | Shareable draft review contract (queue, grants, verdicts)                | lesser                                                   | contract ops live on dev instance; documented in CMS contract doc                 |
+| 2b  | CMS review workflow over MCP                                             | lesser-body                                              | MCP tools submit-for-review / queue / verdict verified against dev instance       |
+| 2c  | Review-workflow chrome (queue cards, attribution strip, verdict actions) | greater-components                                       | components released + vendored, contract-synced to lesser                         |
+| 2d  | Face 2 (Review/Edit) consuming 2a–2c                                     | contentus                                                | shared draft → `draftPreview` → verdict → explicit publish verified; gate honesty |
+| 3   | Mobile chrome (tab bar, FAB, sheets) + Face 3 (Compose)                  | contentus (chrome offered upstream)                      | composer round-trip on a phone viewport                                           |
+| 4   | Face 4 (Timelines)                                                       | contentus                                                | LOCAL/PUBLIC/ACTOR anonymous reads, HOME auth, realtime prepend                   |
+| 5   | Face 5 (Messages)                                                        | contentus                                                | DM round-trip + request accept/decline                                            |
+| 6   | Face 6 (Agents + MCP)                                                    | contentus (roster/MCP components from greater milestone) | roster + MCP detail panel with live discovery                                     |
+| 7   | Face 7 (Drones)                                                          | contentus                                                | `delegateToAgent` creation + roster, policy-disabled state                        |
 
 M3 places the mobile chrome before the remaining faces so no face ships
 desktop-only; faces 1–2 are single-column-safe by construction in the
@@ -418,17 +421,37 @@ fleet milestones with owning stewards, sequenced in the factory roadmap
 (`docs/roadmap/contentus-lesser-interface.md` in the factory repo). Remaining
 gaps are recorded, never patched around.
 
-| Item | Owner | Status |
-| --- | --- | --- |
-| Shareable draft review contract (cross-author draft visibility, review queue, verdict mutations) | `lesser` | **Planned** — release requirement; blocks Face 2 completion |
-| CMS review workflow over MCP (submit-for-review, queue, verdicts) | `lesser-body` | **Planned** — follows the lesser contract |
-| Review-workflow chrome (queue cards, attribution strip, verdict actions) | `greater-components` | **Planned** — new design work against the lesser contract |
-| Agent-roster / MCP-detail components | `greater-components` | **Planned** — new design work; Face 6 consumes |
-| Bottom-nav / drawer / sheet mobile components | `greater-components` | **Planned** — new design work; until vendored, contentus composes from primitives |
-| Tabbed instance/federated timeline face | `greater-components` | **Planned** — small composition; contentus owns interim |
-| Full dark theme coverage in vendored faces (emdash U-18) | `greater-components` | Open gap — determines `data-theme="dark"` vs ramp-inversion bridge |
-| Licensed self-hosted fonts (Inter/Geist/JetBrains Mono) | operator decision | Open — v1 runs system fallbacks |
-| No full-text article search (`search` covers statuses/accounts/hashtags) | `lesser` | Recorded gap — v1 navigates by series/category |
+| Item                                                                                             | Owner                | Status                                                                            |
+| ------------------------------------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------------------- |
+| Shareable draft review contract (cross-author draft visibility, review queue, verdict mutations) | `lesser`             | **Planned** — release requirement; blocks Face 2 completion                       |
+| CMS review workflow over MCP (submit-for-review, queue, verdicts)                                | `lesser-body`        | **Planned** — follows the lesser contract                                         |
+| Review-workflow chrome (queue cards, attribution strip, verdict actions)                         | `greater-components` | **Planned** — new design work against the lesser contract                         |
+| Agent-roster / MCP-detail components                                                             | `greater-components` | **Planned** — new design work; Face 6 consumes                                    |
+| Bottom-nav / drawer / sheet mobile components                                                    | `greater-components` | **Planned** — new design work; until vendored, contentus composes from primitives |
+| Tabbed instance/federated timeline face                                                          | `greater-components` | **Planned** — small composition; contentus owns interim                           |
+| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | Open gap — determines `data-theme="dark"` vs ramp-inversion bridge                |
+| Licensed self-hosted fonts (Inter/Geist/JetBrains Mono)                                          | operator decision    | Open — v1 runs system fallbacks                                                   |
+| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | Recorded gap — v1 navigates by series/category                                    |
+
+Gaps filed upstream from M1 consumption evidence (2026-07-30, verified by Factory before filing; routed via contentus#1):
+
+| Item                                                                                                          | Owner                | Status                                                                                              |
+| ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| GraphQL CMS read path returns raw article source; no rendered/sanitized HTML field                            | `lesser`             | Filed lesser#1287 — gates full Face 1 (Markdown bodies) and safe HTML rendering; stored-XSS class    |
+| `allSeries` unscoped branch silently drops pagination                                                         | `lesser`             | Filed lesser#1288 — not blocking; series navigation uses first page                                 |
+| No deletion/tombstone state on the GraphQL CMS read path (410 inexpressible)                                  | `lesser`             | Filed lesser#1289 — affects reader and review surfaces later                                        |
+| Blog face requires `content` module (Markdown/shiki/remark) its reading surface never uses                    | `greater-components` | Filed greater-components#917 — doctor dependency red by design; absent-module stubs in place         |
+| `greater add` rewrites consumer `package.json` to nonexistent versions                                        | `greater-components` | Filed greater-components#918 — CLI defect; contentus corrected its manifest in place                 |
+| `greater add` emits vendored imports as bare, unresolvable specifiers                                         | `greater-components` | Filed greater-components#919 — absorbed via resolve aliases in `vite.config.ts` / `tsconfig.json`    |
+| U-18 re-confirmed at v0.11.9: blog face dark theme covers only article-card                                   | `greater-components` | Filed greater-components#920 — contentus keeps ramp inversion in `src/lib/brand/bridge.css`          |
+
+Gaps filed from the M1 rework round (same day, at rework head `20e03ea2`):
+
+| Item                                                                                                          | Owner                | Status                                                                                              |
+| ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| Blog face `Article/context.ts` uses runes without the `.svelte.` infix; uncompiled `$state` in built bundles  | `greater-components` | Filed greater-components#921 — absorbed via `compileModule.include`; sunset tied to the rename       |
+| `FaceApp` never forwards `allowedOrigin` into `renderFaceHead`; absolute `<link href>` 500s under strict CSP  | `FaceTheory`         | Filed theory-cloud/FaceTheory#404 — relative-canonical workaround; cross-origin canonicals unserved  |
+| `CLIENT_APP_GUIDE.md` pins FaceTheory v3.2.2; proven pin is v4.0.1                                            | `lesser`             | Filed lesser#1290 — minor doc fix                                                                   |
 
 ## 8. Non-negotiables carried into every face
 
