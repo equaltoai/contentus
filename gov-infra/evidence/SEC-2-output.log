@@ -1,0 +1,5 @@
+Advisories disclosed in the pin but NOT reported by the audit:
+  - GHSA-96hv-2xvq-fx4p | high | ws | >=8.0.0 <8.21.0 | .>@equaltoai/greater-components-adapters>graphql-ws>ws
+
+If the upstream fix landed, delete the entry from the pin. That is the
+intended retirement path, and this failure is its forcing function.

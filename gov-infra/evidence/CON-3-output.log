@@ -1,0 +1,5 @@
+facetheory.lesser.json declares every key `lesser client install` reads.
+  app_name=contentus version=0.0.1
+  build=pnpm build
+  server=build/server/handler.mjs export=handler
+  assets=build/client

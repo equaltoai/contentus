@@ -1,0 +1,11 @@
+greater CLI: /home/aron/.local/share/pnpm/greater (0.11.10)
+integrity check "Component Files" is absent from the doctor report
+integrity check "Orphaned Files" is absent from the doctor report
+disclosed finding "NPM Dependencies" is absent from the doctor report
+disclosed finding "Alias Path: utils" is absent from the doctor report
+disclosed finding "Alias Path: ui" is absent from the doctor report
+disclosed finding "Alias Path: hooks" is absent from the doctor report
+
+Never repair this by installing the declined Markdown chain, by creating empty
+alias directories, or by widening the pin. Route the change upstream and update
+gov-infra/planning/contentus-disclosed-upstream-findings.json only after examining it.
