@@ -1,0 +1,25 @@
+name: Main Branch Guard
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Enforce promotion-only main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require PR from staging
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          CURRENT_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "${BASE_REF}" = main
+          test "${HEAD_REF}" = staging
+          test "${HEAD_REPOSITORY}" = "${CURRENT_REPOSITORY}"
