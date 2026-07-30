@@ -1,0 +1,37 @@
+# Dependencies
+node_modules
+
+# Build output
+/build
+/dist
+/.svelte-kit
+.output
+
+# Instance-specific install manifests (parameterized per target instance)
+/facetheory.*.lesser.json
+!/facetheory.lesser.json
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling
+/.pai
+/.theory
+
+# Materialized agent trees (regenerated from the namespace, never tracked —
+# operator rule 2026-07-30: .agents is materialized space; matches fleet convention)
+/.agents/
+/.claude/
+/.kimi-code/
+/.theorymcp/
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
