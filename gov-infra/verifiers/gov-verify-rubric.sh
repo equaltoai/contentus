@@ -31,13 +31,18 @@ run() {
 }
 
 check_supply_chain() {
-  local allow="$PLAN/contentus-supply-chain-allowlist.txt"
   # GitHub Actions must be immutable: each structured YAML `uses` value is
-  # either a local ./ action or a 40-hex commit SHA. The scanner is deliberately
-  # fixed to .github/workflows; no environment override can subtract coverage.
+  # either a local ./ action whose manifest is scanned under these same rules,
+  # or a 40-hex commit SHA. The scanner is deliberately fixed to
+  # .github/workflows; no environment override can subtract coverage.
   echo "Scanning workflow directory: .github/workflows"
   node "$VERIFY/validate-workflows.mjs" --uses || return 1
+  # Least-privilege permissions and the prohibition on splicing event payload
+  # text into `run:` blocks. A workflow that can write is a supply-chain surface.
+  node "$VERIFY/validate-workflows.mjs" --policy || return 1
   [[ -f pnpm-lock.yaml ]] || { echo 'missing pnpm-lock.yaml'; return 1; }
+  # Every install in this rubric disables lifecycle scripts. That ordering, not
+  # the screening below it, is the control: nothing installed here ever executes.
   set +e
   pnpm install --frozen-lockfile --ignore-scripts
   local install_rc=$?
@@ -46,24 +51,19 @@ check_supply_chain() {
   local pkg_json_list; pkg_json_list="$(mktemp)"
   find node_modules -type f -name package.json 2>/dev/null > "$pkg_json_list" || { rm -f "$pkg_json_list"; return 1; }
   set +e
-  PKG_JSON_LIST="$pkg_json_list" ALLOWLIST="$allow" node <<'NODE'
-const fs=require('fs');
-const hooks=['preinstall','install','postinstall','prepare','prepublishOnly'];
-const allowed=new Set(fs.readFileSync(process.env.ALLOWLIST,'utf8').split(/\r?\n/).filter(x=>x&&!x.startsWith('#')));
-const findings=[];
-for(const p of fs.readFileSync(process.env.PKG_JSON_LIST,'utf8').split(/\r?\n/).filter(Boolean)){try{const x=JSON.parse(fs.readFileSync(p));for(const h of hooks){const s=x.scripts?.[h];if(typeof s==='string'&&/(curl\s+[^|]*\|\s*(sh|bash)|wget\s+[^|]*\|\s*(sh|bash)|webhook\.site|NPM_TOKEN|GITHUB_TOKEN)/i.test(s)){const id=`GOV-SUPPLY:NODE:SCRIPT:pkg=${x.name||p}:ver=${x.version||''}:hook=${h}`;if(!allowed.has(id)) findings.push(id)}}}catch{}}
-if(findings.length){console.error(findings.join('\n'));process.exit(1)}
-NODE
+  node "$VERIFY/check-supply-chain.mjs" "$pkg_json_list"
   local scan_rc=$?; set -e; rm -f "$pkg_json_list"; [[ $scan_rc -eq 0 ]]
 }
 
-# SEC-2: the audit runs in full; the assertion is that its high/critical set is
-# exactly the pinned disclosed set. `pnpm audit` exits non-zero when it reports
-# anything, so its status is deliberately ignored in favour of its output.
+# SEC-2: the audit runs in full over the whole installed graph — not `--prod`,
+# because dev dependencies execute in CI against this checkout. The assertion is
+# that its high/critical set is exactly the pinned disclosed set. `pnpm audit`
+# exits non-zero when it reports anything, so its status is deliberately ignored
+# in favour of its output.
 check_disclosed_audit() {
   local out; out="$(mktemp)"
   set +e
-  pnpm audit --prod --audit-level=high --json > "$out" 2>/dev/null
+  pnpm audit --audit-level=high --json > "$out" 2>/dev/null
   set -e
   node "$VERIFY/check-disclosed-audit.mjs" "$out"
   local rc=$?
@@ -73,11 +73,13 @@ check_disclosed_audit() {
 
 # SEC-7: vendored integrity through the pinned `greater` CLI. The CLI is not on
 # the npm registry, so the repo-local pinned install is preferred and PATH is a
-# fallback. Neither resolving is BLOCKED, never PASS.
+# fallback. Neither resolving is BLOCKED, never PASS — but a CLI that resolves at
+# the wrong version is a different thing entirely: it reports on a tree it does
+# not match, so a version mismatch is a FAIL, not a BLOCKED.
 check_greater_integrity() {
-  local cli=""
-  if [[ -x "$TOOLS/node_modules/.bin/greater" ]]; then cli="$TOOLS/node_modules/.bin/greater"
-  elif command -v greater >/dev/null 2>&1; then cli="$(command -v greater)"; fi
+  local cli="" origin=""
+  if [[ -x "$TOOLS/node_modules/.bin/greater" ]]; then cli="$TOOLS/node_modules/.bin/greater"; origin="repo-local pinned install"
+  elif command -v greater >/dev/null 2>&1; then cli="$(command -v greater)"; origin="PATH fallback"; fi
   if [[ -z "$cli" ]]; then
     echo "${BLOCKED_SENTINEL} greater CLI not resolvable; SEC-7 could not run"
     echo "The CLI is not published to the npm registry. Install the pinned release asset:"
@@ -86,7 +88,16 @@ check_greater_integrity() {
     echo "BLOCKED is not green: this report will not pass."
     return $BLOCKED_RC
   fi
-  echo "greater CLI: $cli ($("$cli" --version 2>/dev/null || echo 'version unavailable'))"
+  local want; want="$(node -p 'JSON.parse(require("fs").readFileSync("gov-infra/planning/contentus-pinned-repo-contract.json","utf8")).greater?.cli_version ?? ""' 2>/dev/null)" || want=""
+  local got; got="$("$cli" --version 2>/dev/null | tr -d '[:space:]')"
+  echo "greater CLI: $cli ($origin) version=${got:-unavailable}, pinned ${want:-unset}"
+  if [[ -z "$want" ]]; then echo 'greater.cli_version is not pinned in the repo contract' >&2; return 1; fi
+  if [[ "$got" != "$want" ]]; then
+    echo "greater CLI version mismatch: resolved '${got:-none}' via $origin, pin requires '$want'." >&2
+    echo "A CLI at another version audits the vendored tree against the wrong manifest." >&2
+    echo "This is a FAIL, not BLOCKED: the gate ran and disagreed." >&2
+    return 1
+  fi
   local out; out="$(mktemp)"
   set +e
   "$cli" doctor --json > "$out" 2>/dev/null
@@ -127,13 +138,17 @@ run CON-1 Consistency 'pnpm run lint'
 run CON-2 Consistency 'pnpm run typecheck'
 run CON-3 Consistency "node $VERIFY/check-install-manifest.mjs"
 run CON-4 Consistency "node $VERIFY/check-greater-pins.mjs"
+# Every control above that trusts `pnpm run <name>` trusts a file the same pull
+# request can edit. CON-5 binds those scripts to their pinned definitions, so a
+# script stubbed to `true` fails the report instead of turning it green.
+run CON-5 Consistency "node $VERIFY/check-package-scripts.mjs"
 
 # --- Completeness -------------------------------------------------------------
 run COM-1 Completeness "node $VERIFY/check-install-manifest.mjs --artifacts"
 run COM-2 Completeness 'node -e "const p=require(\"./package.json\"); if(!/^>=24/.test(p.engines?.node||\"\")) process.exit(1);" && grep -q "lockfileVersion: '\''9.0'\''" pnpm-lock.yaml'
 run COM-3 Completeness 'test -s AGENTS.md && test -s README.md && test -s docs/runbook.md'
 run COM-4 Completeness 'test -f .github/workflows/gov-rubric.yml && test -f .github/workflows/test.yml && test -f .github/workflows/lint.yml && test -f .github/workflows/codeql.yml && test -f .github/workflows/dco.yml && test -f .github/workflows/main-guard.yml'
-run COM-5 Completeness 'pnpm install --frozen-lockfile'
+run COM-5 Completeness 'pnpm install --frozen-lockfile --ignore-scripts'
 
 # --- Security -----------------------------------------------------------------
 run SEC-1 Security 'test -f .github/workflows/codeql.yml && grep -q "github/codeql-action/init@[0-9a-f]\{40\}" .github/workflows/codeql.yml'
@@ -141,7 +156,7 @@ run SEC-2 Security check_disclosed_audit
 run SEC-3 Security check_supply_chain
 run SEC-4 Security 'pnpm run validate:csp'
 run SEC-5 Security 'pnpm run validate:renderer-authority'
-run SEC-6 Security 'node --test --experimental-strip-types tests/ssr-probe.test.mjs tests/origin.test.mjs'
+run SEC-6 Security "node $VERIFY/check-security-tests.mjs"
 run SEC-7 Security check_greater_integrity
 
 # --- Compliance ---------------------------------------------------------------
