@@ -14,10 +14,17 @@
  * fallback under `/l/*`, so a route that fails here is a hard error page on the
  * instance, not a soft miss.
  *
- * The instance is not reachable from the build host, so every GraphQL fetch
- * fails and each route renders its designed unavailable state. That is the
+ * The instance is not reachable from the build host, so by default every GraphQL
+ * fetch fails and each route renders its designed unavailable state. That is the
  * intended audit surface: it proves the degraded path is CSP-clean and
  * renders, which is the path a cold or misconfigured instance actually shows.
+ *
+ * The degraded path is not the whole surface, though. `withStubbedGraphql`
+ * drives the same built handler with CONTROLLED GraphQL responses, so the
+ * loaded-body branches — the ones a real instance actually serves — are
+ * exercised against the built artifact too, and the requests the server makes
+ * are recorded rather than inferred. `pnpm dev` behaviour is not evidence about
+ * what ships; this is.
  */
 
 import { existsSync } from 'node:fs';
@@ -41,8 +48,18 @@ export const AUDIT_ROUTES = [
 	{ name: 'hydration-data', path: '/l/_facetheory/hydration', expectStatus: 200 },
 ];
 
-/** A representative host header; no instance domain is baked into source. */
+/**
+ * A representative request as lesser's edge actually delivers it: CloudFront's
+ * frontend function injects the verified viewer host as `x-lesser-forwarded-host`
+ * and pins the proto (`lesser` → `infra/cdk/stacks/lesser_api_stack.go`). No
+ * instance domain is baked into source.
+ */
 const AUDIT_HOST = 'contentus-audit.invalid';
+const AUDIT_HEADERS = {
+	host: AUDIT_HOST,
+	'x-lesser-forwarded-host': AUDIT_HOST,
+	'x-lesser-forwarded-proto': 'https',
+};
 
 export async function loadHandler() {
 	if (!existsSync(handlerPath)) {
@@ -70,17 +87,20 @@ function normalizeHeaders(result) {
 	return headers;
 }
 
-/** Render one route and return `{ status, headers, html }`. */
+/**
+ * Render one route and return `{ status, headers, html }`.
+ *
+ * `route.headers`, when present, REPLACES the audit defaults rather than merging
+ * into them: a probe that asserts which header the server trusts has to control
+ * the whole header bag, or a default would quietly supply the answer.
+ */
 export async function renderRoute(handler, route) {
 	const [path, rawQueryString = ''] = route.path.split('?');
 
 	const result = await handler({
 		rawPath: path,
 		rawQueryString,
-		headers: {
-			host: AUDIT_HOST,
-			'x-forwarded-proto': 'https',
-		},
+		headers: route.headers ?? AUDIT_HEADERS,
 		requestContext: { http: { method: 'GET', path } },
 	});
 
@@ -92,6 +112,46 @@ export async function renderRoute(handler, route) {
 		headers: normalizeHeaders(result),
 		html: decodeBody(result),
 	};
+}
+
+/**
+ * Run `body` with `fetch` replaced by a GraphQL stub, and return
+ * `{ value, requests }` — what `body` produced, and every request the built
+ * handler made while producing it.
+ *
+ * `respond({ operation, variables })` returns the GraphQL envelope for one
+ * operation — `{ data }`, `{ errors }`, or both. Returning nothing yields
+ * `{ data: null }`, which is what an operation the probe does not care about
+ * should look like.
+ *
+ * Recording `url` is the point as much as the responses are: it is the only
+ * direct evidence of which host the SERVER chose to fetch from, which is exactly
+ * the question a spoofed forwarding header raises.
+ */
+export async function withStubbedGraphql(respond, body) {
+	const requests = [];
+	const originalFetch = globalThis.fetch;
+
+	globalThis.fetch = async (input, init = {}) => {
+		const url = typeof input === 'string' ? input : String(input?.url ?? input);
+		const payload = init.body ? JSON.parse(init.body) : {};
+		const operation = /query\s+([A-Za-z0-9_]+)/.exec(payload.query ?? '')?.[1] ?? '';
+		const variables = payload.variables ?? {};
+
+		requests.push({ url, operation, variables });
+
+		const envelope = respond({ operation, variables }) ?? { data: null };
+		return new Response(JSON.stringify(envelope), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	};
+
+	try {
+		return { value: await body(), requests };
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
 }
 
 /** Render every audited route. */
