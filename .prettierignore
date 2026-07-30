@@ -7,6 +7,8 @@ src/lib/components/
 src/lib/generics/
 src/lib/patterns/
 src/lib/blog-types.ts
+src/lib/blog-share.ts
+src/lib/types.ts
 styles/greater/
 
 # Theory Cloud brand pack — copied verbatim from the design pack
