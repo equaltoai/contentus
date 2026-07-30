@@ -124,6 +124,26 @@ Notes:
     to route upstream, never an entry to append without examining it.
   - Signing is retired for this lifecycle surface; namespace MCP guidance does
     not replace this repo-local CI.
+
+### Bootstrap exception (expires at the M1 merge)
+
+One head is exempt from "green at current HEAD before any push": the initial
+gov-infra spine branch itself. The spine lands on a `staging` that has no
+`package.json`, no lockfile, no `src/`, and no build, so every control that
+invokes the toolchain fails for a structural reason — the application has not
+merged yet. Committing a green report at that ref would require either faking it
+or weakening the gates, and both are worse than a red one.
+
+The green evidence for the spine is therefore the composite run: the spine's
+verifiers against the M1 application tree, run by Factory, reported in the pull
+request with its own report. The red report committed on the spine branch is the
+honest result for the spine ref and is committed as such.
+
+This exception covers exactly this one head. It expires when M1 merges to
+`staging` — from that point the toolchain is present, the composite and the ref
+are the same tree, and the absolute rule above applies with no exception. It is
+not a precedent for any later branch, and it never licenses pushing on a report
+that failed for a *substantive* reason.
 - Cross-client adversarial review applies to PRs per the fleet pattern; the
   implementing client never reviews its own change.
 
