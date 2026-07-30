@@ -17,8 +17,15 @@
     "author who edits both sides can still move the pin. The control it composes with is",
     "cross-client adversarial review of the gov-infra diff, not this file alone.",
     "",
+    "Command text is not behaviour. `validate:csp` pinned to `node scripts/audit-csp.mjs`",
+    "holds perfectly while that file is emptied, and SEC-4 then exits 0 having audited",
+    "nothing. So the pins below reach content: every executable this rubric runs, and",
+    "every probe it counts, is bound by SHA-256 rather than by the string that names it.",
+    "",
     "Changing any value here is a governance change. It travels with the reason, in the",
-    "commit that needs it, and never as drive-by maintenance."
+    "commit that needs it, and never as drive-by maintenance. Duplicate keys are rejected",
+    "when this file is read: JSON.parse is last-wins, so a repeated key is a value a",
+    "reviewer reads and a different value a control enforces."
   ],
   "package_scripts": {
     "rubric_items": ["CON-5"],
@@ -40,6 +47,45 @@
       "validate:csp": "node scripts/audit-csp.mjs",
       "validate:renderer-authority": "node scripts/audit-renderer-authority.mjs",
       "test": "node --test --experimental-strip-types 'tests/*.test.mjs' 'scripts/*.test.mjs'"
+    }
+  },
+  "executable_targets": {
+    "rubric_items": ["CON-5"],
+    "$comment": [
+      "The content of everything the guarded scripts above actually execute. CON-5 walks",
+      "the closure — each `node <path>` target, each file a listed glob expands to, and",
+      "each relative module those files import, transitively — and asserts a SHA-256 for",
+      "every member. A target with no pin fails; a pin no command reaches fails too, so",
+      "this map stays exactly the closure instead of drifting into a wish list.",
+      "",
+      "`unpinned_import_roots` is the declared boundary of that walk. `src/` is the",
+      "application the probes are written against: hashing it would freeze the subject",
+      "under governance and invert the relationship, because the probe is the gate and the",
+      "module is what it judges. `build/` is generated output — regenerated every run, and",
+      "asserted by COM-1 and driven by SEC-6 rather than pinned. A gate that imports helper",
+      "logic out of either root is a limit recorded in the threat model, not a hole this",
+      "map closes.",
+      "",
+      "`allowed_globs` is the set of glob arguments a guarded `node` invocation may pass.",
+      "Every file a listed glob expands to still has to be pinned; the list exists so a",
+      "new glob is a governance edit rather than a silent widening.",
+      "",
+      "`node gov-infra/verifiers/check-package-scripts.mjs --print-hashes` prints this map",
+      "for the current tree, so a legitimate move is mechanical rather than hand-computed."
+    ],
+    "unpinned_import_roots": ["src/", "build/"],
+    "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
+    "sha256": {
+      "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
+      "scripts/audit-renderer-authority.mjs": "d377c4ab7ef0b72f685bfb4b52e67647478475028012ba2297dde55370b79c0a",
+      "scripts/build-stylesheet.mjs": "fd46fbee8daaf2f53ce460b8a80d6209a1d4d497e5506751d4a40ca9a19ca725",
+      "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
+      "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
+      "scripts/render-routes.mjs": "1c797e6ac331198a03588a9b689171c8bb8ccb6c8d67a161e5f8a92766eeb20c",
+      "tests/renderer-authority.test.mjs": "034ca59fd865f2a204973ea36073958e1fb8834675266a05be4726781823de58",
+      "tests/ssr-routes.test.mjs": "263031c62867025221ae574140c0b1b00e5c0db4cae4de9e5d6c8a854eb0e41f",
+      "tests/stylesheet.test.mjs": "a9b08c7db5c8ad6dbdf8ccaf2ea5677cb19f4ea577ed8a0bb43ce0738aea3d2a",
+      "tests/vendored-runes.test.mjs": "fcdead062fa45315cefbdab4a83f2c6356aa7443c6daea434c01144bf67f5e47"
     }
   },
   "install_manifest": {
