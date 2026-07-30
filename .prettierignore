@@ -17,3 +17,21 @@ assets/
 
 # Lockfile
 pnpm-lock.yaml
+
+# Agent materials — steward-owned, outside this repo's app write scope.
+# `greater doctor`/install markers carry checksums; reformatting them is not
+# cosmetic, it edits governed state.
+.codex/
+.agents/
+.claude/
+.kimi-code/
+.theorymcp/
+GEMINI.md
+AGENTS.md
+README.md
+
+# greater CLI state — written and rewritten by the CLI, never hand-formatted.
+components.json
+
+# Design authority — operator-owned baseline.
+docs/product-design.md
