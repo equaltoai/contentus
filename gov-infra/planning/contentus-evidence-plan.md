@@ -15,6 +15,34 @@ the directory as an artifact. There is no second rubric and no alternate refresh
 | CMP-\*, DOC-\*         | verifier                             | planning docs and `DOC-5-parity.log`                      |
 | MAI-4                  | verifier / `check_ci_hook`           | `gov-infra/evidence/MAI-4-output.log`                     |
 
+## Two pins, two purposes
+
+`contentus-disclosed-upstream-findings.json` records upstream state this repository
+cannot fix and does not own — what SEC-2 and SEC-7 assert has not changed. It is
+schema-validated before either gate reads it, because a mistyped key silently turns an
+assertion into a loop over nothing while the control still reports PASS.
+
+`contentus-pinned-repo-contract.json` records this repository's own gate-facing
+artifacts — guarded `package.json` scripts, the SEC-6 probe inventory and its minimums,
+the install manifest's allowed build invocation, the greater release and vendoring
+commit, and the one allowlisted workflow write permission. It exists because those
+artifacts are editable in the pull request being gated (THR-9). Changing a value in
+either file is a governance change and travels with its reason.
+
+## The bootstrap head carries two reports
+
+`gov-rubric-report.json` is the report for this ref, and on the gov-infra spine branch
+it is red: `staging` has no `package.json`, no lockfile, no `src/`, and no build, so
+every toolchain control fails structurally. That is the honest result for this ref and
+it is committed as such.
+
+`composite-m1-spine-gov-rubric-report.json` is the same verifiers run against the M1
+application tree — the tree these controls were written for. It is the green evidence
+for the spine, and it is a snapshot, not a refresh path: nothing in this repository
+regenerates it, and it is not evidence for this ref. Both are named in the pull request.
+Once M1 merges to `staging`, the composite and the ref are the same tree and the second
+report retires with the bootstrap exception in `AGENTS.md`.
+
 ## Freshness
 
 Evidence is regenerated, never edited. The verifier deletes the report and every

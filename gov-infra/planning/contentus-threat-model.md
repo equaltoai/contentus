@@ -28,19 +28,22 @@
 - **Trust boundaries:** contributor changes; the lesser instance's GraphQL responses
   (remote, untrusted-until-typed); the HTTP request as it reaches the SSR handler
   (`Host` and forwarded headers are attacker-controllable unless the edge verified
-  them); package release tarballs; GitHub Actions.
+  them); package release tarballs; GitHub Actions; and — the boundary THR-9 names — the
+  repository's own gate-facing artifacts, which the change under review can edit in the
+  same commit that the gate is meant to judge.
 - **Entry points:** pull requests to `staging`. No workflow runs on direct pushes.
 
-| Threat ID | Title                         | What can go wrong                                                                                                                                                  | Primary controls    | Verification                                       |
-| --------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | -------------------------------------------------- |
-| THR-1     | Supply-chain compromise       | A mutable Action, a lifecycle hook, or an unlocked dependency executes in CI.                                                                                      | SEC-3, COM-2        | `check_supply_chain`                               |
-| THR-2     | Client regression             | SSR routes, types, Svelte components, or the two-pass build regress.                                                                                               | QUA-1, QUA-2, CON-2 | build, tests, type checks                          |
-| THR-3     | Web-integrity regression      | Built output introduces inline scripts, styles, or event handlers, or a third-party script origin, breaking the strict CSP the FaceTheory host enforces.           | SEC-4               | built-output CSP audit                             |
-| THR-4     | Governance drift              | The deterministic rubric or the pull-request CI hook disappears or goes stale.                                                                                     | MAI-4, DOC-5        | CI-hook and threat/control parity checks           |
-| THR-5     | Renderer-authority violation  | A Markdown or HTML rendering path, a client-side excerpt/TOC generator, or a raw-draft-source display appears in the client, creating a second canonical renderer. | SEC-5               | `pnpm run validate:renderer-authority`             |
-| THR-6     | SSR trust-boundary regression | The handler resolves its origin from an unverified `Host`, leaks withheld article source, or serves 200 for a CMS object that does not exist.                      | SEC-6               | built-handler SSR probes                           |
-| THR-7     | Vendored-source drift         | A vendored greater-components file is hand-edited, an orphan appears under the vendored root, or the CLI-copy and tarball channels drift out of lockstep.          | SEC-7, CON-4        | `greater doctor`, pin-lockstep check               |
-| THR-8     | Disclosed-finding drift       | A known, unfixed upstream finding silently changes shape, or a new finding hides behind an old one.                                                                | SEC-2, SEC-7        | exact-set assertion against the pinned disclosures |
+| Threat ID | Title                         | What can go wrong                                                                                                                                                             | Primary controls                         | Verification                                       |
+| --------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| THR-1     | Supply-chain compromise       | A mutable Action, a lifecycle hook, or an unlocked dependency executes in CI.                                                                                                 | SEC-3, COM-2                             | `check_supply_chain`                               |
+| THR-2     | Client regression             | SSR routes, types, Svelte components, or the two-pass build regress.                                                                                                          | QUA-1, QUA-2, CON-2                      | build, tests, type checks                          |
+| THR-3     | Web-integrity regression      | Built output introduces inline scripts, styles, or event handlers, or a third-party script origin, breaking the strict CSP the FaceTheory host enforces.                      | SEC-4                                    | built-output CSP audit                             |
+| THR-4     | Governance drift              | The deterministic rubric or the pull-request CI hook disappears or goes stale.                                                                                                | MAI-4, DOC-5                             | CI-hook and threat/control parity checks           |
+| THR-5     | Renderer-authority violation  | A Markdown or HTML rendering path, a client-side excerpt/TOC generator, or a raw-draft-source display appears in the client, creating a second canonical renderer.            | SEC-5                                    | `pnpm run validate:renderer-authority`             |
+| THR-6     | SSR trust-boundary regression | The handler resolves its origin from an unverified `Host`, leaks withheld article source, or serves 200 for a CMS object that does not exist.                                 | SEC-6                                    | built-handler SSR probes                           |
+| THR-7     | Vendored-source drift         | A vendored greater-components file is hand-edited, an orphan appears under the vendored root, or the CLI-copy and tarball channels drift out of lockstep.                     | SEC-7, CON-4                             | `greater doctor`, pin-lockstep check               |
+| THR-8     | Disclosed-finding drift       | A known, unfixed upstream finding silently changes shape, or a new finding hides behind an old one.                                                                           | SEC-2, SEC-7                             | exact-set assertion against the pinned disclosures |
+| THR-9     | Gate self-neutralization      | The change under review edits what the rubric trusts — a `package.json` script, a test file, the install manifest, a pin — so a control exits 0 without its property holding. | CON-3, CON-4, CON-5, COM-1, SEC-6, SEC-7 | assertion against the pinned repo contract         |
 
 ## Accepted coverage and semantic limits
 
@@ -84,8 +87,24 @@ green report is read for what it is.
   branches is an operator-owned GitHub setting outside this repository.
 - **Workflow structural sentinel limit.** MAI-4 verifies required sentinel tokens in
   line-oriented `run:`/`uses:` surfaces and rejects workflows whose recognized jobs are
-  all `if: false`. It does not interpret arbitrary GitHub expression semantics or
-  composite actions; branch protection and CI execution remain separate enforcement.
+  all `if: false`. It does not interpret arbitrary GitHub expression semantics; branch
+  protection and CI execution remain separate enforcement. SEC-3 does follow `uses: ./`
+  into local action manifests and applies the same pinning rules recursively, so a
+  composite action cannot launder an unpinned reference through the local exemption.
+- **Supply-chain screening is not detection.** The control SEC-3 rests on is that every
+  `pnpm install` in this rubric and in CI carries `--ignore-scripts`, so no dependency
+  lifecycle hook executes. The pattern scan over installed hooks — piped downloads,
+  inline interpreters, process substitution, base64 decoding, token references — is
+  heuristic screening layered above that boundary and would not catch a novel shape. It
+  also asserts the two things `--ignore-scripts` does not cover: the root project's own
+  lifecycle hooks, and pnpm's `.pnpmfile.cjs` and `onlyBuiltDependencies` escape hatches.
+- **THR-9 is bounded by review, not by cryptography.** CON-5, the SEC-6 inventory, and
+  the CON-3/CON-4 bindings all compare a repository artifact against a value pinned in
+  `contentus-pinned-repo-contract.json`. An author who edits both the artifact and the
+  pin still moves the gate. What the pin buys is that the edit has to land in
+  `gov-infra/planning`, in the same diff, where it is the review's subject rather than an
+  unremarkable line in an application file. The control it composes with is the
+  cross-client adversarial review of the gov-infra diff — not the pin alone.
 - **Install verification is not in this rubric.** A green report says the repository's
   gates passed at a ref. It says nothing about whether the app installs into, or renders
   correctly on, any lesser instance. That evidence comes from
