@@ -135,15 +135,26 @@ merged yet. Committing a green report at that ref would require either faking it
 or weakening the gates, and both are worse than a red one.
 
 The green evidence for the spine is therefore the composite run: the spine's
-verifiers against the M1 application tree, run by Factory, reported in the pull
-request with its own report. The red report committed on the spine branch is the
-honest result for the spine ref and is committed as such.
+verifiers against the M1 application tree, run by Factory, with its own report
+and its own preserved logs in `gov-infra/evidence/composite-m1-spine/`. The red
+report committed on the spine branch is the honest result for the spine ref and
+is committed as such.
+
+What the red report contains, stated exactly, because "substantive" is otherwise
+a word each reader fills in differently. Every FAIL on the spine ref is a control
+whose command could not find the application: no `package.json`, so nothing to
+run; no lockfile, so nothing to install; no `src/`, so nothing to build, type,
+lint, or probe. The one BLOCKED is SEC-7, whose digest-verified `greater` CLI is
+installed by the CI step and is absent on a bare checkout of this ref — the
+control could not run, which is what BLOCKED means. There is no FAIL on this ref
+where a gate ran against the artifact it judges and disagreed with it. That is
+the precise property this exception rests on, and if a future run of this ref
+ever produced one, the exception would not cover it.
 
 This exception covers exactly this one head. It expires when M1 merges to
 `staging` — from that point the toolchain is present, the composite and the ref
 are the same tree, and the absolute rule above applies with no exception. It is
-not a precedent for any later branch, and it never licenses pushing on a report
-that failed for a *substantive* reason.
+not a precedent for any later branch.
 - Cross-client adversarial review applies to PRs per the fleet pattern; the
   implementing client never reviews its own change.
 

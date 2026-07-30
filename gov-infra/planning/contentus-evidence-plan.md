@@ -23,11 +23,14 @@ schema-validated before either gate reads it, because a mistyped key silently tu
 assertion into a loop over nothing while the control still reports PASS.
 
 `contentus-pinned-repo-contract.json` records this repository's own gate-facing
-artifacts — guarded `package.json` scripts, the SEC-6 probe inventory and its minimums,
-the install manifest's allowed build invocation, the greater release and vendoring
-commit, and the one allowlisted workflow write permission. It exists because those
-artifacts are editable in the pull request being gated (THR-9). Changing a value in
-either file is a governance change and travels with its reason.
+artifacts — guarded `package.json` scripts and the SHA-256 of every file they execute,
+the SEC-6 probe inventory with its minimums and probe hashes, the install manifest's
+allowed build invocation, the greater release, vendoring commit and CLI release-asset
+digest, and the allowlisted workflow write permission and install invocations. It exists
+because those artifacts are editable in the pull request being gated (THR-9). Changing a
+value in either file is a governance change and travels with its reason. Both files are
+read with duplicate object keys rejected: `JSON.parse` is last-wins, so a repeated key is
+a value a reviewer reads and a different value a control enforces.
 
 ## The bootstrap head carries two reports
 
@@ -36,12 +39,25 @@ it is red: `staging` has no `package.json`, no lockfile, no `src/`, and no build
 every toolchain control fails structurally. That is the honest result for this ref and
 it is committed as such.
 
-`composite-m1-spine-gov-rubric-report.json` is the same verifiers run against the M1
-application tree — the tree these controls were written for. It is the green evidence
-for the spine, and it is a snapshot, not a refresh path: nothing in this repository
-regenerates it, and it is not evidence for this ref. Both are named in the pull request.
-Once M1 merges to `staging`, the composite and the ref are the same tree and the second
-report retires with the bootstrap exception in `AGENTS.md`.
+`gov-infra/evidence/composite-m1-spine/` is the same verifiers run against the M1
+application tree — the tree these controls were written for. It holds its own
+`gov-rubric-report.json` and its own per-control logs, so every `evidencePath` in that
+report resolves to a log committed beside it rather than to this ref's log of the same
+name. It is the green evidence for the spine, and it is a snapshot, not a refresh path:
+nothing in this repository regenerates it, and it is not evidence for this ref. Both are
+named in the pull request. Once M1 merges to `staging`, the composite and the ref are the
+same tree and the second report retires with the bootstrap exception in `AGENTS.md`.
+
+The separation is mechanical, not clerical. The verifier deletes the report and the
+`*-output.log` set it is about to replace, so two runs sharing one directory means the
+second run's report cites the first run's logs. `GOV_EVIDENCE_DIR` selects a direct
+subdirectory of `gov-infra/evidence/` for a run; it can only relocate output, never
+change a verdict, and it is rejected outright if it points anywhere else. The composite
+is produced with:
+
+```
+GOV_EVIDENCE_DIR=gov-infra/evidence/composite-m1-spine bash gov-infra/verifiers/gov-verify-rubric.sh
+```
 
 ## Freshness
 
