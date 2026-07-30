@@ -1,0 +1,17 @@
+# Build output
+build/
+
+# Vendored greater-components source — CLI-managed, never hand-edited or reformatted
+src/lib/greater/
+src/lib/components/
+src/lib/generics/
+src/lib/patterns/
+src/lib/blog-types.ts
+styles/greater/
+
+# Theory Cloud brand pack — copied verbatim from the design pack
+colors_and_type.css
+assets/
+
+# Lockfile
+pnpm-lock.yaml
