@@ -231,6 +231,42 @@ test('a displayable body still reaches hydration, since the page shows it', asyn
 	assert.equal(props.reader.article.content, '<p>Rendered by lesser.</p>');
 });
 
+test('a missing article is a real 404, not a 200 that says "not found"', async () => {
+	const { value } = await probe(
+		{ path: '/l/articles/no-such-article', headers: INSTANCE_HEADERS, expectStatus: 404 },
+		{ article: null }
+	);
+
+	assert.equal(value.status, 404);
+	assert.match(value.html, /Article not found/i);
+});
+
+test('a missing series or category is a real 404 too', async () => {
+	for (const path of ['/l/series/no-such-series', '/l/categories/no-such-category']) {
+		// `seriesBySlug` / `categoryBySlug` resolve to null, which the loader
+		// reports as not-found rather than falling back to the unfiltered listing.
+		const { value } = await probe({ path, headers: INSTANCE_HEADERS, expectStatus: 404 }, {});
+
+		assert.equal(value.status, 404, `${path} should 404`);
+	}
+});
+
+test('an instance with long-form off is a 200 product state, not a 404', async () => {
+	const { value } = await withStubbedGraphql(
+		() => ({ errors: [{ message: 'long-form publishing is not enabled on this instance' }] }),
+		() =>
+			renderRoute(handler, {
+				name: 'cms-disabled',
+				path: '/l/articles/hello',
+				headers: INSTANCE_HEADERS,
+				expectStatus: 200,
+			})
+	);
+
+	assert.equal(value.status, 200, 'a feature-gated instance is a designed state, not a miss');
+	assert.match(value.html, /Long-form publishing is off/i);
+});
+
 test('canonical identity is advertised in both forms lesser expects', async () => {
 	const { value } = await probe(
 		{ path: '/l/articles/hello', headers: INSTANCE_HEADERS },

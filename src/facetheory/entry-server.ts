@@ -23,7 +23,7 @@ import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
 
 import App from './App.svelte';
 import { queryFromSearchString } from './query-parser';
-import { ROUTE_PATTERNS, resolvePage, resolveSlug, statusForPage, stripBasePath } from './routing';
+import { ROUTE_PATTERNS, resolvePage, resolveSlug, statusForRoute, stripBasePath } from './routing';
 import type { RouteProps } from './types';
 
 const CLIENT_ENTRY = 'src/facetheory/entry-client.ts';
@@ -208,7 +208,7 @@ function createFaceForRoute(route: string) {
 			const head = headTagsForRoute(props, origin);
 
 			return {
-				status: statusForPage(props.page),
+				status: statusForRoute(props),
 				csp: STRICT_CSP,
 				headers: { 'content-security-policy': buildStrictCspHeader() },
 				htmlAttrs: { lang: 'en' },

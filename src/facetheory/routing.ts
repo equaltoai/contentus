@@ -1,6 +1,6 @@
 import { APP_BASE_PATH } from '$lib/config/base-path';
 
-import type { AppPageDescriptor, AppPageKey } from './types';
+import type { AppPageDescriptor, AppPageKey, RouteProps } from './types';
 
 export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
 
@@ -150,7 +150,27 @@ export function seriesHref(slug: string): string {
 	return href(`/series/${encodeURIComponent(slug)}`);
 }
 
-/** HTTP status a page should be served with. */
-export function statusForPage(page: AppPageDescriptor): number {
-	return page.key === 'not-found' ? 404 : 200;
+/**
+ * HTTP status a rendered route should be served with.
+ *
+ * The route descriptor alone cannot answer this: `/articles/{slug}` matches
+ * whether or not the slug names anything, so a missing article was rendering
+ * "Article not found" under a 200. Crawlers index that, caches keep it, and
+ * monitoring reads a healthy instance. The loader already knows — it returns a
+ * `not-found` state — so status derives from the loaded data, not just the path.
+ *
+ * The other unavailable states deliberately stay 200. `cms-disabled` is an
+ * instance that does not offer long-form publishing: a product state, correctly
+ * rendered, not a missing resource. `transport` is contentus reporting that the
+ * instance did not answer, which is a page that rendered exactly as designed.
+ *
+ * lesser's CMS contract has no Tombstone on the article read path, so a deleted
+ * article and one that never existed are indistinguishable here and both get
+ * 404. A speculative 410 would be a guess about deletion state.
+ */
+export function statusForRoute(props: RouteProps): number {
+	if (props.page.key === 'not-found') return 404;
+
+	const unavailable = props.reader?.unavailable ?? props.index?.unavailable ?? null;
+	return unavailable?.reason === 'not-found' ? 404 : 200;
 }
