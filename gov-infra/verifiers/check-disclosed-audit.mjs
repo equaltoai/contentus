@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 /**
- * SEC-2 — production audit against a pinned disclosed advisory set.
+ * SEC-2 — dependency audit against a pinned disclosed advisory set.
  *
- * `pnpm audit --prod --audit-level=high --json` runs in full; this compares the
+ * `pnpm audit --audit-level=high --json` runs in full; this compares the
  * high/critical advisories it reports against the exact set pinned in
  * contentus-disclosed-upstream-findings.json. Anything new, anything changed,
  * and anything that quietly disappeared all fail.
+ *
+ * The audit covers the whole installed graph, not `--prod`. The production
+ * dependency set is not the boundary that matters here: dev dependencies execute
+ * in CI, where they can read the checkout and the runner's environment, and they
+ * are installed by the same lockfile the shipped build resolves from. A dev-only
+ * advisory is still disclosed rather than excluded — it enters this pin as its own
+ * entry, with its own owner and sunset, exactly like the `ws` entry.
  *
  * This is deliberately not a threshold reduction and not an exclude. The gate
  * still reports every advisory; the assertion is on identity, severity, module,
@@ -16,8 +23,8 @@
  * Usage: check-disclosed-audit.mjs <audit-json-file>
  */
 import { readFileSync } from 'node:fs';
+import { loadPin } from './pin-schema.mjs';
 
-const PIN = 'gov-infra/planning/contentus-disclosed-upstream-findings.json';
 const GATED_SEVERITIES = new Set(['high', 'critical']);
 
 function fail(lines) {
@@ -38,7 +45,7 @@ try {
 	]);
 }
 
-const pin = JSON.parse(readFileSync(PIN, 'utf8'));
+const pin = loadPin();
 
 /** Identity of an advisory, in the fields that would change if the risk changed. */
 function key({ id, severity, module, versions, paths }) {
