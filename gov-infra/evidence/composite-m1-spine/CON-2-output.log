@@ -1,0 +1,4 @@
+
+> @equaltoai/contentus@0.1.0 typecheck /tmp/pr50-r3/composite-final
+> tsc --noEmit
+

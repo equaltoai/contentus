@@ -4,7 +4,7 @@ node:internal/modules/cjs/loader:1479
 
 Error: Cannot find module './package.json'
 Require stack:
-- /tmp/contentus-staging-ref/[eval]
+- /tmp/pr50-r3/spine-clean/[eval]
     at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)
     at wrapResolveFilename (node:internal/modules/cjs/loader:1049:27)
     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1073:10)
@@ -16,7 +16,7 @@ Require stack:
     at [eval]:1:9
     at runScriptInThisContext (node:internal/vm:219:10) {
   code: 'MODULE_NOT_FOUND',
-  requireStack: [ '/tmp/contentus-staging-ref/[eval]' ]
+  requireStack: [ '/tmp/pr50-r3/spine-clean/[eval]' ]
 }
 
 Node.js v24.15.0

@@ -1,0 +1,22 @@
+
+> @equaltoai/contentus@0.1.0 validate:csp /tmp/pr50-r3/composite-final
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 7
+- Documents scanned: 6
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    2424 bytes  findings=0
+- article-reader   200    2156 bytes  findings=0
+- series           200    2365 bytes  findings=0
+- category         200    2377 bytes  findings=0
+- auth-callback    200    2180 bytes  findings=0
+- not-found        404    2184 bytes  findings=0
+- hydration-data   200     447 bytes  findings=0
+
+CSP audit: clean.

@@ -1,0 +1,14 @@
+greater CLI: gov-infra/.tools/node_modules/.bin/greater (repo-local pinned install)
+  release asset: https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz
+  SHA-256 cc16a72cfe516ceaf39699a6b9c98398aeb93451d5c066559bfe8720452385eb verified against gov-infra/planning/contentus-pinned-repo-contract.json at gate time.
+  version=0.11.9, pinned 0.11.9
+greater doctor: 9/13 checks passed.
+  PASS Component Files — 159 file(s) verified
+  PASS Orphaned Files — No orphaned component files detected
+
+Disclosed and unchanged, matched as (name, severity) tuples
+(PASS here means "unchanged", not "clean"):
+  ERROR NPM Dependencies — equaltoai/greater-components#917
+  WARNING Alias Path: utils
+  WARNING Alias Path: ui
+  WARNING Alias Path: hooks

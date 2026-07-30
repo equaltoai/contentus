@@ -1,0 +1,15 @@
+
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /tmp/pr50-r3/composite-final
+> node scripts/audit-renderer-authority.mjs
+
+# Renderer-authority audit
+
+- dependencies: clean
+- owned-source imports: clean
+- owned-source {@html} sinks: clean
+- vendored blog-face escape fallback: clean
+
+- Forbidden renderer packages checked: 17
+- Contentus-owned source roots scanned: 8
+
+Renderer-authority audit: clean.

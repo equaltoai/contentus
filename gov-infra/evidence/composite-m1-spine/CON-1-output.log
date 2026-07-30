@@ -1,0 +1,6 @@
+
+> @equaltoai/contentus@0.1.0 lint /tmp/pr50-r3/composite-final
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!

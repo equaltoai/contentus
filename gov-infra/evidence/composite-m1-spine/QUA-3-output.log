@@ -1,0 +1,6 @@
+
+> @equaltoai/contentus@0.1.0 svelte-check /tmp/pr50-r3/composite-final
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+1785454932162 START "/tmp/pr50-r3/composite-final"
+1785454932163 COMPLETED 425 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS

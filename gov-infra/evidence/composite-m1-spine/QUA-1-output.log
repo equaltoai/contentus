@@ -1,0 +1,87 @@
+
+> @equaltoai/contentus@0.1.0 build /tmp/pr50-r3/composite-final
+> pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate
+
+
+> @equaltoai/contentus@0.1.0 typecheck /tmp/pr50-r3/composite-final
+> tsc --noEmit
+
+
+> @equaltoai/contentus@0.1.0 svelte-check /tmp/pr50-r3/composite-final
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+1785454927796 START "/tmp/pr50-r3/composite-final"
+1785454927798 COMPLETED 425 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+
+> @equaltoai/contentus@0.1.0 build:client /tmp/pr50-r3/composite-final
+> vite build
+
+vite v8.2.0 building client environment for production...
+[2Ktransforming...✓ 650 modules transformed.
+rendering chunks...
+computing gzip size...
+build/client/.vite/manifest.json                              0.39 kB │ gzip:   0.19 kB
+build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
+build/client/assets/entry-client-BhUW12yO.js                311.43 kB │ gzip: 101.86 kB
+
+✓ built in 641ms
+
+> @equaltoai/contentus@0.1.0 build:server /tmp/pr50-r3/composite-final
+> vite build --ssr src/facetheory/entry-server.ts
+
+vite v8.2.0 building ssr environment for production...
+[2Ktransforming...✓ 637 modules transformed.
+rendering chunks...
+computing gzip size...
+build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
+build/server/handler.mjs                 741.49 kB │ gzip: 179.44 kB
+
+✓ built in 617ms
+
+> @equaltoai/contentus@0.1.0 build:assets /tmp/pr50-r3/composite-final
+> node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
+
+manifest: copied client manifest to build/server/client-manifest.json
+stylesheet: brand/contentus.css — 219633 bytes, 143 --tc-* definitions, integrity assertions passed
+brand assets: copied 12 files to build/client/brand/
+
+> @equaltoai/contentus@0.1.0 validate /tmp/pr50-r3/composite-final
+> pnpm run validate:renderer-authority && pnpm run validate:csp
+
+
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /tmp/pr50-r3/composite-final
+> node scripts/audit-renderer-authority.mjs
+
+# Renderer-authority audit
+
+- dependencies: clean
+- owned-source imports: clean
+- owned-source {@html} sinks: clean
+- vendored blog-face escape fallback: clean
+
+- Forbidden renderer packages checked: 17
+- Contentus-owned source roots scanned: 8
+
+Renderer-authority audit: clean.
+
+> @equaltoai/contentus@0.1.0 validate:csp /tmp/pr50-r3/composite-final
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 7
+- Documents scanned: 6
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    2424 bytes  findings=0
+- article-reader   200    2156 bytes  findings=0
+- series           200    2365 bytes  findings=0
+- category         200    2377 bytes  findings=0
+- auth-callback    200    2180 bytes  findings=0
+- not-found        404    2184 bytes  findings=0
+- hydration-data   200     447 bytes  findings=0
+
+CSP audit: clean.
