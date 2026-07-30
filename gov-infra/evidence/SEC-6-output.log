@@ -1,1 +1,6 @@
-Could not find 'tests/ssr-probe.test.mjs, tests/origin.test.mjs'
+
+tests/ssr-probe.test.mjs: pinned SEC-6 probe is missing
+tests/origin.test.mjs: pinned SEC-6 probe is missing
+
+Repair the coverage. Lowering a minimum in
+gov-infra/planning/contentus-pinned-repo-contract.json retires a probe, and that is a governance change with a reason.
