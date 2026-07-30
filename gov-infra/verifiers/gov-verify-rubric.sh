@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# GovTheory Rubric Verifier (Single Entrypoint)
+# Rendered from namespace pack bc41187efb6f5b3c3bfb4d9295836d4e071941d7 for contentus.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+EVIDENCE=gov-infra/evidence
+PLAN=gov-infra/planning
+VERIFY=gov-infra/verifiers
+TOOLS=gov-infra/.tools
+REPORT="$EVIDENCE/gov-rubric-report.json"
+PIN="$PLAN/contentus-disclosed-upstream-findings.json"
+# A control that cannot run reports BLOCKED, never PASS. `run` only honours this
+# exit code when the control also emitted the sentinel, so an ordinary command
+# that happens to exit 3 is still a FAIL.
+BLOCKED_RC=3
+BLOCKED_SENTINEL='GOV-BLOCKED:'
+mkdir -p "$EVIDENCE" "$TOOLS/bin"
+rm -f "$REPORT" "$EVIDENCE"/*-output.log "$EVIDENCE/DOC-5-parity.log"
+declare -a RESULTS=()
+pass=0 fail=0 blocked=0
+escape() { node -p 'JSON.stringify(process.argv[1])' "$1"; }
+record() { local id=$1 category=$2 status=$3 message=$4 evidence=$5; case "$status" in PASS) ((pass++)) || true;; FAIL) ((fail++)) || true;; BLOCKED) ((blocked++)) || true;; *) exit 2;; esac; RESULTS+=("{\"id\":$(escape "$id"),\"category\":$(escape "$category"),\"status\":$(escape "$status"),\"message\":$(escape "$message"),\"evidencePath\":$(escape "$evidence")}"); }
+run() {
+  local id=$1 category=$2 command=$3 out="$EVIDENCE/$1-output.log"
+  if [[ "$command" == TODO:* || -z "$command" ]]; then printf '%s\n' "$command" > "$out"; record "$id" "$category" BLOCKED "Verifier command not configured" "$out"; return; fi
+  set +e; ( set -o pipefail; eval "$command" ) >"$out" 2>&1; local rc=$?; set -e
+  if [[ $rc -eq 0 ]]; then record "$id" "$category" PASS "Command succeeded" "$out"
+  elif [[ $rc -eq $BLOCKED_RC ]] && grep -q "^$BLOCKED_SENTINEL" "$out"; then record "$id" "$category" BLOCKED "$(grep -m1 "^$BLOCKED_SENTINEL" "$out" | cut -c14-)" "$out"
+  else record "$id" "$category" FAIL "Command failed with exit code $rc" "$out"; fi
+}
+
+check_supply_chain() {
+  local allow="$PLAN/contentus-supply-chain-allowlist.txt"
+  # GitHub Actions must be immutable: each structured YAML `uses` value is
+  # either a local ./ action or a 40-hex commit SHA. The scanner is deliberately
+  # fixed to .github/workflows; no environment override can subtract coverage.
+  echo "Scanning workflow directory: .github/workflows"
+  node "$VERIFY/validate-workflows.mjs" --uses || return 1
+  [[ -f pnpm-lock.yaml ]] || { echo 'missing pnpm-lock.yaml'; return 1; }
+  set +e
+  pnpm install --frozen-lockfile --ignore-scripts
+  local install_rc=$?
+  set -e
+  if [[ $install_rc -ne 0 ]]; then echo "pnpm install --frozen-lockfile --ignore-scripts failed with exit code $install_rc" >&2; return 1; fi
+  local pkg_json_list; pkg_json_list="$(mktemp)"
+  find node_modules -type f -name package.json 2>/dev/null > "$pkg_json_list" || { rm -f "$pkg_json_list"; return 1; }
+  set +e
+  PKG_JSON_LIST="$pkg_json_list" ALLOWLIST="$allow" node <<'NODE'
+const fs=require('fs');
+const hooks=['preinstall','install','postinstall','prepare','prepublishOnly'];
+const allowed=new Set(fs.readFileSync(process.env.ALLOWLIST,'utf8').split(/\r?\n/).filter(x=>x&&!x.startsWith('#')));
+const findings=[];
+for(const p of fs.readFileSync(process.env.PKG_JSON_LIST,'utf8').split(/\r?\n/).filter(Boolean)){try{const x=JSON.parse(fs.readFileSync(p));for(const h of hooks){const s=x.scripts?.[h];if(typeof s==='string'&&/(curl\s+[^|]*\|\s*(sh|bash)|wget\s+[^|]*\|\s*(sh|bash)|webhook\.site|NPM_TOKEN|GITHUB_TOKEN)/i.test(s)){const id=`GOV-SUPPLY:NODE:SCRIPT:pkg=${x.name||p}:ver=${x.version||''}:hook=${h}`;if(!allowed.has(id)) findings.push(id)}}}catch{}}
+if(findings.length){console.error(findings.join('\n'));process.exit(1)}
+NODE
+  local scan_rc=$?; set -e; rm -f "$pkg_json_list"; [[ $scan_rc -eq 0 ]]
+}
+
+# SEC-2: the audit runs in full; the assertion is that its high/critical set is
+# exactly the pinned disclosed set. `pnpm audit` exits non-zero when it reports
+# anything, so its status is deliberately ignored in favour of its output.
+check_disclosed_audit() {
+  local out; out="$(mktemp)"
+  set +e
+  pnpm audit --prod --audit-level=high --json > "$out" 2>/dev/null
+  set -e
+  node "$VERIFY/check-disclosed-audit.mjs" "$out"
+  local rc=$?
+  rm -f "$out"
+  return $rc
+}
+
+# SEC-7: vendored integrity through the pinned `greater` CLI. The CLI is not on
+# the npm registry, so the repo-local pinned install is preferred and PATH is a
+# fallback. Neither resolving is BLOCKED, never PASS.
+check_greater_integrity() {
+  local cli=""
+  if [[ -x "$TOOLS/node_modules/.bin/greater" ]]; then cli="$TOOLS/node_modules/.bin/greater"
+  elif command -v greater >/dev/null 2>&1; then cli="$(command -v greater)"; fi
+  if [[ -z "$cli" ]]; then
+    echo "${BLOCKED_SENTINEL} greater CLI not resolvable; SEC-7 could not run"
+    echo "The CLI is not published to the npm registry. Install the pinned release asset:"
+    echo "  npm install --no-save --prefix $TOOLS \\"
+    echo "    https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz"
+    echo "BLOCKED is not green: this report will not pass."
+    return $BLOCKED_RC
+  fi
+  echo "greater CLI: $cli ($("$cli" --version 2>/dev/null || echo 'version unavailable'))"
+  local out; out="$(mktemp)"
+  set +e
+  "$cli" doctor --json > "$out" 2>/dev/null
+  set -e
+  node "$VERIFY/check-greater-doctor.mjs" "$out"
+  local rc=$?
+  rm -f "$out"
+  return $rc
+}
+
+check_parity() {
+  local out="$EVIDENCE/DOC-5-parity.log" missing=0 threat_ids
+  : > "$out"
+  threat_ids="$(grep -oE 'THR-[0-9]+' "$PLAN/contentus-threat-model.md" | sort -u)" || return 1
+  [[ -n "$threat_ids" ]] || return 1
+  while IFS= read -r t; do
+    grep -q "$t" "$PLAN/contentus-controls-matrix.md" || { echo "unmapped $t" >> "$out"; missing=1; }
+  done <<< "$threat_ids"
+  [[ $missing -eq 0 ]]
+}
+
+check_ci_hook() {
+  grep -R -q 'gov-verify-rubric.sh' .github/workflows || return 1
+  node "$VERIFY/validate-workflows.mjs" --triggers || return 1
+  node --input-type=module -e "import { validateRequiredWorkflows } from './$VERIFY/validate-workflows.mjs'; const findings = validateRequiredWorkflows(); if (findings.length) { console.error(findings.join('\\n')); process.exit(1); }" || return 1
+}
+
+# --- Quality ------------------------------------------------------------------
+# Ordering is load-bearing: the SSR probes drive build/server/handler.mjs and the
+# uncompiled-rune guard walks build/, where an absent build passes vacuously.
+# The build runs first and COM-1 asserts the artifacts it should have produced.
+run QUA-1 Quality 'pnpm run build'
+run QUA-2 Quality 'pnpm test'
+run QUA-3 Quality 'pnpm run svelte-check'
+
+# --- Consistency --------------------------------------------------------------
+run CON-1 Consistency 'pnpm run lint'
+run CON-2 Consistency 'pnpm run typecheck'
+run CON-3 Consistency "node $VERIFY/check-install-manifest.mjs"
+run CON-4 Consistency "node $VERIFY/check-greater-pins.mjs"
+
+# --- Completeness -------------------------------------------------------------
+run COM-1 Completeness "node $VERIFY/check-install-manifest.mjs --artifacts"
+run COM-2 Completeness 'node -e "const p=require(\"./package.json\"); if(!/^>=24/.test(p.engines?.node||\"\")) process.exit(1);" && grep -q "lockfileVersion: '\''9.0'\''" pnpm-lock.yaml'
+run COM-3 Completeness 'test -s AGENTS.md && test -s README.md && test -s docs/runbook.md'
+run COM-4 Completeness 'test -f .github/workflows/gov-rubric.yml && test -f .github/workflows/test.yml && test -f .github/workflows/lint.yml && test -f .github/workflows/codeql.yml && test -f .github/workflows/dco.yml && test -f .github/workflows/main-guard.yml'
+run COM-5 Completeness 'pnpm install --frozen-lockfile'
+
+# --- Security -----------------------------------------------------------------
+run SEC-1 Security 'test -f .github/workflows/codeql.yml && grep -q "github/codeql-action/init@[0-9a-f]\{40\}" .github/workflows/codeql.yml'
+run SEC-2 Security check_disclosed_audit
+run SEC-3 Security check_supply_chain
+run SEC-4 Security 'pnpm run validate:csp'
+run SEC-5 Security 'pnpm run validate:renderer-authority'
+run SEC-6 Security 'node --test --experimental-strip-types tests/ssr-probe.test.mjs tests/origin.test.mjs'
+run SEC-7 Security check_greater_integrity
+
+# --- Compliance ---------------------------------------------------------------
+for x in controls-matrix evidence-plan threat-model; do f="$PLAN/contentus-$x.md"; id=CMP-1; [[ $x == evidence-plan ]]&&id=CMP-2; [[ $x == threat-model ]]&&id=CMP-3; [[ -f $f ]] && record "$id" Compliance PASS 'File exists' "$f" || record "$id" Compliance FAIL 'Required file missing' "$f"; done
+
+# --- Maintainability ----------------------------------------------------------
+run MAI-1 Maintainability "test -s $VERIFY/gov-verify-rubric.sh"
+run MAI-2 Maintainability "test -s $PLAN/contentus-10of10-roadmap.md"
+run MAI-3 Maintainability 'test "$(find gov-infra/verifiers -name "gov-verify-rubric.sh" | wc -l | tr -d " ")" = 1'
+run MAI-4 Maintainability check_ci_hook
+
+# --- Docs ---------------------------------------------------------------------
+for x in threat-model evidence-plan 10of10-rubric; do f="$PLAN/contentus-$x.md"; id=DOC-1; [[ $x == evidence-plan ]]&&id=DOC-2; [[ $x == 10of10-rubric ]]&&id=DOC-3; [[ -f $f ]] && record "$id" Docs PASS 'File exists' "$f" || record "$id" Docs FAIL 'Required file missing' "$f"; done
+if check_parity; then record DOC-5 Docs PASS 'All threat IDs mapped in controls matrix' "$EVIDENCE/DOC-5-parity.log"; else record DOC-5 Docs FAIL 'Threat/control parity failed' "$EVIDENCE/DOC-5-parity.log"; fi
+run DOC-4 Docs "test -s README.md && test -s $PIN && ! grep -R -q '{{[A-Z_][A-Z_]*}}' $PLAN"
+
+status=PASS; [[ $fail -gt 0 ]] && status=FAIL; [[ $blocked -gt 0 && $fail -eq 0 ]] && status=BLOCKED
+printf -v joined '%s,' "${RESULTS[@]}"; joined="[${joined%,}]"
+cat > "$REPORT" <<EOF2
+{"\$schema":"https://gov.pai.dev/schemas/gov-rubric-report.schema.json","schemaVersion":1,"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pack":{"version":"bc41187efb6f5b3c3bfb4d9295836d4e071941d7","digest":"a613e19a4367d98a8f4b45f7c19c11881d21491eb55b8409446ca4a10d4e5cd7"},"project":{"name":"contentus","slug":"contentus"},"summary":{"status":"$status","pass":$pass,"fail":$fail,"blocked":$blocked},"results":$joined}
+EOF2
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]));' "$REPORT"
+echo "Report written to $REPORT: $status ($pass pass, $fail fail, $blocked blocked)"
+[[ $status == PASS ]]
