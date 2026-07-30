@@ -15,8 +15,16 @@
     "the known, unfixed, upstream-owned state honestly and visibly in every report."
   ],
   "npm_audit": {
-    "gate": "pnpm audit --prod --audit-level=high",
+    "gate": "pnpm audit --audit-level=high",
     "rubric_item": "SEC-2",
+    "$comment": [
+      "The audit covers the whole installed graph, not `--prod`. Dev dependencies are",
+      "not outside the boundary: they execute in CI with the checkout and the runner's",
+      "environment in reach, and they resolve from the same lockfile as the shipped",
+      "build. A dev-only advisory is disclosed here as its own entry with its own owner",
+      "and sunset, never excluded by scope. At the rework head the full-graph audit",
+      "reports exactly the one advisory below, the same one `--prod` reported."
+    ],
     "advisories": [
       {
         "id": "GHSA-96hv-2xvq-fx4p",
@@ -25,7 +33,7 @@
         "vulnerable_versions": ">=8.0.0 <8.21.0",
         "paths": [".>@equaltoai/greater-components-adapters>graphql-ws>ws"],
         "owner": "equaltoai/greater-components",
-        "upstream_issue": "NOT YET FILED",
+        "upstream_issue": "equaltoai/greater-components#922",
         "why_not_fixable_here": [
           "`ws` is a transitive dependency of the pinned",
           "@equaltoai/greater-components-adapters release tarball, reached through",
@@ -36,12 +44,9 @@
           "greater-components bumping graphql-ws so it resolves ws >= 8.21.0."
         ],
         "routing_status": [
-          "Contentus's GitHub binding covers equaltoai/contentus only, so this cannot",
-          "be filed directly against equaltoai/greater-components. It is reported to",
-          "Factory for routing to the greater-components steward, matching how the",
-          "other M1 upstream findings in docs/consumption/renderer-authority.md were",
-          "routed. No issue number is recorded here because none exists yet —",
-          "inventing one would be worse than naming the gap."
+          "Contentus's GitHub binding covers equaltoai/contentus only, so this could not",
+          "be filed directly. Factory routed it to the greater-components steward and",
+          "filed equaltoai/greater-components#922."
         ],
         "sunset": [
           "Delete this entry at the first `greater` CLI pin bump whose adapters",
