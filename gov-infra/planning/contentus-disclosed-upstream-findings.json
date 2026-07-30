@@ -1,0 +1,120 @@
+{
+  "$comment": [
+    "Pinned disclosed upstream state for SEC-2 and SEC-7.",
+    "",
+    "This file is NOT an exclude list and NOT a threshold reduction. Each gate below",
+    "still runs in full; the rubric asserts that the finding set it produces is",
+    "EXACTLY this set. A new finding, a changed finding, or a disappeared finding all",
+    "FAIL the gate and force a human back to this file. Emptying an entry is the only",
+    "way a finding leaves the rubric, and that requires the upstream fix to have",
+    "landed.",
+    "",
+    "Rationale for pinning rather than letting the gate stand red: a permanently-red",
+    "gate reports the same colour whether or not a NEW vulnerability appeared, so it",
+    "detects nothing. An exact-set assertion keeps detection alive while representing",
+    "the known, unfixed, upstream-owned state honestly and visibly in every report."
+  ],
+  "npm_audit": {
+    "gate": "pnpm audit --prod --audit-level=high",
+    "rubric_item": "SEC-2",
+    "advisories": [
+      {
+        "id": "GHSA-96hv-2xvq-fx4p",
+        "severity": "high",
+        "module": "ws",
+        "vulnerable_versions": ">=8.0.0 <8.21.0",
+        "paths": [".>@equaltoai/greater-components-adapters>graphql-ws>ws"],
+        "owner": "equaltoai/greater-components",
+        "upstream_issue": "NOT YET FILED",
+        "why_not_fixable_here": [
+          "`ws` is a transitive dependency of the pinned",
+          "@equaltoai/greater-components-adapters release tarball, reached through",
+          "graphql-ws. Contentus does not declare graphql-ws, @apollo/client, or ws;",
+          "they arrive with the adapters pin. Forcing a resolution override would",
+          "edit the pinned upstream dependency graph from the consumer side, which is",
+          "the vendored-source workaround this repo refuses. The fix belongs upstream:",
+          "greater-components bumping graphql-ws so it resolves ws >= 8.21.0."
+        ],
+        "routing_status": [
+          "Contentus's GitHub binding covers equaltoai/contentus only, so this cannot",
+          "be filed directly against equaltoai/greater-components. It is reported to",
+          "Factory for routing to the greater-components steward, matching how the",
+          "other M1 upstream findings in docs/consumption/renderer-authority.md were",
+          "routed. No issue number is recorded here because none exists yet —",
+          "inventing one would be worse than naming the gap."
+        ],
+        "sunset": [
+          "Delete this entry at the first `greater` CLI pin bump whose adapters",
+          "release resolves ws >= 8.21.0. SEC-2 then fails until the entry is removed,",
+          "which is the intended forcing function."
+        ]
+      }
+    ]
+  },
+  "greater_doctor": {
+    "gate": "greater doctor --json",
+    "rubric_item": "SEC-7",
+    "cli_pin": "greater-v0.11.9",
+    "must_pass": ["Component Files", "Orphaned Files"],
+    "must_pass_reason": [
+      "These are the two integrity properties the gate exists for: every vendored",
+      "component file the manifest records is present, and nothing extra is sitting",
+      "under the vendored root. They are non-negotiable and are asserted PASS.",
+      "SEC-7 fails if either regresses, regardless of anything disclosed below."
+    ],
+    "disclosed_failures": [
+      {
+        "name": "NPM Dependencies",
+        "severity": "error",
+        "upstream_issue": "equaltoai/greater-components#917",
+        "owner": "equaltoai/greater-components",
+        "summary": [
+          "The blog face's registry manifest requires the shared `content` module,",
+          "which carries MarkdownRenderer.svelte and CodeBlock.svelte and pulls a full",
+          "Markdown rendering chain. The face's own Article.Content deliberately",
+          "refuses to render Markdown — lesser owns canonical rendering — so the",
+          "renderer arrives through a sibling module the reading surface never uses.",
+          "Contentus declines to install that chain: installing it to satisfy a",
+          "checker would ship a second canonical renderer and break the renderer-",
+          "authority invariant this repo exists to hold. See",
+          "docs/consumption/renderer-authority.md."
+        ],
+        "missing_dependencies": [
+          "hast-util-to-mdast@^10.1.2",
+          "mdast-util-gfm@^3.1.0",
+          "mdast-util-to-markdown@^2.1.2",
+          "@apollo/client@^4.0.9",
+          "@apollo/client-react-streaming@^0.14.0",
+          "@graphql-typed-document-node/core@^3.2.0",
+          "graphql@^16.12.0",
+          "graphql-ws@^6.0.6",
+          "viem@^2.47.14",
+          "remark-gfm@^4.0.1",
+          "remark-parse@^11.0.0",
+          "remark-rehype@^11.1.2",
+          "shiki@^3.19.0"
+        ],
+        "sunset": [
+          "Delete this entry the day the blog face stops requiring the `content`",
+          "shared module, or the day the Markdown chain moves out of it. The same day",
+          "retires src/types/absent-renderer-modules.d.ts and the",
+          "absent-renderer-module alias in vite.config.ts."
+        ]
+      }
+    ],
+    "disclosed_warnings": [
+      {
+        "names": ["Alias Path: utils", "Alias Path: ui", "Alias Path: hooks"],
+        "severity": "warning",
+        "summary": [
+          "components.json declares the CLI's default alias set. Contentus vendors",
+          "only the blog face and shared modules under the `greater` alias, so",
+          "src/lib/utils, src/lib/components/ui, and src/lib/primitives are never",
+          "created. Creating empty directories to silence a checker would be exactly",
+          "the cosmetic workaround this rubric refuses. These are pinned so that a",
+          "FOURTH warning — which would mean a real alias regression — fails SEC-7."
+        ]
+      }
+    ]
+  }
+}
