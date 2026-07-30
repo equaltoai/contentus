@@ -92,6 +92,14 @@ const SPOOFED_HEADERS = {
 	forwarded: 'host=evil.example;proto=http',
 };
 
+/**
+ * A request that never passed lesser's edge, carrying only the Host its caller
+ * chose. The edge sets `x-lesser-forwarded-host` unconditionally, so its absence
+ * means this request came from somewhere else — and `Host` is then caller input,
+ * not the origin's own domain.
+ */
+const UNTRUSTED_HOST_ONLY_HEADERS = { host: 'attacker.example' };
+
 function probe(route, fixtures) {
 	return withStubbedGraphql(respondWith(fixtures), () =>
 		renderRoute(handler, { name: 'probe', expectStatus: 200, ...route })
@@ -147,6 +155,69 @@ test('with no trusted host at all, no viewer-supplied host is substituted', asyn
 	}
 	assert.equal(value.status, 200);
 	assert.doesNotMatch(value.html, /evil\.example/);
+});
+
+test('an ambient Host never becomes the server-side fetch target', async () => {
+	// The regression this pins: `Host` used to be a fallback, so this exact bag
+	// made the server fetch https://attacker.example/api/graphql and advertise
+	// that host in og:url. Absence of the edge header now fails closed.
+	const { value, requests } = await probe(
+		{ path: '/l/articles/hello', headers: UNTRUSTED_HOST_ONLY_HEADERS },
+		{ article: articleFixture() }
+	);
+
+	for (const request of requests) {
+		assert.equal(
+			request.url,
+			'/api/graphql',
+			'an unverified Host must not become an absolute fetch target'
+		);
+	}
+	assert.equal(value.status, 200);
+	assert.doesNotMatch(value.html, /attacker\.example/, 'nor may it reach the document');
+	assert.doesNotMatch(value.html, /rel="canonical"/, 'no origin means no canonical to state');
+});
+
+test('the trusted header still wins when an ambient Host disagrees with it', async () => {
+	const { value, requests } = await probe(
+		{
+			path: '/l/articles/hello',
+			headers: { ...UNTRUSTED_HOST_ONLY_HEADERS, ...INSTANCE_HEADERS, host: 'attacker.example' },
+		},
+		{ article: articleFixture() }
+	);
+
+	assert.ok(requests.length > 0, 'the probe must have driven at least one GraphQL request');
+	for (const request of requests) {
+		assert.equal(request.url, 'https://instance.example.com/api/graphql');
+	}
+	assert.match(
+		value.html,
+		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
+	);
+	assert.doesNotMatch(value.html, /attacker\.example/);
+});
+
+test('with no trusted host the page degrades on a real fetch, not just a stubbed one', async () => {
+	// No stub here: the handler runs `fetch` for real. A null origin leaves the
+	// relative path, which has no base on the server, so the request fails and
+	// each loader returns its designed unavailable state. That is the whole cost
+	// of failing closed — the page renders and explains itself.
+	const value = await renderRoute(handler, {
+		name: 'untrusted-host-degrade',
+		path: '/l/articles/hello',
+		headers: UNTRUSTED_HOST_ONLY_HEADERS,
+		expectStatus: 200,
+	});
+
+	assert.equal(value.status, 200, 'failing closed must degrade, not 500');
+	assert.match(value.html, /^<!doctype html>/i);
+	assert.ok(value.html.includes('contentus-shell'), 'the shell must still render');
+	assert.ok(
+		/unavailable|not answer|could not be reached/i.test(value.html),
+		'the degraded state must explain itself'
+	);
+	assert.doesNotMatch(value.html, /attacker\.example/);
 });
 
 test('a loaded article renders rather than 500ing on its own canonical tag', async () => {
