@@ -5,6 +5,7 @@ import type {
 	AppPageDescriptor,
 	AppPageKey,
 	ComposeIntent,
+	MessageFolderTab,
 	ReviewPanel,
 	RouteProps,
 } from './types';
@@ -106,6 +107,29 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		// reading surface.
 		requiresAuth: false,
 	},
+	messages: {
+		key: 'messages',
+		path: '/messages',
+		title: 'Messages',
+		eyebrow: 'Direct messages',
+		summary: 'Private conversations, and the requests waiting on your answer.',
+		surface: 'mcp',
+		// Unlike `/timelines`, this whole surface is auth-gated: lesser serves no
+		// part of `conversations` anonymously, and the honest anonymous render is
+		// a sign-in prompt. `requiresAuth` is what sends `no-store` and
+		// `noindex` — correct for a private surface even though the anonymous
+		// document carries nothing.
+		requiresAuth: true,
+	},
+	'message-thread': {
+		key: 'message-thread',
+		path: '/messages',
+		title: 'Conversation',
+		eyebrow: 'Direct messages',
+		summary: 'A private conversation on this instance.',
+		surface: 'mcp',
+		requiresAuth: true,
+	},
 	profile: {
 		key: 'profile',
 		path: '/profiles',
@@ -145,6 +169,8 @@ export const ROUTE_PATTERNS = [
 	'/review',
 	'/review/drafts/{id}',
 	'/timelines',
+	'/messages',
+	'/messages/{conversationId}',
 	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
@@ -188,6 +214,11 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// falls through to not-found rather than rendering an empty one.
 	if (segmentAfter(route, '/review/drafts/')) return PAGE_DEFINITIONS['review-workspace'];
 	if (route === '/timelines') return PAGE_DEFINITIONS.timelines;
+	if (route === '/messages') return PAGE_DEFINITIONS.messages;
+	// `/messages/` with no id names no conversation, so it is not the thread
+	// surface: it falls through to not-found rather than rendering an empty one.
+	// Same rule as `/review/drafts` and `/profiles` above.
+	if (segmentAfter(route, '/messages/')) return PAGE_DEFINITIONS['message-thread'];
 	// `/profiles` with no username names no actor, so it is not the profile
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` above.
@@ -307,6 +338,42 @@ export function resolveTimelineTab(
 export function timelinesHref(tab?: TimelineTabId): string {
 	const base = href('/timelines');
 	return !tab || tab === DEFAULT_TIMELINE_TAB ? base : `${base}?tab=${tab}`;
+}
+
+/**
+ * The conversation id captured from `/messages/{conversationId}`, or null.
+ *
+ * Its own accessor for the reason `resolveDraftId` is: a conversation id names
+ * a private thread between named people, and a shared accessor would let a
+ * route read one where it meant a slug or a username.
+ */
+export function resolveConversationId(pathname: string): string | null {
+	return segmentAfter(normalizeRoutePath(pathname), '/messages/');
+}
+
+/**
+ * Which messages folder a link opens, from `?folder=`.
+ *
+ * Requests is a first-class tab, so it is addressable. Anything unrecognised
+ * resolves to the inbox rather than to not-found — same rule as the timeline
+ * tab: the folder is a view onto one surface, not a different address, and a
+ * stale link should land on the messages page rather than on an error.
+ */
+export function resolveMessageFolder(
+	query: Readonly<Record<string, string[] | undefined>> | undefined
+): MessageFolderTab {
+	return query?.['folder']?.[0]?.trim().toLowerCase() === 'requests' ? 'requests' : 'inbox';
+}
+
+/** App-relative href for a messages folder, so callers do not hand-build one. */
+export function messagesHref(folder?: MessageFolderTab): string {
+	const base = href('/messages');
+	return folder === 'requests' ? `${base}?folder=requests` : base;
+}
+
+/** App-relative href for one conversation's thread. */
+export function conversationHref(conversationId: string): string {
+	return href(`/messages/${encodeURIComponent(conversationId)}`);
 }
 
 /**

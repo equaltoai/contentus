@@ -24,7 +24,8 @@ twice, not two navigation systems.
 
 	import { isAuthenticated, clearSession, startLogin } from '$lib/auth/session';
 	import MobileTabBar from './MobileTabBar.svelte';
-	import { COMPOSE_ACTION, visibleNavEntries } from './nav';
+	import { COMPOSE_ACTION, isCurrentEntry, visibleNavEntries } from './nav';
+	import { unreadBadgeLabel, unreadBadgeText, unreadStore } from '$lib/messaging/unread.svelte';
 	import type { AppPageDescriptor } from '../../facetheory/types';
 	import { href as appHref } from '../../facetheory/routing';
 
@@ -40,9 +41,16 @@ twice, not two navigation systems.
 
 	onMount(() => {
 		authenticated = isAuthenticated();
+		// The badge's count comes from an authenticated read, so it cannot exist in
+		// the server document — it appears once the session has been read. The
+		// store returns without a request for an anonymous reader, so a public
+		// article page makes no call it would only be refused.
+		void unreadStore.refresh();
 	});
 
 	const entries = $derived(visibleNavEntries(authenticated));
+	const unreadText = $derived(unreadBadgeText(unreadStore.state));
+	const unreadLabel = $derived(unreadBadgeLabel(unreadStore.state));
 
 	async function onSignIn() {
 		signInError = null;
@@ -83,9 +91,16 @@ twice, not two navigation systems.
 					<a
 						class="contentus-nav__link"
 						href={entry.href}
-						aria-current={entry.pageKey === page.key ? 'page' : undefined}
+						aria-current={isCurrentEntry(entry, page.key) ? 'page' : undefined}
 					>
 						<span>{entry.label}</span>
+						{#if entry.id === 'messages' && unreadText && unreadLabel}
+							<!-- The count is of CONVERSATIONS with unread activity, not of
+							     messages: lesser's contract carries one `unread` boolean per
+							     conversation and no message count. The visible glyph is a
+							     number, so the accessible name is what carries the unit. -->
+							<span class="contentus-nav__unread" aria-label={unreadLabel}>{unreadText}</span>
+						{/if}
 					</a>
 				{:else}
 					<!-- Not a link: the face has not shipped, and lesser has no SPA

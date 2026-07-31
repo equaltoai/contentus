@@ -12,6 +12,8 @@ is no catch-all render path that could silently show the wrong surface.
 	import ArticlesIndexRoute from '$lib/routes/ArticlesIndex.svelte';
 	import AuthCallbackRoute from '$lib/routes/AuthCallback.svelte';
 	import ComposeRoute from '$lib/routes/Compose.svelte';
+	import MessageThreadRoute from '$lib/routes/MessageThread.svelte';
+	import MessagesRoute from '$lib/routes/Messages.svelte';
 	import NotFoundRoute from '$lib/routes/NotFound.svelte';
 	import ProfileRoute from '$lib/routes/Profile.svelte';
 	import ReviewQueueRoute from '$lib/routes/ReviewQueue.svelte';
@@ -20,7 +22,8 @@ is no catch-all render path that could silently show the wrong surface.
 
 	import type { RouteProps } from './types';
 
-	let { page, slug, index, reader, compose, review, timelines, profile }: RouteProps = $props();
+	let { page, slug, index, reader, compose, review, timelines, messages, profile }: RouteProps =
+		$props();
 </script>
 
 <AppShell {page}>
@@ -40,6 +43,10 @@ is no catch-all render path that could silently show the wrong surface.
 			{page}
 			data={timelines ?? { tab: 'instance', page: null, failure: null, partial: false }}
 		/>
+	{:else if page.key === 'messages'}
+		<MessagesRoute {page} data={messages ?? { folder: 'inbox', conversationId: null }} />
+	{:else if page.key === 'message-thread'}
+		<MessageThreadRoute {page} data={messages ?? { folder: 'inbox', conversationId: null }} />
 	{:else if page.key === 'profile'}
 		<ProfileRoute
 			{page}

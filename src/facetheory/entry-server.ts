@@ -30,7 +30,9 @@ import { queryFromSearchString } from './query-parser';
 import {
 	ROUTE_PATTERNS,
 	resolveComposeIntent,
+	resolveConversationId,
 	resolveDraftId,
+	resolveMessageFolder,
 	resolvePage,
 	resolveProfileUsername,
 	resolveReviewPanel,
@@ -94,6 +96,7 @@ async function createRouteProps(
 		compose: null,
 		review: null,
 		timelines: null,
+		messages: null,
 		profile: null,
 	};
 
@@ -145,6 +148,28 @@ async function createRouteProps(
 				},
 			};
 		}
+		case 'messages':
+		case 'message-thread':
+			// THE ADDRESS TRAVELS, THE CORRESPONDENCE DOES NOT — the strictest
+			// instance of the rule `/review` and `/review/drafts/{id}` already
+			// follow. Every conversation operation needs a bearer token, the session
+			// lives in `sessionStorage`, and these props are serialized VERBATIM
+			// into the PUBLIC hydration endpoint further down this file. A
+			// server-side `conversations` or `conversationMessages` fetch would put
+			// one reader's private messages behind a URL anyone could request — the
+			// worst version of the mistake, because unlike a draft there is no
+			// version of a DM that was ever meant to be public.
+			//
+			// So the server ships the route, its folder, and the conversation id it
+			// was asked for. The messages arrive once the client has read the
+			// session.
+			return {
+				...base,
+				messages: {
+					folder: resolveMessageFolder(query),
+					conversationId: resolveConversationId(path),
+				},
+			};
 		case 'profile': {
 			// Both halves are anonymous-safe, so the profile renders completely
 			// on the server. The actor is resolved first because its `id` is
@@ -343,9 +368,17 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
  * `/profiles/{username}` deliberately does NOT get it: ACTOR timelines have no
  * subscription (lesser's `timelineUpdates` takes a type and a listId, not an
  * actor), so that route opens no socket and has no reason to permit one.
+ *
+ * The two messaging routes DO get it, for the same reason `/timelines` does:
+ * `subscription conversationUpdates` is served from the same `wss://ws.<domain>`
+ * sibling host, and both the list and the thread open one — an incoming message
+ * has to reach the list a reader is looking at as well as the thread they have
+ * open (product design §5).
  */
+const SOCKET_ROUTES: ReadonlySet<string> = new Set(['timelines', 'messages', 'message-thread']);
+
 function cspOptionsForRoute(props: RouteProps, origin: string | null) {
-	if (props.page.key !== 'timelines') return {};
+	if (!SOCKET_ROUTES.has(props.page.key)) return {};
 
 	const endpoint = subscriptionEndpoint(origin);
 	return endpoint ? { directives: { 'connect-src': [endpoint] } } : {};
