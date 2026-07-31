@@ -44,8 +44,9 @@ export const AUDIT_ROUTES = [
 	{ name: 'series', path: '/l/series/example-series', expectStatus: 200 },
 	{ name: 'category', path: '/l/categories/example-category', expectStatus: 200 },
 	// Authenticated in effect, anonymous on the server: the session lives in
-	// sessionStorage, so the SSR pass renders the composer and its sign-in state
-	// for everyone. A 200 here is the designed answer, not a missing auth gate.
+	// sessionStorage, so the SSR pass renders the page and its sign-in state and
+	// no write control at all. A 200 here is the designed answer — the route
+	// exists for everyone, the composer does not.
 	{ name: 'compose', path: '/l/compose', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },

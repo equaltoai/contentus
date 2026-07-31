@@ -20,11 +20,21 @@ the compound nor its state is forked; the extras store in
 `$lib/compose/extras.svelte` runs alongside it and both are read together at
 submit.
 
-AUTH AND SSR. The form renders for everyone, including on the anonymous server
-pass. The session lives in `sessionStorage` where the server cannot see it, and
-a cold deep link has to produce a complete page — so the composer renders and
-the sign-in requirement is stated beside it, rather than the page flashing from
-"sign in" to a form a beat later. Nothing a signed-out visitor types is lost.
+AUTH AND SSR. The server pass is anonymous by construction — the session lives
+in `sessionStorage`, which the server cannot see — so the SSR document says the
+one thing that is true for every reader: posting requires an account on this
+instance, and here is where to sign in. The write intents — editor, media,
+poll, schedule, submit, edit, delete — are not in that document at all. They
+mount once the client has read the session and found one.
+
+This inverts an earlier shape that rendered the whole form to everyone and
+stated the requirement beside it, on the theory that nothing a signed-out
+visitor typed would be lost. That traded a real property for a cosmetic one: a
+composer that cannot post is a control that lies, and shipping every write
+affordance inside a cacheable anonymous document is a surface to defend for a
+convenience nobody asked for. Sign-in carries the intent — `startLogin`'s own
+default `returnTo` is the current path AND query string — so a deep-linked
+reply comes back a reply.
 
 THE REVIEW GATE IS NOT HERE. This face posts notes to the timeline, which is a
 direct authenticated write. Article drafts are face 2, they go through lesser's
@@ -160,7 +170,10 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	async function onSignIn() {
 		signInError = null;
 		try {
-			await startLogin({ returnTo: `${appHref('/compose')}` });
+			// No explicit `returnTo`: `startLogin` defaults to the current path AND
+			// query string, which is the whole intent. Naming `/compose` here would
+			// send a reader who deep-linked into a reply back to a blank new post.
+			await startLogin();
 		} catch (error) {
 			signInError = error instanceof Error ? error.message : 'Sign-in could not start.';
 		}
@@ -308,29 +321,6 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	</a>
 </header>
 
-{#if session !== 'authenticated'}
-	<!-- Rendered on the server too, where `session` is `unknown`. The server
-	     cannot know who is asking — the token lives in `sessionStorage` — but
-	     "posting requires an account" is true regardless, so the SSR document
-	     says it. The sign-in button appears once the client has actually looked,
-	     rather than the server asserting a session state it cannot see. -->
-	<section class="contentus-notice">
-		<h2 class="contentus-notice__title">Sign in to post</h2>
-		<p class="contentus-notice__body">
-			Posting requires an account on this instance. You can write here first — signing in
-			returns you to this page.
-		</p>
-		{#if session === 'anonymous'}
-			<button class="contentus-session__button" type="button" onclick={onSignIn}>
-				Sign in
-			</button>
-		{/if}
-		{#if signInError}
-			<p class="contentus-meta" role="alert">{signInError}</p>
-		{/if}
-	</section>
-{/if}
-
 {#if deleted}
 	<Notice
 		title="Deleted"
@@ -371,8 +361,35 @@ reviewer/publisher workflow, and nothing on this page touches them.
 
 	<!-- The desktop presentation product design §5 names: a greater `Panel`.
 	     Below 960px the same markup is flattened to a full-bleed sheet by CSS —
-	     one document, two presentations, no viewport measurement. -->
+	     one document, two presentations, no viewport measurement.
+
+	     The Panel itself is chrome, so it renders for everyone: the sheet has
+	     the same shape on the first paint whether it will hold a composer or a
+	     sign-in prompt. What it HOLDS is what the session decides. -->
 	<Panel class="contentus-compose-panel" padding="md" aria-label="Composer">
+	{#if session !== 'authenticated'}
+		<!-- The server renders this branch, where `session` is `unknown`. It
+		     cannot know who is asking — the token lives in `sessionStorage` — and
+		     "posting requires an account" is true either way, so that is what the
+		     SSR document says. The sign-in button appears once the client has
+		     actually looked, rather than the server asserting a session state it
+		     cannot see. -->
+		<section class="contentus-notice">
+			<h2 class="contentus-notice__title">Sign in to post</h2>
+			<p class="contentus-notice__body">
+				Posting requires an account on this instance. Signing in returns you here, to this
+				same {mode === 'new' ? 'composer' : mode}.
+			</p>
+			{#if session === 'anonymous'}
+				<button class="contentus-session__button" type="button" onclick={onSignIn}>
+					Sign in
+				</button>
+			{/if}
+			{#if signInError}
+				<p class="contentus-meta" role="alert">{signInError}</p>
+			{/if}
+		</section>
+	{:else}
 	{#key editSeed}
 		<ComposeRoot
 			config={{
@@ -438,5 +455,6 @@ reviewer/publisher workflow, and nothing on this page touches them.
 			</footer>
 		</ComposeRoot>
 	{/key}
+	{/if}
 	</Panel>
 </div>

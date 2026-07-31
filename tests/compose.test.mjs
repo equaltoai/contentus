@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { STATUS_BYTE_LIMIT, statusByteLength } from '../src/lib/compose/budget.ts';
@@ -121,34 +122,67 @@ test('the content warning is counted, because the composer counts it', () => {
  * The route: four intents, one server-rendered surface
  * ---------------------------------------------------------------------- */
 
-test('a cold deep link to /compose renders a complete composer', async () => {
+test('a cold deep link to /compose renders a complete page and no write control', async () => {
+	// The server pass is anonymous by construction: the session lives in
+	// sessionStorage. So the document it can honestly produce is the page and
+	// its sign-in requirement — never a form that cannot post.
 	const { value } = await composeRoute('/l/compose');
 
 	assert.equal(value.status, 200);
-	assert.match(value.html, /class="compose-root/, 'the compound must have rendered');
-	assert.match(value.html, /compose-visibility-select/, 'visibility is a first-class control');
-	assert.match(value.html, /Content warning/, 'the CW control is on the surface');
-	assert.match(value.html, /Mark as sensitive/, 'sensitive is its own control');
-	assert.match(value.html, /compose-submit/, 'and there is something to press');
+	assert.match(value.html, /Sign in to post/, 'the requirement is stated');
+	assert.match(value.html, /contentus-compose-panel/, 'inside the surface it will eventually fill');
+
+	for (const [control, pattern] of [
+		['the editor', /compose-editor/],
+		['the compose form', /class="compose-root/],
+		['the visibility select', /compose-visibility-select/],
+		['the content warning', /Content warning/],
+		['the sensitive toggle', /Mark as sensitive/],
+		['the schedule control', /Schedule for later/],
+		['the poll control', /Add a poll/],
+		['the submit button', /compose-submit/],
+	]) {
+		assert.doesNotMatch(value.html, pattern, `${control} must not be in the anonymous document`);
+	}
 });
 
-test('the composer renders for an anonymous visitor, and says why they cannot post', async () => {
-	// The session lives in sessionStorage, so the server cannot know who is
-	// asking. Rendering the form and stating the requirement beats a page that
-	// flashes from "sign in" to a form a beat later.
+test('the anonymous visitor is offered the way in, not a form that cannot post', async () => {
 	const { value } = await composeRoute('/l/compose');
 
-	assert.match(value.html, /compose-editor/);
+	// `session` is `unknown` on the server — it has not read sessionStorage
+	// because it cannot — so the button appears only after the client looks.
+	// The requirement is stated either way.
 	assert.match(value.html, /Sign in to post/);
+	assert.match(value.html, /Posting requires an account on this instance/);
+
+	// Scoped to the composer's own notice: the shell's sidebar carries a
+	// sign-in button of its own, which is a different control with a different
+	// rule. This one appears only once the client has read sessionStorage.
+	const notice = value.html.slice(
+		value.html.indexOf('class="contentus-notice"'),
+		value.html.indexOf('</section>', value.html.indexOf('class="contentus-notice"'))
+	);
+	assert.ok(notice.length > 0, 'the notice must be in the document');
+	assert.doesNotMatch(notice, /<button/, 'the server asserts no session state');
 });
 
-test('visibility and the content warning are not hidden behind a menu', async () => {
-	const { value } = await composeRoute('/l/compose');
+test('visibility and the content warning are first-class controls in the composer', () => {
+	// A SOURCE-SHAPE assertion, and it says so. The controls are no longer in
+	// the anonymous document — that is the point of the test above — and
+	// `node --test` has no DOM to mount the authenticated composer in. What is
+	// still checkable here is product design §5's actual claim: these two are
+	// siblings on the composer surface rather than entries in an overflow menu.
+	const source = readFileSync(new URL('../src/lib/routes/Compose.svelte', import.meta.url), 'utf8');
+	const controls = source.slice(
+		source.indexOf('<div class="contentus-compose-controls">'),
+		source.indexOf('</div>', source.indexOf('<div class="contentus-compose-controls">'))
+	);
 
-	// Product design §5 is explicit about this. `<select>` and a checkbox on
-	// the surface, not entries in an overflow.
-	assert.match(value.html, /<select[^>]*id="compose-visibility"/);
-	assert.match(value.html, /type="checkbox"/);
+	assert.ok(controls.length > 0, 'the controls row must exist');
+	assert.match(controls, /<ComposeVisibilitySelect \/>/);
+	assert.match(controls, /<ContentWarningField \/>/);
+	assert.match(controls, /<SensitiveField \/>/);
+	assert.doesNotMatch(source, /<details/, 'no control is folded behind a disclosure');
 });
 
 test('a reply intent server-renders its target context', async () => {
@@ -207,29 +241,31 @@ test('a quote intent is a quote, not a reply', async () => {
 	assert.doesNotMatch(value.html, /Replying to/);
 });
 
-test('an edit intent seeds the editor and hides what cannot be edited', async () => {
+test('an edit intent server-renders its context and none of its actions', async () => {
 	const { value } = await composeRoute(`/l/compose?edit=${encodeURIComponent(SOURCE_ID)}`, {
 		source: sourceFixture({ content: 'the original words' }),
 	});
 
-	assert.match(value.html, /the original words/, 'the stored content seeds the editor');
-	assert.match(value.html, /Save changes/, 'and the action says what it does');
-
-	// UpdateStatusInput carries no visibility and no poll: a posted status keeps
-	// its reach, and a poll with votes is not rewritten underneath them. So the
-	// controls are absent rather than present-and-ignored.
-	assert.doesNotMatch(value.html, /compose-visibility-select/);
-	assert.doesNotMatch(value.html, /Add a poll/);
+	// The strip says what is being edited. The editor that would hold the
+	// stored content, and the delete that would destroy it, are write intents:
+	// they mount for a session, not for a cacheable anonymous document.
+	assert.match(value.html, /Editing/);
+	assert.doesNotMatch(
+		value.html,
+		/the original words/,
+		'the stored content is not in the document'
+	);
+	assert.doesNotMatch(value.html, /Save changes/);
+	assert.doesNotMatch(value.html, /Delete post/);
 });
 
-test('delete is offered only where there is something to delete', async () => {
-	const editing = await composeRoute(`/l/compose?edit=${encodeURIComponent(SOURCE_ID)}`, {
-		source: sourceFixture(),
-	});
-	const fresh = await composeRoute('/l/compose');
-
-	assert.match(editing.value.html, /Delete post/);
-	assert.doesNotMatch(fresh.value.html, /Delete post/);
+test('delete never appears in a document the server rendered', async () => {
+	// Deleting is irreversible and federates. It is the last control that
+	// should exist in a page the server produced without knowing who is asking.
+	for (const path of ['/l/compose', `/l/compose?edit=${encodeURIComponent(SOURCE_ID)}`]) {
+		const { value } = await composeRoute(path, { source: sourceFixture() });
+		assert.doesNotMatch(value.html, /Delete post/, `${path} must not offer delete`);
+	}
 });
 
 test('agent attribution is absent for a session that is not an agent', async () => {
