@@ -76,6 +76,15 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'journal',
 		requiresAuth: true,
 	},
+	'review-workspace': {
+		key: 'review-workspace',
+		path: '/review/drafts',
+		title: 'Review draft',
+		eyebrow: 'Article review',
+		summary: "Read the instance's rendered preview and the attribution behind it.",
+		surface: 'journal',
+		requiresAuth: true,
+	},
 	'auth-callback': {
 		key: 'auth-callback',
 		path: '/auth/callback',
@@ -104,6 +113,7 @@ export const ROUTE_PATTERNS = [
 	'/categories/{slug}',
 	'/compose',
 	'/review',
+	'/review/drafts/{id}',
 	'/auth/callback',
 	'/{proxy+}',
 ] as const;
@@ -142,12 +152,27 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	if (route === '/') return PAGE_DEFINITIONS['articles-index'];
 	if (route === '/compose') return PAGE_DEFINITIONS.compose;
 	if (route === '/review') return PAGE_DEFINITIONS['review-queue'];
+	// `/review/drafts` with no id names no draft, so it is not the workspace: it
+	// falls through to not-found rather than rendering an empty one.
+	if (segmentAfter(route, '/review/drafts/')) return PAGE_DEFINITIONS['review-workspace'];
 	if (route === '/auth/callback') return PAGE_DEFINITIONS['auth-callback'];
 	if (segmentAfter(route, '/articles/')) return PAGE_DEFINITIONS['article-reader'];
 	if (segmentAfter(route, '/series/')) return PAGE_DEFINITIONS.series;
 	if (segmentAfter(route, '/categories/')) return PAGE_DEFINITIONS.category;
 
 	return PAGE_DEFINITIONS['not-found'];
+}
+
+/**
+ * Draft id captured from `/review/drafts/{id}`, or null.
+ *
+ * Kept separate from `resolveSlug` because it names a different kind of thing: a
+ * slug is a published article's public identity, a draft id names an
+ * unpublished object only its author and invited reviewers may see. One shared
+ * accessor would invite a route to read one where it meant the other.
+ */
+export function resolveDraftId(pathname: string): string | null {
+	return segmentAfter(normalizeRoutePath(pathname), '/review/drafts/');
 }
 
 /** Slug captured from whichever slugged route matched, or null. */
@@ -221,6 +246,10 @@ export function seriesHref(slug: string): string {
 
 export function reviewQueueHref(): string {
 	return href('/review');
+}
+
+export function reviewDraftHref(draftId: string): string {
+	return href(`/review/drafts/${encodeURIComponent(draftId)}`);
 }
 
 /**

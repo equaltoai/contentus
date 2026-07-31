@@ -10,6 +10,7 @@ export type AppPageKey =
 	| 'category'
 	| 'compose'
 	| 'review-queue'
+	| 'review-workspace'
 	| 'auth-callback'
 	| 'not-found';
 
@@ -98,6 +99,21 @@ export interface ComposeData {
 	source: SourceStatus | null;
 }
 
+/**
+ * What `/review/drafts/{id}` carries from the server.
+ *
+ * The draft id and nothing else, and the emptiness is the design. Every review
+ * operation needs a bearer token, the session lives in `sessionStorage`, and
+ * these props are serialized into a PUBLIC hydration endpoint — so a
+ * server-side metadata or preview fetch would put an unpublished draft behind a
+ * URL anyone could request. The route ships its address; the draft arrives once
+ * the client has read the session (product design §5, face 2).
+ */
+export interface ReviewRouteData {
+	/** Draft id from `/review/drafts/{id}`. */
+	draftId: string | null;
+}
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
@@ -105,4 +121,5 @@ export interface RouteProps {
 	index: ArticlesIndexData | null;
 	reader: ArticleReaderData | null;
 	compose: ComposeData | null;
+	review: ReviewRouteData | null;
 }

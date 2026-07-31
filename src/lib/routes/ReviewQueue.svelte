@@ -33,6 +33,7 @@ states, and the honesty about what was not loaded.
 	import { loadReviewQueue, type ReviewQueue, type ReviewQueueEntry } from '$lib/cms/review';
 	import { isAuthenticated, startLogin } from '$lib/auth/session';
 
+	import { reviewDraftHref } from '../../facetheory/routing';
 	import type { AppPageDescriptor } from '../../facetheory/types';
 	import Notice from './Notice.svelte';
 
@@ -194,11 +195,9 @@ states, and the honesty about what was not loaded.
 {/if}
 
 {#snippet card(entry: ReviewQueueEntry)}
-	<!--
-		No `href` yet: the workspace route (#11) is what a card opens, and a link
-		to a route that does not exist is a hard 404 under `/l/*`, where lesser
-		performs no SPA fallback. `QueueCard` renders its title as plain text when
-		`href` is omitted, which is the honest shape until the destination is real.
-	-->
-	<QueueCard review={entry.review} headingLevel={3} />
+	<QueueCard
+		review={entry.review}
+		href={reviewDraftHref(entry.review.draftId)}
+		headingLevel={3}
+	/>
 {/snippet}

@@ -108,6 +108,65 @@ test('the hydration payload for the review queue carries no draft data', async (
 	}
 });
 
+test('the review workspace server-renders its sign-in state, never a draft', async () => {
+	const result = await render('/l/review/drafts/draft-123');
+
+	assert.equal(result.status, 200);
+	assert.match(result.html, /^<!doctype html>/i);
+	assert.match(result.html, /Sign in to review this draft/i);
+
+	// The draft id is in the URL and may legitimately appear in the payload; a
+	// BODY may not. `gr-blog-article__content` is the vendored element the
+	// preview renders into, so its absence is the absence of a rendered draft.
+	assert.doesNotMatch(result.html, /gr-blog-article__content/);
+	assert.doesNotMatch(result.html, /gr-blog-review-attribution/);
+});
+
+test('rendering the review workspace makes no GraphQL request whatsoever', async () => {
+	const { requests } = await withStubbedGraphql(
+		() => ({ data: null }),
+		() => render('/l/review/drafts/draft-123')
+	);
+
+	assert.deepEqual(
+		requests,
+		[],
+		'the server must not fetch a draft or its preview: the answer would land in the ' +
+			'public hydration payload'
+	);
+});
+
+test('the workspace hydration payload carries the address and no draft body', async () => {
+	const result = await renderRoute(handler, {
+		name: 'workspace-hydration',
+		path: '/l/_facetheory/hydration?path=%2Freview%2Fdrafts%2Fdraft-123',
+		expectStatus: 200,
+	});
+
+	const props = JSON.parse(result.html);
+	assert.equal(props.page.key, 'review-workspace');
+	assert.equal(props.page.requiresAuth, true);
+
+	// The ADDRESS travels — that is what makes the client's fetch possible.
+	assert.equal(props.review.draftId, 'draft-123');
+
+	// The DRAFT does not.
+	const serialized = JSON.stringify(props);
+	for (const forbidden of ['renderedHtml', 'editorNotes', 'reviewStatus', 'verdicts']) {
+		assert.ok(
+			!serialized.includes(forbidden),
+			`the public hydration payload must not carry "${forbidden}"`
+		);
+	}
+});
+
+test('a /review/drafts address naming no draft is a real 404', async () => {
+	// Not an empty workspace: the address names nothing, and rendering a
+	// workspace for it under a 200 would tell a crawler the page exists.
+	const result = await render('/l/review/drafts', 404);
+	assert.equal(result.status, 404);
+});
+
 test('the review queue response carries the same strict CSP as every other route', async () => {
 	const { headers } = await render('/l/review');
 	const csp = headers['content-security-policy'];

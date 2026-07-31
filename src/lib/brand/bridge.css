@@ -520,6 +520,65 @@ code {
 	margin: var(--tc-space-6) 0;
 }
 
+/* ---- Workspace: metadata rail beside the server-rendered preview ----
+   Desktop is two columns; the mobile single-column form lands with the
+   segmented control in M2d.4. The rail comes FIRST in the document, so
+   the stacked order already reads attribution-then-body: knowing who
+   wrote something changes how the prose reads. */
+.contentus-review-workspace {
+	display: grid;
+	grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+	gap: var(--tc-space-6);
+	align-items: start;
+}
+
+.contentus-review-rail {
+	display: grid;
+	gap: var(--tc-space-4);
+	min-width: 0;
+}
+
+.contentus-review-preview {
+	min-width: 0;
+}
+
+.contentus-review-meta {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--tc-space-2) var(--tc-space-4);
+	margin: 0 0 var(--tc-space-4) 0;
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-review-meta dt {
+	color: var(--tc-fg-muted);
+}
+
+.contentus-review-meta dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.contentus-review-note {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	margin: 0 0 var(--tc-space-2) 0;
+}
+
+.contentus-review-errors {
+	margin: 0;
+	padding-left: var(--tc-space-6);
+	color: var(--tc-fg-muted);
+	font-family: var(--tc-font-mono);
+	font-size: var(--tc-fs-body-sm);
+}
+
+@media (max-width: 960px) {
+	.contentus-review-workspace {
+		grid-template-columns: 1fr;
+	}
+}
+
 .contentus-visually-hidden {
 	position: absolute;
 	width: 1px;

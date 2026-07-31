@@ -55,6 +55,10 @@ export const AUDIT_ROUTES = [
 	// `tests/ssr-review.test.mjs`, which checks the anonymous document carries
 	// no draft data and makes no authenticated fetch.
 	{ name: 'review-queue', path: '/l/review', expectStatus: 200 },
+	// The workspace, deep-linked cold. A draft is never public, so the 200 here
+	// is the sign-in state — and the probe that matters is that the document
+	// contains no draft at all, which `tests/ssr-review.test.mjs` asserts.
+	{ name: 'review-workspace', path: '/l/review/drafts/draft-123', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },
 	{ name: 'hydration-data', path: '/l/_facetheory/hydration', expectStatus: 200 },

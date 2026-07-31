@@ -27,6 +27,7 @@ import { queryFromSearchString } from './query-parser';
 import {
 	ROUTE_PATTERNS,
 	resolveComposeIntent,
+	resolveDraftId,
 	resolvePage,
 	resolveSlug,
 	statusForRoute,
@@ -79,7 +80,7 @@ async function createRouteProps(
 	const endpoint = graphqlEndpointForOrigin(resolveRequestOrigin(headers));
 	const ctx = { endpoint };
 
-	const base: RouteProps = { page, slug, index: null, reader: null, compose: null };
+	const base: RouteProps = { page, slug, index: null, reader: null, compose: null, review: null };
 
 	switch (page.key) {
 		case 'articles-index':
@@ -101,6 +102,13 @@ async function createRouteProps(
 			const source = intent.statusId ? await loadSourceStatus(intent.statusId, { endpoint }) : null;
 			return { ...base, compose: { intent, source } };
 		}
+		case 'review-workspace':
+			// The ADDRESS travels, the DRAFT does not. Same rule as the queue
+			// below, one step sharper: `draftPreview` renders an unpublished
+			// body, and these props are serialized verbatim into the PUBLIC
+			// hydration endpoint further down this file. A server-side preview
+			// fetch would put that body behind a URL anyone could request.
+			return { ...base, review: { draftId: resolveDraftId(path) } };
 		default:
 			// auth-callback, not-found, and the review queue render without server
 			// data. The first needs sessionStorage and the second has nothing to
