@@ -49,6 +49,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stripComments } from './lib/strip-comments.mjs';
+
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 /**
@@ -258,59 +260,16 @@ function checkImports() {
 }
 
 /**
- * A source file with its comments removed, scanned LEFT TO RIGHT.
+ * Check 3's scanner lives in `./lib/strip-comments.mjs`, imported above.
  *
- * The token has to be ignored inside comments — several owned files, this one
- * included, state the `{@html}` rule in prose, and a check that failed on its
- * own documentation would be measuring the wrong thing.
- *
- * WHY NOT A REGEX REPLACE, and this is the part worth reading. A global
- * `/<!--[\s\S]*?-->/` can REINTRODUCE a delimiter it did not have before:
- * given `<!<!-- -->-- {@html evil} -->`, removing the inner match leaves
- * `<!-- {@html evil} -->` — which a second pass then removes entirely, taking a
- * LIVE `{@html}` with it. That is the dangerous direction: the gate goes green
- * over a sink it should have caught.
- *
- * It is also the wrong answer. A parser reading that text finds its first
- * `<!--` at index 2, so the comment is `<!-- -->` and everything after it —
- * including the sink — is live template. This scan reproduces that reading: it
- * walks forward, consumes a comment atomically at the position it opens, and
- * never re-examines text it has already emitted, so it cannot create a
- * delimiter that was not there. On the nested case above it leaves the sink
- * VISIBLE and the audit FAILS, which is the safe direction and the correct one.
- *
- * An unterminated opener consumes the remainder of the file, which is also what
- * a parser does with one.
- *
- * (CodeQL flagged the regex form as `js/incomplete-multi-character-sanitization`,
- * CWE-116. The first fix attempted was the loop-until-stable that rule
- * recommends; it silences the rule and is wrong here for the reason above.)
+ * It is a module rather than a local function for one reason, and it is a
+ * governance one: the probe that proves this scan reads a nested delimiter the
+ * way a parser does has to drive THIS code, not a copy of it. Two copies stay
+ * identical right up until they do not, and the failure is silent in the
+ * dangerous direction — a green regression over a gate that has stopped seeing
+ * live sinks. See that module's header for what the scan does and why it is not
+ * a regex.
  */
-const COMMENT_DELIMITERS = [
-	['<!--', '-->'],
-	['/*', '*/'],
-];
-
-function stripComments(source) {
-	let out = '';
-	let index = 0;
-
-	while (index < source.length) {
-		const opener = COMMENT_DELIMITERS.find(([open]) => source.startsWith(open, index));
-		if (opener) {
-			const [open, close] = opener;
-			const end = source.indexOf(close, index + open.length);
-			index = end === -1 ? source.length : end + close.length;
-			continue;
-		}
-
-		out += source[index];
-		index += 1;
-	}
-
-	return out;
-}
-
 function checkHtmlSinks() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {

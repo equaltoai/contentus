@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -107,6 +107,98 @@ test('the widened walk feeds the import scan, not only the coverage check', () =
 		);
 	} finally {
 		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+/* ============================================================
+   Check 3, driven as a gate rather than as a function
+   ============================================================ */
+
+/**
+ * The `{@html}` scan, planted and run.
+ *
+ * WHY THESE EXIST. The nested-delimiter case — the one that decided how comments
+ * are stripped — was only ever exercised by calling a COPY of the routine from a
+ * test file. The gate could have been repinned to a different scan and stayed
+ * green, because nothing pointed the audit at a file containing the case. The
+ * scanner is now one module (`scripts/lib/strip-comments.mjs`), and these plant
+ * real Svelte files and read the audit's exit code, so what is asserted is the
+ * gate's behaviour rather than a function's.
+ *
+ * Each case is a differential against the clean baseline above.
+ */
+const SINK_FIXTURE = `${OWNED_DIR}/__audit_sink_probe__.svelte`;
+
+test('the audit scans with the shared module, not a copy of it', () => {
+	// THE COUPLING, pinned. The cases below and the regression in
+	// `tests/vendored-messaging-render.test.mjs` are only evidence about the gate
+	// while the gate runs the same code they do. A second definition here is how
+	// the two drift, and the drift is silent in the dangerous direction.
+	const audit = readFileSync(join(repoRoot, 'scripts/audit-renderer-authority.mjs'), 'utf8');
+
+	assert.match(
+		audit,
+		/import \{ stripComments \} from '\.\/lib\/strip-comments\.mjs'/,
+		'the audit must import the shared comment scanner'
+	);
+	assert.ok(
+		!/function stripComments\s*\(/.test(audit),
+		'the audit has grown its own copy of the comment scanner again'
+	);
+});
+
+test('a live {@html} in owned source fails the audit', () => {
+	plant(SINK_FIXTURE, '<div>{@html planted}</div>\n');
+
+	try {
+		const { status, output } = runAudit();
+
+		assert.equal(status, 1, `a live sink must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[owned-source {@html} sinks] ${SINK_FIXTURE} contains an {@html} sink`),
+			`check 3 must name the file it found the sink in:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, SINK_FIXTURE), { force: true });
+	}
+});
+
+test('a live sink hidden behind a nested comment delimiter still fails the audit', () => {
+	// THE DANGEROUS DIRECTION, planted as a file. A parser reading this finds its
+	// first `<!--` at index 2, so the comment is `<!-- -->` and the `{@html}`
+	// after it is LIVE template. A regex strip — or the loop-until-stable that
+	// CodeQL's rule recommends — deletes the whole thing and reports clean over
+	// a sink that ships. This asserts the gate itself gets it right.
+	plant(SINK_FIXTURE, '<!<!-- -->-- {@html planted} -->\n');
+
+	try {
+		const { status, output } = runAudit();
+
+		assert.equal(
+			status,
+			1,
+			`a sink after a nested delimiter is live template and must fail:\n${output}`
+		);
+		assert.ok(
+			output.includes(`[owned-source {@html} sinks] ${SINK_FIXTURE} contains an {@html} sink`),
+			`check 3 must catch the sink the nested delimiter did not comment out:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, SINK_FIXTURE), { force: true });
+	}
+});
+
+test('a genuinely commented-out sink does not fail the audit', () => {
+	// The other half, without which the two above could be satisfied by a scan
+	// that never strips anything — and every owned file that EXPLAINS the
+	// `{@html}` rule in prose would then be a finding.
+	plant(SINK_FIXTURE, '<!-- contentus-owned templates must not contain {@html} -->\n<p>text</p>\n');
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 0, `a commented sink must not fail the audit:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, SINK_FIXTURE), { force: true });
 	}
 });
 

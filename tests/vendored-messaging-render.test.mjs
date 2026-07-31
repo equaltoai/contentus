@@ -40,52 +40,19 @@ import { test } from 'node:test';
 import { compile } from 'svelte/compiler';
 import { escape } from 'svelte/internal/server';
 
+// THE GATE'S OWN SCANNER, imported rather than reproduced. It used to be copied
+// into this file, and the copies were byte-identical — which is the state that
+// ends with them not being: a regression passing against its duplicate while the
+// gate scans something else. The nested-delimiter case below now drives the code
+// `scripts/audit-renderer-authority.mjs` actually runs, and
+// `tests/renderer-authority-audit.test.mjs` plants the same case as a real file
+// and runs the real audit over it.
+import { stripComments } from '../scripts/lib/strip-comments.mjs';
+
 /** Compile a vendored component exactly as the build does for the server pass. */
 function compileServer(path) {
 	const source = readFileSync(path, 'utf8');
 	return compile(source, { generate: 'server', name: 'Probe' }).js.code;
-}
-
-/**
- * A source file with its comments removed, scanned LEFT TO RIGHT.
- *
- * The same routine `scripts/audit-renderer-authority.mjs` uses, kept in step
- * deliberately — two different opinions about what counts as a comment would
- * let the probe and the gate disagree about the same file.
- *
- * A global `/<!--[\s\S]*?-->/` replace is NOT equivalent, and the difference
- * runs in the dangerous direction: it can reintroduce a delimiter and then, on
- * a second pass, delete a LIVE `{@html}` along with it. See the header of
- * `stripComments` in the audit, and the regression below.
- *
- * Line comments are deliberately not stripped. `//` inside a string or a URL is
- * indistinguishable from a comment without parsing, and removing to end-of-line
- * on a false match could delete real code — including the very `{@html}` this
- * is looking for.
- */
-const COMMENT_DELIMITERS = [
-	['<!--', '-->'],
-	['/*', '*/'],
-];
-
-function stripComments(source) {
-	let out = '';
-	let index = 0;
-
-	while (index < source.length) {
-		const opener = COMMENT_DELIMITERS.find(([open]) => source.startsWith(open, index));
-		if (opener) {
-			const [open, close] = opener;
-			const end = source.indexOf(close, index + open.length);
-			index = end === -1 ? source.length : end + close.length;
-			continue;
-		}
-
-		out += source[index];
-		index += 1;
-	}
-
-	return out;
 }
 
 const MESSAGE = 'src/lib/components/messaging/Message.svelte';
@@ -197,8 +164,10 @@ test('contentus discloses the gap unconditionally, not only when a message exist
 
 test('the comment stripper reads a nested delimiter the way a parser does', () => {
 	// The case that decided the implementation, kept as a regression rather than
-	// as prose. A parser reading this finds its first `<!--` at index 2, so the
-	// comment is `<!-- -->` and the sink after it is LIVE template.
+	// as prose, and run against the GATE'S OWN function — the import at the top
+	// of this file is the whole point of the test. A parser reading this finds
+	// its first `<!--` at index 2, so the comment is `<!-- -->` and the sink
+	// after it is LIVE template.
 	const nested = '<!<!-- -->-- {@html evil} -->';
 
 	assert.match(
