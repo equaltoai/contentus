@@ -11,9 +11,14 @@ export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
  * `/l/*`, so every route here must server-render on a cold request. A route
  * that is not in this table and not matched by the catch-all does not exist.
  *
- * Faces 2-7 (review, compose, timelines, messages, agents, drones) land in
- * later milestones and are deliberately absent rather than stubbed — a nav
- * entry pointing at a route that 404s is worse than one that is not there.
+ * Faces 2 and 4-7 (review, timelines, messages, agents, drones) land in later
+ * milestones and are deliberately absent rather than stubbed — a nav entry
+ * pointing at a route that 404s is worse than one that is not there.
+ *
+ * `/compose` (face 3) requires an authenticated caller, but it is still a fully
+ * server-rendered route: the session lives in `sessionStorage`, so the server
+ * cannot know who is asking, and rendering the signed-out state is both the
+ * honest answer and the only one a cold deep link can produce.
  */
 const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 	'articles-index': {
@@ -52,6 +57,15 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'journal',
 		requiresAuth: false,
 	},
+	compose: {
+		key: 'compose',
+		path: '/compose',
+		title: 'New post',
+		eyebrow: 'Post to timeline',
+		summary: 'Write a post for this instance and the wider fediverse.',
+		surface: 'core',
+		requiresAuth: true,
+	},
 	'auth-callback': {
 		key: 'auth-callback',
 		path: '/auth/callback',
@@ -78,6 +92,7 @@ export const ROUTE_PATTERNS = [
 	'/articles/{slug}',
 	'/series/{slug}',
 	'/categories/{slug}',
+	'/compose',
 	'/auth/callback',
 	'/{proxy+}',
 ] as const;
@@ -114,6 +129,7 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	const route = normalizeRoutePath(pathname);
 
 	if (route === '/') return PAGE_DEFINITIONS['articles-index'];
+	if (route === '/compose') return PAGE_DEFINITIONS.compose;
 	if (route === '/auth/callback') return PAGE_DEFINITIONS['auth-callback'];
 	if (segmentAfter(route, '/articles/')) return PAGE_DEFINITIONS['article-reader'];
 	if (segmentAfter(route, '/series/')) return PAGE_DEFINITIONS.series;

@@ -115,11 +115,11 @@ export interface ComposeAction {
 export const COMPOSE_ACTION: ComposeAction = {
 	id: 'compose',
 	label: 'New post',
-	href: null,
-	pageKey: null,
+	href: href('/compose'),
+	pageKey: 'compose',
 	surface: 'core',
 	requiresAuth: true,
-	upcoming: 'M3.2',
+	upcoming: null,
 };
 
 /**

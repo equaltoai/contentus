@@ -1,9 +1,15 @@
 import type { ArticleBodyDecision } from '$lib/cms/articles';
 import type { ArticleSummary, ArticleDetail, CategorySummary, SeriesSummary } from '$lib/cms/types';
 
-/** Stable identifier for each contentus surface in the M1 route table. */
+/** Stable identifier for each contentus surface in the route table. */
 export type AppPageKey =
-	'articles-index' | 'article-reader' | 'series' | 'category' | 'auth-callback' | 'not-found';
+	| 'articles-index'
+	| 'article-reader'
+	| 'series'
+	| 'category'
+	| 'compose'
+	| 'auth-callback'
+	| 'not-found';
 
 /**
  * Brand surface variant, applied as `data-surface` on the shell root. Face 1

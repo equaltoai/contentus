@@ -11,6 +11,7 @@ is no catch-all render path that could silently show the wrong surface.
 	import ArticleReaderRoute from '$lib/routes/ArticleReader.svelte';
 	import ArticlesIndexRoute from '$lib/routes/ArticlesIndex.svelte';
 	import AuthCallbackRoute from '$lib/routes/AuthCallback.svelte';
+	import ComposeRoute from '$lib/routes/Compose.svelte';
 	import NotFoundRoute from '$lib/routes/NotFound.svelte';
 
 	import type { RouteProps } from './types';
@@ -21,6 +22,8 @@ is no catch-all render path that could silently show the wrong surface.
 <AppShell {page}>
 	{#if page.key === 'article-reader'}
 		<ArticleReaderRoute {page} data={reader ?? { article: null, body: null, unavailable: null }} />
+	{:else if page.key === 'compose'}
+		<ComposeRoute {page} />
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />
 	{:else if page.key === 'not-found'}

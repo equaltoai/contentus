@@ -339,6 +339,24 @@ code {
 	text-align: center;
 }
 
+/* The compose action reads as an action, not a destination: the nav's other
+   entries are places, and this one writes. */
+.contentus-nav__compose {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	margin-top: var(--tc-space-3);
+	padding: var(--tc-space-2) var(--tc-space-4);
+	border: 1px solid var(--tc-core-blue);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-core-blue);
+	color: var(--tc-midnight);
+	font-size: var(--tc-fs-body);
+	font-weight: var(--tc-w-semibold);
+	text-decoration: none;
+}
+
 .contentus-session {
 	margin-top: auto;
 	font-size: var(--tc-fs-body-sm);
