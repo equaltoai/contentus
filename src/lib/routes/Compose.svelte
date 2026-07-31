@@ -32,7 +32,7 @@ reviewer/publisher workflow, and nothing on this page touches them.
 -->
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import ComposeCharacterCount from '$lib/components/compose/CharacterCount.svelte';
 	import ComposeEditorWithAutocomplete from '$lib/components/compose/EditorWithAutocomplete.svelte';
@@ -79,14 +79,14 @@ reviewer/publisher workflow, and nothing on this page touches them.
 
 	let { page, data }: Props = $props();
 
-	// Route props are settled for the life of a page load — FaceTheory hydrates
-	// once and there is no client-side navigation into this route — so the
-	// init-time reads below capture the only value these ever have. `$derived`
-	// for the two the template also reads, so the intent stays in one place.
+	// Route props are settled for the life of a page load: FaceTheory hydrates
+	// once, and every compose intent is a full navigation because lesser has no
+	// SPA fallback under `/l/*`. `$derived` for the two the template reads, so
+	// the intent is stated in one place.
 	const mode = $derived(data.intent.mode);
 	const targetId = $derived(data.intent.statusId);
 
-	let source = $state<SourceStatus | null>(data.source);
+	let source = $state<SourceStatus | null>(untrack(() => data.source));
 	let viewer = $state<ComposeViewer | null>(null);
 
 	/**
@@ -95,12 +95,20 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	 *
 	 * `quoteId` is only set for a quote intent. A reply carries `inReplyToId`,
 	 * an edit carries neither and drives `updateStatus` instead.
+	 *
+	 * `untrack` because this is a SEEDING read, and saying so is the point: the
+	 * store is initialised from the intent once, and everything after that is the
+	 * poster editing it. Without it the compiler reasonably asks whether a
+	 * changing prop should flow through, and the answer here is no — a different
+	 * intent is a different page load.
 	 */
-	const extras = createComposeExtras({
-		...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
-		...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
-		...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
-	});
+	const extras = createComposeExtras(
+		untrack(() => ({
+			...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+			...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+			...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+		}))
+	);
 
 	/**
 	 * Three states, not two. `unknown` is the server's honest answer and the
@@ -124,8 +132,8 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	 * separate raw source for a note to withhold: the stored content IS the
 	 * sanitized content, and editing it is editing text.
 	 */
-	let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
-	let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+	let editSeed = $state(untrack(() => (mode === 'edit' ? (data.source?.content ?? '') : '')));
+	let editSeeded = $state(untrack(() => mode !== 'edit' || Boolean(data.source)));
 
 	onMount(async () => {
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
