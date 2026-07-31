@@ -217,6 +217,20 @@
       "installedAt": "2026-07-30T19:28:20.828Z",
       "modified": false,
       "checksums": []
+    },
+    {
+      "name": "poll-composer",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-31T11:30:29.507Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "custom-emoji-picker",
+      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+      "installedAt": "2026-07-31T11:30:29.508Z",
+      "modified": false,
+      "checksums": []
     }
   ]
 }
