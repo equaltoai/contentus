@@ -10,22 +10,22 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785536809412 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785536809414 COMPLETED 834 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785539961511 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785539961514 COMPLETED 838 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 766 modules transformed.
+[2Ktransforming...✓ 770 modules transformed.
 rendering chunks...
 computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-Y0sAu2xR.css                25.06 kB │ gzip:   4.34 kB
-build/client/assets/entry-client-C9BqaZ3u.js                616.49 kB │ gzip: 188.66 kB
+build/client/assets/entry-client-IDHVsNL2.js                622.55 kB │ gzip: 190.43 kB
 
-✓ built in 1.09s
+✓ built in 1.04s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -36,13 +36,13 @@ build/client/assets/entry-client-C9BqaZ3u.js                616.49 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 742 modules transformed.
+[2Ktransforming...✓ 746 modules transformed.
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 977.48 kB │ gzip: 240.27 kB
+build/server/handler.mjs                 984.65 kB │ gzip: 242.84 kB
 
-✓ built in 1.04s
+✓ built in 884ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
