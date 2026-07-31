@@ -36,6 +36,8 @@
     "src/lib/review/**/*.svelte",
     "src/lib/shell/**/*.ts",
     "src/lib/shell/**/*.svelte",
+    "src/lib/timelines/**/*.ts",
+    "src/lib/timelines/**/*.svelte",
     "src/lib/routes/**/*.ts",
     "src/lib/routes/**/*.svelte",
     "vite.config.ts"

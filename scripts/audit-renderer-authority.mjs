@@ -109,6 +109,11 @@ const OWNED_SOURCE_DIRS = [
 	'src/lib/review',
 	'src/lib/routes',
 	'src/lib/shell',
+	// Face 4's contentus-owned timeline consumption (M4). Same rule as
+	// `src/lib/review` above: added WITH the directory, because a module that
+	// passes lesser's server-sanitized status HTML straight to the vendored
+	// card is only making that claim if this audit is looking at it.
+	'src/lib/timelines',
 	'src/types',
 	'scripts',
 ];
@@ -123,13 +128,43 @@ const VENDORED_SOURCE_ROOTS = [
 	'src/lib/generics',
 	'src/lib/greater',
 	'src/lib/patterns',
+	// The `utils` alias target. Empty until M4, when the social face's shared
+	// modules placed notificationGrouping.ts here; it is the CLI's directory,
+	// not contentus's, despite the generic name.
+	'src/lib/utils',
 ];
 
-/** Vendored modules the CLI emits loose at the `src/lib` root, not in a tree. */
+/**
+ * Vendored modules the CLI emits loose at the `src/lib` root, not in a tree.
+ *
+ * This list grows at every face that vendors a shared module, because the
+ * registry spells those paths `lib/lib/<name>` and the components.json `lib`
+ * alias resolves that to `src/lib` — so they land as siblings of contentus's
+ * own directories rather than under one of their own. Listing them one by one
+ * is the cost of that; a `src/lib/*.ts` glob would classify contentus-owned
+ * files as vendored the moment somebody added one, which is exactly the
+ * misclassification check 5 exists to catch.
+ */
 const VENDORED_SOURCE_FILES = [
 	'src/lib/blog-share.ts',
 	'src/lib/blog-types.ts',
 	'src/lib/types.ts',
+	// M4: the social face's timeline, notification and realtime modules.
+	// contentus imports none of them — the stores assume an Apollo client it
+	// does not run, and `transport.ts` speaks Mastodon's streaming protocol
+	// rather than lesser's GraphQL subscriptions — but they are on disk, so
+	// check 5 requires them classified rather than merely unused.
+	'src/lib/graphqlTimelineStore.svelte.ts',
+	'src/lib/graphqlTimelineStore.ts',
+	'src/lib/integration.svelte.ts',
+	'src/lib/integration.ts',
+	'src/lib/lesserTimelineStore.svelte.ts',
+	'src/lib/lesserTimelineStore.ts',
+	'src/lib/notificationStore.svelte.ts',
+	'src/lib/notificationStore.ts',
+	'src/lib/timelineStore.svelte.ts',
+	'src/lib/timelineStore.ts',
+	'src/lib/transport.ts',
 ];
 
 const VENDORED_ARTICLE_CONTENT = 'src/lib/greater/faces/blog/components/Article/Content.svelte';
