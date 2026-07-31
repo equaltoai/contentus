@@ -22,6 +22,27 @@
 
 import type { LesserVisibility } from './visibility';
 
+/**
+ * The `triggerType` values lesser accepts, verbatim and in full.
+ *
+ * `buildAgentPostAttribution` (lesser `graph/mutation_resolvers_notes.go`)
+ * lower-cases and trims the input, then looks it up in
+ * `allowedAgentAttributionTriggerTypes` and returns a validation error —
+ * "must be one of: scheduled, mention, hashtag_watch, manual" — for anything
+ * else. It is a closed set, not a hint, so a free-text box over it is a
+ * control that turns a valid post into a rejected one.
+ *
+ * An empty trigger is not in the list and is not sent: lesser defaults the
+ * field to `manual` when the input omits it, and saying so beats making the
+ * poster pick a word for "I just wrote it".
+ */
+export const AGENT_TRIGGER_TYPES = ['scheduled', 'mention', 'hashtag_watch', 'manual'] as const;
+
+export type AgentTriggerType = (typeof AGENT_TRIGGER_TYPES)[number];
+
+/** The value lesser records when `triggerType` is absent. */
+export const AGENT_TRIGGER_DEFAULT: AgentTriggerType = 'manual';
+
 /** lesser `PollParamsInput`. */
 export interface PollParamsInput {
 	options: string[];

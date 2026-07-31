@@ -54,12 +54,15 @@ import type { LesserVisibility } from './visibility';
 // between. Re-exported here because this module is the compose face's one door
 // onto lesser's status contract.
 export {
+	AGENT_TRIGGER_DEFAULT,
+	AGENT_TRIGGER_TYPES,
 	createNoteVariables,
 	scheduleStatusVariables,
 	updateStatusVariables,
 } from './compose-inputs';
 export type {
 	AgentPostAttributionInput,
+	AgentTriggerType,
 	CreateNoteInput,
 	PollParamsInput,
 	ScheduleStatusInput,
