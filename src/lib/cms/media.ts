@@ -127,6 +127,25 @@ function transportFailure(message: string): ComposeFailure {
 }
 
 /**
+ * How long one upload may take before the client stops waiting.
+ *
+ * `XMLHttpRequest.timeout` defaults to 0, which means no timeout at all — so
+ * an `ontimeout` handler without this assignment is a handler that never runs,
+ * and a connection that stalls mid-body leaves the promise pending forever.
+ * The composer's `uploading` and `inFlight` states are derived from that
+ * promise, so "forever" is not abstract: the progress line sticks at whatever
+ * percentage it reached and the media picker refuses further files, with no
+ * error and nothing to retry.
+ *
+ * Five minutes rather than something tighter. This is a total-request budget,
+ * not an idle one, and lesser's own ceiling is 10 MiB (`MaxUploadSize`) — a
+ * phone on a poor uplink can legitimately spend minutes on a file the instance
+ * will accept. The number exists to bound the failure, not to second-guess the
+ * connection.
+ */
+const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
  * Upload one file, reporting real progress.
  *
  * Resolves with a failure rather than rejecting: the caller is a per-file
@@ -154,6 +173,9 @@ export function uploadMedia(
 		// No content-type header: the browser sets it, including the multipart
 		// boundary, which is the only place that boundary exists.
 		request.withCredentials = false;
+		// Set AFTER open(), which is where the spec allows it for an async
+		// request, and without which `ontimeout` below never fires.
+		request.timeout = UPLOAD_TIMEOUT_MS;
 
 		request.upload.onprogress = (event) => {
 			if (!event.lengthComputable) return;
@@ -167,7 +189,12 @@ export function uploadMedia(
 			});
 
 		request.ontimeout = () =>
-			resolve({ ok: false, failure: transportFailure('The upload timed out.') });
+			resolve({
+				ok: false,
+				failure: transportFailure(
+					'The upload did not finish in time and was stopped. The file may be large for this connection — try again, or try a smaller one.'
+				),
+			});
 
 		request.onload = () => {
 			let envelope: GraphQLEnvelope;
