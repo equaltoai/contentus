@@ -49,18 +49,22 @@ counting the verdict history instead would be wrong.
 	import AttributionStrip from '$lib/components/Review/AttributionStrip.svelte';
 	import { describeApprovalRequirement } from '$lib/components/Review/state.js';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
+	import PublishAction from '$lib/review/PublishAction.svelte';
+	import VerdictPanel from '$lib/review/VerdictPanel.svelte';
 	import {
+		isDraftAuthor,
 		loadDraftPreview,
 		loadDraftReview,
 		toPreviewFaceArticle,
 		type DraftPreview,
+		type PublishedArticle,
 		type ReviewFailure,
 	} from '$lib/cms/review';
 	import type { DraftReviewData } from '$lib/blog-types';
 	import { isAuthenticated, startLogin } from '$lib/auth/session';
 
 	import type { AppPageDescriptor, ReviewRouteData } from '../../facetheory/types';
-	import { reviewQueueHref } from '../../facetheory/routing';
+	import { articleHref, reviewQueueHref } from '../../facetheory/routing';
 	import Notice from './Notice.svelte';
 
 	interface Props {
@@ -80,19 +84,32 @@ counting the verdict history instead would be wrong.
 	let loading = $state(false);
 	let signInError = $state<string | null>(null);
 
+	/**
+	 * Whether the viewer authored this draft, per lesser's own answer to a
+	 * minimal `draft(id) { id }` — a query that resolves for the author and
+	 * fails for everyone else. It decides which controls appear, never whether
+	 * an operation is permitted; lesser re-checks every mutation.
+	 */
+	let isAuthor = $state(false);
+
+	/** What happened after a publish or a schedule. Shown, not assumed. */
+	let published = $state<PublishedArticle | null>(null);
+	let scheduled = $state<string | null>(null);
+
 	onMount(async () => {
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
 		if (session !== 'authenticated' || !draftId) return;
 
 		loading = true;
 		try {
-			// Metadata and body are asked for together and reported separately. A
-			// draft whose preview fails to render still has attribution worth
-			// showing, and a reviewer who can see the attribution but not the body
-			// should be told which of the two is missing.
-			const [reviewResult, previewResult] = await Promise.all([
+			// Metadata, body, and ownership are asked for together and reported
+			// separately. A draft whose preview fails to render still has
+			// attribution worth showing, and a reviewer who can see the attribution
+			// but not the body should be told which of the two is missing.
+			const [reviewResult, previewResult, author] = await Promise.all([
 				loadDraftReview(draftId),
 				loadDraftPreview(draftId),
+				isDraftAuthor(draftId),
 			]);
 
 			if (reviewResult.ok) review = reviewResult.value;
@@ -100,10 +117,23 @@ counting the verdict history instead would be wrong.
 
 			if (previewResult.ok) preview = previewResult.value;
 			else previewFailure = previewResult.failure;
+
+			isAuthor = author;
 		} finally {
 			loading = false;
 		}
 	});
+
+	/**
+	 * Replace the local draft with the one lesser returned after a verdict.
+	 *
+	 * Replace, not patch. lesser owns `reviewStatus` and overwrites it on every
+	 * submission, so predicting the new state — or merging a guess into the old
+	 * one — would put a status on screen that the server never said.
+	 */
+	function onVerdictRecorded(updated: DraftReviewData) {
+		review = updated;
+	}
 
 	async function onSignIn() {
 		signInError = null;
@@ -229,6 +259,52 @@ counting the verdict history instead would be wrong.
 					edits to the draft's author.
 				</p>
 			</Panel>
+
+			<Panel class="contentus-review-panel" padding="md" aria-label="Verdict">
+				<VerdictPanel {review} {isAuthor} onRecorded={onVerdictRecorded} />
+			</Panel>
+
+			{#if isAuthor}
+				<Panel class="contentus-review-panel" padding="md" aria-label="Publication">
+					<h2 class="contentus-h2">Publish</h2>
+
+					{#if published}
+						<!-- Reported from lesser's Article, not assumed from a 200. The
+						     link is the identity lesser assigned; contentus does not
+						     construct a slug of its own. -->
+						<Notice
+							title="Published"
+							message="This draft is now an article on this instance, and on its way to the
+								fediverse."
+							detail={published.publishedAt}
+						/>
+						{#if published.slug}
+							<p class="contentus-meta">
+								<a href={articleHref(published.slug)}>Read the published article</a>
+							</p>
+						{/if}
+					{:else if scheduled}
+						<Notice
+							title="Scheduled"
+							message="This instance will attempt to publish at the time you chose. The approval
+								gate still applies then."
+							detail={scheduled}
+						/>
+					{:else}
+						<PublishAction
+							{review}
+							onPublished={(article) => {
+								published = article;
+								scheduled = null;
+							}}
+							onScheduled={(at) => {
+								scheduled = at;
+								published = null;
+							}}
+						/>
+					{/if}
+				</Panel>
+			{/if}
 		</aside>
 
 		<!-- The panel. lesser's rendered output, or an explanation. -->

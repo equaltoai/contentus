@@ -2,29 +2,30 @@
  * Face 2's consumption of lesser's shareable-draft review contract
  * (product design §5, face 2; lesser release v1.5.32).
  *
- * Every operation here exists in lesser `docs/contracts/graphql-schema.graphql`
- * at v1.5.32: the `sharedDraftReviews` / `draftReview` / `myDrafts` /
- * `draftPreview` queries and the `submitDraftReview` / `publishDraft` /
- * `scheduleDraft` mutations. Nothing is invented and nothing is derived —
- * contentus asks, renders what comes back, and lets lesser decide what it means.
+ * This module is the transport half: auth, the network calls, and the queue
+ * assembly around them. The documents themselves, the projections built from
+ * the answers, and the failure taxonomy read out of lesser's errors live in
+ * `cms/review-contract.ts`, which has no imports beyond types so a probe can
+ * load it directly. Re-exported here, because this module is face 2's one door
+ * onto lesser's review contract.
  *
- * THREE INVARIANTS THIS MODULE EXISTS TO HOLD.
+ * THREE INVARIANTS THIS FACE HOLDS.
  *
- * 1. RENDERER AUTHORITY. `Draft.content` is the STORED SOURCE, and no query in
- *    this file selects it. Not "selects it and declines to render it" —
- *    does not ask for it. The only body that reaches a reviewer is
- *    `draftPreview.renderedHtml`, which lesser produced with `cms.RenderDraftPreview`
- *    and which the vendored blog face sanitizes again on the way to the DOM. A
- *    preview that did not render is an explained failure with lesser's own
- *    deterministic errors, never a fallback to source.
+ * 1. RENDERER AUTHORITY. No document selects `Draft.content`. Not "selects it
+ *    and declines to render it" — does not ask for it. The only body that
+ *    reaches a reviewer is `draftPreview.renderedHtml`, which lesser produced
+ *    with `cms.RenderDraftPreview` and which the vendored blog face sanitizes
+ *    again on the way to the DOM. A preview that did not render is an explained
+ *    failure carrying lesser's own deterministic errors, never a fallback to
+ *    source.
  *
  * 2. THE GATE IS LESSER'S. `publishDraft` enforces unanimous approval across
  *    active reviewer grants, plus the instance principal's approval whenever
- *    the draft records a generator (`pkg/services/cms`). Contentus never
- *    reconstructs that arithmetic: it describes the requirement with the
- *    vendored chrome's `describeApprovalRequirement`, calls the mutation, and
- *    reports what lesser answered. A refusal is displayed, never pre-empted or
- *    second-guessed.
+ *    the draft records a generator (`pkg/services/cms/draft_service.go`).
+ *    Contentus never reconstructs that arithmetic: it describes the requirement
+ *    with the vendored chrome's `describeApprovalRequirement`, calls the
+ *    mutation, and reports what lesser answered. A refusal is displayed, never
+ *    pre-empted or second-guessed.
  *
  * 3. AUTH. Every operation needs a token — each resolver opens with
  *    `requireAuth` — so all of it runs in the browser. `sessionStorage` is
@@ -36,266 +37,59 @@
  */
 
 import { accessTokenOrNull } from '$lib/auth/session';
-import type {
-	DraftReviewData,
-	DraftReviewVerdict,
-	ReviewActorData,
-	ReviewVerdictRecordData,
-} from '$lib/blog-types';
+import type { DraftReviewData, DraftReviewVerdict } from '$lib/blog-types';
 
-import { graphqlRequest, GraphQLTransportError, type GraphQLError } from './graphql';
+import { graphqlRequest, GraphQLTransportError } from './graphql';
+import {
+	DRAFT_OWNERSHIP_QUERY,
+	DRAFT_PREVIEW_QUERY,
+	DRAFT_REVIEW_QUERY,
+	MY_DRAFTS_QUERY,
+	PUBLISH_DRAFT_MUTATION,
+	SCHEDULE_DRAFT_MUTATION,
+	SHARED_DRAFT_REVIEWS_QUERY,
+	SUBMIT_DRAFT_REVIEW_MUTATION,
+	failureFromErrors,
+	isAgentGenerated,
+	orderQueueEntries,
+	toDraftPreview,
+	toDraftReview,
+	toOwnDraftReview,
+	type DraftPreview,
+	type ReviewFailure,
+	type ReviewQueueEntry,
+	type ReviewResult,
+} from './review-contract';
 
-/* -------------------------------------------------------------------------
- * Documents
- * ---------------------------------------------------------------------- */
-
-/**
- * The actor projection the review chrome renders.
- *
- * `avatar` and `isAgent` are lesser's own field names (`type Actor`), and
- * `isAgent` is read rather than inferred: the chrome has a first-class contract
- * field for it, so guessing from a username would be contentus inventing a
- * signal lesser already publishes.
- */
-const REVIEW_ACTOR_FIELDS = `
-	id
-	username
-	domain
-	displayName
-	avatar
-	isAgent
-`;
-
-/**
- * `DraftReview`, in full.
- *
- * Note what is NOT here, because its absence is the contract rather than an
- * oversight: `DraftReview` carries no body field at all. lesser's review
- * projection deliberately exposes metadata and verdict history and makes
- * `draftPreview` the only path to content.
- *
- * Depth check: `sharedDraftReviews → edges → node → grant → reviewer → username`
- * is 6, inside lesser's `GRAPHQL_MAX_DEPTH` of 12 for ordinary callers.
- */
-const DRAFT_REVIEW_FIELDS = `
-	draftId
-	title
-	subtitle
-	excerpt
-	contentFormat
-	status
-	scheduledAt
-	updatedAt
-	createdAt
-	reviewStatus
-	editorNotes
-	generatedBy { ${REVIEW_ACTOR_FIELDS} }
-	reviewedBy { ${REVIEW_ACTOR_FIELDS} }
-	grant {
-		grantedAt
-		reviewer { ${REVIEW_ACTOR_FIELDS} }
-	}
-	verdicts {
-		verdict
-		notes
-		recordedAt
-		reviewer { ${REVIEW_ACTOR_FIELDS} }
-	}
-`;
-
-export const SHARED_DRAFT_REVIEWS_QUERY = `
-	query ContentusSharedDraftReviews($first: Int, $after: Cursor) {
-		sharedDraftReviews(first: $first, after: $after) {
-			totalCount
-			pageInfo { hasNextPage endCursor }
-			edges {
-				cursor
-				node { ${DRAFT_REVIEW_FIELDS} }
-			}
-		}
-	}
-`;
-
-export const DRAFT_REVIEW_QUERY = `
-	query ContentusDraftReview($id: ID!) {
-		draftReview(id: $id) { ${DRAFT_REVIEW_FIELDS} }
-	}
-`;
-
-/**
- * The viewer's own drafts.
- *
- * `content` is absent by construction — see invariant 1 in the module header.
- * `slug` is selected because the workspace shows what address a publish would
- * claim; it is displayed, never edited (a published slug is immutable, and
- * Article identity is lesser's).
- */
-export const MY_DRAFTS_QUERY = `
-	query ContentusMyDrafts($first: Int, $after: Cursor) {
-		myDrafts(contentType: ARTICLE, first: $first, after: $after) {
-			totalCount
-			pageInfo { hasNextPage endCursor }
-			edges {
-				cursor
-				node {
-					id
-					title
-					slug
-					status
-					scheduledAt
-					contentFormat
-					updatedAt
-					createdAt
-					generatedBy { ${REVIEW_ACTOR_FIELDS} }
-					reviewedBy { ${REVIEW_ACTOR_FIELDS} }
-				}
-			}
-		}
-	}
-`;
-
-/**
- * The ONLY preview path.
- *
- * `success`, `errors`, and the byte counters are selected together on purpose:
- * a preview that failed has to be able to say so specifically. lesser's limits
- * are 256 KiB of source and 512 KiB of rendered output, and a draft that
- * crossed one is a different problem from a draft whose Markdown did not parse.
- */
-export const DRAFT_PREVIEW_QUERY = `
-	query ContentusDraftPreview($id: ID!) {
-		draftPreview(id: $id) {
-			draftId
-			success
-			renderedHtml
-			sourceFormat
-			sourceBytes
-			renderedBytes
-			errors
-		}
-	}
-`;
-
-export const SUBMIT_DRAFT_REVIEW_MUTATION = `
-	mutation ContentusSubmitDraftReview($draftId: ID!, $verdict: DraftReviewVerdict!, $notes: String) {
-		submitDraftReview(draftId: $draftId, verdict: $verdict, notes: $notes) {
-			${DRAFT_REVIEW_FIELDS}
-		}
-	}
-`;
-
-export const PUBLISH_DRAFT_MUTATION = `
-	mutation ContentusPublishDraft($id: ID!) {
-		publishDraft(id: $id) {
-			id
-			slug
-			title
-			publishedAt
-			canonicalUrl
-		}
-	}
-`;
-
-export const SCHEDULE_DRAFT_MUTATION = `
-	mutation ContentusScheduleDraft($id: ID!, $scheduledAt: Time!) {
-		scheduleDraft(id: $id, scheduledAt: $scheduledAt) {
-			id
-			status
-			scheduledAt
-		}
-	}
-`;
-
-/* -------------------------------------------------------------------------
- * Failure shapes
- * ---------------------------------------------------------------------- */
-
-/**
- * Why a review operation did not happen.
- *
- * `gated` is the one worth distinguishing by name. It is not an error in the
- * reviewer's sense: it is lesser declining to publish because the approval rule
- * is not satisfied, which is the review gate doing its job. Rendering it as a
- * generic failure would make a working gate look like a broken instance.
- */
-export type ReviewFailureReason =
-	| 'unauthenticated'
-	| 'forbidden'
-	| 'gated'
-	| 'not-found'
-	| 'cms-disabled'
-	| 'feature-disabled'
-	| 'rejected'
-	| 'transport';
-
-export interface ReviewFailure {
-	reason: ReviewFailureReason;
-	message: string;
-}
-
-export type ReviewResult<T> = { ok: true; value: T } | { ok: false; failure: ReviewFailure };
-
-function messagesOf(errors: GraphQLError[]): string[] {
-	return errors.map((error) => String(error.message ?? '').toLowerCase());
-}
-
-function isAuthError(errors: GraphQLError[]): boolean {
-	return errors.some((error) => {
-		const message = String(error.message ?? '').toLowerCase();
-		const code = String(error.extensions?.['code'] ?? '').toLowerCase();
-		return (
-			code === 'unauthenticated' ||
-			code === 'unauthorized' ||
-			message.includes('authentication required') ||
-			message.includes('unauthenticated') ||
-			message.includes('not authenticated')
-		);
-	});
-}
-
-/**
- * Classify a GraphQL error set from a review operation.
- *
- * Matching on message text is not a thing to be proud of, and it is here for a
- * stated reason: lesser's CMS resolvers return bare `errors.New(...)` values
- * without an `extensions.code`, so the wire carries no machine-readable
- * discriminator to switch on. The classification is presentational only —
- * every branch shows the reviewer what lesser said — so a miss degrades to a
- * plainer message rather than to a wrong permission decision. A typed error
- * code on the CMS surface is an upstream ask, recorded in
- * `docs/consumption/review-contract.md`.
- */
-function failureFromErrors(errors: GraphQLError[]): ReviewFailure {
-	if (isAuthError(errors)) {
-		return {
-			reason: 'unauthenticated',
-			message: 'Your session has expired. Sign in again to continue reviewing.',
-		};
-	}
-
-	const messages = messagesOf(errors);
-	const first = errors[0]?.message ?? 'The instance rejected this request.';
-	const says = (...needles: string[]) =>
-		messages.some((message) => needles.some((needle) => message.includes(needle)));
-
-	// The gate. lesser refuses the publish and says why; that refusal IS the
-	// product behaviour face 2 exists to make legible, so it keeps its own
-	// reason and lesser's own wording.
-	if (says('approv', 'principal', 'reviewer')) {
-		return { reason: 'gated', message: first };
-	}
-	if (says('not enabled', 'disabled', 'long-form', 'long form')) {
-		return { reason: 'cms-disabled', message: first };
-	}
-	if (says('not found', 'no such draft', 'does not exist')) {
-		return { reason: 'not-found', message: first };
-	}
-	if (says('forbidden', 'not permitted', 'not authorized', 'access denied')) {
-		return { reason: 'forbidden', message: first };
-	}
-
-	return { reason: 'rejected', message: first };
-}
+export {
+	DRAFT_OWNERSHIP_QUERY,
+	DRAFT_PREVIEW_QUERY,
+	DRAFT_REVIEW_QUERY,
+	MY_DRAFTS_QUERY,
+	PUBLISH_DRAFT_MUTATION,
+	REVIEW_DOCUMENTS,
+	SCHEDULE_DRAFT_MUTATION,
+	SHARED_DRAFT_REVIEWS_QUERY,
+	SUBMIT_DRAFT_REVIEW_MUTATION,
+	failureFromErrors,
+	isAgentGenerated,
+	orderQueueEntries,
+	toDraftPreview,
+	toDraftReview,
+	toOwnDraftReview,
+	toPreviewFaceArticle,
+	toReviewActor,
+	toVerdictRecord,
+} from './review-contract';
+export type {
+	DraftPreview,
+	PreviewFaceArticle,
+	QueueSource,
+	ReviewFailure,
+	ReviewFailureReason,
+	ReviewQueueEntry,
+	ReviewResult,
+} from './review-contract';
 
 function failureFromThrown(error: unknown): ReviewFailure {
 	if (error instanceof GraphQLTransportError) {
@@ -354,10 +148,6 @@ async function authenticated<T>(
 	}
 }
 
-/* -------------------------------------------------------------------------
- * Projections
- * ---------------------------------------------------------------------- */
-
 const record = (value: unknown): Record<string, unknown> | null =>
 	value && typeof value === 'object' && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -365,149 +155,9 @@ const record = (value: unknown): Record<string, unknown> | null =>
 
 const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
-function toReviewActor(raw: unknown): ReviewActorData | null {
-	const actor = record(raw);
-	if (!actor) return null;
-
-	const username = str(actor['username']);
-	const id = str(actor['id']);
-	if (!username && !id) return null;
-
-	return {
-		id: id ?? '',
-		username: username ?? '',
-		domain: str(actor['domain']),
-		displayName: str(actor['displayName']),
-		avatar: str(actor['avatar']),
-		isAgent: actor['isAgent'] === true,
-	};
-}
-
-function toVerdictRecord(raw: unknown): ReviewVerdictRecordData | null {
-	const entry = record(raw);
-	if (!entry) return null;
-
-	const reviewer = toReviewActor(entry['reviewer']);
-	if (!reviewer) return null;
-
-	const verdict = str(entry['verdict']);
-	if (verdict !== 'APPROVED' && verdict !== 'CHANGES_REQUESTED') return null;
-
-	return {
-		verdict,
-		notes: str(entry['notes']),
-		reviewer,
-		recordedAt: str(entry['recordedAt']) ?? '',
-	};
-}
-
-const DRAFT_STATUSES = ['DRAFT', 'SCHEDULED', 'PUBLISHING', 'PUBLISHED', 'FAILED'] as const;
-type DraftStatusValue = (typeof DRAFT_STATUSES)[number];
-
-function toDraftStatus(raw: unknown): DraftStatusValue | undefined {
-	const value = str(raw);
-	return value && (DRAFT_STATUSES as readonly string[]).includes(value)
-		? (value as DraftStatusValue)
-		: undefined;
-}
-
-function toContentFormat(raw: unknown): 'HTML' | 'MARKDOWN' | undefined {
-	const value = str(raw);
-	return value === 'HTML' || value === 'MARKDOWN' ? value : undefined;
-}
-
-/** A `DraftReview` node from lesser, as the vendored chrome consumes it. */
-export function toDraftReview(raw: unknown): DraftReviewData | null {
-	const node = record(raw);
-	if (!node) return null;
-
-	const draftId = str(node['draftId']);
-	if (!draftId) return null;
-
-	const grant = record(node['grant']);
-	const grantReviewer = grant ? toReviewActor(grant['reviewer']) : null;
-
-	const verdicts = Array.isArray(node['verdicts'])
-		? node['verdicts']
-				.map(toVerdictRecord)
-				.filter((entry): entry is ReviewVerdictRecordData => entry !== null)
-		: [];
-
-	const status = toDraftStatus(node['status']);
-	const contentFormat = toContentFormat(node['contentFormat']);
-
-	return {
-		draftId,
-		title: str(node['title']),
-		subtitle: str(node['subtitle']),
-		excerpt: str(node['excerpt']),
-		...(contentFormat ? { contentFormat } : {}),
-		...(status ? { status } : {}),
-		scheduledAt: str(node['scheduledAt']),
-		updatedAt: str(node['updatedAt']) ?? '',
-		createdAt: str(node['createdAt']) ?? '',
-		generatedBy: toReviewActor(node['generatedBy']),
-		reviewedBy: toReviewActor(node['reviewedBy']),
-		reviewStatus: str(node['reviewStatus']),
-		editorNotes: str(node['editorNotes']),
-		grant:
-			grantReviewer && grant
-				? { reviewer: grantReviewer, grantedAt: str(grant['grantedAt']) ?? '' }
-				: null,
-		verdicts,
-	};
-}
-
-/**
- * A `Draft` the viewer owns, projected onto the same view model.
- *
- * `DraftReviewData` is explicitly a view model rather than a generated GraphQL
- * type — "every field is optional except the identity fields, so a consumer can
- * render partial query selections" — which is what makes this projection a use
- * of the contract rather than a fabrication of one.
- *
- * The fields lesser's `Draft` genuinely does not carry stay ABSENT: no
- * `reviewStatus`, no `editorNotes`, no `grant`, and an empty verdict history.
- * That is not a gap to paper over. It is what makes the chrome render "No
- * review activity recorded" for an own draft nobody has reviewed — which is
- * true, and is the neutral state the design calls for where the projection
- * lacks data.
- */
-export function toOwnDraftReview(raw: unknown): DraftReviewData | null {
-	const node = record(raw);
-	if (!node) return null;
-
-	const draftId = str(node['id']);
-	if (!draftId) return null;
-
-	const status = toDraftStatus(node['status']);
-	const contentFormat = toContentFormat(node['contentFormat']);
-
-	return {
-		draftId,
-		title: str(node['title']),
-		...(contentFormat ? { contentFormat } : {}),
-		...(status ? { status } : {}),
-		scheduledAt: str(node['scheduledAt']),
-		updatedAt: str(node['updatedAt']) ?? '',
-		createdAt: str(node['createdAt']) ?? '',
-		generatedBy: toReviewActor(node['generatedBy']),
-		reviewedBy: toReviewActor(node['reviewedBy']),
-		verdicts: [],
-	};
-}
-
 /* -------------------------------------------------------------------------
  * The queue
  * ---------------------------------------------------------------------- */
-
-/** Where a queue entry came from, which is also the sort order. */
-export type QueueSource = 'shared-with-me' | 'my-agent-draft';
-
-export interface ReviewQueueEntry {
-	review: DraftReviewData;
-	source: QueueSource;
-}
 
 export interface ReviewQueue {
 	entries: ReviewQueueEntry[];
@@ -516,11 +166,11 @@ export interface ReviewQueue {
 	/**
 	 * Own drafts lesser has not returned yet.
 	 *
-	 * Load-bearing for honesty, not just for a button: `myDrafts` filters
-	 * AFTER paginating (`graph/query_resolvers_cms.go`), so a page can come
-	 * back with nothing while more drafts wait behind it. "No agent-generated
-	 * drafts" and "none in the first N" are different claims, and the queue is
-	 * not allowed to make the first when only the second is true.
+	 * Load-bearing for honesty, not just for a button: `myDrafts` filters AFTER
+	 * paginating (`graph/query_resolvers_cms.go`), so a page can come back with
+	 * nothing while more drafts wait behind it. "No agent-generated drafts" and
+	 * "none in the first N" are different claims, and the queue is not allowed
+	 * to make the first when only the second is true.
 	 */
 	moreOwn: boolean;
 	/** Non-fatal partial failures, so one empty half never hides the other. */
@@ -583,55 +233,6 @@ async function loadOwnDraftsPage(
 }
 
 /**
- * Build the review queue: drafts shared with the viewer first, then the
- * viewer's own agent-generated drafts.
- *
- * That order is the workflow, not a preference — an agent writes, a human
- * reviews — so it is the sort rather than a filter the reviewer has to find
- * (product design §5).
- *
- * The two halves are loaded independently and neither can take the other down:
- * an instance that answers `sharedDraftReviews` but fails `myDrafts` shows the
- * shared queue and says what else it could not load. A draft that is BOTH
- * shared with the viewer and owned by them appears once, on the shared side,
- * because that projection carries the verdict history and the grant.
- */
-export async function loadReviewQueue(): Promise<ReviewQueue> {
-	const failures: ReviewFailure[] = [];
-
-	const [shared, own] = await Promise.all([loadSharedPage(null), collectOwnAgentDrafts()]);
-
-	const entries: ReviewQueueEntry[] = [];
-	const seen = new Set<string>();
-
-	let moreShared = false;
-	if (shared.ok) {
-		moreShared = shared.value.hasNextPage;
-		for (const review of shared.value.nodes) {
-			if (seen.has(review.draftId)) continue;
-			seen.add(review.draftId);
-			entries.push({ review, source: 'shared-with-me' });
-		}
-	} else {
-		failures.push(shared.failure);
-	}
-
-	let moreOwn = false;
-	if (own.ok) {
-		moreOwn = own.value.hasNextPage;
-		for (const review of own.value.nodes) {
-			if (seen.has(review.draftId)) continue;
-			seen.add(review.draftId);
-			entries.push({ review, source: 'my-agent-draft' });
-		}
-	} else {
-		failures.push(own.failure);
-	}
-
-	return { entries, moreShared, moreOwn, failures };
-}
-
-/**
  * Walk `myDrafts` for agent-generated drafts, within a page budget.
  *
  * lesser filters `contentType` after paginating, and contentus filters
@@ -651,13 +252,14 @@ async function collectOwnAgentDrafts(): Promise<ReviewResult<Connection<DraftRev
 		if (!result.ok) {
 			// A later page failing after earlier ones succeeded is still a partial
 			// answer worth showing, with more-to-load left true so the queue does
-			// not claim completeness it does not have.
-			if (nodes.length > 0)
+			// not claim a completeness it does not have.
+			if (nodes.length > 0) {
 				return { ok: true, value: { nodes, hasNextPage: true, endCursor: cursor } };
+			}
 			return result;
 		}
 
-		nodes.push(...result.value.nodes.filter((review) => review.generatedBy));
+		nodes.push(...result.value.nodes.filter(isAgentGenerated));
 		hasNextPage = result.value.hasNextPage;
 		cursor = result.value.endCursor;
 
@@ -667,102 +269,50 @@ async function collectOwnAgentDrafts(): Promise<ReviewResult<Connection<DraftRev
 	return { ok: true, value: { nodes, hasNextPage, endCursor: cursor } };
 }
 
+/**
+ * Build the review queue: drafts shared with the viewer first, then the
+ * viewer's own agent-generated drafts.
+ *
+ * The two halves are loaded independently and neither can take the other down:
+ * an instance that answers `sharedDraftReviews` but fails `myDrafts` shows the
+ * shared queue and says what else it could not load. The ordering and
+ * de-duplication rule itself lives in `orderQueueEntries`, which is pure.
+ */
+export async function loadReviewQueue(): Promise<ReviewQueue> {
+	const failures: ReviewFailure[] = [];
+
+	const [shared, own] = await Promise.all([loadSharedPage(null), collectOwnAgentDrafts()]);
+
+	if (!shared.ok) failures.push(shared.failure);
+	if (!own.ok) failures.push(own.failure);
+
+	return {
+		entries: orderQueueEntries(shared.ok ? shared.value.nodes : [], own.ok ? own.value.nodes : []),
+		moreShared: shared.ok ? shared.value.hasNextPage : false,
+		moreOwn: own.ok ? own.value.hasNextPage : false,
+		failures,
+	};
+}
+
 /* -------------------------------------------------------------------------
  * The workspace
  * ---------------------------------------------------------------------- */
 
 /**
- * A draft preview, exactly as lesser rendered it.
+ * Whether the viewer is this draft's author.
  *
- * `html` is null unless lesser reported success — there is no branch in this
- * codebase that produces preview HTML any other way.
+ * Never throws and never reports a failure: a probe that could not run is
+ * simply "not established", and the workspace then shows the reviewer controls
+ * rather than the author ones. That is the safe direction — the author controls
+ * are publish and schedule, and hiding them costs a reload while wrongly
+ * offering them would put a control on screen that lesser will refuse.
  */
-export interface DraftPreview {
-	draftId: string;
-	success: boolean;
-	html: string | null;
-	sourceFormat: string;
-	sourceBytes: number;
-	renderedBytes: number;
-	errors: string[];
-}
-
-function toDraftPreview(raw: unknown): DraftPreview | null {
-	const preview = record(raw);
-	if (!preview) return null;
-
-	const draftId = str(preview['draftId']);
-	if (!draftId) return null;
-
-	const success = preview['success'] === true;
-	const html = str(preview['renderedHtml']);
-	const errors = Array.isArray(preview['errors'])
-		? preview['errors'].map((entry) => String(entry)).filter(Boolean)
-		: [];
-
-	return {
-		draftId,
-		success,
-		// A failed render has nothing displayable, whatever it put in the field.
-		// Carrying it forward would leave partial output one template edit away
-		// from the screen.
-		html: success ? html : null,
-		sourceFormat: str(preview['sourceFormat']) ?? '',
-		sourceBytes: typeof preview['sourceBytes'] === 'number' ? preview['sourceBytes'] : 0,
-		renderedBytes: typeof preview['renderedBytes'] === 'number' ? preview['renderedBytes'] : 0,
-		errors,
-	};
-}
-
-/**
- * Shape a rendered preview for the vendored blog face's `Article` compound.
- *
- * `contentFormat` is `'html'` unconditionally, and that is a statement of fact
- * rather than a choice: the only value this function is ever handed is
- * `DraftPreview.renderedHtml`, which lesser produced with its own renderer.
- * There is no branch that could pass unrendered source and label it HTML —
- * `toDraftPreview` already nulled the field on any preview that did not
- * succeed, and this function refuses a null.
- *
- * The author is the recorded generator when there is one. The preview panel
- * renders `Article.Content` alone, so nothing displays it; it is populated
- * because the face's view model asks for it, and populating it with the actor
- * lesser named is better than populating it with a placeholder.
- */
-export function toPreviewFaceArticle(
-	preview: DraftPreview,
-	review: DraftReviewData | null
-): {
-	id: string;
-	slug: string;
-	content: string;
-	contentFormat: 'html';
-	title: string;
-	author: { id: string; displayName?: string; username?: string };
-	isPublished: false;
-} | null {
-	if (!preview.success || !preview.html) return null;
-
-	const generator = review?.generatedBy ?? null;
-
-	return {
-		id: preview.draftId,
-		// A draft has no published address, and inventing one here would put a
-		// slug on screen that names nothing.
-		slug: '',
-		content: preview.html,
-		contentFormat: 'html',
-		title: review?.title?.trim() || 'Untitled draft',
-		author: {
-			id: generator?.id ?? '',
-			...(generator?.displayName ? { displayName: generator.displayName } : {}),
-			...(generator?.username ? { username: generator.username } : {}),
-		},
-		// Never true on this surface. A draft under review has not published, and
-		// the whole point of the gate is that reaching this screen is not
-		// publication.
-		isPublished: false,
-	};
+export async function isDraftAuthor(id: string): Promise<boolean> {
+	if (!id) return false;
+	const result = await authenticated(DRAFT_OWNERSHIP_QUERY, { id }, (data) =>
+		str(record((data as { draft?: unknown } | null)?.draft)?.['id'])
+	);
+	return result.ok;
 }
 
 export async function loadDraftReview(id: string): Promise<ReviewResult<DraftReviewData>> {
@@ -869,9 +419,9 @@ export interface PublishedArticle {
  * The gate lives in lesser (`DraftService.PublishDraft`): unanimous approval
  * from every reviewer holding an active grant, and — for any draft that records
  * a generator — the instance principal's approval as well, cumulatively. This
- * function does not evaluate any of that. It calls the mutation and reports the
- * answer, which is the only way the client can be right about a rule whose
- * inputs (the active grant set, the principal's identity) it cannot see.
+ * function evaluates none of that. It calls the mutation and reports the
+ * answer, which is the only way a client can be right about a rule whose inputs
+ * (the active grant set, the principal's identity) it cannot see.
  */
 export async function publishDraft(id: string): Promise<ReviewResult<PublishedArticle>> {
 	return authenticated(PUBLISH_DRAFT_MUTATION, { id }, (data) => {
@@ -906,6 +456,9 @@ export interface ScheduledDraft {
  * instead would either hide a working feature or promise a missing one; a
  * readable capability signal is an upstream ask recorded in
  * `docs/consumption/review-contract.md`.
+ *
+ * Scheduling is not an approval. lesser evaluates the same gate when the
+ * scheduled moment arrives.
  */
 export async function scheduleDraft(
 	id: string,
