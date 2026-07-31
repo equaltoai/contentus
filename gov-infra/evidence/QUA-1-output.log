@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785536469420 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785536469422 COMPLETED 834 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785536501675 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785536501678 COMPLETED 834 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -25,7 +25,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-Y0sAu2xR.css                25.06 kB │ gzip:   4.34 kB
 build/client/assets/entry-client-C9BqaZ3u.js                616.49 kB │ gzip: 188.66 kB
 
-✓ built in 971ms
+✓ built in 978ms
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -42,7 +42,7 @@ computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
 build/server/handler.mjs                 977.48 kB │ gzip: 240.27 kB
 
-✓ built in 936ms
+✓ built in 1.28s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
