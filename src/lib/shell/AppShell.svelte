@@ -24,7 +24,7 @@ twice, not two navigation systems.
 
 	import { isAuthenticated, clearSession, startLogin } from '$lib/auth/session';
 	import MobileTabBar from './MobileTabBar.svelte';
-	import { visibleNavEntries } from './nav';
+	import { COMPOSE_ACTION, visibleNavEntries } from './nav';
 	import type { AppPageDescriptor } from '../../facetheory/types';
 	import { href as appHref } from '../../facetheory/routing';
 
@@ -93,6 +93,21 @@ twice, not two navigation systems.
 					</span>
 				{/if}
 			{/each}
+
+			<!-- The compose action, which the tab bar carries as the FAB on mobile.
+			     Shown to everyone for the same reason it is there: /compose renders
+			     a sign-in state rather than rejecting, so advertising the action
+			     costs an anonymous visitor nothing, and hiding it until hydration
+			     would move the nav under them. -->
+			{#if COMPOSE_ACTION.href}
+				<a
+					class="contentus-nav__compose"
+					href={COMPOSE_ACTION.href}
+					aria-current={COMPOSE_ACTION.pageKey === page.key ? 'page' : undefined}
+				>
+					{COMPOSE_ACTION.label}
+				</a>
+			{/if}
 		</nav>
 
 		<div class="contentus-session">
