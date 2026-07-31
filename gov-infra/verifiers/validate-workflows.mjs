@@ -38,6 +38,12 @@
  *     this repository's workflows already use. This applies to every local composite
  *     action manifest the recursive scan reaches, not only to the workflow files: a
  *     composite action's `run:` is a workflow's `run:` one indirection later.
+ *   - The `env:` indirection that rule recommends is only safe where the value is
+ *     consumed as data. `env: PAYLOAD: ${{ github.event.* }}` plus `run: bash -c
+ *     "$PAYLOAD"` contains no `${{ }}` in its `run:` and executes a pull-request title
+ *     anyway. So an event-derived env value may not reach an executable sink, in
+ *     workflows or in reached composites, and a composite may not carry an event
+ *     expression in `env:` at all.
  *   - Every package-manager install in CI is exactly one of the pinned invocations. The
  *     boundary SEC-3 rests on is that no install anywhere runs dependency lifecycle
  *     scripts. The rubric could only ever fix its own install; the three installs in the
@@ -54,9 +60,10 @@ const workflowDirectory = '.github/workflows';
 const requiredWorkflows = {
 	'gov-rubric.yml': [
 		'bash gov-infra/verifiers/gov-verify-rubric.sh',
-		// The digest-verifying CLI install. Without this step SEC-7 has no CLI whose
-		// provenance it can check and reports BLOCKED; MAI-4 binds the step so it
-		// cannot be quietly dropped to convert a hard gate into a soft one.
+		// The step that fetches and digest-verifies the greater release asset. SEC-7
+		// extracts and executes its own copy of that asset, so without this step there
+		// is no archive to extract and the control reports BLOCKED; MAI-4 binds the
+		// step so it cannot be quietly dropped to convert a hard gate into a soft one.
 		'node gov-infra/verifiers/install-greater-cli.mjs',
 	],
 	'dco.yml': ['Signed-off-by'],
@@ -1469,18 +1476,25 @@ export function validatePullRequestTriggers(directory = workflowDirectory) {
 }
 
 /**
- * One structural pass that yields the mapping lines outside block scalars and the
- * text of every `run:` value. Both consumers below need to tell a mapping key from
- * shell text; a `permissions:` line inside a script is not a permissions block, and
- * a `${{ }}` in a comment above a job is not an injected command.
+ * One structural pass that yields the mapping lines outside block scalars, the
+ * text of every `run:` value, and the body of every block scalar by its header
+ * line. The consumers below need to tell a mapping key from shell text; a
+ * `permissions:` line inside a script is not a permissions block, and a `${{ }}`
+ * in a comment above a job is not an injected command. `blockTexts` exists so an
+ * `env:` entry whose value is a block scalar is read rather than skipped: a value
+ * this pass cannot see is a value the env-sink rule below cannot judge.
  */
 function scanWorkflowLines(content) {
 	const lines = content.split(/\r\n|\r|\n/);
 	const mappingLines = [];
 	const runTexts = [];
+	const blockTexts = new Map();
 	let block = null;
 	const closeBlock = () => {
-		if (block?.isRun) runTexts.push({ line: block.headerLine, text: block.body.join('\n') });
+		if (!block) return;
+		const text = block.body.join('\n');
+		blockTexts.set(block.headerLine, { key: block.key, text });
+		if (block.isRun) runTexts.push({ line: block.headerLine, text });
 		block = null;
 	};
 	for (let index = 0; index < lines.length; index += 1) {
@@ -1489,13 +1503,13 @@ function scanWorkflowLines(content) {
 		const nonBlank = /\S/.test(line);
 		if (block) {
 			if (!nonBlank) {
-				if (block.isRun) block.body.push('');
+				block.body.push('');
 				continue;
 			}
 			if (block.contentIndent === null && indent > block.headerIndent)
 				block.contentIndent = block.explicitIndent ?? indent;
 			if (block.contentIndent !== null && indent >= block.contentIndent) {
-				if (block.isRun) block.body.push(line.slice(block.contentIndent));
+				block.body.push(line.slice(block.contentIndent));
 				continue;
 			}
 			closeBlock();
@@ -1519,6 +1533,7 @@ function scanWorkflowLines(content) {
 				headerLine: index,
 				explicitIndent: header.explicitIndent === null ? null : indent + header.explicitIndent,
 				contentIndent: null,
+				key,
 				isRun: key === 'run',
 				body: [],
 			};
@@ -1527,7 +1542,7 @@ function scanWorkflowLines(content) {
 		if (key === 'run' && rawValue.trim()) runTexts.push({ line: index, text: rawValue });
 	}
 	closeBlock();
-	return { mappingLines, runTexts };
+	return { mappingLines, runTexts, blockTexts };
 }
 
 const READ_ONLY_VALUES = new Set(['read', 'none']);
@@ -1632,6 +1647,365 @@ export function validateRunExpressions(directory = workflowDirectory, root = '.'
 				);
 			}
 		}
+	}
+	return findings;
+}
+
+/**
+ * The rule above forbids splicing event payload text into a `run:` block and tells
+ * the author to pass it through `env:` instead. That advice is sound and it was
+ * also, on its own, a hole: `env:` puts the value in the shell's environment, and
+ * a shell that is handed its own environment back as *program text* is exactly as
+ * compromised as one that had the text spliced in.
+ *
+ *     env:
+ *       PAYLOAD: ${{ github.event.pull_request.title }}
+ *     run: bash -c "$PAYLOAD"
+ *
+ * No `${{ }}` appears in that `run:`, so the previous scan passed it, and a pull
+ * request title runs as a command before the rubric starts. Env indirection is
+ * safe only where the value is consumed as *data*.
+ *
+ * So two rules, both applied to workflows and to every local composite action a
+ * workflow reaches:
+ *
+ *   - A composite action manifest may not carry a `github.event` expression in
+ *     `env:` at all. Composites receive their data through `with:` inputs; an
+ *     event expression inside one is the workflow's trust boundary re-crossed at a
+ *     depth the calling workflow's own review does not show.
+ *   - That `with:` channel is allowed because the value arrives as *data*, so the
+ *     same distinction applies to it. `${{ inputs.* }}` spliced straight into a
+ *     composite's `run:` is caller-supplied text becoming program text — the very
+ *     shape the event-expression rule exists to refuse, one indirection along — and
+ *     is a finding. Carrying an input through `env:` is the safe pattern and stays
+ *     allowed; the value is then tainted for the sink rule below, because what the
+ *     caller passed may well be event payload.
+ *   - An env value carrying a `github.event` expression may not be referenced from
+ *     an executable sink in any `run:` text: `bash -c`/`sh -c`, `eval`, `node -e`,
+ *     `python -c` and their siblings, a command substitution, or the command word
+ *     of a segment. Referencing it as data — as an argument to a non-executing
+ *     command, or as argv to a pinned script — stays exactly as allowed as before,
+ *     because that is the pattern this repository's own workflows use.
+ *
+ * Taint follows shell assignment and same-line `$GITHUB_ENV` writes, to a fixpoint,
+ * so renaming a value does not launder it. What it does not follow is recorded as a
+ * residual limit in the threat model rather than implied to be covered: this reads
+ * `run:` text, so a value that reaches a sink inside a called script, through a
+ * pipe, or through a heredoc written to `$GITHUB_ENV` is outside it.
+ */
+const eventExpressionPattern = /\$\{\{([^}]*)\}\}/g;
+const shellIdentifier = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const shellInterpreters = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh']);
+const inlineScriptFlags = new Map([
+	['node', /^(?:-e|--eval|-p|--print)$/],
+	['nodejs', /^(?:-e|--eval|-p|--print)$/],
+	['python', /^-c$/],
+	['python3', /^-c$/],
+	['perl', /^-[eE]$/],
+	['ruby', /^-e$/],
+]);
+const assignmentDeclarators = new Set(['export', 'declare', 'local', 'readonly', 'typeset']);
+
+const eventReference = /\bgithub\s*\.\s*event\b/;
+const inputReference = /\binputs\s*\.\s*[A-Za-z_-]/;
+
+function expressionsMatching(text, pattern) {
+	const found = [];
+	for (const [expression, body] of String(text).matchAll(eventExpressionPattern))
+		if (pattern.test(body)) found.push(expression.trim());
+	return found;
+}
+
+const eventExpressionsIn = (text) => expressionsMatching(text, eventReference);
+const inputExpressionsIn = (text) => expressionsMatching(text, inputReference);
+
+// `$NAME`, `${NAME}`, `${NAME:-default}`. `${!NAME}` is deliberately not matched:
+// indirect expansion is outside this model and is recorded as such.
+function referencesVariable(token, name) {
+	return new RegExp(`\\$\\{?${name}(?![A-Za-z0-9_])`).test(token);
+}
+
+function splitFlowEntries(source) {
+	const entries = [];
+	let depth = 0;
+	let quote = null;
+	let start = 0;
+	for (let index = 0; index < source.length; index += 1) {
+		const character = source[index];
+		if (quote) {
+			if (character === quote) quote = null;
+			continue;
+		}
+		if (character === '"' || character === "'") quote = character;
+		else if ('{[('.includes(character)) depth += 1;
+		else if ('}])'.includes(character)) depth -= 1;
+		else if (character === ',' && depth === 0) {
+			entries.push(source.slice(start, index));
+			start = index + 1;
+		}
+	}
+	entries.push(source.slice(start));
+	return entries.filter((entry) => entry.trim());
+}
+
+// An env value that is a block scalar lives in `blockTexts`, not on the mapping
+// line. Comments are deliberately not stripped: a value this pass mis-trims is a
+// value it would then mis-judge, and over-reading a trailing comment fails closed.
+function envValueOf(mapping, blockTexts) {
+	let header = null;
+	try {
+		header = blockScalarHeader(mapping.rawValue.trimStart());
+	} catch {
+		header = null;
+	}
+	return header ? (blockTexts.get(mapping.index)?.text ?? '') : mapping.rawValue.trim();
+}
+
+function envDeclarations(mappingLines, blockTexts) {
+	const entries = [];
+	const errors = [];
+	for (let position = 0; position < mappingLines.length; position += 1) {
+		const declaration = mappingLines[position];
+		if (declaration.key !== 'env') continue;
+		const value = declaration.rawValue.trim();
+		if (value === '' || value.startsWith('#')) {
+			let childIndent = null;
+			for (let index = position + 1; index < mappingLines.length; index += 1) {
+				const child = mappingLines[index];
+				if (child.indent <= declaration.indent) break;
+				childIndent ??= child.indent;
+				if (child.indent !== childIndent) {
+					errors.push({
+						line: child.index,
+						message: `nested mapping \`${child.line.trim()}\` under env: is outside this scanner's env model`,
+					});
+					continue;
+				}
+				entries.push({ name: child.key, value: envValueOf(child, blockTexts), line: child.index });
+			}
+			continue;
+		}
+		if (value === '{}') continue;
+		const flow = value.match(/^\{(.*)\}$/s);
+		if (flow) {
+			for (const pair of splitFlowEntries(flow[1])) {
+				const separator = pair.indexOf(':');
+				if (separator < 0) {
+					errors.push({
+						line: declaration.index,
+						message: `unreadable flow env entry \`${pair.trim()}\``,
+					});
+					continue;
+				}
+				entries.push({
+					name: pair
+						.slice(0, separator)
+						.trim()
+						.replace(/^['"]|['"]$/g, ''),
+					value: pair.slice(separator + 1).trim(),
+					line: declaration.index,
+				});
+			}
+			continue;
+		}
+		errors.push({
+			line: declaration.index,
+			message: `env: value \`${value}\` is outside this scanner's model; declare env as a mapping`,
+		});
+	}
+	return { entries, errors };
+}
+
+// Command substitutions, arithmetic expansion and process substitutions. All of
+// them can reach the executor: `$((x))` evaluates array subscripts, and `<(cmd)`
+// runs a command. Only spans that actually reference a tainted name are reported,
+// so ordinary arithmetic in a workflow stays untouched.
+function substitutionSpans(text) {
+	const spans = [];
+	for (let index = 0; index < text.length; index += 1) {
+		const character = text[index];
+		if (character === '`' && !escapedByOddBackslashes(text, index)) {
+			const end = text.indexOf('`', index + 1);
+			spans.push({
+				kind: 'a backtick command substitution',
+				text: end < 0 ? text.slice(index + 1) : text.slice(index + 1, end),
+			});
+			if (end < 0) break;
+			index = end;
+			continue;
+		}
+		const opensSubstitution =
+			(character === '$' && text[index + 1] === '(') ||
+			((character === '<' || character === '>') && text[index + 1] === '(');
+		if (!opensSubstitution) continue;
+		let depth = 1;
+		let cursor = index + 2;
+		for (; cursor < text.length && depth; cursor += 1) {
+			if (text[cursor] === '(') depth += 1;
+			else if (text[cursor] === ')') depth -= 1;
+		}
+		spans.push({
+			kind: character === '$' ? 'a $(...) command substitution' : 'a <(...) process substitution',
+			text: text.slice(index + 2, depth ? text.length : cursor - 1),
+		});
+		index = cursor - 1;
+	}
+	return spans;
+}
+
+function assignedName(token) {
+	const match = token.match(/^([A-Za-z_][A-Za-z0-9_]*)\+?=/);
+	return match ? match[1] : null;
+}
+
+/**
+ * Grow the tainted set across shell assignments and same-line `$GITHUB_ENV`
+ * writes until it stops growing. Renaming a value is not laundering it.
+ */
+function propagateTaint(runTexts, tainted) {
+	let grew = true;
+	while (grew) {
+		grew = false;
+		for (const { text } of runTexts) {
+			for (const segment of runSegments(text)) {
+				const rendered = segment.map((entry) => entry.value).join(' ');
+				const carries = [...tainted].some((name) => referencesVariable(rendered, name));
+				if (!carries) continue;
+				const head = segment[0];
+				const candidates = assignmentDeclarators.has(head?.quoted ? '' : head.value)
+					? segment.slice(1)
+					: segment;
+				const writesGithubEnv = segment.some((entry) =>
+					/^\$\{?GITHUB_(?:ENV|OUTPUT)\}?$/.test(entry.value)
+				);
+				for (const entry of candidates) {
+					const name = assignedName(entry.value);
+					if (name && !tainted.has(name)) {
+						tainted.add(name);
+						grew = true;
+					}
+				}
+				if (!writesGithubEnv) continue;
+				for (const entry of segment) {
+					const name = assignedName(entry.value);
+					if (name && !tainted.has(name)) {
+						tainted.add(name);
+						grew = true;
+					}
+				}
+			}
+		}
+	}
+	return tainted;
+}
+
+function executableSinkFindings(text, tainted) {
+	const findings = [];
+	const names = [...tainted];
+	const hits = (token) => names.filter((name) => referencesVariable(token, name));
+	const report = (matched, sink) => {
+		if (matched.length) findings.push({ names: matched, sink });
+	};
+
+	for (const segment of runSegments(text)) {
+		const head = segment[0];
+		if (!head) continue;
+		const rest = segment.slice(1);
+		// A variable that resolves to the command word is execution, not data. An
+		// assignment is neither; propagateTaint has already followed it.
+		if (!assignedName(head.value)) report(hits(head.value), 'the command word of a shell segment');
+		const headWord = head.quoted ? '' : head.value;
+		if (shellInterpreters.has(headWord)) {
+			const command = rest.find(
+				(entry) => !entry.quoted && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(entry.value)
+			);
+			if (command)
+				for (const entry of rest) report(hits(entry.value), `\`${headWord} ${command.value}\``);
+		}
+		if (headWord === 'eval') for (const entry of rest) report(hits(entry.value), '`eval`');
+		const flag = inlineScriptFlags.get(headWord);
+		if (flag) {
+			const inline = rest.find((entry) => !entry.quoted && flag.test(entry.value));
+			if (inline)
+				for (const entry of rest) report(hits(entry.value), `\`${headWord} ${inline.value}\``);
+		}
+	}
+	// A substitution is a nested shell, so it is judged by the same rules rather
+	// than by the mere presence of the name: `$(printf '%s' "$TITLE")` consumes the
+	// value as data exactly as `printf '%s' "$TITLE"` does, while `$($TITLE)` and
+	// `$(bash -c "$TITLE")` reach an executor and are reported as such.
+	for (const span of substitutionSpans(text)) {
+		if (!names.some((name) => referencesVariable(span.text, name))) continue;
+		for (const finding of executableSinkFindings(span.text, tainted))
+			findings.push({ names: finding.names, sink: `${finding.sink} inside ${span.kind}` });
+	}
+	return findings;
+}
+
+/**
+ * The composite `env:` prohibition and the executable-sink rule, over the workflow
+ * set and every local composite action manifest it reaches.
+ */
+export function validateEventEnvSinks(directory = workflowDirectory, root = '.') {
+	const findings = [];
+	const targets = [
+		...yamlFiles(directory).map((file) => ({ file, composite: false })),
+		...localActionManifests(directory, root).map((file) => ({ file, composite: true })),
+	];
+	for (const { file, composite } of targets) {
+		const { mappingLines, runTexts, blockTexts } = scanWorkflowLines(readFileSync(file, 'utf8'));
+		const { entries, errors } = envDeclarations(mappingLines, blockTexts);
+		for (const error of errors) findings.push(`${file}:${error.line + 1}: ${error.message}`);
+		// A composite may not splice a caller-supplied input straight into `run:`
+		// either: the `with:` channel is allowed because the value arrives as data,
+		// and interpolation makes it program text.
+		if (composite)
+			for (const { line, text } of runTexts)
+				for (const expression of inputExpressionsIn(text))
+					findings.push(
+						`${file}:${line + 1}: composite run: interpolates ${expression} directly; ` +
+							'a caller may pass event payload as that input — carry it through env: and ' +
+							'reference the shell variable instead'
+					);
+		const tainted = new Set();
+		for (const entry of entries) {
+			const expressions = eventExpressionsIn(entry.value);
+			if (composite && expressions.length) {
+				findings.push(
+					`${file}:${entry.line + 1}: composite action env: ${entry.name} carries ` +
+						`${expressions[0]}; a composite receives event-derived data through with: inputs, ` +
+						'never by re-crossing the trust boundary inside the action'
+				);
+				continue;
+			}
+			// Inside a composite an input is caller-supplied and may be event payload,
+			// so it is tainted for the sink rule even though carrying it is allowed.
+			const carried = expressions.length
+				? expressions
+				: composite
+					? inputExpressionsIn(entry.value)
+					: [];
+			if (!carried.length) continue;
+			if (!shellIdentifier.test(entry.name)) {
+				findings.push(
+					`${file}:${entry.line + 1}: env: name \`${entry.name}\` carries ${carried[0]} and ` +
+						'is not a shell identifier, so its use cannot be bounded by this scanner'
+				);
+				continue;
+			}
+			tainted.add(entry.name);
+		}
+		if (!tainted.size) continue;
+		propagateTaint(runTexts, tainted);
+		const origin = composite ? 'caller-supplied' : 'event-derived';
+		for (const { line, text } of runTexts)
+			for (const finding of executableSinkFindings(text, tainted))
+				findings.push(
+					`${file}:${line + 1}: run: reaches ${finding.sink} with ${origin} ` +
+						`${finding.names.map((name) => `$${name}`).join(', ')}; ` +
+						'pass the value as data (an argument to a non-executing command, or argv to a ' +
+						'pinned script) instead of as program text'
+				);
 	}
 	return findings;
 }
@@ -1777,6 +2151,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		return [
 			...validateWorkflowPermissions(directory, allowedWrites),
 			...validateRunExpressions(directory),
+			...validateEventEnvSinks(directory),
 			...validateInstallInvocations(directory, allowedInstalls),
 		];
 	};
