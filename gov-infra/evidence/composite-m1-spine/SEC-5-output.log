@@ -1,5 +1,5 @@
 
-> @equaltoai/contentus@0.1.0 validate:renderer-authority /tmp/contentus-composite-r4-final.lTkC45
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /tmp/contentus-r5-comp-final.reihmk
 > node scripts/audit-renderer-authority.mjs
 
 # Renderer-authority audit
