@@ -11,12 +11,19 @@ anonymous nav because the session token lives in `sessionStorage` — there is n
 cookie for the server to read, by design. That means SSR output for the public
 article surfaces is identical for every visitor and safe to cache, and the
 authenticated entries appear on hydration.
+
+Below 960px the sidebar nav gives way to the bottom tab bar (product design
+§4). Both are rendered — the swap is CSS, not a JS viewport measurement, because
+lesser performs no SPA fallback under `/l/*` and a phone's first paint is the
+server's document. The duplication is one nav model (`./nav.ts`) presented
+twice, not two navigation systems.
 -->
 
 <script lang="ts">
 	import { onMount } from 'svelte';
 
 	import { isAuthenticated, clearSession, startLogin } from '$lib/auth/session';
+	import MobileTabBar from './MobileTabBar.svelte';
 	import { visibleNavEntries } from './nav';
 	import type { AppPageDescriptor } from '../../facetheory/types';
 	import { href as appHref } from '../../facetheory/routing';
@@ -107,4 +114,6 @@ authenticated entries appear on hydration.
 	<main class="contentus-main" id="contentus-main">
 		{@render children?.()}
 	</main>
+
+	<MobileTabBar {page} {authenticated} />
 </div>

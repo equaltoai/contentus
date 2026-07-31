@@ -82,3 +82,69 @@ export const NAV_ENTRIES: NavEntry[] = [
 export function visibleNavEntries(authenticated: boolean): NavEntry[] {
 	return NAV_ENTRIES.filter((entry) => authenticated || !entry.requiresAuth);
 }
+
+/**
+ * The compose action (product design §4, "New").
+ *
+ * Deliberately not a `NavEntry`: it is not a destination in the primary nav. On
+ * desktop it is an action in the sidebar; on mobile it is the centered FAB in
+ * the bottom tab bar, which is the highest-frequency mobile write path the
+ * whole chrome exists to serve.
+ *
+ * It is shown to everyone, including anonymous visitors, even though lesser
+ * requires `write` scope to post. Two reasons, and they are the same reason
+ * twice: the FAB is the centre slot of a fixed bar, so hiding it until
+ * hydration would shift the bar under the reader's thumb on every public page;
+ * and `/compose` is a real server-rendered route that renders a designed
+ * sign-in state rather than a rejection. Advertising the action and explaining
+ * the requirement on arrival beats a control that appears a beat late.
+ */
+export interface ComposeAction {
+	id: 'compose';
+	label: string;
+	/** App-relative destination, or null while the face is still upcoming. */
+	href: string | null;
+	pageKey: AppPageKey | null;
+	surface: SurfaceVariant;
+	/** lesser requires an authenticated caller to post; the route says so. */
+	requiresAuth: true;
+	/** Milestone that lands the face; absent once shipped. */
+	upcoming: string | null;
+}
+
+export const COMPOSE_ACTION: ComposeAction = {
+	id: 'compose',
+	label: 'New post',
+	href: null,
+	pageKey: null,
+	surface: 'core',
+	requiresAuth: true,
+	upcoming: 'M3.2',
+};
+
+/**
+ * The four destinations the mobile tab bar carries (product design §4).
+ *
+ * Review is deliberately absent: a thumb-reachable bar holds four targets and a
+ * FAB before the targets drop under 44px, and Review is a desk task on a queue.
+ * It stays in the sidebar nav, which the tab bar does not replace.
+ */
+const MOBILE_TAB_IDS = ['articles', 'timelines', 'messages', 'agents'] as const;
+
+/**
+ * Tab-bar entries visible to a given session, in bar order.
+ *
+ * Same auth rule as the sidebar, and the same consequence: the server render is
+ * always the anonymous bar, because the session token lives in `sessionStorage`
+ * and there is no cookie for the server to read. Messages therefore appears on
+ * hydration for a signed-in reader. The bar is already painted by then, so this
+ * costs one reflow of a rendered control rather than a control that was not
+ * there — which is the trade M1 already made for the sidebar, kept here so the
+ * two navs cannot disagree about who sees what.
+ */
+export function visibleMobileTabs(authenticated: boolean): NavEntry[] {
+	const byId = new Map(NAV_ENTRIES.map((entry) => [entry.id, entry]));
+	return MOBILE_TAB_IDS.map((id) => byId.get(id)).filter(
+		(entry): entry is NavEntry => entry !== undefined && (authenticated || !entry.requiresAuth)
+	);
+}

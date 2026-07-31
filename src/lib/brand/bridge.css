@@ -459,10 +459,213 @@ code {
 	max-width: var(--gr-blog-content-max-width);
 }
 
+.contentus-visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* =============================================================
+   Mobile chrome — bottom tab bar, compose FAB, sheet
+   (product design §4; contentus-owned, M3.1)
+   -------------------------------------------------------------
+   greater-components ships no bottom-nav, drawer, or sheet at
+   greater-v0.11.9 — a planned upstream gap (§7). These rules are the
+   presentation half of the interim chrome; the components are
+   `src/lib/shell/MobileTabBar.svelte` and `src/lib/shell/Sheet.svelte`.
+   SWAP-TO-VENDORED: delete this whole block when greater M3a lands its
+   mobile-nav components and the two files above become bindings.
+
+   Metrics, all from the brand's own scales:
+     --contentus-tabbar-height  56px  bar chrome, excluding the safe area
+     44px minimum touch target on every tab and the FAB
+     env(safe-area-inset-bottom) keeps the row clear of a home indicator
+
+   No affordance here depends on hover. Every tab carries a permanent text
+   label beside its icon, current state is `aria-current` plus a painted
+   indicator, and the hover rules below only add emphasis to something
+   already legible — which is the rule for a surface whose primary input
+   has no hover at all.
+   ============================================================= */
+
+:root {
+	--contentus-tabbar-height: 56px;
+	--contentus-fab-size: 56px;
+	--contentus-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.contentus-tabbar {
+	display: none;
+}
+
+.contentus-tabbar__list {
+	display: flex;
+	align-items: stretch;
+	justify-content: space-around;
+	gap: 0;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-tabbar__item {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+}
+
+.contentus-tabbar__tab {
+	position: relative;
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	min-width: 44px;
+	padding: var(--tc-space-1) var(--tc-space-1);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-label-sm);
+	line-height: 1.2;
+	text-align: center;
+	text-decoration: none;
+}
+
+.contentus-tabbar__tab[aria-disabled='true'] {
+	color: var(--tc-fg-dim);
+}
+
+.contentus-tabbar__tab[aria-current='page'] {
+	color: var(--tc-fg);
+}
+
+/* The current-tab indicator is a painted bar, not a colour change alone:
+   colour is the one signal a reader may not be able to resolve. */
+.contentus-tabbar__tab[aria-current='page']::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	width: 28px;
+	height: 2px;
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-accent);
+}
+
+.contentus-tabbar__label {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.contentus-tabbar__upcoming {
+	font-size: var(--tc-fs-label-sm);
+	color: var(--tc-fg-dim);
+}
+
+.contentus-fab {
+	display: none;
+}
+
+/* ---- Sheet chrome ----
+   `100svh` (small viewport height) rather than `100vh`: on a phone the
+   large viewport is the pre-scroll one, so `100vh` puts the sticky action
+   bar under the browser's own chrome exactly when the keyboard is up and
+   the submit button is what the reader is reaching for. */
+.contentus-sheet-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background: color-mix(in srgb, var(--tc-midnight-depth) 72%, transparent);
+}
+
+.contentus-sheet {
+	position: fixed;
+	z-index: 41;
+	display: flex;
+	flex-direction: column;
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline-variant);
+	box-shadow: var(--tc-shadow-lg);
+	/* Desktop default: a centered dialog. The mobile full-screen form is the
+	   ≤960px override below. */
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: min(640px, calc(100vw - var(--tc-space-8)));
+	max-height: min(80svh, calc(100svh - var(--tc-space-8)));
+	border-radius: var(--tc-radius-lg);
+}
+
+.contentus-sheet__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+	padding: var(--tc-space-4) var(--tc-space-5);
+	border-bottom: 1px solid var(--tc-outline-variant);
+}
+
+.contentus-sheet__title {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h4);
+	font-weight: var(--tc-w-semibold);
+	margin: 0;
+}
+
+.contentus-sheet__close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	min-width: 44px;
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md);
+	background: transparent;
+	color: var(--tc-fg-muted);
+	cursor: pointer;
+}
+
+.contentus-sheet__close:hover {
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+}
+
+.contentus-sheet__body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: var(--tc-space-5);
+}
+
+.contentus-sheet__actions {
+	position: sticky;
+	bottom: 0;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--tc-space-3);
+	padding: var(--tc-space-4) var(--tc-space-5);
+	padding-bottom: calc(var(--tc-space-4) + var(--contentus-safe-bottom));
+	border-top: 1px solid var(--tc-outline-variant);
+	background: var(--tc-surface-1);
+}
+
 /* =============================================================
    Breakpoints — sim's proven system (product design §4)
-   960px: grid collapses to one column
+   960px: grid collapses to one column; the bottom tab bar takes over
+          from the sidebar nav
    720px: tighter gutters, stacked headers
+   640px: tab labels tighten, sheet loses its inset
+   480px: smallest supported phone — labels shrink before targets do
    ============================================================= */
 
 @media (max-width: 960px) {
@@ -478,20 +681,24 @@ code {
 		padding: var(--tc-space-4) 0;
 		border-right: none;
 		border-bottom: 1px solid var(--tc-outline-variant);
-		flex-direction: column;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
 		gap: var(--tc-space-4);
 	}
 
-	/* Horizontal scroll rather than wrap: keeps the nav one row tall on a
-	   phone. The bottom tab bar that replaces this arrives in M3. */
-	.contentus-nav {
-		flex-direction: row;
-		gap: var(--tc-space-2);
-		overflow-x: auto;
-	}
+	/* The bottom tab bar is the mobile nav (product design §4), so the sidebar
+	   nav is not also shown — two navigation systems on one small screen is
+	   worse than one. The sidebar collapses to brand + session, which the tab
+	   bar deliberately does not carry.
 
-	.contentus-nav__link {
-		white-space: nowrap;
+	   Review is the one primary destination the four-tab bar has no slot for.
+	   §4 answers that: "tabs carry the unread/review badges" — when M2 lands,
+	   the review count rides the Articles tab (the journal surface it belongs
+	   to) rather than becoming a fifth target that would push every tab under
+	   44px on a 360px screen. */
+	.contentus-nav {
+		display: none;
 	}
 
 	.contentus-session {
@@ -499,7 +706,68 @@ code {
 	}
 
 	.contentus-main {
-		padding: var(--tc-space-8) 0 var(--tc-space-16);
+		/* Clear the fixed tab bar and the FAB's overhang, plus the safe area. */
+		padding: var(--tc-space-8) 0
+			calc(var(--tc-space-16) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+	}
+
+	.contentus-tabbar {
+		position: fixed;
+		z-index: 30;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		display: block;
+		padding-bottom: var(--contentus-safe-bottom);
+		border-top: 1px solid var(--tc-outline-variant);
+		background: var(--tc-surface-1);
+		box-shadow: var(--tc-shadow-lg);
+	}
+
+	.contentus-tabbar__list {
+		min-height: var(--contentus-tabbar-height);
+		/* Leave the middle clear for the FAB without narrowing any tab: the two
+		   centre items keep their full width and the FAB floats above them. */
+		padding: 0 var(--tc-space-2);
+	}
+
+	.contentus-fab {
+		position: fixed;
+		z-index: 31;
+		left: 50%;
+		bottom: calc(var(--contentus-tabbar-height) - var(--contentus-fab-size) / 2 + var(--contentus-safe-bottom));
+		transform: translateX(-50%);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--contentus-fab-size);
+		height: var(--contentus-fab-size);
+		border: 1px solid var(--tc-outline);
+		border-radius: var(--tc-radius-pill);
+		background: var(--tc-core-blue);
+		color: var(--tc-midnight);
+		box-shadow: var(--tc-shadow-lg);
+		text-decoration: none;
+	}
+
+	.contentus-fab[aria-disabled='true'] {
+		background: var(--tc-surface-2);
+		color: var(--tc-fg-dim);
+	}
+
+	/* Full-screen sheet on mobile: the composer is the highest-frequency
+	   mobile write path, and a centered dialog wastes the screen it needs. */
+	.contentus-sheet {
+		top: auto;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		transform: none;
+		width: 100%;
+		height: 100svh;
+		max-height: 100svh;
+		border: none;
+		border-radius: 0;
 	}
 }
 
@@ -510,6 +778,47 @@ code {
 	}
 
 	.contentus-main {
-		padding: var(--tc-space-6) 0 var(--tc-space-12);
+		padding: var(--tc-space-6) 0
+			calc(var(--tc-space-12) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+	}
+
+	.contentus-sheet__header,
+	.contentus-sheet__body,
+	.contentus-sheet__actions {
+		padding-left: var(--tc-space-4);
+		padding-right: var(--tc-space-4);
+	}
+}
+
+@media (max-width: 640px) {
+	.contentus-shell {
+		padding: 0 var(--tc-space-3);
+	}
+
+	.contentus-tabbar__list {
+		padding: 0;
+	}
+
+	.contentus-tabbar__upcoming {
+		/* The milestone marker is the first thing to go: the label and the
+		   target matter more than the note, and the sidebar still states it. */
+		display: none;
+	}
+}
+
+@media (max-width: 480px) {
+	.contentus-shell {
+		padding: 0 var(--tc-space-2);
+	}
+
+	/* Labels shrink; touch targets do not. 44px is a floor, not a preference. */
+	.contentus-tabbar__label {
+		font-size: var(--tc-fs-label-sm);
+		letter-spacing: -0.01em;
+	}
+
+	.contentus-tabbar__tab {
+		padding-left: 0;
+		padding-right: 0;
 	}
 }
