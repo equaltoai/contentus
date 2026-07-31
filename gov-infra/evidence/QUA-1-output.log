@@ -1,1 +1,313 @@
- ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND  No package.json (or package.yaml, or package.json5) was found in "/tmp/r8-spine.JH0qhY".
+
+> @equaltoai/contentus@0.1.0 build /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate
+
+
+> @equaltoai/contentus@0.1.0 typecheck /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> tsc --noEmit
+
+
+> @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+1785498842389 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785498842390 COMPLETED 477 FILES 0 ERRORS 15 WARNINGS 2 FILES_WITH_PROBLEMS
+
+> @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> vite build
+
+vite v8.2.0 building client environment for production...
+[2Ktransforming...7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:89:42 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+87:   const targetId = $derived(data.intent.statusId);
+88: 
+89:   let source = $state<SourceStatus | null>(data.source);
+                                                   ^
+90:   let viewer = $state<ComposeViewer | null>(null);
+91: 
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:100:6 This reference only captures the initial value of `mode`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 98:    */
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+                 ^
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:100:26 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 98:    */
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+                                         ^
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:100:52 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 98:    */
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+                                                                   ^
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:101:6 This reference only captures the initial value of `mode`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+                 ^
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+103:   });
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:101:26 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+                                         ^
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+103:   });
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:101:48 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+                                                               ^
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+103:   });
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:102:6 This reference only captures the initial value of `mode`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+                 ^
+103:   });
+104: 
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:102:25 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+                                        ^
+103:   });
+104: 
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:102:55 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+                                                                      ^
+103:   });
+104: 
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:127:23 This reference only captures the initial value of `mode`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+125:    * sanitized content, and editing it is editing text.
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+                                 ^
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+129: 
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:127:42 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+125:    * sanitized content, and editing it is editing text.
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+                                                    ^
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+129: 
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:128:25 This reference only captures the initial value of `mode`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+                                   ^
+129: 
+130:   onMount(async () => {
+7:54:02 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:128:52 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+                                                              ^
+129: 
+130:   onMount(async () => {
+✓ 691 modules transformed.
+rendering chunks...
+computing gzip size...
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
+build/client/assets/entry-client-Bkcf1ZlV.css                18.41 kB │ gzip:   3.03 kB
+build/client/assets/entry-client-iyIXkKkC.js                420.48 kB │ gzip: 132.80 kB
+
+✓ built in 813ms
+
+> @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> vite build --ssr src/facetheory/entry-server.ts
+
+vite v8.2.0 building ssr environment for production...
+[2Ktransforming...7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:89:42 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+87:   const targetId = $derived(data.intent.statusId);
+88: 
+89:   let source = $state<SourceStatus | null>(data.source);
+                                                   ^
+90:   let viewer = $state<ComposeViewer | null>(null);
+91: 
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:100:6 This reference only captures the initial value of `mode`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 98:    */
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+                 ^
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:100:26 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 98:    */
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+                                         ^
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:100:52 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 98:    */
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+                                                                   ^
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:101:6 This reference only captures the initial value of `mode`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+                 ^
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+103:   });
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:101:26 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+                                         ^
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+103:   });
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:101:48 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 99:   const extras = createComposeExtras({
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+                                                               ^
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+103:   });
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:102:6 This reference only captures the initial value of `mode`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+                 ^
+103:   });
+104: 
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:102:25 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+                                        ^
+103:   });
+104: 
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:102:55 This reference only captures the initial value of `targetId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+100:     ...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+101:     ...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+102:     ...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+                                                                      ^
+103:   });
+104: 
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:127:23 This reference only captures the initial value of `mode`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+125:    * sanitized content, and editing it is editing text.
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+                                 ^
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+129: 
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:127:42 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+125:    * sanitized content, and editing it is editing text.
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+                                                    ^
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+129: 
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:128:25 This reference only captures the initial value of `mode`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+                                   ^
+129: 
+130:   onMount(async () => {
+7:54:03 AM [vite-plugin-svelte] src/lib/routes/Compose.svelte:128:52 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+126:    */
+127:   let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+128:   let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+                                                              ^
+129: 
+130:   onMount(async () => {
+✓ 675 modules transformed.
+rendering chunks...
+computing gzip size...
+build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
+build/server/handler.mjs                 868.88 kB │ gzip: 209.44 kB
+
+✓ built in 744ms
+
+> @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
+
+manifest: copied client manifest to build/server/client-manifest.json
+stylesheet: brand/contentus.css — 247825 bytes, 143 --tc-* definitions, integrity assertions passed
+brand assets: copied 12 files to build/client/brand/
+
+> @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> pnpm run validate:renderer-authority && pnpm run validate:csp
+
+
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-renderer-authority.mjs
+
+# Renderer-authority audit
+
+- dependencies: clean
+- owned-source imports: clean
+- owned-source {@html} sinks: clean
+- vendored blog-face escape fallback: clean
+
+- Forbidden renderer packages checked: 17
+- Contentus-owned source roots scanned: 8
+
+Renderer-authority audit: clean.
+
+> @equaltoai/contentus@0.1.0 validate:csp /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 8
+- Documents scanned: 7
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    5312 bytes  findings=0
+- article-reader   200    5024 bytes  findings=0
+- series           200    5225 bytes  findings=0
+- category         200    5239 bytes  findings=0
+- compose          200   11620 bytes  findings=0
+- auth-callback    200    5047 bytes  findings=0
+- not-found        404    5047 bytes  findings=0
+- hydration-data   200     462 bytes  findings=0
+
+CSP audit: clean.

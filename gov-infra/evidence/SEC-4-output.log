@@ -1,1 +1,23 @@
- ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND  No package.json (or package.yaml, or package.json5) was found in "/tmp/r8-spine.JH0qhY".
+
+> @equaltoai/contentus@0.1.0 validate:csp /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 8
+- Documents scanned: 7
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    5312 bytes  findings=0
+- article-reader   200    5024 bytes  findings=0
+- series           200    5225 bytes  findings=0
+- category         200    5239 bytes  findings=0
+- compose          200   11620 bytes  findings=0
+- auth-callback    200    5047 bytes  findings=0
+- not-found        404    5047 bytes  findings=0
+- hydration-data   200     462 bytes  findings=0
+
+CSP audit: clean.
