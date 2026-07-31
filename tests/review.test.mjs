@@ -309,12 +309,25 @@ test('no review source imports a Markdown renderer or holds an {@html} sink', ()
 		'src/lib/review/PublishAction.svelte',
 		'src/lib/review/VerdictPanel.svelte',
 	]) {
+		// Asserted on the RAW source, with no comment stripping.
+		//
+		// The earlier version stripped comments first, which was both weaker and
+		// unnecessary. Weaker because comment stripping by regex is not comment
+		// parsing: an unterminated or nested `<!--` swallows the rest of the file,
+		// and everything after it stops being checked — so the probe could pass
+		// while a sink sat below the gap. CodeQL flagged exactly that
+		// (js/incomplete-multi-character-sanitization) and it was right.
+		//
+		// Unnecessary because none of these files mentions `{@html}` even in
+		// prose, and the renderer check matches an IMPORT (`from '…'`) rather than
+		// a bare package name, so the one file that discusses remark-parse in a
+		// comment does not trip it. Nothing had to be excluded, which is the
+		// cheapest way to be sure nothing was excluded by mistake.
 		const source = readFileSync(file, 'utf8');
-		const withoutComments = source.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
-		assert.doesNotMatch(withoutComments, /\{@html\b/, `${file} contains an {@html} sink`);
+		assert.doesNotMatch(source, /\{@html\b/, `${file} contains an {@html} sink`);
 		assert.doesNotMatch(
-			withoutComments,
+			source,
 			/from\s+['"](marked|markdown-it|remark[^'"]*|shiki)['"]/,
 			`${file} imports a Markdown renderer`
 		);

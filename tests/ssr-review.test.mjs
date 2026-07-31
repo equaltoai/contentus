@@ -201,8 +201,21 @@ test('the review queue response carries the same strict CSP as every other route
 test('the review queue emits no inline script and no inline style', async () => {
 	const result = await render('/l/review');
 
-	for (const match of result.html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+	// `</script\s*>`, not `</script>`. HTML lets an end tag carry trailing
+	// whitespace — `</script >` closes a script exactly as `</script>` does — so
+	// the strict spelling matches nothing on such a document and the loop runs
+	// zero times. A test whose evidence is "the loop found no violations" passes
+	// most convincingly when it examined nothing at all, which is the failure
+	// CodeQL's js/bad-tag-filter names.
+	for (const match of result.html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
 		assert.equal((match[1] ?? '').trim(), '', 'no <script> may have an inline body');
 	}
+
+	// And the loop is only evidence if it ran. Every opening `<script` must have
+	// been paired by the matcher above; a count mismatch means a script element
+	// this assertion never looked inside.
+	const opens = [...result.html.matchAll(/<script\b/gi)].length;
+	const paired = [...result.html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi)].length;
+	assert.equal(opens, paired, 'every <script> element must have been examined');
 	assert.doesNotMatch(result.html, /<style\b/i, 'no inline <style> may reach the document');
 });
