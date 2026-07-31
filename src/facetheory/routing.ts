@@ -1,6 +1,12 @@
 import { APP_BASE_PATH } from '$lib/config/base-path';
 
-import type { AppPageDescriptor, AppPageKey, ComposeIntent, RouteProps } from './types';
+import type {
+	AppPageDescriptor,
+	AppPageKey,
+	ComposeIntent,
+	ReviewPanel,
+	RouteProps,
+} from './types';
 
 export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
 
@@ -11,14 +17,15 @@ export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
  * `/l/*`, so every route here must server-render on a cold request. A route
  * that is not in this table and not matched by the catch-all does not exist.
  *
- * Faces 2 and 4-7 (review, timelines, messages, agents, drones) land in later
- * milestones and are deliberately absent rather than stubbed — a nav entry
- * pointing at a route that 404s is worse than one that is not there.
+ * Faces 4-7 (timelines, messages, agents, drones) land in later milestones and
+ * are deliberately absent rather than stubbed — a nav entry pointing at a route
+ * that 404s is worse than one that is not there.
  *
- * `/compose` (face 3) requires an authenticated caller, but it is still a fully
- * server-rendered route: the session lives in `sessionStorage`, so the server
- * cannot know who is asking, and rendering the signed-out state is both the
- * honest answer and the only one a cold deep link can produce.
+ * `/compose` (face 3) and the `/review` pair (face 2) require an authenticated
+ * caller, but they are still fully server-rendered routes: the session lives in
+ * `sessionStorage`, so the server cannot know who is asking, and rendering the
+ * signed-out state is both the honest answer and the only one a cold deep link
+ * can produce.
  */
 const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 	'articles-index': {
@@ -66,6 +73,24 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'core',
 		requiresAuth: true,
 	},
+	'review-queue': {
+		key: 'review-queue',
+		path: '/review',
+		title: 'Review',
+		eyebrow: 'Article review',
+		summary: 'Drafts shared with you for review, and your own agent-generated drafts.',
+		surface: 'journal',
+		requiresAuth: true,
+	},
+	'review-workspace': {
+		key: 'review-workspace',
+		path: '/review/drafts',
+		title: 'Review draft',
+		eyebrow: 'Article review',
+		summary: "Read the instance's rendered preview and the attribution behind it.",
+		surface: 'journal',
+		requiresAuth: true,
+	},
 	'auth-callback': {
 		key: 'auth-callback',
 		path: '/auth/callback',
@@ -93,6 +118,8 @@ export const ROUTE_PATTERNS = [
 	'/series/{slug}',
 	'/categories/{slug}',
 	'/compose',
+	'/review',
+	'/review/drafts/{id}',
 	'/auth/callback',
 	'/{proxy+}',
 ] as const;
@@ -130,12 +157,41 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 
 	if (route === '/') return PAGE_DEFINITIONS['articles-index'];
 	if (route === '/compose') return PAGE_DEFINITIONS.compose;
+	if (route === '/review') return PAGE_DEFINITIONS['review-queue'];
+	// `/review/drafts` with no id names no draft, so it is not the workspace: it
+	// falls through to not-found rather than rendering an empty one.
+	if (segmentAfter(route, '/review/drafts/')) return PAGE_DEFINITIONS['review-workspace'];
 	if (route === '/auth/callback') return PAGE_DEFINITIONS['auth-callback'];
 	if (segmentAfter(route, '/articles/')) return PAGE_DEFINITIONS['article-reader'];
 	if (segmentAfter(route, '/series/')) return PAGE_DEFINITIONS.series;
 	if (segmentAfter(route, '/categories/')) return PAGE_DEFINITIONS.category;
 
 	return PAGE_DEFINITIONS['not-found'];
+}
+
+/**
+ * Draft id captured from `/review/drafts/{id}`, or null.
+ *
+ * Kept separate from `resolveSlug` because it names a different kind of thing: a
+ * slug is a published article's public identity, a draft id names an
+ * unpublished object only its author and invited reviewers may see. One shared
+ * accessor would invite a route to read one where it meant the other.
+ */
+export function resolveDraftId(pathname: string): string | null {
+	return segmentAfter(normalizeRoutePath(pathname), '/review/drafts/');
+}
+
+/**
+ * Which workspace panel a link opens, from `?panel=`.
+ *
+ * Anything unrecognised is `details`: the rail is where a reviewer starts —
+ * attribution before prose — and a malformed link should land somewhere
+ * sensible rather than nowhere.
+ */
+export function resolveReviewPanel(
+	query: Readonly<Record<string, string[] | undefined>> | undefined
+): ReviewPanel {
+	return query?.['panel']?.[0]?.trim().toLowerCase() === 'preview' ? 'preview' : 'details';
 }
 
 /** Slug captured from whichever slugged route matched, or null. */
@@ -205,6 +261,15 @@ export function categoryHref(slug: string): string {
 
 export function seriesHref(slug: string): string {
 	return href(`/series/${encodeURIComponent(slug)}`);
+}
+
+export function reviewQueueHref(): string {
+	return href('/review');
+}
+
+export function reviewDraftHref(draftId: string, panel?: ReviewPanel): string {
+	const path = href(`/review/drafts/${encodeURIComponent(draftId)}`);
+	return panel === 'preview' ? `${path}?panel=preview` : path;
 }
 
 /**

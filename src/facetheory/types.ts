@@ -9,6 +9,8 @@ export type AppPageKey =
 	| 'series'
 	| 'category'
 	| 'compose'
+	| 'review-queue'
+	| 'review-workspace'
 	| 'auth-callback'
 	| 'not-found';
 
@@ -97,6 +99,30 @@ export interface ComposeData {
 	source: SourceStatus | null;
 }
 
+/**
+ * What `/review/drafts/{id}` carries from the server.
+ *
+ * The draft id and nothing else, and the emptiness is the design. Every review
+ * operation needs a bearer token, the session lives in `sessionStorage`, and
+ * these props are serialized into a PUBLIC hydration endpoint — so a
+ * server-side metadata or preview fetch would put an unpublished draft behind a
+ * URL anyone could request. The route ships its address; the draft arrives once
+ * the client has read the session (product design §5, face 2).
+ */
+export interface ReviewRouteData {
+	/** Draft id from `/review/drafts/{id}`. */
+	draftId: string | null;
+	/** Which panel the single-column workspace opens on, from `?panel=`. */
+	panel: ReviewPanel;
+}
+
+/**
+ * The single-column workspace shows one panel at a time, never a split view
+ * (product design §5). It travels in the URL rather than living only in
+ * component state so a reviewer can link to "the preview of this draft".
+ */
+export type ReviewPanel = 'details' | 'preview';
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
@@ -104,4 +130,5 @@ export interface RouteProps {
 	index: ArticlesIndexData | null;
 	reader: ArticleReaderData | null;
 	compose: ComposeData | null;
+	review: ReviewRouteData | null;
 }

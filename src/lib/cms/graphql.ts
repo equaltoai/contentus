@@ -1,4 +1,10 @@
-import { GRAPHQL_PATH } from './origin';
+// Explicit `.ts` extension, unlike the rest of the repo's relative imports.
+// `cms/review-transport.ts` is loaded straight off disk by `node --test
+// --experimental-strip-types` so the shipped adapters can be driven against a
+// stubbed `fetch`, and Node's ESM resolver does not guess extensions. Vite and
+// `tsc` (`allowImportingTsExtensions`) both accept the explicit form, so the
+// build is unchanged and the module stays probe-loadable.
+import { GRAPHQL_PATH } from './origin.ts';
 
 /**
  * Minimal GraphQL transport over lesser's same-origin `/api/graphql`.

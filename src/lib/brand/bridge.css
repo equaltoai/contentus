@@ -477,6 +477,308 @@ code {
 	max-width: var(--gr-blog-content-max-width);
 }
 
+/* =============================================================
+   Face 2 — review queue (product design §5; contentus-owned, M2d.1)
+
+   Only the queue AROUND the cards. Every `.gr-blog-review-*` class the
+   vendored `Review.QueueCard` / `AttributionStrip` / `VerdictActions`
+   emit is styled by the blog face's own theme.css, which the site
+   stylesheet already adopts — unlike `compose` at M3, the `review`
+   registry entry ships its appearance upstream, so there is no shim
+   here and nothing for a pin bump to drift away from.
+   ============================================================= */
+.contentus-h2 {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h3);
+	font-weight: var(--tc-w-semibold);
+	margin: 0 0 var(--tc-space-4) 0;
+}
+
+.contentus-review-group {
+	border-top: 1px solid var(--tc-outline-variant);
+	padding-top: var(--tc-space-6);
+	margin-bottom: var(--tc-space-8);
+}
+
+.contentus-review-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-4);
+}
+
+.contentus-review-empty {
+	color: var(--tc-fg-muted);
+	max-width: 60ch;
+	margin: 0;
+}
+
+.contentus-review-hint {
+	color: var(--tc-fg-muted);
+	margin: var(--tc-space-6) 0;
+}
+
+/* ---- Workspace: metadata rail beside the server-rendered preview ----
+   Desktop is two columns; the mobile single-column form lands with the
+   segmented control in M2d.4. The rail comes FIRST in the document, so
+   the stacked order already reads attribution-then-body: knowing who
+   wrote something changes how the prose reads. */
+.contentus-review-workspace {
+	display: grid;
+	grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+	gap: var(--tc-space-6);
+	align-items: start;
+}
+
+.contentus-review-rail {
+	display: grid;
+	gap: var(--tc-space-4);
+	min-width: 0;
+}
+
+.contentus-review-preview {
+	min-width: 0;
+}
+
+.contentus-review-meta {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--tc-space-2) var(--tc-space-4);
+	margin: 0 0 var(--tc-space-4) 0;
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-review-meta dt {
+	color: var(--tc-fg-muted);
+}
+
+.contentus-review-meta dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.contentus-review-note {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	margin: 0 0 var(--tc-space-2) 0;
+}
+
+.contentus-review-errors {
+	margin: 0;
+	padding-left: var(--tc-space-6);
+	color: var(--tc-fg-muted);
+	font-family: var(--tc-font-mono);
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* ---- Verdict and publish controls (contentus-owned, M2d.3) ----
+   The vendored `Review.VerdictActions` brings its own appearance from the
+   blog face theme; these are the contentus controls around it. 44px is a
+   floor on every one of them, not a preference. */
+.contentus-review-verdict {
+	display: grid;
+	gap: var(--tc-space-2);
+}
+
+/* =============================================================
+   SIZING BRIDGE — the vendored verdict controls (M2d rework)
+   -------------------------------------------------------------
+   WHY THIS BLOCK EXISTS, and when it should stop existing.
+
+   `Review.VerdictActions` renders every one of its controls at
+   `size="sm"`, and the vendored primitives theme sizes that variant
+   `min-height: 2rem` — 32px. So the two decisions a reviewer makes on a
+   phone, approve and request-changes, plus both buttons in the
+   confirmation dialog and its close control, were 32px targets on a
+   surface whose primary input is a thumb. The design's floor is 44px
+   (product design §4) and the publish controls beside them already meet
+   it, so the verdict pair were the smallest targets on the screen and
+   the only ones that fell short.
+
+   The buttons themselves are vendored and are not edited: the `size`
+   prop is upstream's, and hand-editing the component would take it out
+   of the `greater` CLI's hands. So this is a SIZING BRIDGE in the sense
+   `src/lib/brand/compose.css` established at M3 — contentus's own
+   appearance over upstream's class contract, appearance only, changing
+   nothing about what the components do or emit.
+
+   NOT INSIDE A MEDIA QUERY, deliberately, and this is the same rule the
+   publish controls above follow: a touch target that is only large on a
+   phone is a target that got small on a tablet. The mobile breakpoints
+   are therefore covered by a floor that never lifts rather than by a
+   rule that has to be repeated at each one.
+
+   Specificity is descendant-qualified (0,2,0) so it beats
+   `.gr-button--sm` (0,1,0) on merit rather than on cascade order, and
+   the block sits after the primitives theme in the assembled sheet in
+   any case.
+
+   SWAP-TO-VENDORED: delete this block when greater's review chrome sizes
+   its verdict controls to the 44px touch floor itself, or exposes the
+   size as a consumer prop. Recorded as an UPSTREAM SIZING CANDIDATE
+   against `equaltoai/greater-components` in
+   `docs/consumption/review-contract.md`; until then the floor lives here
+   rather than in a fork of the component.
+   ============================================================= */
+.gr-blog-review-verdict .gr-blog-review-verdict__approve,
+.gr-blog-review-verdict .gr-blog-review-verdict__request-changes,
+.gr-blog-review-verdict__dialog .gr-modal__footer .gr-button,
+.gr-blog-review-verdict__dialog .gr-modal__close {
+	min-height: 44px;
+	min-width: 44px;
+}
+
+.contentus-review-publish {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-3);
+	margin-bottom: var(--tc-space-3);
+}
+
+.contentus-review-publish__primary,
+.contentus-review-publish__secondary {
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 var(--tc-space-5);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-review-publish__primary {
+	border: 1px solid var(--tc-accent);
+	background: var(--tc-accent);
+	color: var(--tc-midnight);
+	font-weight: var(--tc-w-semibold);
+}
+
+.contentus-review-publish__secondary {
+	border: 1px solid var(--tc-outline-variant);
+	background: transparent;
+	color: var(--tc-fg);
+}
+
+.contentus-review-publish__primary[disabled],
+.contentus-review-publish__secondary[disabled] {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.contentus-review-field {
+	display: grid;
+	gap: var(--tc-space-2);
+	margin: var(--tc-space-4) 0;
+}
+
+.contentus-review-field input {
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+	font: inherit;
+}
+
+.contentus-review-error {
+	color: var(--tc-fg);
+	border-left: 3px solid var(--tc-accent);
+	padding-left: var(--tc-space-3);
+	margin: var(--tc-space-3) 0 0 0;
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* The decisions sit under both columns on desktop, and become the sticky
+   bar below. `grid-column: 1 / -1` rather than a third column: a verdict is
+   about the whole draft, not about one pane of it. */
+.contentus-review-actions {
+	grid-column: 1 / -1;
+	display: grid;
+	gap: var(--tc-space-4);
+}
+
+/* The segmented control has nothing to switch while both panels are on
+   screen, so above the breakpoint it is not in the layout at all. */
+.contentus-review-segmented {
+	display: none;
+}
+
+/* =============================================================
+   Single-column workspace (product design §5; M2d.4)
+
+   ONE PANEL AT A TIME, NEVER A SPLIT. A split view on a phone is two
+   columns too narrow to read instead of one that is. `data-panel` on
+   the workspace root is the only state; this media query is what
+   decides that it means anything. No script measures the viewport.
+   ============================================================= */
+@media (max-width: 960px) {
+	.contentus-review-workspace {
+		grid-template-columns: 1fr;
+		/* Room for the sticky bar and, below it, the tab bar and the home
+		   indicator — so the last line of a preview is readable rather than
+		   permanently behind the controls. */
+		padding-bottom: calc(
+			var(--tc-space-20) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom)
+		);
+	}
+
+	.contentus-review-segmented {
+		display: flex;
+		gap: var(--tc-space-2);
+		margin-bottom: var(--tc-space-4);
+		padding: var(--tc-space-1);
+		border: 1px solid var(--tc-outline-variant);
+		border-radius: var(--tc-radius-pill);
+		background: var(--tc-surface-1);
+	}
+
+	.contentus-review-segmented__option {
+		flex: 1;
+		/* 44px is a floor, not a preference. */
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: 0;
+		border-radius: var(--tc-radius-pill);
+		background: transparent;
+		color: var(--tc-fg-muted);
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.contentus-review-segmented__option[aria-pressed='true'] {
+		background: var(--tc-surface-2);
+		color: var(--tc-fg);
+		font-weight: var(--tc-w-semibold);
+	}
+
+	/* The panel the control is not showing is GONE, not merely hidden behind
+	   another: `display: none` keeps it out of the accessibility tree and out
+	   of the tab order, so a screen reader and a keyboard agree with the
+	   painted state. */
+	.contentus-review-workspace[data-panel='details'] [data-review-panel='preview'],
+	.contentus-review-workspace[data-panel='preview'] [data-review-panel='details'] {
+		display: none;
+	}
+
+	/* The decisions stay reachable while a long preview scrolls. A decision
+	   surface that scrolls away is one that gets made from memory. */
+	.contentus-review-actions {
+		position: sticky;
+		bottom: calc(var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+		z-index: 2;
+		gap: var(--tc-space-2);
+		padding-top: var(--tc-space-2);
+		background: var(--tc-bg);
+		border-top: 1px solid var(--tc-outline-variant);
+	}
+}
+
 .contentus-visually-hidden {
 	position: absolute;
 	width: 1px;

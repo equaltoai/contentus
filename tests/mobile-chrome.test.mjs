@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { buildSiteStylesheet } from '../scripts/build-stylesheet.mjs';
@@ -218,4 +219,207 @@ test('the page identity the sheet keys off is in the document', async () => {
 	// viewport measured in JavaScript — so it is right in the first paint.
 	assert.match(compose.html, /data-page="compose"/);
 	assert.match(index.html, /data-page="articles-index"/);
+});
+
+/* ---------------------------------------------------------------------------
+ * Face 2's single-column workspace (M2d.4)
+ *
+ * Same rule as the rest of this file: these assert what the STYLESHEET ships,
+ * because CSS is only real once a browser resolves it against a box. What they
+ * genuinely prove is that the declarations are there, in the right media
+ * block, keyed off an attribute the server emits — which is the part that can
+ * regress silently.
+ * ------------------------------------------------------------------------ */
+
+test('the stylesheet shows one workspace panel at a time below the breakpoint', () => {
+	const block = mediaBlocks(stylesheet, 960);
+
+	// The unselected panel is `display: none` — out of the accessibility tree
+	// and out of the tab order — rather than merely painted over, so a screen
+	// reader and a keyboard agree with what is on screen.
+	assert.match(
+		block,
+		/\[data-panel='details'\]\s*\[data-review-panel='preview'\][\s\S]*?display:\s*none/,
+		'the details panel must hide the preview'
+	);
+	assert.match(
+		block,
+		/\[data-panel='preview'\]\s*\[data-review-panel='details'\][\s\S]*?display:\s*none/,
+		'the preview panel must hide the details'
+	);
+
+	// And never a split: the single column is the whole point.
+	assert.match(block, /\.contentus-review-workspace\s*\{[^}]*grid-template-columns:\s*1fr/s);
+});
+
+test('the stylesheet hides the segmented control where there is nothing to switch', () => {
+	// Above the breakpoint both panels are on screen, so the control is not in
+	// the layout at all rather than being a no-op the reviewer can press.
+	assert.match(stylesheet, /\.contentus-review-segmented\s*\{[^}]*display:\s*none/s);
+
+	const block = mediaBlocks(stylesheet, 960);
+	assert.match(block, /\.contentus-review-segmented\s*\{[^}]*display:\s*flex/s);
+});
+
+test('the stylesheet gives the segmented control 44px targets', () => {
+	const block = mediaBlocks(stylesheet, 960);
+	assert.match(block, /\.contentus-review-segmented__option\s*\{[^}]*min-height:\s*44px/s);
+});
+
+test('the stylesheet sticks the verdict and publish actions above the tab bar', () => {
+	const block = mediaBlocks(stylesheet, 960);
+
+	// A decision surface that scrolls away is one that gets made from memory.
+	const actions = /\.contentus-review-actions\s*\{([^}]*)\}/s.exec(block)?.[1] ?? '';
+	assert.match(actions, /position:\s*sticky/);
+
+	// Above the tab bar AND the home indicator, not underneath either. Both
+	// terms are asserted because dropping one is the regression: the bar lands
+	// behind the tab bar, or behind the home indicator, and looks fine on the
+	// simulator that has neither.
+	assert.match(actions, /bottom:\s*calc\(/);
+	assert.match(actions, /--contentus-tabbar-height/);
+	assert.match(actions, /--contentus-safe-bottom/);
+
+	// And the workspace leaves room, so the last line of a preview is readable
+	// rather than permanently behind the bar.
+	const workspace = /\.contentus-review-workspace\s*\{([^}]*)\}/s.exec(block)?.[1] ?? '';
+	assert.match(workspace, /padding-bottom:\s*calc\(/);
+	assert.match(workspace, /--contentus-tabbar-height/);
+	assert.match(workspace, /--contentus-safe-bottom/);
+});
+
+test('the publish controls are 44px wherever they render', () => {
+	// Not inside a media block: the floor applies on every viewport, because a
+	// touch target that is only large on a phone is a target that got small on
+	// a tablet.
+	assert.match(
+		stylesheet,
+		/\.contentus-review-publish__primary,\s*\n?\s*\.contentus-review-publish__secondary\s*\{[^}]*min-height:\s*44px/s
+	);
+	assert.match(stylesheet, /\.contentus-review-field input\s*\{[^}]*min-height:\s*44px/s);
+});
+
+/* ---------------------------------------------------------------------------
+ * The verdict controls, asserted on the selectors that actually render
+ *
+ * The finding this section exists for: the test above asserted only the
+ * `.contentus-review-publish__*` pair — contentus's own controls. The VERDICT
+ * controls are the vendored `Review.VerdictActions`, which renders every one of
+ * its buttons at `size="sm"`, and the vendored primitives theme sizes that
+ * variant `min-height: 2rem`. So the two decisions a reviewer makes were 32px
+ * targets, on selectors no assertion here named, and the suite was green.
+ *
+ * The lesson is in the shape of these probes, not just their subject: a
+ * stylesheet assertion is only worth its selector, so each one below reads the
+ * class list out of the SHIPPED COMPONENT first and then requires the sheet to
+ * size exactly that.
+ * ------------------------------------------------------------------------ */
+
+/** The first rule whose selector list names `.<className>`, with its body. */
+function ruleNaming(css, className) {
+	const marker = `.${className}`;
+	const at = css.indexOf(marker);
+	if (at === -1) return null;
+
+	const open = css.indexOf('{', at);
+	const close = css.indexOf('}', open);
+	if (open === -1 || close === -1) return null;
+
+	// Walk back to the start of the selector list so the whole list is visible.
+	const selectorStart = Math.max(css.lastIndexOf('}', at), css.lastIndexOf('*/', at)) + 1;
+
+	return {
+		index: at,
+		selector: css.slice(selectorStart, open).trim(),
+		declarations: css.slice(open + 1, close),
+	};
+}
+
+test('the verdict controls the component renders are the ones the stylesheet sizes', () => {
+	const component = readFileSync('src/lib/components/Review/VerdictActions.svelte', 'utf8');
+
+	// What ships. Read from the component so a renamed class breaks this test
+	// rather than silently emptying it.
+	const emitted = ['gr-blog-review-verdict__approve', 'gr-blog-review-verdict__request-changes'];
+	for (const className of emitted) {
+		assert.match(
+			component,
+			new RegExp(`class="${className}"`),
+			`VerdictActions must emit .${className} — if it no longer does, this probe is asserting nothing`
+		);
+	}
+
+	// The vendored size the bridge exists to lift, confirmed rather than assumed:
+	// if upstream ever raises `--sm` to the floor, this is the assertion that
+	// says the bridge can go.
+	assert.match(component, /size="sm"/, 'the vendored controls still render at the sm size');
+	const smallVariant = ruleNaming(stylesheet, 'gr-button--sm');
+	assert.ok(smallVariant, 'the vendored primitives theme must define the sm size variant');
+	assert.match(smallVariant.declarations, /min-height:\s*2rem/);
+
+	// And the sheet must raise each emitted selector to the floor.
+	for (const className of emitted) {
+		const rule = ruleNaming(stylesheet, className);
+		assert.ok(rule, `the stylesheet must carry a rule naming .${className}`);
+		assert.match(
+			rule.declarations,
+			/min-height:\s*44px/,
+			`.${className} must meet the 44px touch floor`
+		);
+		assert.ok(
+			rule.index > smallVariant.index,
+			'the contentus sizing bridge must cascade after the vendored size variant'
+		);
+		// Descendant-qualified, so it wins on specificity rather than on order.
+		assert.match(rule.selector, /\.gr-blog-review-verdict\s+\.gr-blog-review-verdict__approve/);
+	}
+});
+
+test('the verdict confirmation dialog controls meet the same floor', () => {
+	const component = readFileSync('src/lib/components/Review/VerdictActions.svelte', 'utf8');
+
+	// The dialog is where the verdict is actually confirmed, and its Cancel and
+	// confirm buttons are `size="sm"` too. The class the sheet hooks is the one
+	// the component hands the Modal.
+	assert.match(component, /class="gr-blog-review-verdict__dialog"/);
+
+	const rule = ruleNaming(stylesheet, 'gr-blog-review-verdict__approve');
+	assert.match(
+		rule.selector,
+		/\.gr-blog-review-verdict__dialog\s+\.gr-modal__footer\s+\.gr-button/,
+		"the dialog's own buttons must be sized by the same rule"
+	);
+	assert.match(
+		rule.selector,
+		/\.gr-blog-review-verdict__dialog\s+\.gr-modal__close/,
+		'and so must its close control'
+	);
+});
+
+test('the verdict floor holds at every mobile breakpoint, by never lifting', () => {
+	// The floor is declared outside every media block, so the mobile breakpoints
+	// inherit it rather than restating it. What could still go wrong is a
+	// breakpoint rule LOWERING it, so that is what is checked: no rule at
+	// 960/720/640/480 may touch a verdict selector with a smaller min-height.
+	for (const breakpoint of [960, 720, 640, 480]) {
+		const block = mediaBlocks(stylesheet, breakpoint);
+		for (const match of block.matchAll(
+			/(\.gr-blog-review-verdict[^{}]*)\{([^}]*min-height:\s*(\d+(?:\.\d+)?)(px|rem)[^}]*)\}/g
+		)) {
+			const value = match[4] === 'rem' ? Number(match[3]) * 16 : Number(match[3]);
+			assert.ok(
+				value >= 44,
+				`a ${breakpoint}px rule sizes a verdict control at ${match[3]}${match[4]}, below the floor`
+			);
+		}
+	}
+
+	// And the vendored component is not edited to achieve any of this.
+	const component = readFileSync('src/lib/components/Review/VerdictActions.svelte', 'utf8');
+	assert.doesNotMatch(
+		component,
+		/min-height/,
+		'the fix must not have been made in vendored source'
+	);
 });

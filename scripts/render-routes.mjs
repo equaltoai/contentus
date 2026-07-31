@@ -48,6 +48,17 @@ export const AUDIT_ROUTES = [
 	// no write control at all. A 200 here is the designed answer — the route
 	// exists for everyone, the composer does not.
 	{ name: 'compose', path: '/l/compose', expectStatus: 200 },
+	// Face 2, and the same shape as compose for the same reason: the route
+	// exists for everyone and server-renders its sign-in state, while the queue
+	// itself — which needs a bearer token — does not appear in the document at
+	// all. The 200 is the designed answer; what makes it correct is asserted in
+	// `tests/ssr-review.test.mjs`, which checks the anonymous document carries
+	// no draft data and makes no authenticated fetch.
+	{ name: 'review-queue', path: '/l/review', expectStatus: 200 },
+	// The workspace, deep-linked cold. A draft is never public, so the 200 here
+	// is the sign-in state — and the probe that matters is that the document
+	// contains no draft at all, which `tests/ssr-review.test.mjs` asserts.
+	{ name: 'review-workspace', path: '/l/review/drafts/draft-123', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },
 	{ name: 'hydration-data', path: '/l/_facetheory/hydration', expectStatus: 200 },

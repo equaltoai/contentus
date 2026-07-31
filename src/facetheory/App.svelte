@@ -13,10 +13,12 @@ is no catch-all render path that could silently show the wrong surface.
 	import AuthCallbackRoute from '$lib/routes/AuthCallback.svelte';
 	import ComposeRoute from '$lib/routes/Compose.svelte';
 	import NotFoundRoute from '$lib/routes/NotFound.svelte';
+	import ReviewQueueRoute from '$lib/routes/ReviewQueue.svelte';
+	import ReviewWorkspaceRoute from '$lib/routes/ReviewWorkspace.svelte';
 
 	import type { RouteProps } from './types';
 
-	let { page, slug, index, reader, compose }: RouteProps = $props();
+	let { page, slug, index, reader, compose, review }: RouteProps = $props();
 </script>
 
 <AppShell {page}>
@@ -27,6 +29,10 @@ is no catch-all render path that could silently show the wrong surface.
 			{page}
 			data={compose ?? { intent: { mode: 'new', statusId: null }, source: null }}
 		/>
+	{:else if page.key === 'review-queue'}
+		<ReviewQueueRoute {page} />
+	{:else if page.key === 'review-workspace'}
+		<ReviewWorkspaceRoute {page} data={review ?? { draftId: null, panel: 'details' }} />
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />
 	{:else if page.key === 'not-found'}

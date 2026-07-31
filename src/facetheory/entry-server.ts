@@ -27,7 +27,9 @@ import { queryFromSearchString } from './query-parser';
 import {
 	ROUTE_PATTERNS,
 	resolveComposeIntent,
+	resolveDraftId,
 	resolvePage,
+	resolveReviewPanel,
 	resolveSlug,
 	statusForRoute,
 	stripBasePath,
@@ -79,7 +81,7 @@ async function createRouteProps(
 	const endpoint = graphqlEndpointForOrigin(resolveRequestOrigin(headers));
 	const ctx = { endpoint };
 
-	const base: RouteProps = { page, slug, index: null, reader: null, compose: null };
+	const base: RouteProps = { page, slug, index: null, reader: null, compose: null, review: null };
 
 	switch (page.key) {
 		case 'articles-index':
@@ -101,9 +103,26 @@ async function createRouteProps(
 			const source = intent.statusId ? await loadSourceStatus(intent.statusId, { endpoint }) : null;
 			return { ...base, compose: { intent, source } };
 		}
+		case 'review-workspace':
+			// The ADDRESS travels, the DRAFT does not. Same rule as the queue
+			// below, one step sharper: `draftPreview` renders an unpublished
+			// body, and these props are serialized verbatim into the PUBLIC
+			// hydration endpoint further down this file. A server-side preview
+			// fetch would put that body behind a URL anyone could request.
+			return {
+				...base,
+				review: { draftId: resolveDraftId(path), panel: resolveReviewPanel(query) },
+			};
 		default:
-			// auth-callback and not-found render without server data: the former
-			// needs sessionStorage, the latter has nothing to fetch.
+			// auth-callback, not-found, and the review queue render without server
+			// data. The first needs sessionStorage and the second has nothing to
+			// fetch; the review queue is the load-bearing one, and its emptiness
+			// here is deliberate. Every review operation needs a bearer token,
+			// and these props are serialized verbatim into the PUBLIC hydration
+			// endpoint below — so a server-side queue fetch would put one
+			// reviewer's unpublished drafts behind a URL anyone could request.
+			// The server ships the route and its signed-out chrome; the client
+			// loads the queue once it has read the session.
 			return base;
 	}
 }
@@ -204,6 +223,57 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
 	return { title, tags };
 }
 
+/**
+ * Response headers for a rendered route.
+ *
+ * WHY AN AUTH-REQUIRED ROUTE STILL ANSWERS 200, stated here because it looks
+ * wrong and the reasoning is load-bearing.
+ *
+ * `/review`, `/review/drafts/{id}`, and `/compose` require an authenticated
+ * caller, and an anonymous request to one of them gets HTTP 200 with a sign-in
+ * shell. The correct-looking answer — 401, or a redirect to sign-in — is not
+ * available at this boundary, and not because the framework lacks a hook:
+ * `renderOptions` returns both `status` and `headers`, so contentus could send
+ * either. It is that THE SERVER CANNOT TELL WHO IS ASKING. lesser's auth
+ * contract is Authorization Code + PKCE with the token in `sessionStorage`
+ * (never a cookie — `$lib/auth/session`), so no credential is presented on the
+ * document request at all. A blanket 401 would be returned to the authenticated
+ * reviewer as readily as to the anonymous visitor, and lesser performs no SPA
+ * fallback under `/l/*`, so every cold deep link a signed-in reviewer follows
+ * would answer "unauthorized" for a page they are authorized to use. That
+ * trades one false signal for a worse one.
+ *
+ * What IS true of this response is that it delivered the sign-in shell, which
+ * is a 200, and that it carries no protected data — `tests/ssr-review.test.mjs`
+ * asserts the anonymous document contains no draft and that the server makes no
+ * authenticated fetch. The drafts themselves live behind authenticated GraphQL,
+ * which answers 401 correctly.
+ *
+ * WHAT THIS FIXES ANYWAY. The residual risk in a 200 is that a shared cache or
+ * a crawler treats the protected surface as ordinary public content, so these
+ * two headers close that half at the boundary that does control it: `no-store`
+ * keeps the shell out of every cache, and `noindex, nofollow` keeps it out of
+ * indexes. Neither is available to lesser to set on contentus's behalf — the
+ * origin owns its headers on `/l` routes.
+ *
+ * The remaining half — that anonymous access to a protected route reads as
+ * success to monitoring — is a genuine limitation of a client whose credential
+ * is invisible to its own server. Routed rather than left silent; see
+ * `docs/consumption/auth-boundary.md`.
+ */
+function headersForRoute(props: RouteProps): Record<string, string> {
+	const headers: Record<string, string> = {
+		'content-security-policy': buildStrictCspHeader(),
+	};
+
+	if (props.page.requiresAuth) {
+		headers['cache-control'] = 'no-store';
+		headers['x-robots-tag'] = 'noindex, nofollow';
+	}
+
+	return headers;
+}
+
 function createFaceForRoute(route: string) {
 	return createSvelteFace({
 		route,
@@ -234,7 +304,7 @@ function createFaceForRoute(route: string) {
 			return {
 				status: statusForRoute(props),
 				csp: STRICT_CSP,
-				headers: { 'content-security-policy': buildStrictCspHeader() },
+				headers: headersForRoute(props),
 				htmlAttrs: { lang: 'en' },
 				head: { title: head.title },
 				headTags: [...head.tags, ...assets.headTags],

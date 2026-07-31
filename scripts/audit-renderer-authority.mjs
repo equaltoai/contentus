@@ -102,6 +102,11 @@ const OWNED_SOURCE_DIRS = [
 	'src/lib/cms',
 	'src/lib/compose',
 	'src/lib/config',
+	// Face 2's contentus-owned review controls (M2d.3). Added WITH the directory
+	// rather than after it, which is the rule check 5 exists to enforce: the
+	// components here render lesser's rendered output and never produce HTML of
+	// their own, and that claim is only worth anything if this audit is looking.
+	'src/lib/review',
 	'src/lib/routes',
 	'src/lib/shell',
 	'src/types',
