@@ -32,6 +32,14 @@ of every cold deep link, and an empty one would be a blank timeline for readers
 and crawlers alike. Off on the server renders every item; on after mount, the
 virtualized path is what the browser actually runs.
 
+WHAT IS IN THE LISTS IS NOT DECIDED HERE. `feed-state.ts` owns every rule that
+moves a status between the rendered list and the live buffer — deduplication
+across both, and the caps that keep neither growing for the lifetime of the
+route. It is a separate module because a rule inside a component can only be
+driven by rendering one, and these rules earned probes: the duplicate-card bug
+and the unbounded buffer both lived here, in code no test could reach. This file
+owns which state is SHOWING and why; that one owns what is in the lists.
+
 NO SCROLL STEAL, and how it is actually guaranteed. Live items never enter the
 rendered list while the reader is somewhere in it. Two cases:
 
@@ -76,6 +84,14 @@ write face's job, not a stub's.
 		type TimelineFailure,
 		type TimelinePage,
 	} from './contract';
+	import {
+		acceptLiveStatus,
+		canMaterializeMore,
+		feedFrom,
+		ingestPage,
+		revealBuffered,
+		type FeedItems,
+	} from './feed-state';
 	import { fetchTimelinePage } from './transport';
 	import { subscribe, subscriptionEndpoint, type SubscriptionState } from './subscription';
 
@@ -113,62 +129,54 @@ write face's job, not a stub's.
 	// feed has paginated, prepended live items, or refreshed, the prop is a
 	// stale first page and re-deriving from it would throw the reader's scroll
 	// position and their live items away.
-	let items = $state<Status[]>(untrack(() => initialPage)?.items ?? []);
+	//
+	// The two collections and every rule that moves a status between them live in
+	// `feed-state.ts`, so they are driven by probes rather than only by a browser.
+	let feed = $state<FeedItems>(feedFrom(untrack(() => initialPage)?.items ?? []));
 	let endCursor = $state<string | null>(untrack(() => initialPage)?.endCursor ?? null);
 	let hasNextPage = $state(untrack(() => initialPage)?.hasNextPage ?? false);
 	let skipped = $state(untrack(() => initialPage)?.skipped ?? 0);
 	let failure = $state<TimelineFailure | null>(untrack(() => initialFailure));
+	/** lesser answered, and part of the answer failed. See `TimelineResult.partial`. */
+	let partial = $state(false);
 
 	let mounted = $state(false);
 	let loadingMore = $state(false);
 	let refreshing = $state(false);
 
-	/** Live items held back because the reader is not at the top. */
-	let pending = $state<Status[]>([]);
 	let liveState = $state<SubscriptionState>('idle');
 	let atTop = $state(true);
 
 	let scrollRoot = $state<HTMLElement | null>(null);
 	let stopLive: (() => void) | null = null;
 
+	const items = $derived(feed.items);
+	const pending = $derived(feed.pending);
 	const realtimeMode = $derived(realtime ? realtimeAvailability(type, authenticated) : 'unsupported');
 	const failureCopy = $derived(failure ? TIMELINE_FAILURE_COPY[failure] : null);
-
-	/**
-	 * The one place a status enters the list from the socket.
-	 *
-	 * Deduplicated by id against BOTH the rendered list and the buffer: lesser
-	 * can publish an object that the page fetch also returned, and a duplicate
-	 * card is indistinguishable from the author having posted twice.
-	 */
-	function acceptLive(status: Status) {
-		if (items.some((item) => item.id === status.id)) return;
-		if (pending.some((item) => item.id === status.id)) return;
-
-		if (atTop) items = [status, ...items];
-		else pending = [status, ...pending];
-	}
+	/** The rendered list is at its bound, so pagination stops offering more. */
+	const atMaterializedLimit = $derived(!canMaterializeMore(feed));
 
 	function revealPending() {
-		if (!pending.length) return;
-		items = [...pending, ...items];
-		pending = [];
+		feed = revealBuffered(feed);
 		scrollRoot?.querySelector('.timeline-scroll')?.scrollTo({ top: 0, behavior: 'smooth' });
 	}
 
 	async function loadMore() {
-		if (loadingMore || !hasNextPage || !endCursor) return;
+		// The cap is enforced by NOT FETCHING, never by evicting what is already
+		// read: `endCursor` points at the last status a page delivered, so
+		// dropping the tail and paginating from that cursor would append posts
+		// contiguous with something no longer on screen — a hole nothing marks.
+		if (loadingMore || !hasNextPage || !endCursor || atMaterializedLimit) return;
 		loadingMore = true;
 		try {
 			const result = await fetchTimelinePage({ type, actorId, after: endCursor, accessToken });
 			if (result.ok) {
-				// Append by id rather than concatenating blind: a cursor page can
-				// overlap the previous one when objects arrived in between.
-				const seen = new Set(items.map((item) => item.id));
-				items = [...items, ...result.page.items.filter((item) => !seen.has(item.id))];
+				feed = ingestPage(feed, result.page.items);
 				endCursor = result.page.endCursor;
 				hasNextPage = result.page.hasNextPage;
 				skipped += result.page.skipped;
+				partial = partial || result.partial;
 			} else {
 				// A failed NEXT page must not erase the pages already read. The
 				// list stays; only the load-more control reports the failure.
@@ -183,9 +191,11 @@ write face's job, not a stub's.
 	/**
 	 * Re-read the first page from the top.
 	 *
-	 * Also the recovery path for a dropped socket: the stream cannot replay what
-	 * it missed, so closing the gap means asking lesser again rather than
-	 * pretending the reconnect was seamless.
+	 * Also the recovery path for a dropped socket, an overflowed buffer, and a
+	 * degraded stream: none of those can replay what they missed, so closing the
+	 * gap means asking lesser again rather than pretending it was seamless. It is
+	 * therefore the one place `liveState` is allowed to leave `degraded`, because
+	 * this is the moment the gap it names actually closes.
 	 */
 	async function refresh() {
 		if (refreshing) return;
@@ -193,12 +203,13 @@ write face's job, not a stub's.
 		try {
 			const result = await fetchTimelinePage({ type, actorId, accessToken });
 			if (result.ok) {
-				items = result.page.items;
+				feed = feedFrom(result.page.items);
 				endCursor = result.page.endCursor;
 				hasNextPage = result.page.hasNextPage;
 				skipped = result.page.skipped;
-				pending = [];
+				partial = result.partial;
 				failure = null;
+				if (liveState === 'degraded') liveState = 'live';
 			} else {
 				failure = result.failure;
 			}
@@ -210,7 +221,10 @@ write face's job, not a stub's.
 	function onScroll() {
 		const scroller = scrollRoot?.querySelector('.timeline-scroll');
 		atTop = !scroller || scroller.scrollTop < 24;
-		if (atTop && pending.length) revealPending();
+		// An overflowed buffer is NOT auto-revealed: it is missing posts in its
+		// middle, so prepending it would put a silent gap on screen. That state
+		// offers a re-read instead, and the reader chooses it.
+		if (atTop && pending.length && !feed.overflowed) revealPending();
 	}
 
 	/**
@@ -256,7 +270,7 @@ write face's job, not a stub's.
 						const status = toTimelineStatus(data.timelineUpdates, {
 							viewerAuthenticated: Boolean(accessToken),
 						});
-						if (status) acceptLive(status);
+						if (status) feed = acceptLiveStatus(feed, status, { atTop });
 					},
 				});
 			}
@@ -282,26 +296,43 @@ write face's job, not a stub's.
 
 <div class="contentus-feed" bind:this={scrollRoot}>
 	<!--
-	A PINNED UPSTREAM GAP, said out loud rather than left to be discovered.
+	TWO PINNED UPSTREAM GAPS IN ONE COMPONENT, said out loud rather than left to
+	be discovered. Both are `ContentRenderer`'s, and the first disclosure here
+	covered only one of them.
 
-	The vendored `ContentRenderer` writes its sanitized output through a Svelte
-	ACTION (`use:setHtml` → `node.innerHTML`), and actions do not run during SSR
-	— so the server emits an empty body container and the post text appears at
-	hydration. Every social status path reaches that component; the blog face's
-	`Article.Content` uses `{@html}` and renders fine, so it is one component's
-	defect, not a framework limit.
+	1. NOTHING SERVER-RENDERS. `ContentRenderer` writes its sanitized output
+	   through a Svelte ACTION (`use:setHtml` → `node.innerHTML`), and actions do
+	   not run during SSR — so the server emits an empty body container and the
+	   post text appears at hydration.
 
-	Contentus cannot repair it here. Vendored source is never hand-edited, and an
+	2. WHAT HYDRATION FILLS IN IS CORRUPTED. `processContent` sanitizes the
+	   server's HTML and then, when the status carries no mentions and no tags,
+	   passes the RESULT to `linkifyMentions` — which runs `escapeHtml` over it
+	   before linkifying. Already-sanitized markup is escaped and then written to
+	   `innerHTML`, so `<p>Hello <strong>world</strong></p>` reaches the reader as
+	   the literal text `<p>Hello <strong>world</strong></p>`. Statuses that DO
+	   carry mentions or tags take the other branch and render correctly, which is
+	   why this is easy to miss and why the disclosure below names both.
+
+	Contentus cannot repair either here. Vendored source is never hand-edited; an
 	`{@html}` in contentus-owned source is precisely what check 3 of the
-	renderer-authority audit forbids — weakening that gate to route around an
-	upstream bug is the repair that is never correct. So the gap is reported
-	upstream, pinned by `tests/ssr-timelines.test.mjs`, and disclosed here to the
-	one reader it actually reaches. Delete this block when the probe goes red.
+	renderer-authority audit forbids; and there is no supported prop that turns
+	the linkify step off — supplying fabricated `mentions` to dodge the branch
+	would be inventing content to route around a rendering bug. So both gaps are
+	reported upstream, pinned by `tests/ssr-timelines.test.mjs` and
+	`tests/vendored-content-renderer.test.mjs`, and disclosed here to the readers
+	they actually reach. Delete this block when those probes go red.
 	-->
+	<p class="contentus-feed__gap" role="status">
+		Post text on this instance is filled in after the page loads, and some posts currently show
+		their formatting as literal text (like <code>&lt;p&gt;</code>) instead of applying it. Both are
+		faults in the shared component this client renders posts with, reported upstream. Authors,
+		timestamps, links and everything else on each post are unaffected.
+	</p>
 	<noscript>
 		<p class="contentus-feed__noscript">
-			Post text on this instance is filled in by JavaScript. Authors, timestamps and links are
-			shown above without it; the text of each post is not.
+			Post text needs JavaScript on this instance. Authors, timestamps and links are shown above
+			without it; the text of each post is not.
 		</p>
 	</noscript>
 
@@ -309,7 +340,17 @@ write face's job, not a stub's.
 		<!-- The live strip is never a blank: every state says something, which is
 		     the point of tracking `requires-auth` apart from `unavailable`. -->
 		<div class="contentus-feed__live" data-state={liveState}>
-			{#if pending.length}
+			{#if feed.overflowed}
+				<!-- The buffer filled and stopped accepting, so posts are being
+				     missed. Revealing it would show an incomplete run with no mark
+				     on the gap; a re-read is the only thing that closes it. -->
+				<p class="contentus-feed__live-note">
+					More new posts than this view can hold at once.
+					<button type="button" class="contentus-feed__retry" onclick={refresh}>
+						Refresh the timeline
+					</button>
+				</p>
+			{:else if pending.length}
 				<button type="button" class="contentus-feed__new" onclick={revealPending}>
 					{pending.length === 1 ? '1 new post' : `${pending.length} new posts`}
 				</button>
@@ -317,9 +358,20 @@ write face's job, not a stub's.
 				<p class="contentus-feed__live-note">Live — new posts appear as they arrive.</p>
 			{:else if liveState === 'connecting'}
 				<p class="contentus-feed__live-note">Connecting for live updates…</p>
+			{:else if liveState === 'degraded'}
+				<!-- The socket is open and something it delivered could not be
+				     shown. Saying "live" would claim a continuity this stream lost;
+				     saying "stopped" would be false. This is neither. -->
+				<p class="contentus-feed__live-note">
+					Some live posts could not be shown.
+					<button type="button" class="contentus-feed__retry" onclick={refresh}>
+						Refresh the timeline
+					</button>
+				</p>
 			{:else if liveState === 'requires-auth'}
-				<!-- lesser answers `timelineUpdates` for PUBLIC anonymously and for
-				     nothing else. The Instance tab reads fine and cannot go live,
+				<!-- lesser's WebSocket gateway refuses every connection with no
+				     token, whatever the subscription resolver would allow. So the
+				     timelines read for everyone and go live for signed-in readers,
 				     and saying so beats a spinner that never resolves. -->
 				<p class="contentus-feed__live-note">Sign in to see this timeline update live.</p>
 			{:else if liveState === 'unavailable'}
@@ -372,6 +424,17 @@ write face's job, not a stub's.
 			</p>
 		{/if}
 
+		{#if partial}
+			<!-- lesser answered and part of the answer failed. Distinct from the
+			     count above: those are objects this CLIENT could not project, this
+			     is a field the INSTANCE could not resolve. A failed nullable field
+			     comes back looking exactly like an absent one, so without this the
+			     posts would quietly under-report themselves. -->
+			<p class="contentus-feed__partial" role="status">
+				Parts of these posts could not be loaded, so something may be missing from them.
+			</p>
+		{/if}
+
 		<TimelineVirtualized
 			{items}
 			virtualScrolling={mounted}
@@ -382,7 +445,18 @@ write face's job, not a stub's.
 			density="comfortable"
 		/>
 
-		{#if hasNextPage}
+		{#if hasNextPage && atMaterializedLimit}
+			<!-- The bound, disclosed rather than enforced by eviction. Dropping the
+			     tail to keep paginating would append the next page contiguous with
+			     posts no longer on screen; stopping is the honest end, and the
+			     re-read is the way past it. -->
+			<p class="contentus-feed__limit" role="status">
+				This view holds as many posts as it can at once.
+				<button type="button" class="contentus-feed__retry" onclick={refresh}>
+					Refresh to read from the top
+				</button>
+			</p>
+		{:else if hasNextPage}
 			<div class="contentus-feed__more">
 				<button type="button" onclick={loadMore} disabled={loadingMore}>
 					{loadingMore ? 'Loading…' : 'Load more posts'}

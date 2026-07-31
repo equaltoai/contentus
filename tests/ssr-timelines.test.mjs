@@ -164,15 +164,41 @@ test('PINNED GAP: the vendored ContentRenderer emits no status body during SSR',
 	);
 });
 
-test('the surface tells a no-script reader that bodies need JavaScript', async () => {
-	// Because of the gap above, a reader with no JavaScript gets cards with no
-	// text. A blank is not a designed state, so the document says what is
-	// happening instead of leaving it to be discovered.
+test('the surface discloses BOTH ContentRenderer gaps, to every reader', async () => {
+	// Two different gaps and two different audiences, and the first version of
+	// this disclosure covered only one of each.
+	//
+	//   1. Nothing server-renders, so a no-script reader gets cards with no text
+	//      at all. That is the `<noscript>` half.
+	//   2. What hydration fills in is ESCAPED — see
+	//      tests/vendored-content-renderer.test.mjs — so the reader WITH
+	//      JavaScript, the ordinary case, sees `<p>` printed in their posts. That
+	//      reader never sees a `<noscript>` block, so the disclosure has to render
+	//      unconditionally, which is what `.contentus-feed__gap` is.
 	const handler = await loadHandler();
 	const rendered = await renderRoute(handler, route('timelines-instance'));
 
-	assert.match(rendered.html, /<noscript>/);
+	assert.match(rendered.html, /<noscript>/, 'the no-script half');
 	assert.match(rendered.html, /JavaScript/i);
+
+	assert.match(
+		rendered.html,
+		/class="contentus-feed__gap"/,
+		'the hydrated half must be disclosed to readers who never see a noscript block'
+	);
+	assert.match(
+		rendered.html,
+		/literal text/i,
+		'and it must name what the reader actually sees, not gesture at "a rendering issue"'
+	);
+	// Svelte escapes `<` and leaves `>` alone, so both encodings are accepted —
+	// the claim is that the reader is shown the tag, not how the compiler spelled
+	// it.
+	assert.match(
+		rendered.html,
+		/<code>&lt;p(&gt;|>)<\/code>/,
+		'showing the markup they will find in their posts'
+	);
 });
 
 test('a profile deep link server-renders the actor card AND their posts', async () => {

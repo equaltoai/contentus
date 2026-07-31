@@ -215,12 +215,23 @@
 }
 
 .contentus-feed__skipped,
+.contentus-feed__partial,
+.contentus-feed__limit,
 .contentus-feed__tail {
 	margin: 0 0 var(--tc-space-3);
 	padding: var(--tc-space-2) var(--tc-space-3);
 	border-left: 3px solid var(--tc-outline-variant);
 	color: var(--tc-fg-muted);
 	font-size: 0.875rem;
+}
+
+/* The bound notice carries an action, so it needs room for a control that
+   still meets the touch floor. */
+.contentus-feed__limit {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--tc-space-3);
 }
 
 /* =============================================================
@@ -586,10 +597,13 @@
 	}
 }
 
-/* The no-script disclosure of the pinned upstream SSR gap. Styled as a
-   notice rather than an error: nothing is broken for the reader who has
-   JavaScript, and the one who does not deserves the explanation rather
-   than an alarm. */
+/* The disclosure of the two pinned upstream ContentRenderer gaps — no body
+   during SSR, and escaped markup after hydration. Styled as a notice rather
+   than an error: the surface works, one shared component renders one part of
+   it wrongly, and the reader is owed the explanation rather than an alarm.
+   Both classes share it; the no-script one adds the case where the text
+   never arrives at all. */
+.contentus-feed__gap,
 .contentus-feed__noscript {
 	margin: 0 0 var(--tc-space-3);
 	padding: var(--tc-space-3);
