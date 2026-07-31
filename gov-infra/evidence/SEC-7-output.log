@@ -1,8 +1,9 @@
 note: a PATH `greater` exists (/home/aron/.local/share/pnpm/greater) and is deliberately not used.
-GOV-BLOCKED: repo-local pinned greater CLI is not installed; SEC-7 could not run
-The greater CLI is not published to the npm registry. Install the pinned,
+GOV-BLOCKED: gov-infra/.tools/greater-components-cli.tgz is absent, so SEC-7 has no verified archive to execute from
+The greater CLI is not published to the npm registry. Fetch the pinned,
 digest-verified release asset with the repository-local installer:
   node gov-infra/verifiers/install-greater-cli.mjs
-CI runs exactly that step. A PATH `greater` is deliberately not accepted:
-its provenance is whatever it says about itself, which is not evidence.
-BLOCKED is not green: this report will not pass.
+CI runs exactly that step. SEC-7 consumes the tarball it leaves behind and
+extracts its own copy; it never executes the tree that installer produces,
+and a PATH `greater` is not accepted at all — provenance by self-report is
+not provenance. BLOCKED is not green: this report will not pass.

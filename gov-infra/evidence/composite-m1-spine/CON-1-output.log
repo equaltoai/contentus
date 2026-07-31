@@ -1,5 +1,5 @@
 
-> @equaltoai/contentus@0.1.0 lint /tmp/pr50-r3/composite-final
+> @equaltoai/contentus@0.1.0 lint /tmp/contentus-composite-r4-final.lTkC45
 > prettier --check .
 
 Checking formatting...
