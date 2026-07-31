@@ -17,9 +17,11 @@
  *
  * 1. AUTH IS PER TIMELINE TYPE, AND THE QUERY AND THE SUBSCRIPTION DISAGREE.
  *    `applyTimelineTypeFilter` requires a username for HOME and DIRECT only, so
- *    LOCAL, PUBLIC and ACTOR read anonymously. The subscription is stricter:
- *    `TimelineUpdates` refuses every type except PUBLIC without a username. So
- *    the Instance tab reads for everyone but goes live only once signed in, and
+ *    LOCAL, PUBLIC and ACTOR read anonymously. The subscription is stricter,
+ *    and stricter still than its own resolver: `TimelineUpdates` refuses every
+ *    type except PUBLIC without a username, and the WebSocket gateway in front
+ *    of it refuses EVERY tokenless connection before the resolver is reached.
+ *    So the timelines read for everyone and go live only once signed in, and
  *    saying so is `realtimeAvailability` below rather than a dead socket.
  *
  * 2. `excludeAgents` FILTERS AFTER PAGINATION. The resolver fetches a page, then
@@ -88,17 +90,28 @@ export function readRequiresAuth(type: ContentusTimelineType): boolean {
  * this caller — a separate question from `readRequiresAuth`, and the reason the
  * two are separate functions rather than one flag.
  *
+ * TWO REFUSALS, AND THE STRICTER ONE IS THE ONE READERS MEET.
  * `subscription_resolvers_timelines.go` refuses any type but PUBLIC when the
- * connection carries no username. LOCAL is the case that matters: the Instance
- * tab reads fine anonymously and cannot go live, so the affordance has to say
- * that instead of showing a connecting spinner forever.
+ * connection carries no username — so the resolver would serve an anonymous
+ * PUBLIC subscriber. It never gets the chance: the WebSocket gateway in front
+ * of it (`cmd/graphql-ws/main.go` → `handleConnectionInit`) requires an access
+ * token in the `connection_init` payload and answers an empty one with
+ * `connection_error` before any GraphQL dispatch, and `handleSubscribe` refuses
+ * a connection with no username besides.
+ *
+ * That contradiction is lesser's and is filed as lesser's. What contentus owes
+ * a reader in the meantime is the truth about what will happen, so realtime is
+ * gated on a token for EVERY type: the Federated tab reads anonymously and
+ * says "sign in to see it update live", which is what the instance will do,
+ * rather than advertising a stream that cannot open. Reads are untouched —
+ * only realtime is gated. When lesser can ACK an anonymous connection, PUBLIC
+ * comes back here and the probe that pins this goes red.
  */
 export function realtimeAvailability(
 	type: ContentusTimelineType,
 	viewerAuthenticated: boolean
 ): 'available' | 'requires-auth' | 'unsupported' {
 	if (type === 'ACTOR') return 'unsupported';
-	if (type === 'PUBLIC') return 'available';
 	return viewerAuthenticated ? 'available' : 'requires-auth';
 }
 

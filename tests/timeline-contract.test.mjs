@@ -307,15 +307,35 @@ test('only HOME needs a token to READ', () => {
 	assert.equal(readRequiresAuth('ACTOR'), false);
 });
 
-test('realtime is stricter than reads: only PUBLIC goes live anonymously', () => {
-	// subscription_resolvers_timelines.go: any type but PUBLIC with no username
-	// is refused. The Instance tab reads for everyone and cannot go live.
-	assert.equal(realtimeAvailability('PUBLIC', false), 'available');
+test('realtime is stricter than reads: no timeline goes live without a token', () => {
+	// TWO REFUSALS, AND THE STRICTER ONE IS THE ONE READERS MEET.
+	// `subscription_resolvers_timelines.go` refuses any type but PUBLIC with no
+	// username — so the RESOLVER would serve an anonymous PUBLIC subscriber. It
+	// never gets the chance: `cmd/graphql-ws/main.go` → `handleConnectionInit`
+	// answers a tokenless `connection_init` with `connection_error` before any
+	// GraphQL dispatch, and `handleSubscribe` refuses a connection with no
+	// username besides.
+	//
+	// PUBLIC therefore reads anonymously and cannot go live anonymously, and this
+	// says so rather than advertising a stream that will be refused.
+	assert.equal(
+		realtimeAvailability('PUBLIC', false),
+		'requires-auth',
+		'GOOD NEWS IF THIS FAILS: lesser can now ACK an anonymous connection_init. ' +
+			'Restore PUBLIC to `available` here and in realtimeAvailability, and drop the ' +
+			'lesser filing from docs/consumption/timeline-contract.md.'
+	);
 	assert.equal(realtimeAvailability('LOCAL', false), 'requires-auth');
 	assert.equal(realtimeAvailability('HOME', false), 'requires-auth');
 
+	assert.equal(realtimeAvailability('PUBLIC', true), 'available');
 	assert.equal(realtimeAvailability('LOCAL', true), 'available');
 	assert.equal(realtimeAvailability('HOME', true), 'available');
+
+	// Reads are UNTOUCHED by the realtime gate. This pairing is the assertion
+	// that the gate did not quietly become a sign-in wall on the reading surface.
+	assert.equal(readRequiresAuth('PUBLIC'), false);
+	assert.equal(readRequiresAuth('LOCAL'), false);
 
 	assert.equal(realtimeAvailability('ACTOR', true), 'unsupported');
 	assert.equal(realtimeAvailability('ACTOR', false), 'unsupported');

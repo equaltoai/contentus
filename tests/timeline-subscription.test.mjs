@@ -14,6 +14,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+	CLOSE_ACK_TIMEOUT,
+	CLOSE_INVALID_FRAME,
 	GRAPHQL_TRANSPORT_WS,
 	subscribe,
 	subscriptionEndpoint,
@@ -32,14 +34,18 @@ class FakeSocket {
 		this.readyState = FakeSocket.OPEN;
 		this.sent = [];
 		this.closed = false;
+		/** Every close code the module passed, in order. */
+		this.closeCodes = [];
 	}
 
 	send(data) {
 		this.sent.push(JSON.parse(data));
 	}
 
-	close() {
+	close(code, reason) {
 		this.closed = true;
+		this.closeCodes.push(code ?? null);
+		this.closeReason = reason ?? null;
 		this.readyState = FakeSocket.CLOSED;
 	}
 
@@ -55,11 +61,18 @@ class FakeSocket {
 	}
 }
 
-/** Start a subscription against a fake socket and return both plus the state log. */
+/**
+ * Start a subscription against a fake socket and return both plus the state log.
+ *
+ * The ack deadline is DRIVEN, not waited out: `fireAckTimeout()` runs whatever
+ * the module scheduled. A timeout asserted by sleeping is a timeout asserted
+ * flakily, and one asserted not at all is the finding this file was reworked for.
+ */
 function start(options = {}) {
 	let socket;
 	const states = [];
 	const received = [];
+	const timers = [];
 
 	const stop = subscribe({
 		endpoint: 'wss://ws.example.test',
@@ -71,10 +84,21 @@ function start(options = {}) {
 			socket = new FakeSocket(url, protocols);
 			return socket;
 		},
+		scheduleTimeout: (run, ms) => {
+			const timer = { run, ms, cancelled: false };
+			timers.push(timer);
+			return () => {
+				timer.cancelled = true;
+			};
+		},
 		...options,
 	});
 
-	return { socket, states, received, stop };
+	const fireAckTimeout = () => {
+		for (const timer of timers) if (!timer.cancelled) timer.run();
+	};
+
+	return { socket, states, received, stop, timers, fireAckTimeout };
 }
 
 // The module reads `WebSocket.OPEN`; in Node there is no global WebSocket
@@ -176,8 +200,8 @@ test('a ping is answered with a pong carrying the same payload', () => {
 	assert.deepEqual(pong.payload, { keepalive: 1 });
 });
 
-test('next frames deliver data, and a next carrying only errors delivers nothing', () => {
-	const { socket, received } = start();
+test('next frames deliver data, and a next carrying only errors is reported as degraded', () => {
+	const { socket, received, states } = start();
 	socket.open();
 	socket.deliver({ type: 'connection_ack' });
 
@@ -188,10 +212,16 @@ test('next frames deliver data, and a next carrying only errors delivers nothing
 	});
 	assert.equal(received.length, 1);
 	assert.equal(received[0].timelineUpdates.id, 'obj-1');
+	assert.equal(states.at(-1), 'live');
 
 	// A field failure is not a post; passing it on would prepend an empty card.
+	// But it is not nothing either — lesser published something that did not
+	// arrive, and a strip still reading `live` would be claiming a continuity
+	// this stream just lost. That silent drop is what this assertion replaced.
 	socket.deliver({ type: 'next', id: '1', payload: { errors: [{ message: 'boom' }] } });
-	assert.equal(received.length, 1);
+	assert.equal(received.length, 1, 'still no empty card');
+	assert.equal(states.at(-1), 'degraded');
+	assert.ok(!socket.closed, 'and the socket stays open, because the stream has not ended');
 });
 
 test('frames for another subscription id are ignored', () => {
@@ -203,26 +233,134 @@ test('frames for another subscription id are ignored', () => {
 	assert.equal(received.length, 0);
 });
 
-test('an unparseable frame does not tear down a working stream', () => {
+test('an unparseable frame terminates the session with 4400, as the spec requires', () => {
+	// This assertion is the inverse of the one it replaces, and the replacement
+	// is the point. The old probe asserted that a frame this client could not
+	// parse was IGNORED and the stream carried on reading `live` — which is a
+	// session whose peers have disagreed about the protocol, reported to the
+	// reader as healthy. `graphql-transport-ws` requires 4400 termination.
 	const { socket, received, states } = start();
 	socket.open();
 	socket.deliver({ type: 'connection_ack' });
 
 	socket.onmessage({ data: 'not json at all' });
-	assert.ok(!socket.closed, 'the protocol tolerates unknown messages');
 
+	assert.ok(socket.closed, 'an invalid frame ends the session');
+	assert.deepEqual(socket.closeCodes, [CLOSE_INVALID_FRAME]);
+	assert.equal(states.at(-1), 'unavailable', 'and the reader is told, rather than left on live');
+
+	// Nothing after the teardown may still be treated as stream traffic.
 	socket.deliver({
 		type: 'next',
 		id: '1',
 		payload: { data: { timelineUpdates: { id: 'obj-2' } } },
 	});
-	assert.equal(received.length, 1, 'and the stream keeps working after one');
+	assert.equal(received.length, 0);
+});
+
+test('a well-formed frame that is not an object is invalid too', () => {
+	const { socket, states } = start();
+	socket.open();
+	socket.deliver({ type: 'connection_ack' });
+
+	// Valid JSON, no message shape. `"type" of undefined` is not a protocol.
+	socket.onmessage({ data: '[1,2,3]' });
+
+	assert.deepEqual(socket.closeCodes, [CLOSE_INVALID_FRAME]);
+	assert.equal(states.at(-1), 'unavailable');
+});
+
+test('an unprompted pong is ignored rather than treated as a failure', () => {
+	// This client sends no `ping`, so a keepalive `pong` is traffic to skip. It
+	// is named explicitly because the invalid-frame rule above must not be
+	// widened into "any frame I did not expect ends the session" — lesser
+	// already sends one non-spec frame, and a strict unknown-type teardown would
+	// close on its own gateway's legacy vocabulary.
+	const { socket, states } = start();
+	socket.open();
+	socket.deliver({ type: 'connection_ack' });
+	socket.deliver({ type: 'pong' });
+
+	assert.ok(!socket.closed);
 	assert.equal(states.at(-1), 'live');
 });
 
 /* ---------------------------------------------------------------------------
  * Failure states, which are different screens
  * ------------------------------------------------------------------------ */
+
+test("lesser's gateway refuses a tokenless connection_init, and that must not be a stall", () => {
+	// THE FINDING THIS EXISTS FOR. `cmd/graphql-ws/main.go` → `handleConnectionInit`
+	// answers an empty init payload with `connection_error` — before any GraphQL
+	// dispatch, and WITHOUT closing the socket. A client with no case for that
+	// frame waits on an ack that will never arrive, so the live strip read
+	// "Connecting…" forever: the one outcome a reader can neither read nor act on.
+	//
+	// `connection_error` is not a `graphql-transport-ws` frame at all; it belongs
+	// to the older `subscriptions-transport-ws` protocol. It is handled because it
+	// is what the instance sends, not because the protocol says to.
+	const { socket, states } = start({ accessToken: null });
+	socket.open();
+
+	socket.deliver({
+		type: 'connection_error',
+		payload: { message: 'Access token required in connection_init payload', code: 'unauthorized' },
+	});
+
+	assert.equal(states.at(-1), 'requires-auth', 'a refusal with an action attached says so');
+	assert.ok(!states.includes('live'), 'and never claims the stream opened');
+	assert.ok(socket.closed, 'the session is closed rather than left waiting on an ack');
+});
+
+test('an expired token gets the same treatment, from the same frame', () => {
+	// The other `connection_error` the gateway sends. Identical shape, identical
+	// consequence for a reader: sign in again.
+	const { socket, states } = start({ accessToken: 'stale-token' });
+	socket.open();
+
+	socket.deliver({
+		type: 'connection_error',
+		payload: { message: 'Invalid or expired token', code: 'unauthorized' },
+	});
+
+	assert.equal(states.at(-1), 'requires-auth');
+	assert.ok(socket.closed);
+});
+
+test('a connection_error with no auth vocabulary is unavailable, and still terminal', () => {
+	const { socket, states } = start();
+	socket.open();
+	socket.deliver({ type: 'connection_error', payload: { message: 'gateway exploded' } });
+
+	assert.equal(states.at(-1), 'unavailable');
+	assert.ok(socket.closed, 'unclassifiable is still not a reason to keep spinning');
+});
+
+test('a handshake that is never acknowledged times out instead of spinning', () => {
+	const { socket, states, fireAckTimeout } = start();
+	socket.open();
+
+	assert.equal(states.at(-1), 'connecting', 'the deadline has not passed yet');
+	fireAckTimeout();
+
+	assert.equal(states.at(-1), 'unavailable');
+	assert.deepEqual(socket.closeCodes, [CLOSE_ACK_TIMEOUT]);
+});
+
+test('the ack cancels the deadline, so a healthy stream is never torn down by it', () => {
+	const { socket, states, timers, fireAckTimeout } = start();
+	socket.open();
+	socket.deliver({ type: 'connection_ack' });
+
+	assert.ok(
+		timers.every((timer) => timer.cancelled),
+		'the deadline must be cancelled the moment the ack lands'
+	);
+
+	fireAckTimeout();
+	assert.equal(states.at(-1), 'live', 'a live stream stays live');
+	assert.ok(!socket.closed);
+});
 
 test("lesser's auth refusal is reported as requires-auth, not as a generic failure", () => {
 	// The subscription resolver refuses every type but PUBLIC without a token.
@@ -311,12 +449,48 @@ test('stopping sends complete and closes exactly once', () => {
 	assert.equal(socket.sent.length, afterFirstStop, 'a second stop is a no-op');
 });
 
-test("lesser's own complete ends the stream without an error state", () => {
+test("lesser's own complete ends the stream in a state that renders copy", () => {
+	// Replaces an assertion on `idle`. `idle` is the state the TEARDOWN path
+	// uses — the reader navigated away — and the live strip deliberately renders
+	// nothing for it. Mapping a SERVER-initiated end onto it left a strip that
+	// said nothing at all while posts had stopped arriving. lesser sends
+	// `complete` on several refusal paths (`handleSubscribe` emits it after every
+	// `error`), so this is a frame readers actually meet.
 	const { socket, states } = start();
 	socket.open();
 	socket.deliver({ type: 'connection_ack' });
 	socket.deliver({ type: 'complete', id: '1' });
 
-	assert.equal(states.at(-1), 'idle', 'a clean end is not a failure');
+	assert.equal(states.at(-1), 'unavailable', 'the stream stopped, and the reader is told so');
+	assert.ok(!states.slice(states.indexOf('live')).includes('idle'), 'never the blank state');
 	assert.ok(socket.closed);
+});
+
+test('every terminal frame leaves a state a reader can act on — none leaves connecting', () => {
+	// The property behind the four probes above, asserted as a property. Any
+	// future refusal frame that lands with no case will fail here rather than
+	// shipping as a spinner.
+	const terminals = [
+		{
+			type: 'connection_error',
+			payload: { message: 'Access token required', code: 'unauthorized' },
+		},
+		{ type: 'connection_error', payload: { message: 'gateway exploded' } },
+		{ type: 'error', id: '1', payload: [{ message: 'authentication required' }] },
+		{ type: 'error', id: '1', payload: [{ message: 'internal failure' }] },
+		{ type: 'complete', id: '1' },
+	];
+
+	for (const frame of terminals) {
+		const { socket, states } = start();
+		socket.open();
+		if (frame.id) socket.deliver({ type: 'connection_ack' });
+		socket.deliver(frame);
+
+		assert.ok(
+			['requires-auth', 'unavailable'].includes(states.at(-1)),
+			`${frame.type} left the reader on "${states.at(-1)}"`
+		);
+		assert.ok(socket.closed, `${frame.type} left the socket open`);
+	}
 });

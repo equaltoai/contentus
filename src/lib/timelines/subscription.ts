@@ -43,6 +43,18 @@
  * NO INSTANCE DOMAIN IS HARD-CODED anywhere here: the host comes from the
  * request that was actually served, so expanding past the dev instance stays a
  * configuration event.
+ *
+ * THE GATEWAY AND THE RESOLVER DISAGREE, AND THE GATEWAY WINS. lesser's
+ * subscription RESOLVER admits an anonymous PUBLIC subscriber; its WebSocket
+ * GATEWAY never lets one reach the resolver. `handleConnectionInit`
+ * (`cmd/graphql-ws/main.go`) requires an access token in the `connection_init`
+ * payload and answers an empty one with a `connection_error` — before any
+ * GraphQL dispatch — and `handleSubscribe` refuses again for a connection with
+ * no username. So anonymous realtime is unreachable at runtime no matter what
+ * the resolver would allow, and this module reports what the runtime does. Two
+ * consequences live here: `connection_error` is a handled frame, and
+ * `realtimeAvailability` in `contract.ts` gates realtime on a token for every
+ * type. Filed against lesser; see docs/consumption/timeline-contract.md.
  */
 
 /** The subprotocol lesser's `cmd/graphql-ws` negotiates. */
@@ -78,9 +90,33 @@ export function subscriptionEndpoint(origin: string | null | undefined): string 
 	return `${scheme}//${host}${port}`;
 }
 
-/** Why a live connection is not running. Each is a different thing to tell a reader. */
+/**
+ * Why a live connection is not running. Each is a different thing to tell a
+ * reader, and each has to be REACHED — a state the transport can never enter is
+ * a screen nobody sees.
+ *
+ * `degraded` is the one that is not a failure and not health: the socket is
+ * open and delivering, and something it delivered could not be turned into a
+ * post. Reporting that as `live` would be the transport asserting a
+ * completeness it lost; reporting it as `unavailable` would be telling a reader
+ * the stream stopped when it did not. It is sticky for the life of the socket,
+ * because the gap it names does not close on its own — only a re-read does that.
+ */
 export type SubscriptionState =
-	'idle' | 'connecting' | 'live' | 'unsupported' | 'requires-auth' | 'unavailable';
+	'idle' | 'connecting' | 'live' | 'degraded' | 'unsupported' | 'requires-auth' | 'unavailable';
+
+/**
+ * Close codes from the `graphql-transport-ws` spec, used where it names them.
+ *
+ * A client that meets a frame it cannot parse is required to terminate rather
+ * than skip it: the peers have disagreed about the protocol, and a session that
+ * carries on after that is one whose subsequent frames mean nothing definite.
+ */
+export const CLOSE_INVALID_FRAME = 4400;
+export const CLOSE_ACK_TIMEOUT = 4408;
+
+/** How long to wait for `connection_ack` before giving up on the handshake. */
+export const DEFAULT_ACK_TIMEOUT_MS = 10_000;
 
 export interface SubscriptionHandlers<T> {
 	/** One payload from lesser. Called for every `next` frame. */
@@ -95,6 +131,36 @@ export interface SubscriptionOptions<T> extends SubscriptionHandlers<T> {
 	accessToken?: string | null;
 	/** Injectable for probes; defaults to the platform WebSocket. */
 	socketFactory?: (url: string, protocols: string | string[]) => WebSocket;
+	/** Handshake deadline. Zero disables it. */
+	ackTimeoutMs?: number;
+	/**
+	 * Injectable timer, returning its own canceller.
+	 *
+	 * Present so the ack deadline is DRIVEN by a probe rather than waited out:
+	 * a timeout asserted by sleeping is a timeout asserted flakily.
+	 */
+	scheduleTimeout?: (run: () => void, ms: number) => () => void;
+}
+
+/**
+ * Whether a refusal from lesser is one the reader can act on by signing in.
+ *
+ * lesser refuses on two surfaces with two vocabularies, and both land here. The
+ * gateway's `connection_error` carries `{message, code}` with `code:
+ * "unauthorized"` for a missing, invalid or expired token; the resolver's
+ * `error` carries a plain gqlerror whose message is "authentication required for
+ * this timeline type". Neither is a generic failure: both have the same action
+ * attached, and collapsing them into "something went wrong" hides it.
+ */
+function isAuthRefusal(payload: unknown): boolean {
+	const text = JSON.stringify(payload ?? '').toLowerCase();
+	return (
+		text.includes('authentication required') ||
+		text.includes('unauthorized') ||
+		text.includes('unauthenticated') ||
+		text.includes('access token required') ||
+		text.includes('invalid or expired token')
+	);
 }
 
 /**
@@ -106,6 +172,14 @@ export interface SubscriptionOptions<T> extends SubscriptionHandlers<T> {
  * never arrive, and the timeline would look continuous while missing posts.
  * Face 4's affordance is a visible "reconnect" the reader chooses, which also
  * refetches the page, so the gap is closed rather than hidden.
+ *
+ * EVERY WAY THIS CAN END, ENDS IN A STATE. That is the property to preserve
+ * when editing this function, and the one it did not previously have: a refusal
+ * with no case, a frame that would not parse, or a handshake that was never
+ * answered all left the caller on `connecting` — a spinner with nothing behind
+ * it, which is the one outcome a reader can neither read nor act on. There is
+ * no path below that returns without either reporting a state or having already
+ * reported one.
  */
 export function subscribe<T>(options: SubscriptionOptions<T>): () => void {
 	const {
@@ -116,9 +190,17 @@ export function subscribe<T>(options: SubscriptionOptions<T>): () => void {
 		onData,
 		onState,
 		socketFactory,
+		ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS,
+		scheduleTimeout,
 	} = options;
 
 	const open = socketFactory ?? ((url, protocols) => new WebSocket(url, protocols));
+	const schedule =
+		scheduleTimeout ??
+		((run: () => void, ms: number) => {
+			const handle = setTimeout(run, ms);
+			return () => clearTimeout(handle);
+		});
 
 	let socket: WebSocket;
 	try {
@@ -131,11 +213,28 @@ export function subscribe<T>(options: SubscriptionOptions<T>): () => void {
 	// One subscription per socket, so a fixed id is unambiguous.
 	const id = '1';
 	let closed = false;
+	let acked = false;
+	let cancelAckTimeout: (() => void) | null = null;
 
 	onState('connecting');
 
 	const send = (message: unknown) => {
 		if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+	};
+
+	/** Report a terminal state once and close the socket, optionally with a code. */
+	const finish = (state: SubscriptionState, code?: number, reason?: string) => {
+		if (closed) return;
+		closed = true;
+		cancelAckTimeout?.();
+		cancelAckTimeout = null;
+		onState(state);
+		try {
+			if (code === undefined) socket.close();
+			else socket.close(code, reason);
+		} catch {
+			// Already closing; the state is what mattered.
+		}
 	};
 
 	socket.onopen = () => {
@@ -146,55 +245,101 @@ export function subscribe<T>(options: SubscriptionOptions<T>): () => void {
 			type: 'connection_init',
 			payload: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
 		});
+
+		// The handshake gets a deadline, because a server that never answers it
+		// is indistinguishable from one still thinking, and the difference to a
+		// reader is a spinner that resolves and one that does not.
+		if (ackTimeoutMs > 0) {
+			cancelAckTimeout = schedule(() => {
+				if (acked || closed) return;
+				finish('unavailable', CLOSE_ACK_TIMEOUT, 'Connection acknowledgement timeout');
+			}, ackTimeoutMs);
+		}
 	};
 
 	socket.onmessage = (event) => {
+		if (closed) return;
+
 		let message: { type?: string; id?: string; payload?: unknown };
 		try {
-			message = JSON.parse(String(event.data));
+			const parsed: unknown = JSON.parse(String(event.data));
+			if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+				throw new SyntaxError('frame is not an object');
+			}
+			message = parsed as { type?: string; id?: string; payload?: unknown };
 		} catch {
-			// A frame this client cannot parse is not a reason to tear down a
-			// working stream; the protocol tolerates unknown messages.
+			// The spec is explicit that an unparseable frame terminates the socket
+			// with 4400 rather than being skipped: the peers have disagreed about
+			// the protocol, and every frame after that means nothing definite. The
+			// previous behaviour — ignore and carry on — kept a session alive that
+			// this client could no longer reason about, and reported it as `live`.
+			finish('unavailable', CLOSE_INVALID_FRAME, 'Invalid message received');
 			return;
 		}
 
 		switch (message.type) {
 			case 'connection_ack':
+				acked = true;
+				cancelAckTimeout?.();
+				cancelAckTimeout = null;
 				send({ type: 'subscribe', id, payload: { query, variables } });
 				onState('live');
+				return;
+
+			case 'connection_error':
+				// NOT a `graphql-transport-ws` frame — it belongs to the older
+				// `subscriptions-transport-ws` protocol — but it is what lesser's
+				// gateway actually sends, and it sends it for EVERY init payload
+				// with no token (`cmd/graphql-ws/main.go` → `handleConnectionInit`).
+				// It also does not close the socket afterwards, so a client with no
+				// case for it waits on an ack that will never come. Recorded as a
+				// contract/runtime contradiction in
+				// docs/consumption/timeline-contract.md; handled here because a
+				// reader's spinner is not the place to litigate it.
+				finish(isAuthRefusal(message.payload) ? 'requires-auth' : 'unavailable');
 				return;
 
 			case 'ping':
 				send({ type: 'pong', payload: message.payload });
 				return;
 
+			case 'pong':
+				// This client sends no `ping`, so an unprompted `pong` is a
+				// keepalive to be ignored rather than a frame to fail on.
+				return;
+
 			case 'next': {
 				if (message.id !== id) return;
 				const payload = message.payload as { data?: T; errors?: unknown[] } | undefined;
-				// A `next` carrying only errors is a field failure, not a post.
-				// Passing it on would prepend an empty card.
-				if (payload?.data) onData(payload.data);
+				if (payload?.data) {
+					onData(payload.data);
+					return;
+				}
+				// A `next` with no data is a field failure, not a post — passing it
+				// on would prepend an empty card. The stream is still open, so this
+				// is not a teardown; but something lesser published did not arrive,
+				// and leaving the strip reading `live` would be the client claiming
+				// a continuity it just lost.
+				onState('degraded');
 				return;
 			}
 
 			case 'error': {
 				if (message.id !== id) return;
-				// lesser's subscription resolver returns "authentication required
-				// for this timeline type" for every type but PUBLIC without a
-				// token. That is a state with an action attached, so it is
-				// reported as itself rather than as a generic failure.
-				const text = JSON.stringify(message.payload ?? '').toLowerCase();
-				onState(text.includes('authentication required') ? 'requires-auth' : 'unavailable');
-				closed = true;
-				socket.close();
+				// The resolver's refusal, as opposed to the gateway's above.
+				finish(isAuthRefusal(message.payload) ? 'requires-auth' : 'unavailable');
 				return;
 			}
 
 			case 'complete':
 				if (message.id !== id) return;
-				closed = true;
-				onState('idle');
-				socket.close();
+				// lesser ending the operation is not this client ending it. The
+				// socket stops delivering posts either way, and `idle` — the state
+				// the teardown path uses — renders no copy at all, so a
+				// server-initiated end used to leave a live strip that silently
+				// said nothing. It is the same absence as a drop, with the same
+				// refresh attached.
+				finish('unavailable');
 				return;
 		}
 	};
@@ -206,6 +351,8 @@ export function subscribe<T>(options: SubscriptionOptions<T>): () => void {
 	socket.onclose = () => {
 		if (closed) return;
 		closed = true;
+		cancelAckTimeout?.();
+		cancelAckTimeout = null;
 		// Both cases are `unavailable` to a reader — a stream that never
 		// established and one that dropped are the same absence of live posts,
 		// and the affordance offered for either is the same reconnect.
@@ -215,6 +362,8 @@ export function subscribe<T>(options: SubscriptionOptions<T>): () => void {
 	return () => {
 		if (closed) return;
 		closed = true;
+		cancelAckTimeout?.();
+		cancelAckTimeout = null;
 		send({ type: 'complete', id });
 		try {
 			socket.close();
