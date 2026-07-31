@@ -21,6 +21,17 @@ bar during the upload it is waiting on. The real per-file progress from
 `uploadMedia`'s XHR is surfaced in the line above instead. An upstream
 observation — the handler would need to yield attachments before completion for
 the pattern's own progress bar to ever run.
+
+WHO DECIDES WHAT THE INSTANCE ACCEPTS. Not this component. The pattern's
+defaults — six MIME types and a 10 MiB ceiling, enforced with `console.warn`
+and a silent drop — are an invented policy that happens to resemble one
+instance's configuration, and `cms/media.ts` is explicit that lesser's real
+limits are unadvertised and must not be guessed. So the size ceiling is set
+where the check can never trip it, the type list is widened to lesser's own
+`MediaCategory` vocabulary, and anything the vendored validator still discards
+is RECOVERED and named to the poster rather than swallowed. The reasoning, the
+residual limit, and the upstream `greater` issue it belongs to are in
+`$lib/compose/media-policy`.
 -->
 
 <script lang="ts">
@@ -30,6 +41,12 @@ the pattern's own progress bar to ever run.
 	import type { ComposeFailure } from '$lib/cms/compose';
 
 	import { getComposeExtras } from './extras.svelte';
+	import {
+		droppedFilesMessage,
+		filesDroppedBeforeUpload,
+		NO_CLIENT_SIZE_CEILING,
+		PICKER_MEDIA_TYPES,
+	} from './media-policy';
 
 	interface Props {
 		/** lesser accepts four attachments per status, matching Mastodon. */
@@ -42,6 +59,25 @@ the pattern's own progress bar to ever run.
 
 	let failure = $state<ComposeFailure | null>(null);
 	let inFlight = $state<{ name: string; percent: number } | null>(null);
+	let rejected = $state<string | null>(null);
+
+	/**
+	 * What the poster actually chose, captured before the vendored validator
+	 * runs.
+	 *
+	 * Capture-phase listeners on the wrapper, so they see the picker's `change`
+	 * and the drop zone's `drop` ahead of the pattern's own handlers. This is
+	 * the only way to learn what was discarded without editing vendored source:
+	 * `onUpload` is called with the survivors and nothing says what is missing.
+	 * Adapter-level and documented, with the upstream issue and its sunset
+	 * recorded in `media-policy.ts`.
+	 */
+	let picked: File[] = [];
+
+	function notePicked(files: FileList | null | undefined) {
+		picked = Array.from(files ?? []);
+		rejected = null;
+	}
 
 	/**
 	 * lesser's `MediaCategory` onto the vendored attachment `type`.
@@ -67,6 +103,12 @@ the pattern's own progress bar to ever run.
 
 	async function onUpload(files: File[]): Promise<MediaComposerAttachment[]> {
 		failure = null;
+
+		// Anything the poster chose that never arrived here was dropped by the
+		// vendored validator. Say so by name; a file that disappears without a
+		// word reads as a bug in the instance.
+		rejected = droppedFilesMessage(filesDroppedBeforeUpload(picked, files));
+		picked = [];
 
 		const room = Math.max(0, maxAttachments - extras.state.attachmentIds.length);
 		const accepted = files.slice(0, room);
@@ -138,9 +180,18 @@ the pattern's own progress bar to ever run.
 	}
 </script>
 
-<div class="contentus-compose-media">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="contentus-compose-media"
+	onchangecapture={(event) => notePicked((event.target as HTMLInputElement | null)?.files)}
+	ondropcapture={(event) => notePicked(event.dataTransfer?.files)}
+>
 	{#if failure}
 		<p class="contentus-compose-media__error" role="alert">{failure.message}</p>
+	{/if}
+
+	{#if rejected}
+		<p class="contentus-compose-media__error" role="alert">{rejected}</p>
 	{/if}
 
 	{#if inFlight}
@@ -156,6 +207,13 @@ the pattern's own progress bar to ever run.
 			enableFocalPoint: true,
 			layout: 'grid',
 			requireAltText: false,
+			// Neither value is contentus deciding what the instance takes. The
+			// list is what the vendored validator requires in order to offer
+			// lesser's own media categories at all, and the ceiling is set where
+			// the check cannot trip — leaving both decisions to lesser, which is
+			// the only party that knows them. See `./media-policy`.
+			allowedTypes: [...PICKER_MEDIA_TYPES],
+			maxFileSize: NO_CLIENT_SIZE_CEILING,
 		}}
 		handlers={{ onUpload, onRemove, onReorder, onUpdateAltText, onUpdateFocalPoint }}
 	/>
