@@ -4,8 +4,8 @@ node:fs:441
 
 Error: ENOENT: no such file or directory, open 'package.json'
     at readFileSync (node:fs:441:20)
-    at readStrictJson (file:///tmp/r7-spine-f2.7XnIlh/gov-infra/verifiers/strict-json.mjs:114:25)
-    at file:///tmp/r7-spine-f2.7XnIlh/gov-infra/verifiers/check-greater-pins.mjs:30:13
+    at readStrictJson (file:///tmp/r8-spine.JH0qhY/gov-infra/verifiers/strict-json.mjs:114:25)
+    at file:///tmp/r8-spine.JH0qhY/gov-infra/verifiers/check-greater-pins.mjs:30:13
     at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
     at async node:internal/modules/esm/loader:639:26
     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
