@@ -252,6 +252,41 @@ lesser's gateway answers an expired credential with `connection_error`, and a
 reader who cannot tell that from a dropped socket has no idea signing in would
 fix it.
 
+### "Live" is three signals, not one
+
+A socket reporting `live` is not enough to tell a reader the stream is complete,
+because two things can be wrong while it is perfectly open. A RECONNECT leaves a
+gap — `conversationUpdates` has no replay, so the events published during the
+drop were never delivered and never will be — and a failed RE-READ leaves the
+thread silent while the socket keeps arriving, most sharply when the HTTP
+session has expired and the socket, authorized at connect time, has not. So the
+notice is derived from all three (`src/lib/messaging/liveness.ts`), and the only
+combination that renders nothing is a live socket with no outstanding gap and no
+failed re-read. On reconnect the binding re-reads the open folder and thread
+BEFORE reporting connected, and says "catching up" until it has.
+
+### The session owns the surface, and sign-out ends it
+
+`clearSession()` empties `sessionStorage`; it does nothing to a page that has
+already read it. So sign-out is ANNOUNCED (`$lib/auth/session-events`), and the
+messages face closes its socket, drops its binding and clears its state on that
+announcement. The alternative — reading the session once at mount — left an
+authorized socket receiving and a signed-out reader's conversations on screen,
+which on a shared device is the next person's screen.
+
+### The shared context is reconciled, not trusted
+
+Composing from `getMessagesContext()` means sharing a state machine that keys
+nothing by conversation: `selectConversation` writes whichever read resolves
+last into one `messages` array, and `sendMessage` appends to whatever is
+selected when the mutation returns. On a surface where the selection changes
+faster than a read completes, that is one correspondent's words under another's
+name. Contentus cannot change that source, so the surface reconciles against the
+`conversationId` every projected message already carries
+(`src/lib/messaging/selection.ts`), and pages are merged only into the
+conversation they were requested for. The composer is keyed by conversation for
+the same reason, in the one way available while it exposes no binding of its own.
+
 ### The thread is its own route, and the URL always names what is on screen
 
 `/messages` is the list; `/messages/{conversationId}` is a conversation. Above
@@ -342,12 +377,45 @@ The server ships the route, its folder and the conversation id. Asserted in
    card has no action slot. See the decision above; both block §5's addressable
    Requests tab and its on-card accept/decline.
 
-8. **The messaging registry entry ships no stylesheet.** Third reproduction of
-   the same CLI shape after `compose` and `timeline`: the record lists
-   `component`, `types` and `utils` files and no `styles` entry, while every
-   `.messages-*`, `.message*` and `.new-conversation*` class lives only in
-   `packages/faces/social/src/theme.css`. `src/lib/brand/messaging.css` is
-   contentus's interim appearance layer, with a stated sunset.
+8. **`Messages.Composer` has no conversation binding.** It holds its draft in
+   component state and reads `selectedConversation` at SEND time, and nothing in
+   its `Props` (`class`, and only `class`) names a conversation or accepts a
+   draft. On a two-pane viewport, where selecting is in-place, text typed for
+   one person and left unsent is still in the box when the next conversation
+   opens — and the next Send delivers it to them. Contentus wraps it in a
+   `{#key selected?.id}`, which destroys the draft with the conversation it
+   belonged to; that closes the misdelivery and costs the draft. Suggested fix:
+   accept `conversationId` (and optionally an initial `value`), so a client can
+   retain drafts PER conversation instead of discarding them.
+   **Pinned** by `tests/messaging-races.test.mjs`, inverted: it asserts the
+   `Props` surface is still `class` alone and fails the day a binding appears.
+
+9. **`createMessagesContext.acceptMessageRequest` ignores the request state it
+   just received.** It removes the pending request and foreground-switches to
+   Inbox whatever `viewerMetadata.requestState` comes back — so an accept lesser
+   reports as still `PENDING` vanishes from the only tab that holds it, and
+   returns on the next load. `declineMessageRequest` is correct by comparison
+   (it acts only on an explicit `true`) but tells the caller nothing about which
+   happened. Suggested fix: act on the returned state, and resolve with it.
+   Contentus posts both mutations through the binding's handlers and renders the
+   returned state itself (`src/lib/messaging/requests.ts`).
+
+10. **The context auto-reconnects without reconciling, and retries a refused
+    credential.** `scheduleRealtimeReconnect` fires on every `disconnected` or
+    `error` and reports `connected` as soon as the socket acks — but
+    `conversationUpdates` has no replay, so everything published during the drop
+    was never delivered. It also cannot distinguish a credential refusal, so an
+    expired session becomes a socket opened every few seconds forever.
+    Suggested fix: expose a reconnect hook a client can reconcile in, and stop
+    retrying on an auth refusal. Contentus withholds `connected` until its own
+    re-read finishes, and latches the refusal in the binding.
+
+11. **The messaging registry entry ships no stylesheet.** Third reproduction of
+    the same CLI shape after `compose` and `timeline`: the record lists
+    `component`, `types` and `utils` files and no `styles` entry, while every
+    `.messages-*`, `.message*` and `.new-conversation*` class lives only in
+    `packages/faces/social/src/theme.css`. `src/lib/brand/messaging.css` is
+    contentus's interim appearance layer, with a stated sunset.
 
 ### To `equaltoai/lesser`
 
@@ -374,6 +442,24 @@ The server ships the route, its folder and the conversation id. Asserted in
    `ws.` onto the request origin, which is lesser's documented topology but not
    a value the instance states. Confined to `subscriptionEndpoint` so there is
    one place to delete.
+
+6. **`conversation(id)` answers "not yours" and "not here" with different
+   envelopes.** `graph/query_resolvers_conversations.go` returns a clean
+   `(nil, nil)` when the store reports not-found, and `(nil, ErrAccessDenied)`
+   when the conversation EXISTS but the viewer is not a participant. Both leave
+   `data.conversation` null and neither leaks a body — but the difference is an
+   existence oracle: a caller who can type a URL can distinguish "this
+   conversation exists" from "it does not", one guessed id at a time, purely
+   from the presence of the error. Suggested fix: answer a non-participant
+   exactly as a missing id is answered.
+
+   Contentus declines to relay it: `adapter.fetchConversation` suppresses the
+   partial-read disclosure when the conversation is null, so both answers reach
+   the surface as the same value, on the same path, in the same one round trip,
+   and render one "this conversation is not available" state.
+   **Pinned** by `tests/messaging-adapters.test.mjs`, which drives both
+   envelopes through the real adapter and asserts the value, the disclosure and
+   the request count are identical.
 
 ---
 
