@@ -145,6 +145,79 @@ message rather than to a wrong permission decision.
 **Ask:** an `extensions.code` on CMS errors — at minimum for the approval-gate
 refusal, feature-gate refusal, and not-found/forbidden.
 
+## M2d.5 — the completion-gate round trip, and what was actually verified
+
+The operator's completion gate is: articles sharable as drafts for review, and
+review possible through **both** contentus and MCP. Three things were checked,
+and they are not the same kind of evidence. Saying which is which is the point
+of this section.
+
+### 1. Contentus's half of the round trip — VERIFIED, against shipped code
+
+`tests/review-round-trip.test.mjs` walks share → queue → `draftPreview` →
+verdict → gated publish. Each step sends one of the exact documents
+`review-contract.ts` exports and feeds the answer through the exact projections
+the routes use, so it is evidence about the shipped consumption of the contract.
+
+Recorded results:
+
+| Step              | Asserted                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| share → queue     | the shared draft sorts above the viewer's own agent drafts; the viewer's grant is carried                |
+| `draftPreview`    | the body is lesser's rendered HTML; no Markdown syntax reaches the reader; no document selects `content` |
+| preview failure   | partial output is dropped, lesser's errors are shown, nothing is rendered in its place                   |
+| verdict           | the server's `DraftReview` replaces the local copy; the draft is still `DRAFT`                           |
+| **gated publish** | the principal-approval refusal is classified `gated` and lesser's wording is verbatim                    |
+| publish           | lesser's assigned slug and Article identity are what the UI links to                                     |
+
+The gate step asserts the **refusal** as its pass condition. A draft that
+published without approval would fail the suite, which is the right way round
+for a face whose product property is that publication is gated.
+
+**What this is not.** The stand-in is not lesser. It does not enforce the gate,
+authorize a grant, or render Markdown. A green run says contentus asks the right
+questions and reads the answers correctly — nothing about whether a live
+instance answers them.
+
+### 2. MCP parity — VERIFIED AS A CONTRACT PROPERTY, not behaviourally
+
+lesser-body's M2b surface (`article_draft_review_submit`,
+`article_draft_review_read`, `article_draft_review_verdict`,
+`article_draft_publish`, merged as #507 at `16c9359`) is documented as calling
+the **same Lesser CMS operations** this face sends. Parity is therefore a
+property of the shared contract rather than of two implementations happening to
+agree, and the half this repository can check is checked: contentus drives
+exactly `sharedDraftReviews`, `draftReview`, `draft`, `myDrafts`,
+`draftPreview`, `submitDraftReview`, `publishDraft`, `scheduleDraft` — and
+nothing invented alongside them.
+
+**Not verified:** the same draft moving through both surfaces in one session.
+That needs a live instance and a reachable Body endpoint. See below.
+
+### 3. Live instance round trip on `trenchcoat` — NOT RUN
+
+Non-gating by operator ruling (2026-07-31), and reported rather than skipped
+quietly. What was attempted and what it returned:
+
+| Attempt                                      | Result                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `https://trenchcoat.lesser.host/api/graphql` | DNS does not resolve                                                  |
+| `https://lab.lesser.host/api/graphql`        | HTTP 404 — not the instance's GraphQL surface                         |
+| lesser-body MCP `article_draft_*` tools      | no such endpoint is connected to this session                         |
+| `lesser client install` to the dev instance  | operator-only; the steward does not run installs on its own authority |
+
+The runbook's own target table says the trenchcoat stage URL is "recorded here
+at first verified install" and it is still blank, which is consistent: the
+install has not been verified yet, so there is no address to reach. M2b also
+landed on lesser-body's `staging` rather than `main`, so the parity surface is
+not deployed anywhere this session could reach even with an address.
+
+**None of this is evidence that the round trip fails.** It is the absence of
+evidence, and it is recorded as such. The live round trip is an operator-run
+step: install contentus to the dev instance, then drive one draft through
+contentus and through the Body tools. Its outcome belongs on issue #14 when it
+happens.
+
 ## What contentus refused to do
 
 - Render Markdown client-side, anywhere, for any preview.
