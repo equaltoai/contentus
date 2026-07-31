@@ -228,6 +228,22 @@ rather than fields _the instance_ could not resolve. No server text reaches the
 reader: lesser's timeline errors carry no extension codes (filed below), so the
 only honest thing a client can say from them is _that_ something failed.
 
+**The marker travels through SSR, and originally did not.** Carrying it on the
+wire is only half the job: contentus server-renders the first page of Instance,
+Federated and every profile, so the server pass is the _only_ pass a reader with
+no script gets and the first paint for everyone else. `TimelinesRouteData` and
+`ProfileRouteData` therefore carry it (`partial`; `pagePartial` and
+`actorPartial` on a profile, because the card and the posts are two reads that
+fail independently), `TimelineFeed` seeds its state from `initialPartial` rather
+than from `false`, and the profile card renders its own
+`.contentus-profile__partial` notice. Found by codex's adversarial review of
+PR #56: the transport was correct and `entry-server.ts` dropped the marker one
+layer later, so a half-failed server read painted a timeline that asserted a
+completeness lesser never claimed. A half-failed read that carried **no**
+objects is disclosed too, rather than rendering as "no posts yet" — the false
+empty this whole rule exists to prevent, arriving through the one state that had
+no marker on it.
+
 ## Routed upstream
 
 ### To `equaltoai/greater-components`
@@ -271,6 +287,18 @@ only honest thing a client can say from them is _that_ something failed.
    correctly, which is why the defect survives casual inspection: it hits
    ordinary posts and spares the ones with an `@` or `#` in them.
 
+   **That bound is pinned too**, on codex's second look at PR #56. The feed's
+   disclosure claims _some_ posts, and an unpinned bound is a claim that decays
+   silently: the vendored mentions branch could start escaping too with every
+   probe still green, and the disclosure would go on saying "some" while every
+   post was corrupt. `tests/vendored-content-renderer.test.mjs` now **executes
+   the component's real `processContent`** — the region is sliced verbatim out of
+   the `.svelte` file and evaluated, because the function is an instance closure
+   that cannot be imported and the component writes through an action that needs
+   a DOM to run — and drives one body through both branches. Reproducing the
+   pipeline in test code, which is what it did before, agrees with itself no
+   matter what the vendored file says.
+
    Suggested fix for both: emit `{@html processedContent}` as the blog face does
    (keeping the action for the client-side update path), and stop routing
    already-sanitized HTML through the plain-text linkifier — or give
@@ -286,8 +314,9 @@ only honest thing a client can say from them is _that_ something failed.
    than a rendering switch. Fabricating them to steer a branch would be inventing
    content to route around a rendering bug. So both gaps are **pinned** —
    `tests/ssr-timelines.test.mjs` for 1a and
-   `tests/vendored-content-renderer.test.mjs` for 1b, every assertion inverted so
-   it fails the day upstream fixes it — and **both are disclosed in the feed**:
+   `tests/vendored-content-renderer.test.mjs` for 1b, each corrupting branch
+   asserted invertedly so it fails the day upstream fixes it — and **both are
+   disclosed in the feed**:
    the always-rendered `.contentus-feed__gap` notice for the hydrated corruption
    (which a `<noscript>` block would never reach) and the `<noscript>` block for
    the missing server paint.
