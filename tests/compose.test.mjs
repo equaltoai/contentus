@@ -4,23 +4,79 @@ import { test } from 'node:test';
 
 import { STATUS_BYTE_LIMIT, statusByteLength } from '../src/lib/compose/budget.ts';
 import {
+	AGENT_TRIGGER_DEFAULT,
+	AGENT_TRIGGER_TYPES,
+	createNoteVariables,
+	scheduleStatusVariables,
+	updateStatusVariables,
+} from '../src/lib/cms/compose-inputs.ts';
+import {
 	LESSER_VISIBILITIES,
 	fromLesserVisibility,
+	normalizeVisibility,
+	reachesWiderThan,
+	seedVisibilityFrom,
 	toLesserVisibility,
 } from '../src/lib/cms/visibility.ts';
+import { composeSeed } from '../src/lib/compose/seed.ts';
+import { buildComposeSubmission } from '../src/lib/compose/submission.ts';
+import {
+	droppedFilesMessage,
+	filesDroppedBeforeUpload,
+	NO_CLIENT_SIZE_CEILING,
+	PICKER_MEDIA_TYPES,
+} from '../src/lib/compose/media-policy.ts';
 import { loadHandler, renderRoute, withStubbedGraphql } from '../scripts/render-routes.mjs';
 
 /**
- * Face 3 probes (M3.2–M3.5).
+ * Face 3 probes (M3.2–M3.5, extended in the PR #53 round-2 rework).
  *
- * Two kinds of assertion, and the split is deliberate. The contract-facing
- * logic — the visibility mapping and the byte budget — is tested directly,
- * because those two decide who can see a post and whether it will be accepted
- * at all, and a test with a bundler between it and the shipped code is a test
- * of the bundler too. Everything else runs against `build/server/handler.mjs`,
- * exactly as lesser's SSR host invokes it, because what ships is what the built
- * handler produces.
+ * THREE KINDS OF ASSERTION, and which one a claim gets is not arbitrary.
+ *
+ *   1. DIRECT, against dependency-free shipped modules. Everything that
+ *      decides what goes over the wire — the visibility mapping and the reach
+ *      rules, the seeds, the submit decision, the GraphQL variable builders,
+ *      the byte budget — is loaded and called. No bundler stands between the
+ *      assertion and the code, so these are claims about what ships.
+ *   2. BUILT-HANDLER, against `build/server/handler.mjs`, invoked exactly as
+ *      lesser's SSR host invokes it. What ships is what the handler produces,
+ *      including whatever the vendored components emit.
+ *   3. SOURCE-SHAPE, reading a file and asserting about its text. Weakest of
+ *      the three and used only where the other two cannot reach — a browser
+ *      API set on an XHR, the wiring between two tested functions inside a
+ *      component. Every one of them says so in its own body.
+ *
+ * What no probe here claims is that the composer BEHAVES correctly in a
+ * browser: `node --test` has no DOM, so the mounted composer is exercised
+ * through its pure parts and its server-rendered document, and the rest is the
+ * instance-verification step.
  */
+
+/** A source status as the seeds read it, at whatever reach the case needs. */
+function seedSource(visibility, overrides = {}) {
+	return {
+		visibility,
+		content: 'the original words',
+		sensitive: false,
+		spoilerText: null,
+		...overrides,
+	};
+}
+
+/** The extras store as it stands at submit time, with nothing set. */
+function emptyExtras(overrides = {}) {
+	return {
+		sensitive: false,
+		attachmentIds: [],
+		poll: null,
+		scheduledAt: null,
+		inReplyToId: null,
+		quoteId: null,
+		agentAttribution: null,
+		editingStatusId: null,
+		...overrides,
+	};
+}
 
 const handler = await loadHandler();
 
@@ -86,6 +142,236 @@ test('an unmapped visibility narrows rather than widens', () => {
 	// a disclosure.
 	assert.equal(toLesserVisibility('followers-only'), 'DIRECT');
 	assert.equal(toLesserVisibility(''), 'DIRECT');
+});
+
+/* -------------------------------------------------------------------------
+ * Reach: a reply is never seeded wider than the post it answers (F1)
+ * ---------------------------------------------------------------------- */
+
+test('a reply seeds the reach of the post it answers, exactly', () => {
+	// The defect this replaces: `defaultVisibility: 'public'`, hard-coded, for
+	// every intent. A reader replying to a direct message sent it to everyone.
+	assert.equal(seedVisibilityFrom('DIRECT'), 'direct');
+	assert.equal(seedVisibilityFrom('FOLLOWERS'), 'private');
+	assert.equal(seedVisibilityFrom('UNLISTED'), 'unlisted');
+	assert.equal(seedVisibilityFrom('PUBLIC'), 'public');
+});
+
+test('an unreadable source reach seeds the narrowest, not the widest', () => {
+	// `fromLesserVisibility` widens to public on an unknown value because it
+	// only ever drove a control's initial selection. This one decides the reach
+	// a post is actually sent at, so it does the opposite.
+	assert.equal(fromLesserVisibility('who-knows'), 'public');
+	assert.equal(seedVisibilityFrom('who-knows'), 'direct');
+	assert.equal(seedVisibilityFrom(null), 'direct');
+	assert.equal(seedVisibilityFrom(undefined), 'direct');
+	assert.equal(seedVisibilityFrom(''), 'direct');
+});
+
+test('normalising a server reach keeps case but not nonsense', () => {
+	assert.equal(normalizeVisibility('public'), 'PUBLIC');
+	assert.equal(normalizeVisibility('Followers'), 'FOLLOWERS');
+	assert.equal(normalizeVisibility('SOMETHING_NEW'), 'DIRECT');
+});
+
+test('wider means wider, in the contract order and no other', () => {
+	assert.ok(reachesWiderThan('PUBLIC', 'DIRECT'));
+	assert.ok(reachesWiderThan('PUBLIC', 'FOLLOWERS'));
+	assert.ok(reachesWiderThan('UNLISTED', 'FOLLOWERS'));
+	assert.ok(reachesWiderThan('FOLLOWERS', 'DIRECT'));
+
+	// Equal is not wider, and narrower certainly is not.
+	assert.ok(!reachesWiderThan('DIRECT', 'DIRECT'));
+	assert.ok(!reachesWiderThan('PUBLIC', 'PUBLIC'));
+	assert.ok(!reachesWiderThan('DIRECT', 'PUBLIC'));
+	assert.ok(!reachesWiderThan('FOLLOWERS', 'UNLISTED'));
+});
+
+test('every intent seeds a reach no wider than its source', () => {
+	// The invariant, checked over the whole cross product rather than the four
+	// cases somebody thought to write down.
+	for (const parent of LESSER_VISIBILITIES) {
+		for (const mode of ['reply', 'quote']) {
+			const seeded = toLesserVisibility(composeSeed(mode, seedSource(parent)).visibility);
+			assert.ok(
+				!reachesWiderThan(seeded, parent),
+				`${mode} to ${parent} seeded ${seeded}, which is wider`
+			);
+		}
+	}
+});
+
+test('a new post has no parent to inherit from and seeds public', () => {
+	assert.equal(composeSeed('new', null).visibility, 'public');
+});
+
+/* -------------------------------------------------------------------------
+ * The seeds, end to end into the GraphQL variables (F1, F2)
+ * ---------------------------------------------------------------------- */
+
+test('a reply to a DIRECT status sends DIRECT', () => {
+	// Seed -> submit decision -> GraphQL variables, all shipped code. This is
+	// the finding's exact scenario: the reader accepts the default and posts.
+	const seed = composeSeed('reply', seedSource('DIRECT'));
+
+	const submission = buildComposeSubmission({
+		mode: 'reply',
+		form: { content: 'answering you', visibility: seed.visibility },
+		extras: emptyExtras({ inReplyToId: SOURCE_ID }),
+	});
+
+	assert.equal(submission.kind, 'create');
+
+	const { input } = createNoteVariables(submission.input);
+	assert.equal(input.visibility, 'DIRECT');
+	assert.equal(input.inReplyToId, SOURCE_ID);
+});
+
+test('a reply to a FOLLOWERS status sends FOLLOWERS', () => {
+	const seed = composeSeed('reply', seedSource('FOLLOWERS'));
+	const submission = buildComposeSubmission({
+		mode: 'reply',
+		form: { content: 'answering you', visibility: seed.visibility },
+		extras: emptyExtras({ inReplyToId: SOURCE_ID }),
+	});
+
+	assert.equal(createNoteVariables(submission.input).input.visibility, 'FOLLOWERS');
+});
+
+test('a scheduled reply carries the inherited reach too', () => {
+	// The schedule path is a different mutation with a different input shape,
+	// so the rule has to hold there separately or it does not hold.
+	const seed = composeSeed('reply', seedSource('DIRECT'));
+	const submission = buildComposeSubmission({
+		mode: 'reply',
+		form: { content: 'later', visibility: seed.visibility },
+		extras: emptyExtras({ inReplyToId: SOURCE_ID, scheduledAt: '2026-08-01T00:00:00Z' }),
+	});
+
+	assert.equal(submission.kind, 'schedule');
+	assert.equal(scheduleStatusVariables(submission.input).input.visibility, 'DIRECT');
+});
+
+test('a poster who widens past the parent still gets what they asked for', () => {
+	// No clamp, on purpose: lesser accepts the reach the caller asks for, and a
+	// client overriding an explicit choice would invent a rule the contract
+	// does not have. `ReachNotice` is what makes the choice visible.
+	const submission = buildComposeSubmission({
+		mode: 'reply',
+		form: { content: 'answering you', visibility: 'public' },
+		extras: emptyExtras({ inReplyToId: SOURCE_ID }),
+	});
+
+	assert.equal(createNoteVariables(submission.input).input.visibility, 'PUBLIC');
+	assert.ok(reachesWiderThan('PUBLIC', 'DIRECT'), 'and the notice condition is true for it');
+});
+
+test('an edit seeds the sensitive flag and the warning from the status', () => {
+	const seed = composeSeed(
+		'edit',
+		seedSource('PUBLIC', { sensitive: true, spoilerText: 'spoilers for chapter 9' })
+	);
+
+	assert.equal(seed.content, 'the original words');
+	assert.equal(seed.sensitive, true);
+	assert.equal(seed.contentWarning, 'spoilers for chapter 9');
+	assert.equal(seed.contentWarningEnabled, true);
+});
+
+test('leaving an edit alone changes neither the gate nor the warning', () => {
+	// The F2 defect: an unseeded editor sent `sensitive: false` on every save,
+	// silently ungating the media on a post whose author had gated it.
+	const source = seedSource('PUBLIC', { sensitive: true, spoilerText: 'chapter 9' });
+	const seed = composeSeed('edit', source);
+
+	const submission = buildComposeSubmission({
+		mode: 'edit',
+		form: {
+			content: seed.content,
+			visibility: seed.visibility,
+			contentWarning: seed.contentWarning,
+		},
+		extras: emptyExtras({ sensitive: seed.sensitive, editingStatusId: SOURCE_ID }),
+	});
+
+	assert.equal(submission.kind, 'update');
+
+	const { id, input } = updateStatusVariables(submission.id, submission.input);
+	assert.equal(id, SOURCE_ID);
+	assert.equal(input.sensitive, true, 'the gate survives a save that did not touch it');
+	assert.equal(input.spoilerText, 'chapter 9', 'and so does the warning');
+});
+
+test('removing the warning on an edit sends an explicit empty spoiler', () => {
+	// lesser seeds `spoilerText` from the stored status and replaces it only
+	// when the input carries the field, so an omitted empty warning leaves the
+	// old one standing on a post whose composer showed none.
+	const seed = composeSeed('edit', seedSource('PUBLIC', { spoilerText: 'chapter 9' }));
+
+	const submission = buildComposeSubmission({
+		mode: 'edit',
+		// `Compose.Root` forwards `contentWarning` as undefined once the toggle
+		// is off, which is exactly what the operator removing it produces.
+		form: { content: seed.content, visibility: seed.visibility, contentWarning: undefined },
+		extras: emptyExtras({ editingStatusId: SOURCE_ID }),
+	});
+
+	const { input } = updateStatusVariables(submission.id, submission.input);
+	assert.equal(input.spoilerText, '', 'present and empty, which is how lesser clears it');
+	assert.ok(
+		Object.hasOwn(input, 'spoilerText'),
+		'omitting it would preserve the warning the composer just removed'
+	);
+});
+
+test('turning the sensitive gate off on an edit sends false, not nothing', () => {
+	const submission = buildComposeSubmission({
+		mode: 'edit',
+		form: { content: 'unchanged', visibility: 'public', contentWarning: undefined },
+		extras: emptyExtras({ sensitive: false, editingStatusId: SOURCE_ID }),
+	});
+
+	const { input } = updateStatusVariables(submission.id, submission.input);
+	assert.equal(input.sensitive, false);
+	assert.ok(Object.hasOwn(input, 'sensitive'), 'a removed gate has to be sent to be removed');
+});
+
+test('a new post with no warning sends no spoiler at all', () => {
+	// The create path keeps the opposite rule, and must: a post carrying
+	// `spoilerText: ""` would be asserting an empty warning it does not have.
+	const submission = buildComposeSubmission({
+		mode: 'new',
+		form: { content: 'hello', visibility: 'public', contentWarning: undefined },
+		extras: emptyExtras(),
+	});
+
+	const { input } = createNoteVariables(submission.input);
+	assert.ok(!Object.hasOwn(input, 'spoilerText'));
+});
+
+test('a reply inherits neither the warning nor the gate of its parent', () => {
+	// lesser has no rule that an answer inherits either, and an invented
+	// warning would be attributed to the person replying.
+	const seed = composeSeed(
+		'reply',
+		seedSource('PUBLIC', { sensitive: true, spoilerText: 'chapter 9' })
+	);
+
+	assert.equal(seed.sensitive, false);
+	assert.equal(seed.contentWarning, '');
+	assert.equal(seed.contentWarningEnabled, false);
+	assert.equal(seed.content, '', 'and it does not inherit the body either');
+});
+
+test('the byte guard refuses before choosing a mutation', () => {
+	const submission = buildComposeSubmission({
+		mode: 'new',
+		form: { content: '🌍'.repeat(200), visibility: 'public' },
+		extras: emptyExtras(),
+	});
+
+	assert.equal(submission.kind, 'rejected');
+	assert.match(submission.message, /800 bytes/);
 });
 
 /* -------------------------------------------------------------------------
@@ -319,4 +605,150 @@ test('hydration for a deep-linked reply resolves the same intent as the document
 	assert.equal(props.compose.intent.mode, 'reply');
 	assert.equal(props.compose.intent.statusId, SOURCE_ID);
 	assert.equal(props.compose.source.authorUsername, 'ada');
+});
+
+/* -------------------------------------------------------------------------
+ * Agent provenance: only what lesser records (F4)
+ * ---------------------------------------------------------------------- */
+
+test('the trigger vocabulary is lesser’s closed set, verbatim', () => {
+	// `allowedAgentAttributionTriggerTypes` in lesser's
+	// graph/mutation_resolvers_notes.go. Anything else is a validation error,
+	// not a tolerated extra — so a free-text control over this turned a valid
+	// post into a rejected one.
+	assert.deepEqual([...AGENT_TRIGGER_TYPES], ['scheduled', 'mention', 'hashtag_watch', 'manual']);
+	assert.equal(AGENT_TRIGGER_DEFAULT, 'manual', 'what lesser records when the field is absent');
+	assert.ok(AGENT_TRIGGER_TYPES.includes(AGENT_TRIGGER_DEFAULT));
+});
+
+test('the attribution panel offers the enum and nothing lesser ignores', () => {
+	// SOURCE-SHAPE, and it says so: the panel renders only for an agent
+	// session, which `node --test` cannot mount. What is checkable is which
+	// controls exist at all — the defect was a control bound to a field the
+	// server discards.
+	const source = readFileSync(
+		new URL('../src/lib/compose/AgentAttributionField.svelte', import.meta.url),
+		'utf8'
+	);
+	const script = source.slice(source.indexOf('<script'));
+
+	assert.match(script, /AGENT_TRIGGER_TYPES/, 'the trigger control is driven by the enum');
+	assert.match(script, /<select/, 'and it is a select, not a text box over a closed set');
+
+	for (const ignored of ['delegatedBy', 'delegatedByDid', 'scopes', 'constraints', 'modelId']) {
+		assert.doesNotMatch(
+			script,
+			new RegExp(`\\b${ignored}\\b`),
+			`${ignored} is derived by lesser from token claims; a control for it would be theatre`
+		);
+	}
+});
+
+/* -------------------------------------------------------------------------
+ * Media: the instance decides, and nothing vanishes quietly (F6, F7)
+ * ---------------------------------------------------------------------- */
+
+test('files the vendored picker discarded are recovered by identity', () => {
+	// Not by name: two files can share one. The pattern filters the very File
+	// objects it was handed, so identity is exactly the right comparison.
+	const a = { name: 'shot.avif', type: 'image/avif' };
+	const b = { name: 'shot.avif', type: 'image/avif' };
+	const c = { name: 'clip.mkv', type: 'video/x-matroska' };
+
+	assert.deepEqual(filesDroppedBeforeUpload([a, b, c], [a, c]), [b]);
+	assert.deepEqual(filesDroppedBeforeUpload([a], [a]), [], 'nothing dropped, nothing reported');
+	assert.deepEqual(filesDroppedBeforeUpload([], []), []);
+});
+
+test('a discarded file is named to the poster, not to the console', () => {
+	// The defect: `console.warn` and a silent `return false`, so a file simply
+	// never appeared and the instance was never asked.
+	const message = droppedFilesMessage([{ name: 'holiday.heic', type: 'image/heic' }]);
+
+	assert.ok(message, 'there must be something to show');
+	assert.match(message, /holiday\.heic/, 'by name');
+	assert.match(message, /composer refusing rather than the instance/, 'and by whose refusal it is');
+
+	assert.equal(droppedFilesMessage([]), null, 'and silence when nothing was dropped');
+});
+
+test('the client imposes no size ceiling of its own', () => {
+	// lesser's MaxUploadSize is unadvertised and instance-configurable. The
+	// vendored 10 MiB default was a guess that silently dropped files an
+	// instance would have accepted.
+	assert.ok(NO_CLIENT_SIZE_CEILING > 10 * 1024 * 1024 * 1024, 'larger than any plausible upload');
+	assert.equal(NO_CLIENT_SIZE_CEILING, Number.MAX_SAFE_INTEGER);
+});
+
+test('the picker spans every media category lesser names', () => {
+	// MediaCategory is IMAGE | VIDEO | AUDIO | GIFV | DOCUMENT. The vendored
+	// default offered two of those five.
+	for (const [category, prefix] of [
+		['image', 'image/'],
+		['video', 'video/'],
+		['audio', 'audio/'],
+		['document', 'application/'],
+	]) {
+		assert.ok(
+			PICKER_MEDIA_TYPES.some((type) => type.startsWith(prefix)),
+			`the picker must offer something for ${category}`
+		);
+	}
+
+	// And it is wider than the vendored six it replaced.
+	assert.ok(PICKER_MEDIA_TYPES.length > 6);
+});
+
+test('the upload sets a timeout, so a stalled transfer cannot hang the UI', () => {
+	// SOURCE-SHAPE, and it says so. `XMLHttpRequest.timeout` is a browser
+	// property with no DOM here to set it on, and the defect was precisely
+	// that `ontimeout` was installed while `timeout` was left at its default
+	// of 0 — a handler that could never fire.
+	const source = readFileSync(new URL('../src/lib/cms/media.ts', import.meta.url), 'utf8');
+
+	assert.match(source, /request\.timeout\s*=\s*UPLOAD_TIMEOUT_MS/, 'the property is assigned');
+	assert.match(source, /const UPLOAD_TIMEOUT_MS\s*=\s*5 \* 60 \* 1000/, 'to a finite bound');
+	assert.match(source, /request\.ontimeout\s*=/, 'and the handler it enables is still there');
+});
+
+/* -------------------------------------------------------------------------
+ * The wiring the pure probes above cannot reach
+ * ---------------------------------------------------------------------- */
+
+test('the composer is seeded from the seed, in both places Root reads', () => {
+	// SOURCE-SHAPE, and it says so. The rules are tested directly above; what
+	// no probe here can reach is whether the component hands them to the
+	// vendored compound. `Root` reads `initialState.visibility` for the first
+	// render and `config.defaultVisibility` for the reset it performs after a
+	// resolved submit, so seeding one and not the other would send the second
+	// reply of a thread at the wrong reach.
+	const source = readFileSync(new URL('../src/lib/routes/Compose.svelte', import.meta.url), 'utf8');
+
+	assert.match(source, /defaultVisibility: seed\.visibility/);
+	assert.match(source, /visibility: seed\.visibility/);
+	assert.match(source, /contentWarning: seed\.contentWarning/);
+	assert.match(source, /contentWarningEnabled: seed\.contentWarningEnabled/);
+	assert.match(source, /extras\.update\(\{ sensitive: settled\.sensitive \}\)/);
+
+	assert.doesNotMatch(
+		source,
+		/defaultVisibility: '[a-z]+'/,
+		'no literal reach survives; that literal was the F1 defect'
+	);
+});
+
+test('the composer does not exist until its seed does', () => {
+	// SOURCE-SHAPE, and it says so. The hold is what removes the window in
+	// which a poster could type into a composer that has not learned its reach
+	// — and what guarantees no seed can overwrite typing, because the subtree
+	// that would hold the typing is not mounted yet.
+	const source = readFileSync(new URL('../src/lib/routes/Compose.svelte', import.meta.url), 'utf8');
+
+	assert.match(source, /\{:else if !seed\}/, 'an unsettled seed renders a holding state');
+	assert.match(source, /\{:else if sourceUnavailable\}/, 'and an unloadable target is refused');
+	assert.match(
+		source,
+		/\{#if session !== 'authenticated'\}/,
+		'with the whole subtree behind the session gate'
+	);
 });

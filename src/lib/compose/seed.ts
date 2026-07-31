@@ -16,7 +16,7 @@
 
 import type { ComposeMode } from '../../facetheory/types';
 
-import { seedVisibilityFrom, type ComposeVisibility } from '../cms/visibility';
+import { seedVisibilityFrom, type ComposeVisibility } from '../cms/visibility.ts';
 
 /**
  * The parts of a source status the seeds read.

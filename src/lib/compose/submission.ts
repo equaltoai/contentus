@@ -27,8 +27,8 @@ import type {
 	ScheduleStatusInput,
 	UpdateStatusInput,
 } from '../cms/compose-inputs';
-import { toLesserVisibility } from '../cms/visibility';
-import { STATUS_BYTE_LIMIT, statusByteLength } from './budget';
+import { toLesserVisibility } from '../cms/visibility.ts';
+import { STATUS_BYTE_LIMIT, statusByteLength } from './budget.ts';
 import type { ComposeExtrasState } from './extras.svelte';
 
 /** What `Compose.Root` hands its `onSubmit` handler. */

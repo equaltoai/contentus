@@ -24,6 +24,20 @@ import { AUDIT_ROUTES, loadHandler, renderRoute } from '../scripts/render-routes
  * What no probe here claims is that the layout LOOKS right at 375px. That is
  * the instance-validation step on a real phone viewport (M3.6), and these
  * assertions are what make that step a check rather than a discovery.
+ *
+ * AND WHAT THE STYLESHEET HALF IS, EXACTLY: string parsing over the assembled
+ * CSS. No viewport is emulated, no rule is cascaded, no `min-height` is
+ * resolved against a box. A test that finds `min-height: 44px` inside an
+ * `@media (max-width: 960px)` block has proven the declaration is in the
+ * stylesheet that ships — not that the tab it belongs to renders 44 pixels
+ * tall, which depends on specificity, inheritance, and a browser. Every test
+ * below whose evidence is the stylesheet says "the stylesheet" in its name for
+ * that reason, and the ones whose evidence is the document say "the document".
+ *
+ * A separate note, because the two get confused: this file says nothing about
+ * inline style. `scripts/audit-csp.mjs` is what asserts the shipped documents
+ * carry no inline `style=` and no inline `<style>`, against the built handler's
+ * output, on every route.
  */
 
 const handler = await loadHandler();
@@ -132,7 +146,7 @@ test('the anonymous server render shows only anonymous tabs', async () => {
 	assert.match(rendered.html, /contentus-tabbar__label">Articles</);
 });
 
-test('the chrome responds at every breakpoint the design names', () => {
+test('the stylesheet carries rules at every breakpoint the design names', () => {
 	for (const breakpoint of [960, 720, 640, 480]) {
 		const block = mediaBlocks(stylesheet, breakpoint);
 		assert.ok(
@@ -147,7 +161,7 @@ test('the chrome responds at every breakpoint the design names', () => {
 	}
 });
 
-test('960px is where the sidebar nav hands over to the tab bar', () => {
+test('the stylesheet hands the sidebar over to the tab bar at 960px', () => {
 	const block = mediaBlocks(stylesheet, 960);
 
 	assert.match(block, /\.contentus-tabbar\s*\{[^}]*position:\s*fixed/);
@@ -155,7 +169,7 @@ test('960px is where the sidebar nav hands over to the tab bar', () => {
 	assert.match(block, /\.contentus-fab\s*\{[^}]*position:\s*fixed/);
 });
 
-test('touch targets never fall below 44px, at any breakpoint', () => {
+test('no breakpoint rule in the stylesheet sets a min-height below 44px', () => {
 	// The floor is a floor. 640px and 480px tighten labels and padding; if a
 	// rule there ever set a height or min-height below 44px on a target, the
 	// design's own minimum would have been traded for a few pixels of label.
@@ -171,7 +185,7 @@ test('touch targets never fall below 44px, at any breakpoint', () => {
 	}
 });
 
-test('the sheet is sized in svh and clears the safe area', () => {
+test('the stylesheet sizes the sheet in svh and clears the safe area', () => {
 	// 100vh measures the pre-scroll viewport, which puts a sticky action bar
 	// behind the browser chrome exactly when the keyboard is up. And a bar that
 	// ignores the safe-area inset sits under the home indicator.
@@ -182,7 +196,7 @@ test('the sheet is sized in svh and clears the safe area', () => {
 	assert.match(block, /padding-bottom:\s*calc\([\s\S]*?--contentus-safe-bottom/);
 });
 
-test('the composer sheet claims the viewport and gives back a way out', () => {
+test('the stylesheet gives the composer sheet the viewport, and a way out', () => {
 	const block = mediaBlocks(stylesheet, 960);
 
 	// The sheet covers the tab bar rather than stacking two bars into the safe
