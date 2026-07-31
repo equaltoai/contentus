@@ -124,7 +124,10 @@ sheets.
 	     and needs no keyboard equivalent. -->
 	<div class="contentus-sheet-scrim" aria-hidden="true"></div>
 
-	<section
+	<!-- A `div` rather than a `section`: `role="dialog"` is an interactive role,
+	     and putting it on a landmark element conflicts with that landmark's own
+	     semantics. The dialog IS the region here. -->
+	<div
 		bind:this={panel}
 		class="contentus-sheet"
 		role="dialog"
@@ -152,5 +155,5 @@ sheets.
 				{@render actions()}
 			</footer>
 		{/if}
-	</section>
+	</div>
 {/if}

@@ -360,6 +360,105 @@
 	padding-top: var(--tc-space-2);
 }
 
+.contentus-compose-actions__buttons {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-3);
+}
+
+/* ---- Reply / quote / edit context ---- */
+
+.contentus-compose-source {
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-left: 3px solid var(--tc-accent);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-source__eyebrow {
+	margin: 0 0 var(--tc-space-1) 0;
+	font-size: var(--tc-fs-eyebrow);
+	letter-spacing: var(--tc-ls-eyebrow);
+	text-transform: uppercase;
+	color: var(--tc-accent);
+}
+
+.contentus-compose-source__author {
+	margin: 0 0 var(--tc-space-1) 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--tc-space-2);
+}
+
+.contentus-compose-source__handle {
+	color: var(--tc-fg-muted);
+	font-family: var(--tc-font-mono);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-source__warning {
+	margin: var(--tc-space-2) 0 0 0;
+	color: var(--tc-phi-gold);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-source__attribution {
+	margin: var(--tc-space-2) 0 0 0;
+	color: var(--tc-violet-signal);
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* ---- Agent attribution ---- */
+
+.contentus-compose-attribution {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-violet-signal);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-attribution__title {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	margin: 0;
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h4);
+	font-weight: var(--tc-w-semibold);
+	color: var(--tc-violet-signal);
+}
+
+/* ---- Destructive action ---- */
+
+.contentus-compose-delete {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-error);
+	border-radius: var(--tc-radius-pill);
+	background: transparent;
+	color: var(--tc-error);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-compose-delete:hover {
+	background: var(--tc-error-container);
+}
+
+.contentus-compose-delete:disabled {
+	border-color: var(--tc-outline);
+	color: var(--tc-fg-dim);
+	cursor: not-allowed;
+}
+
 /* ---- Media, poll, emoji fields ---- */
 
 .contentus-compose-media {

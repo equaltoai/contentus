@@ -308,3 +308,286 @@ export async function createNote(input: CreateNoteInput): Promise<ComposeResult<
 		toCreatedNote((data as { createNote?: { object?: unknown } } | null)?.createNote?.object)
 	);
 }
+
+/* -------------------------------------------------------------------------
+ * Editing, deleting, and scheduling
+ * ---------------------------------------------------------------------- */
+
+/** lesser `UpdateStatusInput`. No visibility: a posted status keeps its reach. */
+export interface UpdateStatusInput {
+	content: string;
+	sensitive?: boolean;
+	spoilerText?: string;
+	language?: string;
+	attachmentIds?: string[];
+}
+
+const UPDATE_STATUS_MUTATION = `
+	mutation ContentusUpdateStatus($id: ID!, $input: UpdateStatusInput!) {
+		updateStatus(id: $id, input: $input) { ${CREATED_NOTE_FIELDS} }
+	}
+`;
+
+const DELETE_OBJECT_MUTATION = `
+	mutation ContentusDeleteObject($id: ID!) {
+		deleteObject(id: $id)
+	}
+`;
+
+const SCHEDULE_STATUS_MUTATION = `
+	mutation ContentusScheduleStatus($input: ScheduleStatusInput!) {
+		scheduleStatus(input: $input) {
+			id
+			scheduledAt
+			createdAt
+		}
+	}
+`;
+
+/**
+ * Edit a posted status.
+ *
+ * `UpdateStatusInput` carries no visibility and no poll, which is the contract
+ * stating that neither is editable after the fact — a status that federated as
+ * public cannot be quietly narrowed, and a poll with votes cannot be rewritten
+ * underneath them. The composer's edit mode therefore hides both rather than
+ * offering controls whose changes would be dropped.
+ */
+export async function updateStatus(
+	id: string,
+	input: UpdateStatusInput
+): Promise<ComposeResult<CreatedNote>> {
+	const payload: Record<string, unknown> = { content: input.content };
+	if (input.sensitive !== undefined) payload['sensitive'] = input.sensitive;
+	if (input.spoilerText) payload['spoilerText'] = input.spoilerText;
+	if (input.language) payload['language'] = input.language;
+	if (input.attachmentIds?.length) payload['attachmentIds'] = input.attachmentIds;
+
+	return authenticatedWrite(UPDATE_STATUS_MUTATION, { id, input: payload }, (data) =>
+		toCreatedNote((data as { updateStatus?: unknown } | null)?.updateStatus)
+	);
+}
+
+/**
+ * Delete a status. Irreversible, and the composer confirms before calling it.
+ *
+ * lesser returns a bare `Boolean!`, so a `false` is a refusal without a reason.
+ * That is reported as a refusal rather than dressed up as an error.
+ */
+export async function deleteObject(id: string): Promise<ComposeResult<true>> {
+	return authenticatedWrite(DELETE_OBJECT_MUTATION, { id }, (data) =>
+		(data as { deleteObject?: unknown } | null)?.deleteObject === true ? true : null
+	);
+}
+
+/** lesser `ScheduleStatusInput`. */
+export interface ScheduleStatusInput {
+	text: string;
+	scheduledAt: string;
+	visibility?: LesserVisibility;
+	sensitive?: boolean;
+	spoilerText?: string;
+	inReplyToId?: string;
+	language?: string;
+	mediaIds?: string[];
+	poll?: PollParamsInput;
+}
+
+export interface ScheduledStatus {
+	id: string;
+	scheduledAt: string;
+}
+
+/**
+ * Schedule a status for later.
+ *
+ * Note the shape differences from `createNote`, which are lesser's and not
+ * ours: the body is `text`, attachments are `mediaIds`, and there is no
+ * `quoteId` and no `agentAttribution`. The composer disables quoting when a
+ * schedule is set rather than silently dropping the quote — the contract has no
+ * way to express a scheduled quote post, so neither does the UI.
+ */
+export async function scheduleStatus(
+	input: ScheduleStatusInput
+): Promise<ComposeResult<ScheduledStatus>> {
+	const payload: Record<string, unknown> = {
+		text: input.text,
+		scheduledAt: input.scheduledAt,
+	};
+
+	if (input.visibility) payload['visibility'] = input.visibility;
+	if (input.sensitive !== undefined) payload['sensitive'] = input.sensitive;
+	if (input.spoilerText) payload['spoilerText'] = input.spoilerText;
+	if (input.inReplyToId) payload['inReplyToId'] = input.inReplyToId;
+	if (input.language) payload['language'] = input.language;
+	if (input.mediaIds?.length) payload['mediaIds'] = input.mediaIds;
+	if (input.poll) payload['poll'] = input.poll;
+
+	return authenticatedWrite(SCHEDULE_STATUS_MUTATION, { input: payload }, (data) => {
+		const scheduled = (data as { scheduleStatus?: Record<string, unknown> } | null)?.scheduleStatus;
+		if (!scheduled || typeof scheduled['id'] !== 'string') return null;
+		return {
+			id: scheduled['id'],
+			scheduledAt:
+				typeof scheduled['scheduledAt'] === 'string' ? scheduled['scheduledAt'] : input.scheduledAt,
+		};
+	});
+}
+
+/* -------------------------------------------------------------------------
+ * Reading the source status and the viewer
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The source status a reply, quote, or edit is anchored to.
+ *
+ * Deliberately shallow, and deliberately NOT rendered as a status card: face 4
+ * owns that component and that query. What a composer needs is enough to show
+ * the poster what they are answering.
+ */
+export interface SourceStatus {
+	id: string;
+	content: string;
+	visibility: LesserVisibility;
+	sensitive: boolean;
+	spoilerText: string | null;
+	authorUsername: string;
+	authorDomain: string | null;
+	authorDisplayName: string | null;
+	createdAt: string;
+	/** Present when the source itself was agent-generated. */
+	agentAttributionLabel: string | null;
+	attachmentIds: string[];
+}
+
+/**
+ * `object(id:)` resolves through `optionalAuth`, so this works anonymously for
+ * a public status and needs the token for anything narrower. Depth stays within
+ * lesser's limit: object → actor → username is three.
+ */
+export const SOURCE_STATUS_QUERY = `
+	query ContentusSourceStatus($id: ID!) {
+		object(id: $id) {
+			id
+			content
+			visibility
+			sensitive
+			spoilerText
+			createdAt
+			actor { id username domain displayName }
+			attachments { id }
+			agentAttribution { identityLabel triggerType }
+		}
+	}
+`;
+
+function toSourceStatus(raw: unknown): SourceStatus | null {
+	if (!raw || typeof raw !== 'object') return null;
+	const object = raw as Record<string, unknown>;
+	if (typeof object['id'] !== 'string' || !object['id']) return null;
+
+	const actor = (object['actor'] ?? {}) as Record<string, unknown>;
+	const attribution = object['agentAttribution'] as Record<string, unknown> | null | undefined;
+	const attachments = Array.isArray(object['attachments']) ? object['attachments'] : [];
+
+	return {
+		id: object['id'],
+		content: typeof object['content'] === 'string' ? object['content'] : '',
+		visibility: String(object['visibility'] ?? 'PUBLIC').toUpperCase() as LesserVisibility,
+		sensitive: object['sensitive'] === true,
+		spoilerText: typeof object['spoilerText'] === 'string' ? object['spoilerText'] : null,
+		authorUsername: typeof actor['username'] === 'string' ? actor['username'] : '',
+		authorDomain: typeof actor['domain'] === 'string' ? actor['domain'] : null,
+		authorDisplayName: typeof actor['displayName'] === 'string' ? actor['displayName'] : null,
+		createdAt: typeof object['createdAt'] === 'string' ? object['createdAt'] : '',
+		agentAttributionLabel:
+			attribution && typeof attribution['identityLabel'] === 'string'
+				? attribution['identityLabel']
+				: attribution && typeof attribution['triggerType'] === 'string'
+					? attribution['triggerType']
+					: null,
+		attachmentIds: attachments.flatMap((entry) => {
+			const id = (entry as Record<string, unknown> | null)?.['id'];
+			return typeof id === 'string' ? [id] : [];
+		}),
+	};
+}
+
+/**
+ * Load the status a compose intent points at.
+ *
+ * Runs on the server (anonymously, for the SSR pass) and again in the browser
+ * with the session token. The server pass resolves public statuses, which is
+ * most reply targets; anything narrower comes back null there and the client
+ * fills it in. Returns null rather than throwing: a reply whose target could
+ * not be loaded is still a reply, and the composer says so.
+ */
+export async function loadSourceStatus(
+	id: string,
+	options: { endpoint?: string | null; accessToken?: string | null } = {}
+): Promise<SourceStatus | null> {
+	if (!id) return null;
+
+	try {
+		const result = await graphqlRequest<{ object?: unknown }>(
+			SOURCE_STATUS_QUERY,
+			{ id },
+			{
+				...(options.endpoint !== undefined ? { endpoint: options.endpoint } : {}),
+				...(options.accessToken ? { accessToken: options.accessToken } : {}),
+			}
+		);
+		return toSourceStatus(result.data?.object);
+	} catch {
+		return null;
+	}
+}
+
+/** Who the session belongs to, and whether lesser will treat it as an agent. */
+export interface ComposeViewer {
+	id: string;
+	username: string;
+	displayName: string | null;
+	isAgent: boolean;
+}
+
+const VIEWER_QUERY = `
+	query ContentusComposeViewer {
+		viewer { id username displayName isAgent }
+	}
+`;
+
+/**
+ * The signed-in actor, or null.
+ *
+ * Used for one decision: whether to offer the agent-attribution panel. lesser
+ * applies `agentAttribution` only when the CALLER'S TOKEN carries agent claims
+ * (`graph/mutation_resolvers_notes.go` → `if claims.IsAgent`), and those claims
+ * are not visible to a client. `Actor.isAgent` on the session's own actor is
+ * the closest thing the contract exposes, and it is the right signal in
+ * practice: an agent session authenticates as its agent actor.
+ *
+ * The distinction matters because the alternative is worse. Offering the panel
+ * to every signed-in poster would put fields on screen that lesser silently
+ * drops for a human caller — attribution theatre, on the one surface where
+ * attribution honesty is the product.
+ */
+export async function loadComposeViewer(): Promise<ComposeViewer | null> {
+	const accessToken = accessTokenOrNull();
+	if (!accessToken) return null;
+
+	try {
+		const result = await graphqlRequest<{ viewer?: unknown }>(VIEWER_QUERY, {}, { accessToken });
+		const viewer = result.data?.viewer as Record<string, unknown> | null | undefined;
+		if (!viewer || typeof viewer['username'] !== 'string') return null;
+
+		return {
+			id: typeof viewer['id'] === 'string' ? viewer['id'] : '',
+			username: viewer['username'],
+			displayName: typeof viewer['displayName'] === 'string' ? viewer['displayName'] : null,
+			isAgent: viewer['isAgent'] === true,
+		};
+	} catch {
+		return null;
+	}
+}
