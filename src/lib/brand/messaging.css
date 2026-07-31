@@ -73,7 +73,7 @@
 	min-height: 0;
 }
 
-@media (min-width: 960px) {
+@media (min-width: 961px) {
 	.contentus-messages[data-two-pane='true'] {
 		grid-template-columns: minmax(18rem, 22rem) 1fr;
 		align-items: start;
@@ -1031,7 +1031,7 @@
    read here rather than re-measured so the two cannot disagree.
    ============================================================= */
 
-@media (max-width: 959px) {
+@media (max-width: 960px) {
 	.contentus-messages__thread {
 		/* The thread owns the viewport below the page header so its list can
 		   scroll under a composer that does not move. */

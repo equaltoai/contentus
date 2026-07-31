@@ -103,8 +103,16 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	const selected = $derived(dm.selectedConversation);
 	const failure = $derived(dm.error ? classifyMessagingError(new Error(dm.error)) : null);
 
-	/** Wide enough for two panes. Matches the §4 breakpoint the shell uses. */
-	const TWO_PANE_QUERY = '(min-width: 960px)';
+	/**
+	 * Wide enough for two panes.
+	 *
+	 * `min-width: 961px` rather than 960, because the shell hands the sidebar
+	 * over to the tab bar in `@media (max-width: 960px)` — inclusive — and 960
+	 * itself is therefore a MOBILE width. A `min-width: 960px` query here would
+	 * put the two-pane layout and the mobile chrome on screen together at exactly
+	 * that width. The stylesheet's own two-pane rule uses the same 961.
+	 */
+	const TWO_PANE_QUERY = '(min-width: 961px)';
 	let twoPane = $state(false);
 
 	onMount(() => {
