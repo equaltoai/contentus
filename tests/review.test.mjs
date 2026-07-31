@@ -15,6 +15,7 @@ import {
 	toReviewActor,
 	toVerdictRecord,
 } from '../src/lib/cms/review-contract.ts';
+import { describeVerdictOffer } from '../src/lib/review/verdict-offer.ts';
 
 /**
  * Face 2 probes (M2d).
@@ -375,6 +376,63 @@ test('a loaded half with more to come speaks only about what was scanned', () =>
 		assert.doesNotMatch(copy, /^No drafts are currently shared/);
 		assert.doesNotMatch(copy, /^You have no agent-generated article drafts/);
 	}
+});
+
+/* ---------------------------------------------------------------------------
+ * Whether the verdict controls are offered
+ *
+ * The finding this section exists for: the panel applied a local `!isAuthor`
+ * gate on top of lesser's grant, which suppressed the principal-owner approval
+ * path — the one lesser's publication gate requires for a generated draft the
+ * principal owns.
+ * ------------------------------------------------------------------------ */
+
+const grant = { grantedAt: '2026-07-30T09:00:00Z', reviewer: actor({ username: 'principal' }) };
+
+test('an active grant offers the verdict action even to the draft own author', () => {
+	// lesser returns the owner's own grant for exactly one case: the explicit
+	// principal-owner approval flow (`DraftReviewForCaller`). Offering the action
+	// here is how a principal approves a principal-owned generated draft; lesser
+	// re-checks `SubmitDraftReview` regardless.
+	const offer = describeVerdictOffer({ grant }, true);
+
+	assert.equal(offer.offer, true);
+	assert.equal(offer.state, 'granted');
+});
+
+test('an active grant offers the verdict action to an invited reviewer', () => {
+	assert.deepEqual(describeVerdictOffer({ grant }, false), { offer: true, state: 'granted' });
+});
+
+test('no grant is an honest refusal, and says which refusal it is', () => {
+	// Absent a grant the action is not offered — but the reason differs, and the
+	// author's explanation must name the self-grant path rather than assert a
+	// blanket "you cannot review your own draft" that lesser does not enforce.
+	assert.deepEqual(describeVerdictOffer({ grant: null }, true), {
+		offer: false,
+		state: 'no-grant-author',
+	});
+	assert.deepEqual(describeVerdictOffer({ grant: null }, false), {
+		offer: false,
+		state: 'no-grant',
+	});
+	assert.equal(describeVerdictOffer({}, false).offer, false);
+});
+
+test('the verdict panel takes its decision from that rule and holds no gate of its own', () => {
+	const source = readFileSync('src/lib/review/VerdictPanel.svelte', 'utf8');
+
+	assert.match(source, /describeVerdictOffer/, 'the panel must use the shared rule');
+
+	// The regression this pins: a local authorship gate re-introduced alongside
+	// the grant. `isAuthor` may still be PASSED to the rule (it chooses which
+	// explanation to show); it may not be conjoined with the grant here.
+	assert.doesNotMatch(
+		source,
+		/!isAuthor/,
+		'the panel must not suppress a lesser-granted action for the author'
+	);
+	assert.doesNotMatch(source, /canReview/, 'the panel must not re-derive its own permission');
 });
 
 /* ---------------------------------------------------------------------------
