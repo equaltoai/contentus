@@ -25,6 +25,7 @@
  */
 
 import { accessTokenOrNull, isAuthenticated } from '../auth/session.ts';
+import { resolveBrowserOrigin } from '../cms/origin.ts';
 import { unreadConversationCount } from './contract.ts';
 import { createMessagingBinding } from './handlers.ts';
 import type { Conversation } from '../components/messaging/context.svelte.js';
@@ -77,7 +78,10 @@ class UnreadStore {
 
 		this.#loading = true;
 		try {
-			const { handlers } = createMessagingBinding();
+			const { handlers } = createMessagingBinding({
+				accessToken: accessTokenOrNull,
+				origin: resolveBrowserOrigin(),
+			});
 			const conversations = await handlers.onFetchConversations?.('INBOX');
 			this.state = conversations
 				? { status: 'known', conversations: unreadConversationCount(conversations) }

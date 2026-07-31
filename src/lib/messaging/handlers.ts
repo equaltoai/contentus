@@ -43,8 +43,6 @@ import type {
 	MessagesHandlers,
 	MessagesRealtimeCallbacks,
 } from '../components/messaging/context.svelte.js';
-import { accessTokenOrNull } from '../auth/session.ts';
-import { resolveBrowserOrigin } from '../cms/origin.ts';
 import { subscriptionEndpoint, type SubscriptionState } from '../timelines/subscription.ts';
 import {
 	createMessagingAdapter,
@@ -80,13 +78,24 @@ export const MESSAGE_PAGE_SIZE = 50;
 export const PARTICIPANT_SEARCH_LIMIT = 10;
 
 export interface MessagingBindingConfig {
+	/**
+	 * The reader's bearer token, read at CALL time.
+	 *
+	 * REQUIRED, and deliberately not defaulted to `accessTokenOrNull`. Importing
+	 * `$lib/auth/session` here would pull `$app/environment` into this module and
+	 * make it unloadable by `node --test`, which is exactly what stops
+	 * `tests/messaging-adapters.test.mjs` driving the REAL adapters against a
+	 * stubbed `fetch`. Same split, and the same payoff, as
+	 * `timelines/transport.ts`: the session belongs to the caller, the network
+	 * belongs here. Callers pass `accessTokenOrNull`.
+	 */
+	accessToken: () => string | null;
 	endpoint?: string | null;
 	/** Origin the page was served from, used to derive the socket host. */
 	origin?: string | null;
 	onPartial?: (operation: string) => void;
 	onRealtimeState?: (state: SubscriptionState) => void;
 	/** Injectable for probes. */
-	accessToken?: () => string | null;
 	socketFactory?: (url: string, protocols: string | string[]) => WebSocket;
 }
 
@@ -99,13 +108,11 @@ export interface MessagingBinding {
 	loadConversation: (conversationId: string) => Promise<Conversation | null>;
 }
 
-export function createMessagingBinding(config: MessagingBindingConfig = {}): MessagingBinding {
-	const origin = config.origin ?? resolveBrowserOrigin();
-
+export function createMessagingBinding(config: MessagingBindingConfig): MessagingBinding {
 	const adapter = createMessagingAdapter({
-		accessToken: config.accessToken ?? accessTokenOrNull,
+		accessToken: config.accessToken,
 		endpoint: config.endpoint ?? null,
-		subscriptionEndpoint: subscriptionEndpoint(origin),
+		subscriptionEndpoint: subscriptionEndpoint(config.origin ?? null),
 		...(config.onPartial ? { onPartial: config.onPartial } : {}),
 		...(config.onRealtimeState ? { onRealtimeState: config.onRealtimeState } : {}),
 		...(config.socketFactory ? { socketFactory: config.socketFactory } : {}),
@@ -196,9 +203,7 @@ export function createMessagingBinding(config: MessagingBindingConfig = {}): Mes
 								// The newly-arrived message, as far as lesser reports one. The
 								// context appends it to an OPEN thread and updates the list
 								// row; it never scrolls, so a reader mid-thread is not moved.
-								...(uiConversation.lastMessage
-									? { message: uiConversation.lastMessage }
-									: {}),
+								...(uiConversation.lastMessage ? { message: uiConversation.lastMessage } : {}),
 							});
 						})
 						.catch(() => {
@@ -277,7 +282,11 @@ export function classifyMessagingError(error: unknown): MessagingFailure {
 	// affordance attached to the one failure it fixes.
 	const text = error instanceof Error ? error.message : String(error ?? '');
 	if (/session has expired|sign in again/i.test(text)) return 'auth-required';
-	if (/did not answer|could not complete|did not return|did not confirm|did not open|unavailable/i.test(text)) {
+	if (
+		/did not answer|could not complete|did not return|did not confirm|did not open|unavailable/i.test(
+			text
+		)
+	) {
 		return 'unavailable';
 	}
 	return 'unknown';

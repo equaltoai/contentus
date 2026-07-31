@@ -2,10 +2,24 @@
  * lesser's conversation contract, projected into the shape greater's messaging
  * components read.
  *
- * WHY THIS EXISTS WHEN `createLesserMessagesHandlers` ALREADY MAPS. The
- * vendored handler is used for everything it can serve, and this module covers
- * exactly the two things its interface cannot express — both of which face 5
- * needs and neither of which is a contentus preference:
+ * THE TYPES ARE UPSTREAM'S, THE PROJECTION IS OURS. Everything below returns a
+ * `Conversation`, `DirectMessage` or `MessageParticipant` imported from
+ * greater's `components/messaging/context.svelte.ts` — the interface the
+ * vendored components actually read — so a pin bump that changes the shape they
+ * expect fails contentus's typecheck instead of drifting into a blank name at
+ * runtime. What contentus owns is the mapping from lesser's wire shape onto
+ * those types, the same division `$lib/timelines/contract` draws for face 4.
+ *
+ * These decisions deliberately mirror greater's own
+ * `createLesserMessagesHandlers`, which contentus cannot call (its config type
+ * hard-references the Apollo-bound `LesserGraphQLAdapter`; see the header of
+ * `./handlers`). Participant id canonicalization, handle construction, folder
+ * derivation from `viewerMetadata.requestState` and the flattening of `unread`
+ * all match it, so the two clients behave the same way against one instance.
+ *
+ * TWO OF THESE PROJECTIONS EXIST BECAUSE THE HANDLER INTERFACE CANNOT EXPRESS
+ * THEM AT ALL, and both are routed upstream
+ * (docs/consumption/messaging-contract.md):
  *
  *   1. **A conversation by id.** `MessagesHandlers` has `onFetchConversations`
  *      (a folder at a time) and nothing that resolves ONE conversation. Face 5
@@ -18,18 +32,15 @@
  *
  *   2. **A page of messages with its cursor.** `onFetchMessages` accepts a
  *      cursor and returns `DirectMessage[]`, discarding `pageInfo.endCursor`
- *      and `hasNextPage` — so the caller can pass a cursor it has no way to
+ *      and `hasNextPage` — so a caller can pass a cursor it has no way to
  *      obtain. `conversationMessages` IS a proper connection; #34's cursor
- *      pagination is unreachable through the vendored handler alone.
+ *      pagination is unreachable through that interface alone.
  *
- * Both are routed upstream (docs/consumption/messaging-contract.md). Until they
- * land, these projections mirror the vendored mapper's decisions EXACTLY —
- * participant id canonicalization, handle construction, folder derivation from
- * `viewerMetadata.requestState`, the `unread` boolean flattened the same way —
- * and `tests/messaging-contract.test.mjs` drives the REAL vendored handler and
- * these functions over one identical payload and asserts they agree field for
- * field. A pin bump that changes upstream's mapping fails that probe rather
- * than silently giving contentus two behaviours for one contract.
+ * `tests/messaging-adapters.test.mjs` drives every function here directly, and
+ * `tests/messaging-queries.test.mjs` asserts that each document actually
+ * SELECTS the fields these projections dereference — the failure mode a
+ * contract comparison alone would miss, because an unselected field reads as a
+ * blank display name rather than as an error.
  */
 
 import type {
@@ -268,5 +279,8 @@ export function mergeMessages(
  * labels its own badge honestly and that mislabel is routed upstream.
  */
 export function unreadConversationCount(conversations: readonly Conversation[]): number {
-	return conversations.reduce((total, conversation) => total + (conversation.unreadCount > 0 ? 1 : 0), 0);
+	return conversations.reduce(
+		(total, conversation) => total + (conversation.unreadCount > 0 ? 1 : 0),
+		0
+	);
 }

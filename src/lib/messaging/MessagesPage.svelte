@@ -19,7 +19,7 @@ would be a guess that flickers, and on this surface the guess that flickers is
 
 	import Root from '$lib/components/messaging/Root.svelte';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
-	import { isAuthenticated, startLogin } from '$lib/auth/session';
+	import { accessTokenOrNull, isAuthenticated, startLogin } from '$lib/auth/session';
 	import { resolveBrowserOrigin } from '$lib/cms/origin';
 	import type { SubscriptionState } from '$lib/timelines/subscription';
 	import MessagingSurface from './MessagingSurface.svelte';
@@ -40,12 +40,15 @@ would be a guess that flickers, and on this surface the guess that flickers is
 	let binding = $state<MessagingBinding | null>(null);
 
 	/**
-	 * The realtime state as OBSERVED, not as assumed.
+	 * The realtime state as OBSERVED by the socket.
 	 *
-	 * `createLesserMessagesHandlers` reports `connected` synchronously after
-	 * subscribing — before a socket has opened, let alone been acknowledged — so
-	 * the context's `realtimeStatus` is optimism. The adapter reports what the
-	 * socket actually did, and that is what the surface renders.
+	 * The messages context keeps its own `realtimeStatus`, and it is a coarser
+	 * thing: `connected`, `disconnected` or `error`, with retry copy attached. The
+	 * socket distinguishes states that need different sentences — `requires-auth`
+	 * (sign in again) from `unavailable` (reload), and `degraded` (the stream is
+	 * open but something it sent could not be read) from either. Those
+	 * distinctions are what the surface renders, so they are tracked here rather
+	 * than flattened into the context's vocabulary on the way past.
 	 */
 	let realtime = $state<SubscriptionState>('idle');
 	let partialOperations = $state<string[]>([]);
@@ -58,6 +61,11 @@ would be a guess that flickers, and on this surface the guess that flickers is
 		}
 
 		binding = createMessagingBinding({
+			// The session is passed in rather than read inside the binding, which is
+			// what keeps that module loadable by `node --test` and its adapters
+			// drivable against a stubbed fetch. Passed as a FUNCTION so a token
+			// refreshed mid-session is the one the next request carries.
+			accessToken: accessTokenOrNull,
 			origin: resolveBrowserOrigin(),
 			onRealtimeState: (state) => {
 				realtime = state;

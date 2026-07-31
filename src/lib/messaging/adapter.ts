@@ -266,7 +266,9 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 			// Without it the surface would have to assume the accept worked and move
 			// the card itself — inferring request state instead of reading it.
 			if (!data.acceptMessageRequest) {
-				throw new MessagingUnavailableError('This instance did not confirm the request was accepted.');
+				throw new MessagingUnavailableError(
+					'This instance did not confirm the request was accepted.'
+				);
 			}
 			return data.acceptMessageRequest;
 		},

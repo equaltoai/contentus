@@ -102,6 +102,13 @@ const OWNED_SOURCE_DIRS = [
 	'src/lib/cms',
 	'src/lib/compose',
 	'src/lib/config',
+	// Face 5's contentus-owned messaging consumption (M5). Same rule as
+	// `src/lib/review` and `src/lib/timelines` below: added WITH the directory.
+	// The claim this audit is checking here is a sharp one — every message body
+	// on this surface is lesser's server-sanitized HTML, handed to the vendored
+	// component untouched, and nothing in this directory renders, transforms or
+	// re-sanitizes it. That is only worth stating if the audit is looking.
+	'src/lib/messaging',
 	// Face 2's contentus-owned review controls (M2d.3). Added WITH the directory
 	// rather than after it, which is the rule check 5 exists to enforce: the
 	// components here render lesser's rendered output and never produce HTML of

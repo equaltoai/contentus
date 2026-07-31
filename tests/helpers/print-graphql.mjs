@@ -167,7 +167,8 @@ function printVariableDefinitions(node) {
 
 	return `(${defs
 		.map((def) => {
-			if (!isNode(def) || def.kind !== 'VariableDefinition') return fail('variable definition', def);
+			if (!isNode(def) || def.kind !== 'VariableDefinition')
+				return fail('variable definition', def);
 			assertNoDirectives(def);
 			const variable = printValue(def.variable);
 			const type = printType(def.type);
