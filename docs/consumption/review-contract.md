@@ -38,7 +38,7 @@ no write path at all. Their channel for changes is `submitDraftReview` with
 notes, which is what the review contract is for. The workspace rail is
 read-and-decide, and that is the contract's shape rather than a simplification.
 
-### 2. You cannot review your own draft
+### 2. An owner reviews their own draft only as the principal, and only on a grant
 
 `DraftService.SubmitDraftReview` refuses when `caller == owner`, unless the
 caller is the instance principal:
@@ -50,15 +50,50 @@ if caller == owner {
         return nil, errors.New("draft owner cannot review their own draft")
     }
 }
+if _, err := s.ActiveDraftReviewGrant(ctx, owner, draftID, caller); err != nil { … }
 ```
 
-It then requires `ActiveDraftReviewGrant(ctx, owner, draftID, caller)`.
+`DraftReviewForCaller` returns that self-grant explicitly — its own comment says
+"Owners ordinarily have no grant, except the explicit principal-owner approval
+flow for generated drafts" — so the projection's `grant` is present for exactly
+this case.
 
 Contentus therefore offers the verdict actions when `DraftReview.grant` is
 present — the projection's `grant` is the **viewer's own** invitation, set from
 the `g` that `DraftReviewForCaller` returned — and explains the requirement when
 it is not. That is reading a field lesser publishes, not reconstructing the
 policy.
+
+**Correction recorded at the M2d rework (PR #54, finding F2).** The shipped
+panel had gone further than this note and suppressed the controls for the
+draft's author _even when lesser had projected an active grant_
+(`canReview = Boolean(review.grant) && !isAuthor`). That is a stricter rule than
+lesser's, and it removed the only path the publication gate accepts for a
+principal-owned generated draft: the gate requires the instance principal's
+approval on any draft recording a generator, and the principal approving their
+own draft is precisely the self-grant flow above. The local gate is gone; the
+decision now lives in `src/lib/review/verdict-offer.ts` and reads `grant` alone.
+Contentus cannot see who the principal is, does not guess, and lets lesser
+authorize.
+
+### 2b. `myDrafts` carries no review projection at all
+
+`type Draft` (`graph/phase1.graphql`) exposes `generatedBy` and `reviewedBy` and
+**nothing else about review**: no `reviewStatus`, no `editorNotes`, no `grant`,
+no verdict history. `type DraftReview` carries all five.
+
+lesser sets `Draft.ReviewedBy` and `Draft.ReviewStatus` together, on every
+`SubmitDraftReview` (`draft_review.go`). So a draft a reviewer has already ruled
+on comes back from the listing with a reviewer and no verdicts — indistinguishable,
+in the fields the queue actually reads, from one nobody has touched.
+
+The queue therefore loads `draftReview(id)` for each of the viewer's own
+agent-generated drafts. `DraftReviewForCaller` authorizes it for the **owner** as
+well as for an active grantee, so the viewer is entitled to every one of them,
+and asking is reading the contract rather than working around it. A draft whose
+projection does not arrive keeps its listing shape, is marked `listing-only`, and
+is rendered as an unknown review state — never as a decided absence. See upstream
+ask E below for the chrome half of this, and ask F for the fan-out.
 
 ### 3. `myDrafts` filters after it paginates
 
@@ -144,6 +179,63 @@ message rather than to a wrong permission decision.
 
 **Ask:** an `extensions.code` on CMS errors — at minimum for the approval-gate
 refusal, feature-gate refusal, and not-found/forbidden.
+
+### D. `Review.VerdictActions` sizes its controls below the touch floor
+
+**Where:** `equaltoai/greater-components`, `review` registry entry,
+`Review/VerdictActions.svelte` (greater-v0.12.0).
+
+Every control the component renders is `size="sm"` — both verdict buttons, both
+dialog buttons, and the dialog's close control — and the vendored primitives
+theme sizes that variant `min-height: 2rem` (32px). On a phone, the two
+decisions a reviewer makes are the smallest targets on the screen. Product
+design §4 sets a 44px floor, and contentus's own controls beside them
+(`.contentus-review-publish__*`, `.contentus-review-segmented__option`) meet it.
+
+**Ask:** raise the review chrome's controls to a 44px minimum, or expose `size`
+as a prop on `VerdictActions` so a consumer can. The buttons are a decision
+surface, not a toolbar.
+
+**What contentus did while this is open:** a **sizing bridge** in
+`src/lib/brand/bridge.css` — the pattern `src/lib/brand/compose.css` established
+at M3 — raising the vendored selectors to 44px. Appearance only; the component
+is not edited and stays CLI-managed. The block carries a swap-to-vendored header
+and is deleted when this ask lands. Asserted in `tests/mobile-chrome.test.mjs`
+against the selectors the component actually emits.
+
+### E. `resolveReviewState` renders an absent projection as a decided absence
+
+**Where:** `equaltoai/greater-components`, `review` registry entry,
+`Review/state.ts` (greater-v0.12.0).
+
+With no `reviewStatus` and an empty `verdicts`, `resolveReviewState` returns the
+definite label `"No review activity recorded"` with `source: 'none'`. That is
+correct for a `DraftReview`, which carries both fields — their emptiness is an
+answer. It is wrong for any partial projection, and `DraftReviewData` is
+explicitly documented as a view model that consumers may fill from partial
+query selections. The chrome has no way to say "not known".
+
+**Ask:** a fourth state — `source: 'unknown'` with a neutral label — for a
+projection that did not carry the review fields, so a consumer can distinguish
+"nobody has reviewed this" from "I was not told".
+
+**What contentus did while this is open:** the queue fetches the full projection
+(fact 2b above) so the vendored badge is lesser's own answer, and renders its own
+minimal card for the entries where that projection did not arrive. No vendored
+file is edited.
+
+### F. No batch review projection for a caller's own drafts
+
+**Where:** `equaltoai/lesser`, GraphQL contract.
+
+`draftReview(id)` is per draft. A queue that wants the review state of the
+viewer's own drafts must fan out one query per draft, which is what contentus
+now does (bounded concurrency, nothing dropped).
+
+**Ask:** either review fields on `type Draft` for the owner — `reviewStatus`,
+`verdicts` — or a `myDraftReviews(...)` connection returning `DraftReview` for
+the caller's own drafts. `DraftReviewForCaller` already authorizes the owner for
+each of them individually, so this exposes no new access.
 
 ## M2d.5 — the completion-gate round trip, and what was actually verified
 
