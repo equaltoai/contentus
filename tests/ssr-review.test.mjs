@@ -160,6 +160,26 @@ test('the workspace hydration payload carries the address and no draft body', as
 	}
 });
 
+test('the panel a link names survives a cold server render', async () => {
+	// The panel is a URL parameter rather than component state so a reviewer can
+	// link to "the preview of this draft" — which only works if the server
+	// resolves it on a cold request, since lesser does no SPA fallback.
+	const preview = await renderRoute(handler, {
+		name: 'workspace-preview-panel',
+		path: '/l/_facetheory/hydration?path=%2Freview%2Fdrafts%2Fdraft-123&search=panel%3Dpreview',
+		expectStatus: 200,
+	});
+	assert.equal(JSON.parse(preview.html).review.panel, 'preview');
+
+	// Anything unrecognised lands on the details rail rather than nowhere.
+	const nonsense = await renderRoute(handler, {
+		name: 'workspace-bad-panel',
+		path: '/l/_facetheory/hydration?path=%2Freview%2Fdrafts%2Fdraft-123&search=panel%3Dwombat',
+		expectStatus: 200,
+	});
+	assert.equal(JSON.parse(nonsense.html).review.panel, 'details');
+});
+
 test('a /review/drafts address naming no draft is a real 404', async () => {
 	// Not an empty workspace: the address names nothing, and rendering a
 	// workspace for it under a 200 would tell a crawler the page exists.

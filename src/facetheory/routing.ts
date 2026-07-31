@@ -1,6 +1,12 @@
 import { APP_BASE_PATH } from '$lib/config/base-path';
 
-import type { AppPageDescriptor, AppPageKey, ComposeIntent, RouteProps } from './types';
+import type {
+	AppPageDescriptor,
+	AppPageKey,
+	ComposeIntent,
+	ReviewPanel,
+	RouteProps,
+} from './types';
 
 export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
 
@@ -175,6 +181,19 @@ export function resolveDraftId(pathname: string): string | null {
 	return segmentAfter(normalizeRoutePath(pathname), '/review/drafts/');
 }
 
+/**
+ * Which workspace panel a link opens, from `?panel=`.
+ *
+ * Anything unrecognised is `details`: the rail is where a reviewer starts —
+ * attribution before prose — and a malformed link should land somewhere
+ * sensible rather than nowhere.
+ */
+export function resolveReviewPanel(
+	query: Readonly<Record<string, string[] | undefined>> | undefined
+): ReviewPanel {
+	return query?.['panel']?.[0]?.trim().toLowerCase() === 'preview' ? 'preview' : 'details';
+}
+
 /** Slug captured from whichever slugged route matched, or null. */
 export function resolveSlug(pathname: string): string | null {
 	const route = normalizeRoutePath(pathname);
@@ -248,8 +267,9 @@ export function reviewQueueHref(): string {
 	return href('/review');
 }
 
-export function reviewDraftHref(draftId: string): string {
-	return href(`/review/drafts/${encodeURIComponent(draftId)}`);
+export function reviewDraftHref(draftId: string, panel?: ReviewPanel): string {
+	const path = href(`/review/drafts/${encodeURIComponent(draftId)}`);
+	return panel === 'preview' ? `${path}?panel=preview` : path;
 }
 
 /**

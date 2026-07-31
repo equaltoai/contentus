@@ -39,7 +39,7 @@ counting the verdict history instead would be wrong.
 -->
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import {
 		Content as ArticleContent,
@@ -63,7 +63,7 @@ counting the verdict history instead would be wrong.
 	import type { DraftReviewData } from '$lib/blog-types';
 	import { isAuthenticated, startLogin } from '$lib/auth/session';
 
-	import type { AppPageDescriptor, ReviewRouteData } from '../../facetheory/types';
+	import type { AppPageDescriptor, ReviewPanel, ReviewRouteData } from '../../facetheory/types';
 	import { articleHref, reviewQueueHref } from '../../facetheory/routing';
 	import Notice from './Notice.svelte';
 
@@ -95,6 +95,42 @@ counting the verdict history instead would be wrong.
 	/** What happened after a publish or a schedule. Shown, not assumed. */
 	let published = $state<PublishedArticle | null>(null);
 	let scheduled = $state<string | null>(null);
+
+	/**
+	 * Which panel the single-column layout shows.
+	 *
+	 * Seeded from `?panel=` — `untrack` because that is a SEEDING read: the
+	 * server settled the intent for this page load, and everything after it is
+	 * the reviewer switching panels. A different draft is a different page load.
+	 */
+	let panel = $state<ReviewPanel>(untrack(() => data.panel));
+
+	/**
+	 * Switch panels, and keep the URL saying which one is showing.
+	 *
+	 * `replaceState`, not a navigation: lesser performs no SPA fallback under
+	 * `/l/*`, so navigating would be a full cold round trip that refetches the
+	 * draft and the preview to change which of two already-rendered panels is
+	 * visible. Rewriting the address instead keeps the link shareable — the
+	 * whole reason the panel is a URL parameter — at no cost.
+	 *
+	 * Guarded because `history` does not exist during SSR, and wrapped because a
+	 * browser that refuses the rewrite must not take the toggle down with it:
+	 * the panel still switches, the address just does not follow.
+	 */
+	function selectPanel(next: ReviewPanel) {
+		panel = next;
+
+		if (typeof window === 'undefined' || !window.history?.replaceState) return;
+		try {
+			const url = new URL(window.location.href);
+			if (next === 'preview') url.searchParams.set('panel', 'preview');
+			else url.searchParams.delete('panel');
+			window.history.replaceState(window.history.state, '', url);
+		} catch {
+			// A URL the browser will not accept is not worth failing a toggle for.
+		}
+	}
 
 	onMount(async () => {
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
@@ -217,11 +253,47 @@ counting the verdict history instead would be wrong.
 			: null}
 	/>
 {:else if review}
-	<div class="contentus-review-workspace">
+	<!--
+		THE SEGMENTED CONTROL, and why it is in the document on every viewport.
+
+		Below 960px the workspace is single-column and shows ONE panel at a time —
+		never a split view, which on a phone means two things too narrow to read
+		instead of one that is (product design §5). Above it, both panels are on
+		screen and the control has nothing to switch, so CSS hides it.
+
+		One document, two presentations, no viewport measurement: `data-panel` on
+		the root is the only state, the media query decides what it means, and
+		nothing here asks how wide the window is. That is the same rule M3's tab
+		bar follows, kept so the two cannot disagree.
+	-->
+	<div class="contentus-review-segmented" role="group" aria-label="Workspace panel">
+		<button
+			type="button"
+			class="contentus-review-segmented__option"
+			aria-pressed={panel === 'details'}
+			onclick={() => selectPanel('details')}
+		>
+			Details
+		</button>
+		<button
+			type="button"
+			class="contentus-review-segmented__option"
+			aria-pressed={panel === 'preview'}
+			onclick={() => selectPanel('preview')}
+		>
+			Preview
+		</button>
+	</div>
+
+	<div class="contentus-review-workspace" data-panel={panel}>
 		<!-- The rail. Metadata and attribution, in that order, both above the
 		     preview on a narrow viewport because knowing WHO wrote this changes
 		     how the prose reads. -->
-		<aside class="contentus-review-rail" aria-label="Draft metadata and attribution">
+		<aside
+			class="contentus-review-rail"
+			data-review-panel="details"
+			aria-label="Draft metadata and attribution"
+		>
 			<Panel class="contentus-review-panel" padding="md" aria-label="Attribution">
 				<AttributionStrip {review} {approvalRequirement} />
 			</Panel>
@@ -260,55 +332,14 @@ counting the verdict history instead would be wrong.
 				</p>
 			</Panel>
 
-			<Panel class="contentus-review-panel" padding="md" aria-label="Verdict">
-				<VerdictPanel {review} {isAuthor} onRecorded={onVerdictRecorded} />
-			</Panel>
-
-			{#if isAuthor}
-				<Panel class="contentus-review-panel" padding="md" aria-label="Publication">
-					<h2 class="contentus-h2">Publish</h2>
-
-					{#if published}
-						<!-- Reported from lesser's Article, not assumed from a 200. The
-						     link is the identity lesser assigned; contentus does not
-						     construct a slug of its own. -->
-						<Notice
-							title="Published"
-							message="This draft is now an article on this instance, and on its way to the
-								fediverse."
-							detail={published.publishedAt}
-						/>
-						{#if published.slug}
-							<p class="contentus-meta">
-								<a href={articleHref(published.slug)}>Read the published article</a>
-							</p>
-						{/if}
-					{:else if scheduled}
-						<Notice
-							title="Scheduled"
-							message="This instance will attempt to publish at the time you chose. The approval
-								gate still applies then."
-							detail={scheduled}
-						/>
-					{:else}
-						<PublishAction
-							{review}
-							onPublished={(article) => {
-								published = article;
-								scheduled = null;
-							}}
-							onScheduled={(at) => {
-								scheduled = at;
-								published = null;
-							}}
-						/>
-					{/if}
-				</Panel>
-			{/if}
 		</aside>
 
 		<!-- The panel. lesser's rendered output, or an explanation. -->
-		<section class="contentus-review-preview" aria-label="Rendered preview">
+		<section
+			class="contentus-review-preview"
+			data-review-panel="preview"
+			aria-label="Rendered preview"
+		>
 			<Panel class="contentus-review-panel" padding="md" aria-label="Draft preview">
 				{#if previewArticle}
 					<!--
@@ -357,6 +388,71 @@ counting the verdict history instead would be wrong.
 					/>
 				{/if}
 			</Panel>
+		</section>
+
+		<!--
+			THE DECISIONS, and they belong to neither panel.
+
+			Below 960px this bar is sticky at the bottom of the viewport, above the
+			tab bar, so the verdict and the publish stay reachable while a reviewer
+			scrolls a long preview — a decision surface that scrolls away is one
+			that gets made from memory. Above 960px it sits under both columns in
+			normal flow.
+
+			It is OUTSIDE the two toggled panels on purpose: switching from the
+			details to the preview must not take the actions off screen, because
+			the point of reading the preview is to decide.
+
+			Every control in here is confirm-guarded — `Review.VerdictActions`
+			brings its own Modal, and `PublishAction` brings another — which
+			matters most exactly here, where a thumb is near a button by default.
+		-->
+		<section class="contentus-review-actions" aria-label="Verdict and publication">
+			<Panel class="contentus-review-panel" padding="md" aria-label="Verdict">
+				<VerdictPanel {review} {isAuthor} onRecorded={onVerdictRecorded} />
+			</Panel>
+
+			{#if isAuthor}
+				<Panel class="contentus-review-panel" padding="md" aria-label="Publication">
+					<h2 class="contentus-h2">Publish</h2>
+
+					{#if published}
+						<!-- Reported from lesser's Article, not assumed from a 200. The
+						     link is the identity lesser assigned; contentus does not
+						     construct a slug of its own. -->
+						<Notice
+							title="Published"
+							message="This draft is now an article on this instance, and on its way to the
+								fediverse."
+							detail={published.publishedAt}
+						/>
+						{#if published.slug}
+							<p class="contentus-meta">
+								<a href={articleHref(published.slug)}>Read the published article</a>
+							</p>
+						{/if}
+					{:else if scheduled}
+						<Notice
+							title="Scheduled"
+							message="This instance will attempt to publish at the time you chose. The approval
+								gate still applies then."
+							detail={scheduled}
+						/>
+					{:else}
+						<PublishAction
+							{review}
+							onPublished={(article) => {
+								published = article;
+								scheduled = null;
+							}}
+							onScheduled={(at) => {
+								scheduled = at;
+								published = null;
+							}}
+						/>
+					{/if}
+				</Panel>
+			{/if}
 		</section>
 	</div>
 {/if}

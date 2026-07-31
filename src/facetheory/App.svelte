@@ -32,7 +32,7 @@ is no catch-all render path that could silently show the wrong surface.
 	{:else if page.key === 'review-queue'}
 		<ReviewQueueRoute {page} />
 	{:else if page.key === 'review-workspace'}
-		<ReviewWorkspaceRoute {page} data={review ?? { draftId: null }} />
+		<ReviewWorkspaceRoute {page} data={review ?? { draftId: null, panel: 'details' }} />
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />
 	{:else if page.key === 'not-found'}

@@ -112,7 +112,16 @@ export interface ComposeData {
 export interface ReviewRouteData {
 	/** Draft id from `/review/drafts/{id}`. */
 	draftId: string | null;
+	/** Which panel the single-column workspace opens on, from `?panel=`. */
+	panel: ReviewPanel;
 }
+
+/**
+ * The single-column workspace shows one panel at a time, never a split view
+ * (product design §5). It travels in the URL rather than living only in
+ * component state so a reviewer can link to "the preview of this draft".
+ */
+export type ReviewPanel = 'details' | 'preview';
 
 export interface RouteProps {
 	page: AppPageDescriptor;

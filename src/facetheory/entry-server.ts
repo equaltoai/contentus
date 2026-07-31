@@ -29,6 +29,7 @@ import {
 	resolveComposeIntent,
 	resolveDraftId,
 	resolvePage,
+	resolveReviewPanel,
 	resolveSlug,
 	statusForRoute,
 	stripBasePath,
@@ -108,7 +109,10 @@ async function createRouteProps(
 			// body, and these props are serialized verbatim into the PUBLIC
 			// hydration endpoint further down this file. A server-side preview
 			// fetch would put that body behind a URL anyone could request.
-			return { ...base, review: { draftId: resolveDraftId(path) } };
+			return {
+				...base,
+				review: { draftId: resolveDraftId(path), panel: resolveReviewPanel(query) },
+			};
 		default:
 			// auth-callback, not-found, and the review queue render without server
 			// data. The first needs sessionStorage and the second has nothing to

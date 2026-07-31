@@ -219,3 +219,82 @@ test('the page identity the sheet keys off is in the document', async () => {
 	assert.match(compose.html, /data-page="compose"/);
 	assert.match(index.html, /data-page="articles-index"/);
 });
+
+/* ---------------------------------------------------------------------------
+ * Face 2's single-column workspace (M2d.4)
+ *
+ * Same rule as the rest of this file: these assert what the STYLESHEET ships,
+ * because CSS is only real once a browser resolves it against a box. What they
+ * genuinely prove is that the declarations are there, in the right media
+ * block, keyed off an attribute the server emits — which is the part that can
+ * regress silently.
+ * ------------------------------------------------------------------------ */
+
+test('the stylesheet shows one workspace panel at a time below the breakpoint', () => {
+	const block = mediaBlocks(stylesheet, 960);
+
+	// The unselected panel is `display: none` — out of the accessibility tree
+	// and out of the tab order — rather than merely painted over, so a screen
+	// reader and a keyboard agree with what is on screen.
+	assert.match(
+		block,
+		/\[data-panel='details'\]\s*\[data-review-panel='preview'\][\s\S]*?display:\s*none/,
+		'the details panel must hide the preview'
+	);
+	assert.match(
+		block,
+		/\[data-panel='preview'\]\s*\[data-review-panel='details'\][\s\S]*?display:\s*none/,
+		'the preview panel must hide the details'
+	);
+
+	// And never a split: the single column is the whole point.
+	assert.match(block, /\.contentus-review-workspace\s*\{[^}]*grid-template-columns:\s*1fr/s);
+});
+
+test('the stylesheet hides the segmented control where there is nothing to switch', () => {
+	// Above the breakpoint both panels are on screen, so the control is not in
+	// the layout at all rather than being a no-op the reviewer can press.
+	assert.match(stylesheet, /\.contentus-review-segmented\s*\{[^}]*display:\s*none/s);
+
+	const block = mediaBlocks(stylesheet, 960);
+	assert.match(block, /\.contentus-review-segmented\s*\{[^}]*display:\s*flex/s);
+});
+
+test('the stylesheet gives the segmented control 44px targets', () => {
+	const block = mediaBlocks(stylesheet, 960);
+	assert.match(block, /\.contentus-review-segmented__option\s*\{[^}]*min-height:\s*44px/s);
+});
+
+test('the stylesheet sticks the verdict and publish actions above the tab bar', () => {
+	const block = mediaBlocks(stylesheet, 960);
+
+	// A decision surface that scrolls away is one that gets made from memory.
+	const actions = /\.contentus-review-actions\s*\{([^}]*)\}/s.exec(block)?.[1] ?? '';
+	assert.match(actions, /position:\s*sticky/);
+
+	// Above the tab bar AND the home indicator, not underneath either. Both
+	// terms are asserted because dropping one is the regression: the bar lands
+	// behind the tab bar, or behind the home indicator, and looks fine on the
+	// simulator that has neither.
+	assert.match(actions, /bottom:\s*calc\(/);
+	assert.match(actions, /--contentus-tabbar-height/);
+	assert.match(actions, /--contentus-safe-bottom/);
+
+	// And the workspace leaves room, so the last line of a preview is readable
+	// rather than permanently behind the bar.
+	const workspace = /\.contentus-review-workspace\s*\{([^}]*)\}/s.exec(block)?.[1] ?? '';
+	assert.match(workspace, /padding-bottom:\s*calc\(/);
+	assert.match(workspace, /--contentus-tabbar-height/);
+	assert.match(workspace, /--contentus-safe-bottom/);
+});
+
+test('the publish and verdict controls are 44px wherever they render', () => {
+	// Not inside a media block: the floor applies on every viewport, because a
+	// touch target that is only large on a phone is a target that got small on
+	// a tablet.
+	assert.match(
+		stylesheet,
+		/\.contentus-review-publish__primary,\s*\n?\s*\.contentus-review-publish__secondary\s*\{[^}]*min-height:\s*44px/s
+	);
+	assert.match(stylesheet, /\.contentus-review-field input\s*\{[^}]*min-height:\s*44px/s);
+});
