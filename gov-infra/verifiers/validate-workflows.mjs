@@ -1494,7 +1494,9 @@ function scanWorkflowLines(content) {
 		if (!block) return;
 		const text = block.body.join('\n');
 		blockTexts.set(block.headerLine, { key: block.key, text });
-		if (block.isRun) runTexts.push({ line: block.headerLine, text });
+		// A block scalar's body is already shell text; an inline `run:` value is a
+		// YAML scalar and its quoting comes off first, so the two are distinguished.
+		if (block.isRun) runTexts.push({ line: block.headerLine, text, inlineScalar: false });
 		block = null;
 	};
 	for (let index = 0; index < lines.length; index += 1) {
@@ -1539,7 +1541,8 @@ function scanWorkflowLines(content) {
 			};
 			continue;
 		}
-		if (key === 'run' && rawValue.trim()) runTexts.push({ line: index, text: rawValue });
+		if (key === 'run' && rawValue.trim())
+			runTexts.push({ line: index, text: rawValue, inlineScalar: true });
 	}
 	closeBlock();
 	return { mappingLines, runTexts, blockTexts };
@@ -1689,11 +1692,15 @@ export function validateRunExpressions(directory = workflowDirectory, root = '.'
  *     the pattern this repository's own workflows use.
  *
  * A sink is identified by what a segment *executes*, never by the word it starts
- * with. `env bash -c "$VALUE"` runs the same interpreter as `bash -c "$VALUE"`, so
- * resolution steps over launcher wrappers; `bash <<< "$VALUE"` and `bash < <(…)`
- * hand the interpreter its program on stdin, where no `-c` flag ever appears; and
- * `source <(…)` executes a substitution's output that the same substitution
- * standing alone would only produce as data.
+ * with, and — since three successive rounds of this rule each lost to a spelling it
+ * had not enumerated — never by spelling at all. Quoting and backslashes rewrite the
+ * executing word (`"bash"`, `b\ash`); assignment, empty-expansion and redirection
+ * prefixes move it off the front (`FOO=bar bash`, `$UNSET bash`, `> /dev/null bash`);
+ * `!`, subshells and keyword compounds put it after a grammar token (`( bash … )`,
+ * `if …; then bash …`); and a variable can be the word itself (`VAR=bash; $VAR -c`).
+ * A rule that enumerates sink spellings cannot win against a grammar, so the standard
+ * of proof is inverted: the scanner must PROVE a segment safe, and a segment it
+ * cannot resolve is a finding. See `lexShellScript` for what that parse covers.
  *
  * Taint follows shell assignment and same-line `$GITHUB_ENV` writes, to a fixpoint,
  * so renaming a value does not launder it. What it does not follow is recorded as a
@@ -1952,89 +1959,638 @@ function propagateTaint(runTexts, tainted) {
 	return tainted;
 }
 
+class ShellParseError extends Error {}
+
+// Reserved words that hold a command position without being the command: what runs
+// is the word after them. `time` is deliberately absent — it is a launcher wrapper
+// here, so the finding still records that the sink was reached through one.
+const commandPositionKeywords = new Set([
+	'!',
+	'{',
+	'}',
+	'do',
+	'done',
+	'elif',
+	'else',
+	'fi',
+	'if',
+	'then',
+	'until',
+	'while',
+]);
+
+// Redirection operators that can put an interpreter's program on its standard input.
+const stdinRedirections = new Set(['<', '<<', '<<-', '<<<', '<>']);
+
+// Longest-first, because `<<<` must win over `<<` and `<`.
+const redirectionOperators = [
+	'&>>',
+	'&>',
+	'<<<',
+	'<<-',
+	'<<',
+	'<>',
+	'<&',
+	'>>',
+	'>&',
+	'>|',
+	'<',
+	'>',
+];
+
+// Options whose value the interpreter reads as program text rather than as data.
+const programTextOptions = new Map([
+	...[...shellInterpreters].map((name) => [name, /^--(?:rcfile|init-file)$/]),
+	['node', /^(?:-r|--require|--import)$/],
+	['nodejs', /^(?:-r|--require|--import)$/],
+	['python', /^-m$/],
+	['python3', /^-m$/],
+]);
+
+const assignmentWord = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/;
+
 /**
- * The command word a segment actually executes, plus the interpreters a launcher
- * wrapper may still reach. Judging `segment[0]` alone lets `env bash -c "$VALUE"`
- * and `command bash -c "$VALUE"` past a rule that stops the bare `bash -c` it
- * contains, so resolution steps over each wrapper and over the assignments and
- * options that belong to it, chained as deeply as the segment nests them.
+ * Lex one `run:` script into words, operators and redirections.
  *
- * Wrapper option grammars differ, and one whose option takes a separate value
- * (`env -u NAME bash -c …`) would otherwise resolve to that value. So once a
- * wrapper has been consumed, every later unquoted interpreter word is returned as
- * an additional head. Those extra heads carry the interpreter rules only, never the
- * command-word rule, so `env printf '%s' "$VALUE"` stays the data use it is.
+ * Each word carries three readings of itself, because the rules need different ones:
+ * `source` is the text with quote characters removed, which is what taint matching
+ * reads; `literal` is the fully resolved value once quotes and backslashes are gone,
+ * which is what command-word resolution reads and which only exists when `expanded`
+ * is false; and `plain` is the unquoted, unescaped prefix, which is what decides
+ * whether a word is an assignment — `"FOO=bar" cmd` runs a command called `FOO=bar`,
+ * it does not assign.
+ *
+ * What this grammar covers: single and double quotes across line boundaries,
+ * backslash escapes and line continuations, `$`/backtick expansions and `<(…)`
+ * process substitutions, comments, fd-prefixed redirections including heredocs and
+ * herestrings, and the operators `; ;; & && | || ( )`. What it does not cover it
+ * refuses: `$'…'` and `$"…"` quoting, `|&`, `;&`, `;;&`, an unbalanced group, an
+ * unterminated quote or heredoc, a redirection with no target. A refusal is a
+ * finding, never a pass — that is the whole point of the inversion.
  */
-function resolveExecution(segment) {
+function lexShellScript(text) {
+	const tokens = [];
+	const pendingHeredocs = [];
+	let word = null;
+	let pendingRedirect = null;
 	let index = 0;
-	let wrapped = false;
-	while (
-		index < segment.length &&
-		!segment[index].quoted &&
-		launcherWrappers.has(segment[index].value)
-	) {
-		wrapped = true;
-		index += 1;
-		while (
-			index < segment.length &&
-			!segment[index].quoted &&
-			(assignedName(segment[index].value) || /^[-+]/.test(segment[index].value))
-		)
+
+	const fail = (message) => {
+		throw new ShellParseError(message);
+	};
+	const open = () => {
+		word ??= { kind: 'word', source: '', literal: '', plain: '', expanded: false, quoted: false };
+		return word;
+	};
+	const addLiteral = (characters, plain) => {
+		const current = open();
+		current.source += characters;
+		current.literal += characters;
+		if (plain && current.plain.length === current.literal.length - characters.length)
+			current.plain += characters;
+	};
+	const endWord = () => {
+		if (!word) return;
+		if (!pendingRedirect) {
+			tokens.push(word);
+			word = null;
+			return;
+		}
+		pendingRedirect.target = word;
+		if (pendingRedirect.op === '<<' || pendingRedirect.op === '<<-') {
+			if (word.expanded) fail('a heredoc delimiter built from an expansion is unmodelled');
+			pendingRedirect.expands = !word.quoted;
+			pendingHeredocs.push({
+				delimiter: word.literal,
+				stripTabs: pendingRedirect.op === '<<-',
+				redirect: pendingRedirect,
+			});
+		}
+		pendingRedirect = null;
+		word = null;
+	};
+	const pushOperator = (value) => {
+		endWord();
+		if (pendingRedirect) fail(`redirection \`${pendingRedirect.op}\` has no target`);
+		tokens.push({ kind: 'operator', value });
+	};
+
+	// The index of the `closer` that balances the `opener` at `start`. An unbalanced
+	// group is refused rather than guessed past.
+	const balanced = (start, opener, closer, label) => {
+		let depth = 0;
+		for (let cursor = start; cursor < text.length; cursor += 1) {
+			if (text[cursor] === opener) depth += 1;
+			else if (text[cursor] === closer && !(depth -= 1)) return cursor;
+		}
+		return fail(`unterminated ${label}`);
+	};
+
+	// One `$…` expansion beginning at `start`: its last index, and whether it is an
+	// expansion at all. Outside double quotes `$'` and `$"` are ANSI-C and localized
+	// quoting, whose escape semantics this scanner does not model; inside them the
+	// same two characters are an ordinary `$`.
+	const expansionAt = (start, inQuote) => {
+		const next = text[start + 1];
+		if (next === "'" || next === '"') {
+			if (!inQuote) fail(`\`$${next}…\` quoting is outside this scanner's shell grammar`);
+			return { end: start, expansion: false };
+		}
+		if (next === '(')
+			return { end: balanced(start + 1, '(', ')', '`$(` substitution'), expansion: true };
+		if (next === '{')
+			return { end: balanced(start + 1, '{', '}', '`${` expansion'), expansion: true };
+		if (/[A-Za-z_]/.test(next ?? '')) {
+			let cursor = start + 1;
+			while (/[A-Za-z0-9_]/.test(text[cursor] ?? '')) cursor += 1;
+			return { end: cursor - 1, expansion: true };
+		}
+		if (/[0-9@*#?$!\-]/.test(next ?? '')) return { end: start + 1, expansion: true };
+		// A `$` that expands nothing nameable. Marked as an expansion anyway: in a
+		// command position this scanner would rather refuse than resolve a guess.
+		return { end: start, expansion: true };
+	};
+
+	const readDoubleQuoted = (start) => {
+		const current = open();
+		current.quoted = true;
+		for (let cursor = start + 1; cursor < text.length; cursor += 1) {
+			const character = text[cursor];
+			if (character === '"') return cursor + 1;
+			if (character === '\\') {
+				const next = text[cursor + 1];
+				if (next === undefined) break;
+				if (next === '\n') {
+					cursor += 1;
+					continue;
+				}
+				const escaped = '$`"\\'.includes(next) ? next : character + next;
+				current.source += escaped;
+				current.literal += escaped;
+				cursor += 1;
+				continue;
+			}
+			if (character === '`') {
+				const close = text.indexOf('`', cursor + 1);
+				if (close < 0) fail('unterminated backtick substitution');
+				current.source += text.slice(cursor, close + 1);
+				current.expanded = true;
+				cursor = close;
+				continue;
+			}
+			if (character === '$') {
+				const { end, expansion } = expansionAt(cursor, true);
+				current.source += text.slice(cursor, end + 1);
+				if (expansion) current.expanded = true;
+				else current.literal += text.slice(cursor, end + 1);
+				cursor = end;
+				continue;
+			}
+			current.source += character;
+			current.literal += character;
+		}
+		return fail('unterminated double quote');
+	};
+
+	// Heredoc bodies begin on the line after the operator, so they are collected when
+	// the newline is reached rather than where the `<<` was lexed.
+	const drainHeredocs = (from) => {
+		let cursor = from;
+		while (pendingHeredocs.length) {
+			const heredoc = pendingHeredocs.shift();
+			const body = [];
+			for (;;) {
+				if (cursor >= text.length)
+					fail(`heredoc delimited by \`${heredoc.delimiter}\` is unterminated`);
+				const newline = text.indexOf('\n', cursor);
+				const line = newline < 0 ? text.slice(cursor) : text.slice(cursor, newline);
+				cursor = newline < 0 ? text.length : newline + 1;
+				if ((heredoc.stripTabs ? line.replace(/^\t+/, '') : line) === heredoc.delimiter) break;
+				body.push(line);
+			}
+			heredoc.redirect.body = body.join('\n');
+		}
+		return cursor;
+	};
+
+	const readRedirection = (start) => {
+		let fd = null;
+		if (word && !word.expanded && !word.quoted && /^\d+$/.test(word.literal)) {
+			fd = word.literal;
+			word = null;
+		}
+		endWord();
+		if (pendingRedirect) fail(`redirection \`${pendingRedirect.op}\` has no target`);
+		const op = redirectionOperators.find((candidate) => text.startsWith(candidate, start));
+		if (!op) return fail(`unmodelled redirection at \`${text.slice(start, start + 4)}\``);
+		pendingRedirect = { kind: 'redirect', op, fd, target: null, body: null, expands: false };
+		tokens.push(pendingRedirect);
+		return start + op.length;
+	};
+
+	while (index < text.length) {
+		const character = text[index];
+		if (character === '\\') {
+			const next = text[index + 1];
+			if (next === undefined) fail('trailing backslash');
+			if (next === '\n') {
+				index += 2;
+				continue;
+			}
+			open().quoted = true;
+			addLiteral(next, false);
+			index += 2;
+			continue;
+		}
+		if (character === "'") {
+			const close = text.indexOf("'", index + 1);
+			if (close < 0) fail('unterminated single quote');
+			const current = open();
+			current.quoted = true;
+			current.source += text.slice(index + 1, close);
+			current.literal += text.slice(index + 1, close);
+			index = close + 1;
+			continue;
+		}
+		if (character === '"') {
+			index = readDoubleQuoted(index);
+			continue;
+		}
+		if (character === '`') {
+			const close = text.indexOf('`', index + 1);
+			if (close < 0) fail('unterminated backtick substitution');
+			const current = open();
+			current.source += text.slice(index, close + 1);
+			current.expanded = true;
+			index = close + 1;
+			continue;
+		}
+		if (character === '$') {
+			const { end, expansion } = expansionAt(index, false);
+			const current = open();
+			current.source += text.slice(index, end + 1);
+			if (expansion) current.expanded = true;
+			else current.literal += text.slice(index, end + 1);
+			index = end + 1;
+			continue;
+		}
+		// `<(…)` and `>(…)` are words, not redirections: the shell hands the command a
+		// path to read. `< <(…)` is therefore a redirection *and* a substitution.
+		if ((character === '<' || character === '>') && text[index + 1] === '(') {
+			const close = balanced(index + 1, '(', ')', 'process substitution');
+			const current = open();
+			current.source += text.slice(index, close + 1);
+			current.expanded = true;
+			index = close + 1;
+			continue;
+		}
+		if (character === '#' && !word) {
+			const newline = text.indexOf('\n', index);
+			index = newline < 0 ? text.length : newline;
+			continue;
+		}
+		if (character === '\n') {
+			pushOperator('\n');
+			index = drainHeredocs(index + 1);
+			continue;
+		}
+		if (character === ' ' || character === '\t' || character === '\r') {
+			endWord();
 			index += 1;
+			continue;
+		}
+		if (character === '<' || character === '>') {
+			index = readRedirection(index);
+			continue;
+		}
+		if (character === '&') {
+			if (text[index + 1] === '>') {
+				index = readRedirection(index);
+				continue;
+			}
+			const double = text[index + 1] === '&';
+			pushOperator(double ? '&&' : '&');
+			index += double ? 2 : 1;
+			continue;
+		}
+		if (character === '|') {
+			if (text[index + 1] === '&') fail("`|&` is outside this scanner's shell grammar");
+			const double = text[index + 1] === '|';
+			pushOperator(double ? '||' : '|');
+			index += double ? 2 : 1;
+			continue;
+		}
+		if (character === ';') {
+			if (text[index + 1] === '&') fail("`;&` is outside this scanner's shell grammar");
+			if (text[index + 1] === ';' && text[index + 2] === '&')
+				fail("`;;&` is outside this scanner's shell grammar");
+			const double = text[index + 1] === ';';
+			pushOperator(double ? ';;' : ';');
+			index += double ? 2 : 1;
+			continue;
+		}
+		if (character === '(' || character === ')') {
+			pushOperator(character);
+			index += 1;
+			continue;
+		}
+		addLiteral(character, true);
+		index += 1;
 	}
-	if (index >= segment.length) return { heads: [], wrapped };
-	const heads = [index];
-	if (wrapped)
-		for (let cursor = index + 1; cursor < segment.length; cursor += 1)
-			if (!segment[cursor].quoted && interpreterWords.has(segment[cursor].value))
-				heads.push(cursor);
-	return { heads, wrapped };
+	endWord();
+	if (pendingRedirect) fail(`redirection \`${pendingRedirect.op}\` has no target`);
+	if (pendingHeredocs.length)
+		fail(`heredoc delimited by \`${pendingHeredocs[0].delimiter}\` is unterminated`);
+	return tokens;
 }
 
 /**
- * Program text an interpreter reads from standard input: a `<<<` herestring, or a
- * process substitution redirected onto stdin with `< <(…)`. The interpreter runs
- * what it reads, so a tainted value in either is execution — and neither carries
- * the `-c` flag the inline-script rule looks for.
- *
- * A script operand suppresses the rule: stdin then belongs to that script, and a
- * value reaching a sink inside a called script is a recorded residual rather than a
- * shape this scanner judges. An operand that names standard input itself suppresses
- * nothing, because it takes nothing away.
+ * Reduce a lexed script to the simple commands it runs, each with its assignment
+ * prefixes, its words and its redirections. Command positions are the ones the shell
+ * gives them: the start of the script, after `; & && || | ( )` and newlines, after
+ * `!`, after a grouping token, and inside the `if`/`while`/`until`/`for`/`case`
+ * compounds. `for` headers and `case` pattern lists are word lists, not commands, and
+ * are skipped as such — which is why `for` and `case` in a real workflow do not
+ * become findings. Anything this walk cannot place is refused.
  */
-function stdinProgramSpans(rest) {
-	for (const entry of rest) {
-		if (/^0?[<>]/.test(entry.value)) break;
-		if (entry.quoted) return [];
-		if (standardInputNames.has(entry.value)) continue;
-		if (/^[-+]/.test(entry.value) || assignedName(entry.value)) continue;
-		if (scriptOperand.test(entry.value)) return [];
-	}
-	const spans = [];
-	const trailing = (from) =>
-		rest
-			.slice(from)
-			.map((entry) => entry.value)
-			.join(' ');
-	for (let index = 0; index < rest.length; index += 1) {
-		const value = rest[index].value;
-		if (value.startsWith('<<<')) {
-			spans.push({ kind: 'a `<<<` herestring', text: value.slice(3) || trailing(index + 1) });
+function parseSimpleCommands(tokens) {
+	const commands = [];
+	let current = null;
+	let mode = 'command';
+	let groupDepth = 0;
+	let caseDepth = 0;
+
+	const fail = (message) => {
+		throw new ShellParseError(message);
+	};
+	const flush = () => {
+		if (current) commands.push(current);
+		current = null;
+	};
+	const command = () => (current ??= { assignments: [], words: [], redirects: [] });
+
+	for (let index = 0; index < tokens.length; index += 1) {
+		const token = tokens[index];
+		if (token.kind === 'redirect') {
+			if (mode !== 'command' && mode !== 'arguments')
+				fail('a redirection inside a `for` header or `case` pattern is unmodelled');
+			command().redirects.push(token);
 			continue;
 		}
-		// `< <(cmd)` and its explicit-descriptor spelling `0< <(cmd)`; a redirection
-		// onto any other descriptor is not the interpreter's program.
-		const stdinRedirection = value.match(/^0?<(?!<)/);
-		if (!stdinRedirection) continue;
-		const redirected =
-			`${value.slice(stdinRedirection[0].length)} ${trailing(index + 1)}`.trimStart();
-		if (redirected.startsWith('<('))
+		if (token.kind === 'operator') {
+			if (mode === 'casePattern') {
+				if (token.value === ')') mode = 'command';
+				else if (!['(', '|', '\n'].includes(token.value))
+					fail(`\`${token.value}\` in a \`case\` pattern list is unmodelled`);
+				continue;
+			}
+			switch (token.value) {
+				case ';':
+				case '&':
+				case '\n':
+				case '&&':
+				case '||':
+				case '|':
+					flush();
+					mode = 'command';
+					break;
+				case ';;':
+					if (!caseDepth) fail('`;;` outside a `case`');
+					flush();
+					mode = 'casePattern';
+					break;
+				case '(':
+					flush();
+					groupDepth += 1;
+					mode = 'command';
+					break;
+				case ')':
+					flush();
+					groupDepth -= 1;
+					if (groupDepth < 0) fail('unbalanced `)`');
+					mode = 'command';
+					break;
+				default:
+					fail(`unmodelled operator \`${token.value}\``);
+			}
+			continue;
+		}
+		const resolvable = !token.expanded && !token.quoted;
+		if (mode === 'caseSubject') {
+			mode = 'caseIn';
+			continue;
+		}
+		if (mode === 'caseIn') {
+			if (resolvable && token.literal === 'in') mode = 'casePattern';
+			else fail('a `case` head without `in` is unmodelled');
+			continue;
+		}
+		if (mode === 'casePattern') {
+			if (resolvable && token.literal === 'esac') {
+				caseDepth -= 1;
+				mode = 'command';
+			}
+			continue;
+		}
+		if (mode === 'forHeader') {
+			if (resolvable && token.literal === 'do') mode = 'command';
+			continue;
+		}
+		if (mode === 'command' && resolvable) {
+			const literal = token.literal;
+			if (literal === 'case') {
+				caseDepth += 1;
+				mode = 'caseSubject';
+				continue;
+			}
+			if (literal === 'esac') {
+				if (!caseDepth) fail('`esac` outside a `case`');
+				caseDepth -= 1;
+				continue;
+			}
+			if (literal === 'for' || literal === 'select') {
+				mode = 'forHeader';
+				continue;
+			}
+			if (literal === 'in') fail('`in` outside a `for` or `case` head');
+			if (commandPositionKeywords.has(literal)) continue;
+			// `name () { … }` — the name is not executed here, the body's commands are.
+			if (
+				tokens[index + 1]?.value === '(' &&
+				tokens[index + 2]?.value === ')' &&
+				tokens[index + 1].kind === 'operator'
+			) {
+				index += 2;
+				continue;
+			}
+		}
+		// An assignment prefix is named by its unquoted, unescaped prefix and nothing
+		// else. `RESULT="$(…)"` assigns; `"RESULT=x"` runs a command called `RESULT=x`.
+		if (mode === 'command' && assignmentWord.test(token.plain)) {
+			command().assignments.push(token);
+			continue;
+		}
+		command().words.push(token);
+		mode = 'arguments';
+	}
+	flush();
+	if (groupDepth) fail('unbalanced `(`');
+	if (caseDepth) fail('unterminated `case`');
+	return commands;
+}
+
+/**
+ * What a parsed command executes. Judging the first word alone lets `env bash -c
+ * "$VALUE"` past a rule that stops the bare `bash -c` it contains, so resolution
+ * steps over each launcher wrapper and over the assignments and options that belong
+ * to it, chained as deeply as the command nests them.
+ *
+ * The command word must then resolve to a *literal*. `$UNSET bash -c "$VALUE"` and
+ * `VAR=bash; $VAR -c "$VALUE"` execute an interpreter while naming no word this
+ * scanner can read, so they are returned as unresolved and reported — no literal
+ * tracking, no enumeration of what a variable might hold.
+ *
+ * Wrapper option grammars differ, and one whose option takes a separate value
+ * (`env -u NAME bash -c …`) would otherwise resolve to that value. So once a wrapper
+ * has been consumed — or once the command word has failed to resolve — every later
+ * literal interpreter word is an additional head. Those extra heads carry the
+ * interpreter rules only, so `env printf '%s' "$VALUE"` stays the data use it is.
+ */
+function resolveExecution(words) {
+	const isLiteral = (entry) => !entry.expanded;
+	let index = 0;
+	let wrapped = false;
+	while (
+		index < words.length &&
+		isLiteral(words[index]) &&
+		launcherWrappers.has(words[index].literal)
+	) {
+		wrapped = true;
+		index += 1;
+		// The wrapper's own assignments and options. An assignment is recognised by its
+		// unquoted prefix, so `env COPY="$VALUE" ./pinned.sh` still resolves to the
+		// script — the value is being placed in an environment, not executed.
+		while (
+			index < words.length &&
+			(assignmentWord.test(words[index].plain) ||
+				(isLiteral(words[index]) && /^[-+]/.test(words[index].literal)))
+		)
+			index += 1;
+	}
+	const trailingInterpreters = (from) => {
+		const heads = [];
+		for (let cursor = from; cursor < words.length; cursor += 1)
+			if (isLiteral(words[cursor]) && interpreterWords.has(words[cursor].literal))
+				heads.push(cursor);
+		return heads;
+	};
+	if (index >= words.length) return { heads: [], wrapped, unresolved: null };
+	if (!isLiteral(words[index]))
+		return { heads: trailingInterpreters(index + 1), wrapped, unresolved: words[index] };
+	return {
+		heads: [index, ...(wrapped ? trailingInterpreters(index + 1) : [])],
+		wrapped,
+		unresolved: null,
+	};
+}
+
+// The text a redirection carries. A heredoc whose delimiter was quoted does not
+// expand, so its body is not a path a value can travel down.
+function redirectText(redirect) {
+	if (redirect.op === '<<' || redirect.op === '<<-')
+		return redirect.expands ? (redirect.body ?? '') : '';
+	return redirect.target?.source ?? '';
+}
+
+/**
+ * Program text an interpreter reads from standard input: a herestring, a heredoc
+ * that expands, a process substitution redirected onto stdin, or an ordinary `<`
+ * whose operand the interpreter then runs. The interpreter executes what it reads,
+ * and none of these carries the `-c` flag the inline-script rule looks for.
+ *
+ * A literal script operand suppresses the rule: stdin then belongs to that script,
+ * and a value reaching a sink inside a called script is a recorded residual rather
+ * than a shape this scanner judges. An operand that names standard input itself
+ * suppresses nothing, because it takes nothing away, and an operand that is an
+ * expansion suppresses nothing either — an unreadable operand is not a proof.
+ */
+function stdinProgramSpans(rest, redirects) {
+	for (const entry of rest) {
+		if (entry.expanded) continue;
+		if (standardInputNames.has(entry.literal)) continue;
+		if (/^[-+]/.test(entry.literal) || assignmentWord.test(entry.plain)) continue;
+		if (scriptOperand.test(entry.literal)) return [];
+	}
+	const spans = [];
+	for (const redirect of redirects) {
+		if (!stdinRedirections.has(redirect.op) || (redirect.fd ?? '0') !== '0') continue;
+		const text = redirectText(redirect);
+		if (redirect.op === '<<<') spans.push({ kind: 'a `<<<` herestring', text });
+		else if (redirect.op === '<<' || redirect.op === '<<-') spans.push({ kind: 'a heredoc', text });
+		else if (/^<\(/.test(redirect.target?.source ?? ''))
 			spans.push({
 				kind: 'a `< <(...)` stdin process substitution',
-				text: balancedInterior(redirected, 1).text,
+				text: balancedInterior(redirect.target.source, 1).text,
 			});
+		else spans.push({ kind: `a \`${redirect.op}\` stdin redirection`, text });
 	}
 	return spans;
+}
+
+// An option whose value the interpreter reads as program text: `bash --rcfile FILE`
+// sources FILE before anything else, and `node -r MODULE` runs MODULE.
+function programOptionSpans(headWord, rest) {
+	const option = programTextOptions.get(headWord);
+	if (!option) return [];
+	const spans = [];
+	for (let index = 0; index < rest.length; index += 1) {
+		const entry = rest[index];
+		if (entry.expanded) continue;
+		const separator = entry.literal.indexOf('=');
+		if (separator > 0 && option.test(entry.literal.slice(0, separator))) {
+			spans.push({
+				kind: `\`${headWord} ${entry.literal.slice(0, separator)}\``,
+				text: entry.source.slice(entry.source.indexOf('=') + 1),
+			});
+			continue;
+		}
+		if (option.test(entry.literal) && rest[index + 1])
+			spans.push({ kind: `\`${headWord} ${entry.literal}\``, text: rest[index + 1].source });
+	}
+	return spans;
+}
+
+/**
+ * An inline `run:` value is a YAML scalar before it is shell, and the two layers do
+ * not compose safely. `run: 'bash -c "$VALUE"'` is one YAML string whose *contents*
+ * are the script; handed to a shell lexer with the YAML quoting still on, it reads
+ * as a single enormous quoted word and every sink rule misses it. An alias
+ * (`run: *script`) is not even present in the text.
+ *
+ * The lesson of this whole thread is that a scanner which unpicks a second notation
+ * in passing loses to that notation's grammar, so this one does not try. Two forms
+ * are read: a plain scalar, which is already shell, and a block scalar, whose body
+ * `scanWorkflowLines` has already collected. Every other inline form — quoted,
+ * aliased, anchored, tagged — is refused in a file that carries tainted data. The
+ * repair is one character: make it a `run: |` block.
+ */
+const opaqueRunScalar = {
+	"'": 'a single-quoted',
+	'"': 'a double-quoted',
+	'*': 'an aliased',
+	'&': 'an anchored',
+	'!': 'a tagged',
+};
+
+function yamlRunScalar(value) {
+	const opaque = opaqueRunScalar[value.trimStart()[0]];
+	return opaque
+		? {
+				error:
+					`${opaque} inline run: scalar, which is a YAML value this scanner does not ` +
+					'decode into shell text — write it as a `run: |` block',
+			}
+		: { text: value };
 }
 
 function executableSinkFindings(text, tainted) {
@@ -2042,53 +2598,78 @@ function executableSinkFindings(text, tainted) {
 	const names = [...tainted];
 	const hits = (token) => names.filter((name) => referencesVariable(token, name));
 	const report = (matched, sink) => {
-		if (matched.length) findings.push({ names: matched, sink });
+		if (matched.length) findings.push({ kind: 'sink', names: matched, sink });
 	};
 
-	for (const segment of runSegments(text)) {
-		const { heads, wrapped } = resolveExecution(segment);
-		if (!heads.length) continue;
+	let commands;
+	try {
+		commands = parseSimpleCommands(lexShellScript(text));
+	} catch (error) {
+		if (!(error instanceof ShellParseError)) throw error;
+		return [{ kind: 'unproven', reason: error.message }];
+	}
+
+	for (const { words, redirects } of commands) {
+		if (!words.length) continue;
+		const { heads, wrapped, unresolved } = resolveExecution(words);
 		const via = wrapped ? ' reached through a launcher wrapper' : '';
-		// A variable that resolves to the command word is execution, not data. An
-		// assignment is neither; propagateTaint has already followed it.
-		const commandWord = segment[heads[0]];
-		if (!assignedName(commandWord.value))
-			report(hits(commandWord.value), `the command word of a shell segment${via}`);
+		if (unresolved) {
+			// A variable that resolves to the command word is execution, not data —
+			// and a command word this scanner cannot resolve is not proven to be data
+			// either, which is the same finding for a different reason.
+			const matched = hits(unresolved.source);
+			if (matched.length)
+				findings.push({
+					kind: 'sink',
+					names: matched,
+					sink: `the command word of a shell segment${via}`,
+				});
+			else
+				findings.push({
+					kind: 'unproven',
+					reason:
+						`the command word \`${unresolved.source}\`${via} is an expansion, so what this ` +
+						'segment executes cannot be resolved to a literal',
+				});
+		}
 		for (const position of heads) {
-			const head = segment[position];
-			const rest = segment.slice(position + 1);
-			const headWord = head.quoted ? '' : head.value;
+			const headWord = words[position].literal;
+			const rest = words.slice(position + 1);
+			// A redirection belongs to the same command as its words, so a value that
+			// arrives through one is judged with the rest of that command's text.
+			const attached = [...rest.map((entry) => entry.source), ...redirects.map(redirectText)];
 			// Whether the interpreter already holds its program inline. If it does,
 			// its standard input is that program's data rather than a second program.
 			let inlineProgram = false;
 			if (shellInterpreters.has(headWord)) {
-				const command = rest.find(
-					(entry) => !entry.quoted && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(entry.value)
+				const flag = rest.find(
+					(entry) => !entry.expanded && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(entry.literal)
 				);
-				if (command) {
+				if (flag) {
 					inlineProgram = true;
-					for (const entry of rest)
-						report(hits(entry.value), `\`${headWord} ${command.value}\`${via}`);
+					for (const value of attached)
+						report(hits(value), `\`${headWord} ${flag.literal}\`${via}`);
 				}
 			}
-			if (headWord === 'eval')
-				for (const entry of rest) report(hits(entry.value), `\`eval\`${via}`);
+			if (headWord === 'eval') for (const value of attached) report(hits(value), `\`eval\`${via}`);
 			// `source`/`.` take a program, not an argument, so every operand is program
 			// text: `source <(printf '%s' "$VALUE")` executes what the substitution
 			// prints, though that same substitution standing alone only prints it.
 			if (sourceCommands.has(headWord))
-				for (const entry of rest) report(hits(entry.value), `\`${headWord}\`${via}`);
-			const flag = inlineScriptFlags.get(headWord);
-			if (flag) {
-				const inline = rest.find((entry) => !entry.quoted && flag.test(entry.value));
-				if (inline) {
+				for (const value of attached) report(hits(value), `\`${headWord}\`${via}`);
+			const inline = inlineScriptFlags.get(headWord);
+			if (inline) {
+				const flag = rest.find((entry) => !entry.expanded && inline.test(entry.literal));
+				if (flag) {
 					inlineProgram = true;
-					for (const entry of rest)
-						report(hits(entry.value), `\`${headWord} ${inline.value}\`${via}`);
+					for (const value of attached)
+						report(hits(value), `\`${headWord} ${flag.literal}\`${via}`);
 				}
 			}
+			for (const span of programOptionSpans(headWord, rest))
+				report(hits(span.text), `${span.kind}${via}`);
 			if (!inlineProgram && stdinInterpreters.has(headWord))
-				for (const span of stdinProgramSpans(rest))
+				for (const span of stdinProgramSpans(rest, redirects))
 					report(hits(span.text), `${span.kind} run by \`${headWord}\`${via}`);
 		}
 	}
@@ -2099,7 +2680,11 @@ function executableSinkFindings(text, tainted) {
 	for (const span of substitutionSpans(text)) {
 		if (!names.some((name) => referencesVariable(span.text, name))) continue;
 		for (const finding of executableSinkFindings(span.text, tainted))
-			findings.push({ names: finding.names, sink: `${finding.sink} inside ${span.kind}` });
+			findings.push(
+				finding.kind === 'sink'
+					? { ...finding, sink: `${finding.sink} inside ${span.kind}` }
+					: { ...finding, reason: `${finding.reason}, inside ${span.kind}` }
+			);
 	}
 	return findings;
 }
@@ -2160,14 +2745,28 @@ export function validateEventEnvSinks(directory = workflowDirectory, root = '.')
 		if (!tainted.size) continue;
 		propagateTaint(runTexts, tainted);
 		const origin = composite ? 'caller-supplied' : 'event-derived';
-		for (const { line, text } of runTexts)
-			for (const finding of executableSinkFindings(text, tainted))
+		for (const { line, text, inlineScalar } of runTexts) {
+			const scalar = inlineScalar ? yamlRunScalar(text) : { text };
+			if (scalar.error) {
 				findings.push(
-					`${file}:${line + 1}: run: reaches ${finding.sink} with ${origin} ` +
-						`${finding.names.map((name) => `$${name}`).join(', ')}; ` +
-						'pass the value as data (an argument to a non-executing command, or argv to a ' +
-						'pinned script) instead of as program text'
+					`${file}:${line + 1}: run: cannot be proven free of an executable sink: ` +
+						`${scalar.error}. This file carries ${origin} data in env:, so a run: value ` +
+						'this scanner cannot read as shell is a finding, not a pass'
 				);
+				continue;
+			}
+			for (const finding of executableSinkFindings(scalar.text, tainted))
+				findings.push(
+					finding.kind === 'sink'
+						? `${file}:${line + 1}: run: reaches ${finding.sink} with ${origin} ` +
+								`${finding.names.map((name) => `$${name}`).join(', ')}; ` +
+								'pass the value as data (an argument to a non-executing command, or argv to a ' +
+								'pinned script) instead of as program text'
+						: `${file}:${line + 1}: run: cannot be proven free of an executable sink: ` +
+								`${finding.reason}. This file carries ${origin} data in env:, so a segment ` +
+								'this scanner cannot resolve is a finding, not a pass'
+				);
+		}
 	}
 	return findings;
 }
