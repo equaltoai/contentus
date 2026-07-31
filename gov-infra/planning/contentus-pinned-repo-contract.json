@@ -159,7 +159,7 @@
       "Binds the two greater channels to each other and to a named release, rather than",
       "to a shape. A 40-hex-shaped ref is not evidence of anything: every commit in every",
       "repository is 40 hex. `vendored_ref` is the greater-components commit the",
-      "greater-v0.11.9 vendoring came from, recorded at the M1 `greater add` run.",
+      "greater-v0.12.0 vendoring came from, recorded at the M2d `greater add` run.",
       "",
       "Both values move together at a CLI pin bump and only through the CLI.",
       "`cli_version` is the version string the CLI must print; a digest-verified install",
@@ -167,17 +167,28 @@
       "",
       "`cli_asset` is the provenance of the tool itself. The CLI is not on the npm",
       "registry, so nothing about the downloaded bytes is checked by a package manager,",
-      "and `--version` is the tool describing itself — any executable can print `0.11.9`",
+      "and `--version` is the tool describing itself — any executable can print `0.12.0`",
       "and emit a plausible doctor document. The installer verifies this digest before",
       "unpacking and SEC-7 re-verifies it at gate time. A PATH `greater` is not accepted",
-      "at all: unverifiable provenance is BLOCKED, never PASS."
+      "at all: unverifiable provenance is BLOCKED, never PASS.",
+      "",
+      "M2d MOVED THIS PIN, 0.11.9 -> 0.12.0, and the reason is worth stating because a",
+      "pin bump is not a routine edit. The review chrome contentus consumes for face 2",
+      "(`Review.QueueCard`, `Review.AttributionStrip`, `Review.VerdictActions`) is a",
+      "`review` registry entry that exists only from greater-v0.12.0. The 0.11.9 CLI has",
+      "no such entry, so `greater add review` at the old pin does not resolve — there is",
+      "no vendoring of the M2c chrome that leaves this block untouched. CON-4 then forces",
+      "the rest: every `installed[]` entry must carry `vendored_ref`, so the whole",
+      "vendored tree and every tarball pin move together, in one commit, through the CLI.",
+      "The alternative — hand-copying three components — is the vendored-source edit this",
+      "repository refuses outright."
     ],
-    "release_tag": "greater-v0.11.9",
-    "vendored_ref": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-    "cli_version": "0.11.9",
+    "release_tag": "greater-v0.12.0",
+    "vendored_ref": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+    "cli_version": "0.12.0",
     "cli_asset": {
-      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz",
-      "sha256": "cc16a72cfe516ceaf39699a6b9c98398aeb93451d5c066559bfe8720452385eb"
+      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/greater-components-cli.tgz",
+      "sha256": "ab2d3815127248ac4dab197e1d498b049229481037ffd403b3c2ca2427e3f001"
     }
   },
   "workflows": {

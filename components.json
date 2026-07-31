@@ -1,7 +1,7 @@
 {
   "$schema": "https://greater.components.dev/schema.json",
   "version": "1.0.0",
-  "ref": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
+  "ref": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
   "installMode": "vendored",
   "style": "default",
   "rsc": false,
@@ -24,211 +24,218 @@
   "installed": [
     {
       "name": "social-types",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "icons",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "tokens",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "utils",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "social-renderers",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "social-generics",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "primitives",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "adapters",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "status",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "blog-types",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "blog-share",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "content",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "headless",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "auth",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "compose",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "notifications",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "search",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "thread-view",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "content-warning-handler",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "media-composer",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "bookmark-manager",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "article",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "author",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "publication",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "navigation",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "editor",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "faces/blog",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "shell",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-30T19:28:20.828Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "poll-composer",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-31T11:30:29.507Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     },
     {
       "name": "custom-emoji-picker",
-      "version": "8cd07b81bd3e7206ede9b9e969b01d4db96d565e",
-      "installedAt": "2026-07-31T11:30:29.508Z",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
+      "modified": false,
+      "checksums": []
+    },
+    {
+      "name": "review",
+      "version": "c9825f8fcf253cf76a8ff04ad4dddf57ee358fc1",
+      "installedAt": "2026-07-31T16:33:33.282Z",
       "modified": false,
       "checksums": []
     }
