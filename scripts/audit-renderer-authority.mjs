@@ -258,34 +258,57 @@ function checkImports() {
 }
 
 /**
- * A source file with its comments removed, applied to a FIXED POINT.
+ * A source file with its comments removed, scanned LEFT TO RIGHT.
  *
  * The token has to be ignored inside comments — several owned files, this one
  * included, state the `{@html}` rule in prose, and a check that failed on its
  * own documentation would be measuring the wrong thing.
  *
- * THE LOOP IS THE POINT, and it is not theoretical. A single pass over
- * `/<!--[\s\S]*?-->/` can REINTRODUCE a comment delimiter it did not have
- * before: given `<!<!-- -->-- … -->`, removing the inner match leaves
- * `<!-- … -->`, a comment the pass has already moved past. CodeQL names this
- * `js/incomplete-multi-character-sanitization` (CWE-116) and flagged the same
- * two-line idiom in `tests/vendored-messaging-render.test.mjs` at M5.
+ * WHY NOT A REGEX REPLACE, and this is the part worth reading. A global
+ * `/<!--[\s\S]*?-->/` can REINTRODUCE a delimiter it did not have before:
+ * given `<!<!-- -->-- {@html evil} -->`, removing the inner match leaves
+ * `<!-- {@html evil} -->` — which a second pass then removes entirely, taking a
+ * LIVE `{@html}` with it. That is the dangerous direction: the gate goes green
+ * over a sink it should have caught.
  *
- * For this gate the realistic consequence is a FALSE POSITIVE — a surviving
- * `{@html}` inside what is really a comment fails the build — which is the safe
- * direction. It is fixed anyway rather than argued down: a gate whose scanner
- * has a known blind spot invites the next person to reason about which
- * direction it fails in, and that reasoning is exactly what should not be load
- * bearing. Re-running until the text stops changing removes the question.
+ * It is also the wrong answer. A parser reading that text finds its first
+ * `<!--` at index 2, so the comment is `<!-- -->` and everything after it —
+ * including the sink — is live template. This scan reproduces that reading: it
+ * walks forward, consumes a comment atomically at the position it opens, and
+ * never re-examines text it has already emitted, so it cannot create a
+ * delimiter that was not there. On the nested case above it leaves the sink
+ * VISIBLE and the audit FAILS, which is the safe direction and the correct one.
+ *
+ * An unterminated opener consumes the remainder of the file, which is also what
+ * a parser does with one.
+ *
+ * (CodeQL flagged the regex form as `js/incomplete-multi-character-sanitization`,
+ * CWE-116. The first fix attempted was the loop-until-stable that rule
+ * recommends; it silences the rule and is wrong here for the reason above.)
  */
+const COMMENT_DELIMITERS = [
+	['<!--', '-->'],
+	['/*', '*/'],
+];
+
 function stripComments(source) {
-	let previous;
-	let current = source;
-	do {
-		previous = current;
-		current = current.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-	} while (current !== previous);
-	return current;
+	let out = '';
+	let index = 0;
+
+	while (index < source.length) {
+		const opener = COMMENT_DELIMITERS.find(([open]) => source.startsWith(open, index));
+		if (opener) {
+			const [open, close] = opener;
+			const end = source.indexOf(close, index + open.length);
+			index = end === -1 ? source.length : end + close.length;
+			continue;
+		}
+
+		out += source[index];
+		index += 1;
+	}
+
+	return out;
 }
 
 function checkHtmlSinks() {

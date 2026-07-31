@@ -47,30 +47,45 @@ function compileServer(path) {
 }
 
 /**
- * A source file with its comments removed, applied to a FIXED POINT.
+ * A source file with its comments removed, scanned LEFT TO RIGHT.
  *
- * The same routine `scripts/audit-renderer-authority.mjs` uses, and looped for
- * the same reason: a single pass over `/<!--[\s\S]*?-->/` can REINTRODUCE a
- * delimiter it did not have before — `<!<!-- -->-- … -->` becomes `<!-- … -->`
- * after the inner match is removed, a comment the pass has already moved past.
- * CodeQL flagged the un-looped idiom here as
- * `js/incomplete-multi-character-sanitization` (CWE-116), and it was fixed in
- * both places rather than dismissed as test-only: a scanner with a blind spot
- * makes the direction it fails in load-bearing, and that is what should not be.
+ * The same routine `scripts/audit-renderer-authority.mjs` uses, kept in step
+ * deliberately — two different opinions about what counts as a comment would
+ * let the probe and the gate disagree about the same file.
  *
- * Line comments are deliberately NOT stripped. `//` inside a string or a URL is
+ * A global `/<!--[\s\S]*?-->/` replace is NOT equivalent, and the difference
+ * runs in the dangerous direction: it can reintroduce a delimiter and then, on
+ * a second pass, delete a LIVE `{@html}` along with it. See the header of
+ * `stripComments` in the audit, and the regression below.
+ *
+ * Line comments are deliberately not stripped. `//` inside a string or a URL is
  * indistinguishable from a comment without parsing, and removing to end-of-line
- * on a false match could delete real code — including, in the worst case, the
- * very `{@html}` this is looking for.
+ * on a false match could delete real code — including the very `{@html}` this
+ * is looking for.
  */
+const COMMENT_DELIMITERS = [
+	['<!--', '-->'],
+	['/*', '*/'],
+];
+
 function stripComments(source) {
-	let previous;
-	let current = source;
-	do {
-		previous = current;
-		current = current.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-	} while (current !== previous);
-	return current;
+	let out = '';
+	let index = 0;
+
+	while (index < source.length) {
+		const opener = COMMENT_DELIMITERS.find(([open]) => source.startsWith(open, index));
+		if (opener) {
+			const [open, close] = opener;
+			const end = source.indexOf(close, index + open.length);
+			index = end === -1 ? source.length : end + close.length;
+			continue;
+		}
+
+		out += source[index];
+		index += 1;
+	}
+
+	return out;
 }
 
 const MESSAGE = 'src/lib/components/messaging/Message.svelte';
@@ -180,28 +195,44 @@ test('contentus discloses the gap unconditionally, not only when a message exist
 	);
 });
 
-test('the comment stripper survives a delimiter it reintroduces', () => {
-	// The concrete case behind the fixed-point loop, kept as a regression rather
-	// than as a comment. A SINGLE pass over the nested form leaves a comment
-	// behind — one the pass has already scanned past — so the `{@html}` inside it
-	// survives into the scan.
+test('the comment stripper reads a nested delimiter the way a parser does', () => {
+	// The case that decided the implementation, kept as a regression rather than
+	// as prose. A parser reading this finds its first `<!--` at index 2, so the
+	// comment is `<!-- -->` and the sink after it is LIVE template.
 	const nested = '<!<!-- -->-- {@html evil} -->';
 
-	const singlePass = nested.replace(/<!--[\s\S]*?-->/g, '');
 	assert.match(
-		singlePass,
+		stripComments(nested),
 		/\{@html evil\}/,
-		'the un-looped strip is supposed to leave the sink behind — that is the defect'
+		'a live sink must survive the strip, so the audit can catch it'
 	);
 
-	assert.equal(stripComments(nested), '', 'the looped strip must reach a fixed point');
+	// The regex form that CodeQL flagged, and the loop-until-stable fix that rule
+	// recommends, both get this WRONG in the dangerous direction: one pass
+	// reintroduces `<!-- … -->`, and a second deletes the sink with it. Asserted
+	// so the reasoning cannot quietly be undone by somebody "simplifying" this
+	// back into a replace.
+	let looped = nested;
+	let previous;
+	do {
+		previous = looped;
+		looped = looped.replace(/<!--[\s\S]*?-->/g, '');
+	} while (looped !== previous);
+	assert.equal(
+		looped,
+		'',
+		'the looped replace is supposed to eat the sink — that is why it is not used'
+	);
 
-	// And the ordinary case still works, so the loop did not become a
-	// scorched-earth pass that eats real template text.
+	// Ordinary comments still go, so the scan did not become a no-op.
 	assert.equal(
 		stripComments('<p>keep</p><!-- drop --><span>keep</span>'),
 		'<p>keep</p><span>keep</span>'
 	);
+	assert.equal(stripComments('a /* gone */ b'), 'a  b');
+
+	// An unterminated opener consumes the rest, which is what a parser does too.
+	assert.equal(stripComments('ok <!-- never closed {@html x}'), 'ok ');
 });
 
 test('contentus owns no client-side rendering of a message body', () => {
