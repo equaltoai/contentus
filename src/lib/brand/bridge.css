@@ -582,6 +582,54 @@ code {
 	gap: var(--tc-space-2);
 }
 
+/* =============================================================
+   SIZING BRIDGE — the vendored verdict controls (M2d rework)
+   -------------------------------------------------------------
+   WHY THIS BLOCK EXISTS, and when it should stop existing.
+
+   `Review.VerdictActions` renders every one of its controls at
+   `size="sm"`, and the vendored primitives theme sizes that variant
+   `min-height: 2rem` — 32px. So the two decisions a reviewer makes on a
+   phone, approve and request-changes, plus both buttons in the
+   confirmation dialog and its close control, were 32px targets on a
+   surface whose primary input is a thumb. The design's floor is 44px
+   (product design §4) and the publish controls beside them already meet
+   it, so the verdict pair were the smallest targets on the screen and
+   the only ones that fell short.
+
+   The buttons themselves are vendored and are not edited: the `size`
+   prop is upstream's, and hand-editing the component would take it out
+   of the `greater` CLI's hands. So this is a SIZING BRIDGE in the sense
+   `src/lib/brand/compose.css` established at M3 — contentus's own
+   appearance over upstream's class contract, appearance only, changing
+   nothing about what the components do or emit.
+
+   NOT INSIDE A MEDIA QUERY, deliberately, and this is the same rule the
+   publish controls above follow: a touch target that is only large on a
+   phone is a target that got small on a tablet. The mobile breakpoints
+   are therefore covered by a floor that never lifts rather than by a
+   rule that has to be repeated at each one.
+
+   Specificity is descendant-qualified (0,2,0) so it beats
+   `.gr-button--sm` (0,1,0) on merit rather than on cascade order, and
+   the block sits after the primitives theme in the assembled sheet in
+   any case.
+
+   SWAP-TO-VENDORED: delete this block when greater's review chrome sizes
+   its verdict controls to the 44px touch floor itself, or exposes the
+   size as a consumer prop. Recorded as an UPSTREAM SIZING CANDIDATE
+   against `equaltoai/greater-components` in
+   `docs/consumption/review-contract.md`; until then the floor lives here
+   rather than in a fork of the component.
+   ============================================================= */
+.gr-blog-review-verdict .gr-blog-review-verdict__approve,
+.gr-blog-review-verdict .gr-blog-review-verdict__request-changes,
+.gr-blog-review-verdict__dialog .gr-modal__footer .gr-button,
+.gr-blog-review-verdict__dialog .gr-modal__close {
+	min-height: 44px;
+	min-width: 44px;
+}
+
 .contentus-review-publish {
 	display: flex;
 	flex-wrap: wrap;
