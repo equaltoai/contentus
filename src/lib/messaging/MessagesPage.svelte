@@ -12,6 +12,17 @@ THREE SESSION STATES, NOT TWO. `unknown` is the server's honest answer and the
 client's first frame: nothing has read `sessionStorage` yet. Claiming either way
 would be a guess that flickers, and on this surface the guess that flickers is
 "you have no messages".
+
+THE GATE TRACKS THE SESSION; IT DOES NOT SNAPSHOT IT. That distinction was a
+defect: reading `isAuthenticated()` once in `onMount` meant sign-out emptied
+`sessionStorage` while this component went on holding everything the session had
+bought — the conversations, the participants, the bodies, and an AUTHORIZED
+SOCKET still receiving. On a shared device the next person met the last one's
+inbox. So `clearSession` announces itself (`$lib/auth/session-events`), and
+`closeSession` below is what that announcement runs: the socket is closed first,
+the binding is dropped, and every piece of state bought with the old session
+goes with it. A different reader signing in afterwards gets a NEW binding and a
+new `Root`, so there is nothing of the previous session left to observe.
 -->
 
 <script lang="ts">
@@ -20,10 +31,16 @@ would be a guess that flickers, and on this surface the guess that flickers is
 	import Root from '$lib/components/messaging/Root.svelte';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 	import { accessTokenOrNull, isAuthenticated, startLogin } from '$lib/auth/session';
+	import { onSessionChange } from '$lib/auth/session-events';
 	import { resolveBrowserOrigin } from '$lib/cms/origin';
 	import type { SubscriptionState } from '$lib/timelines/subscription';
 	import MessagingSurface from './MessagingSurface.svelte';
-	import { createMessagingBinding, type MessagingBinding } from './handlers';
+	import {
+		createMessagingBinding,
+		type MessagingBinding,
+		type MessagingCatchUp,
+		type MessagingRereadState,
+	} from './handlers';
 	import { unreadStore } from './unread.svelte';
 	import type { AppPageDescriptor, MessagesRouteData } from '../../facetheory/types';
 
@@ -51,14 +68,26 @@ would be a guess that flickers, and on this surface the guess that flickers is
 	 * than flattened into the context's vocabulary on the way past.
 	 */
 	let realtime = $state<SubscriptionState>('idle');
+	/** Whether a reconnected socket has re-read what it missed. */
+	let catchUp = $state<MessagingCatchUp>('idle');
+	/** What happened to the last re-read an event asked for. */
+	let reread = $state<MessagingRereadState>('idle');
 	let partialOperations = $state<string[]>([]);
 
-	onMount(() => {
-		session = isAuthenticated() ? 'authenticated' : 'anonymous';
-		if (session !== 'authenticated') {
-			unreadStore.reset();
+	/**
+	 * Open the surface for the session that is actually in storage.
+	 *
+	 * Idempotent: a `signed-in` announcement for the session already open leaves
+	 * the existing binding — and the conversations loaded through it — alone.
+	 */
+	function openSession() {
+		if (!isAuthenticated()) {
+			closeSession();
 			return;
 		}
+
+		session = 'authenticated';
+		if (binding) return;
 
 		binding = createMessagingBinding({
 			// The session is passed in rather than read inside the binding, which is
@@ -70,12 +99,56 @@ would be a guess that flickers, and on this surface the guess that flickers is
 			onRealtimeState: (state) => {
 				realtime = state;
 			},
+			onCatchUp: (state) => {
+				catchUp = state;
+			},
+			onRereadState: (state) => {
+				reread = state;
+			},
 			onPartial: (operation) => {
 				if (!partialOperations.includes(operation)) {
 					partialOperations = [...partialOperations, operation];
 				}
 			},
 		});
+	}
+
+	/**
+	 * End the surface with the session.
+	 *
+	 * ORDER MATTERS. The socket is closed first, because it is the only thing
+	 * here that keeps RECEIVING after the reader has gone; then the binding is
+	 * dropped, which unmounts `Root` and takes the conversations, the thread and
+	 * the drafts bound to it with it. Nothing is left holding the old session's
+	 * data for the next reader to find.
+	 */
+	function closeSession() {
+		binding?.teardown();
+		binding = null;
+		session = 'anonymous';
+		realtime = 'idle';
+		catchUp = 'idle';
+		reread = 'idle';
+		partialOperations = [];
+		unreadStore.reset();
+	}
+
+	onMount(() => {
+		openSession();
+
+		const unsubscribe = onSessionChange((change) => {
+			if (change === 'signed-out') closeSession();
+			else openSession();
+		});
+
+		return () => {
+			unsubscribe();
+			// Leaving the surface closes the socket too. `Root`'s own `onDestroy`
+			// stops the subscription it holds — but it only holds it from a
+			// microtask AFTER subscribing, so a navigation landing first would leave
+			// an authorized socket open with nothing left to read it.
+			binding?.teardown();
+		};
 	});
 
 	async function onSignIn() {
@@ -127,6 +200,8 @@ would be a guess that flickers, and on this surface the guess that flickers is
 				folder={data.folder}
 				conversationId={data.conversationId}
 				{realtime}
+				{catchUp}
+				{reread}
 				{partialOperations}
 			/>
 		</Root>

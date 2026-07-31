@@ -25,6 +25,15 @@ import {
 	toMessagePage,
 	unreadConversationCount,
 } from '../src/lib/messaging/contract.ts';
+import {
+	acceptResolution,
+	applyConversation,
+	countPendingRequests,
+	declineResolution,
+	isResolved,
+	requestNotice,
+	withoutConversation,
+} from '../src/lib/messaging/requests.ts';
 
 /** A lesser actor, as `ActorSummary` returns one. */
 function actor(username, domain = null) {
@@ -572,4 +581,221 @@ test('a conversation lesser does not know is not-found, not a failure', async ()
 	// Null with no errors means the instance answered and does not have it. That
 	// is a different screen from "the instance did not answer", which throws.
 	assert.equal(value, null);
+});
+
+/* ============================================================
+   A conversation this reader cannot open — one answer, not two
+   ============================================================ */
+
+test('a foreign conversation and a nonexistent one are indistinguishable to the caller', async () => {
+	// lesser answers the two with different ENVELOPES: a missing id is a clean
+	// `{ conversation: null }`, and an id that exists but belongs to other people
+	// is `{ conversation: null }` plus an access-denied error
+	// (`graph/query_resolvers_conversations.go`). No body leaks either way, but
+	// the difference is an existence oracle: anybody who can type a URL could
+	// read "this conversation exists" off the partial-read notice, one guessed id
+	// at a time. Both must present identically.
+	const missingPartials = [];
+	const missing = createMessagingBinding({
+		accessToken: () => 'token',
+		onPartial: (operation) => missingPartials.push(operation),
+	});
+	const foreignPartials = [];
+	const foreign = createMessagingBinding({
+		accessToken: () => 'token',
+		onPartial: (operation) => foreignPartials.push(operation),
+	});
+
+	const { value: missingValue, requests: missingRequests } = await withStubbedFetch(
+		() => ({ data: { conversation: null } }),
+		() => missing.loadConversation('never-existed')
+	);
+	const { value: foreignValue, requests: foreignRequests } = await withStubbedFetch(
+		() => ({
+			data: { conversation: null },
+			errors: [
+				{
+					message: 'Access denied',
+					path: ['conversation'],
+					extensions: { code: 'FORBIDDEN', resource_type: 'resource' },
+				},
+			],
+		}),
+		() => foreign.loadConversation('somebody-elses')
+	);
+
+	// Same value…
+	assert.equal(missingValue, null);
+	assert.equal(foreignValue, null);
+	// …same disclosure…
+	assert.deepEqual(foreignPartials, [], 'a null conversation must never raise the partial notice');
+	assert.deepEqual(missingPartials, []);
+	assert.deepEqual(foreignPartials, missingPartials);
+	// …and the same amount of work, so the two do not separate on timing either.
+	assert.equal(foreignRequests.length, 1);
+	assert.equal(missingRequests.length, foreignRequests.length);
+	assert.deepEqual(
+		foreignRequests.map((request) => request.operation),
+		missingRequests.map((request) => request.operation)
+	);
+});
+
+test('a partial answer that DID carry the conversation is still disclosed', async () => {
+	// The suppression is scoped to the null answer, and only to it. A partial read
+	// the reader can see says nothing they do not already have, and dropping the
+	// marker there would hide a real gap in what was rendered.
+	const seen = [];
+	const binding = createMessagingBinding({
+		accessToken: () => 'token',
+		onPartial: (operation) => seen.push(operation),
+	});
+
+	const { value } = await withStubbedFetch(
+		() => ({
+			data: { conversation: conversation('c1') },
+			errors: [{ message: 'lastStatus failed', path: ['conversation', 'lastStatus'] }],
+		}),
+		() => binding.loadConversation('c1')
+	);
+
+	assert.equal(value?.id, 'c1');
+	assert.deepEqual(seen, ['this conversation']);
+});
+
+/* ============================================================
+   Accept and decline: the card renders what lesser returned
+   ============================================================ */
+
+test('an accept that came back PENDING resolves as unchanged, and says so', async () => {
+	// The contradiction M5's review found: the vendored context removes the
+	// request card and switches to Inbox whatever request state comes back, so a
+	// request lesser still holds disappears from the tab that holds it. The
+	// surface resolves through these instead.
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	const { value } = await withStubbedFetch(
+		() => ({ data: { acceptMessageRequest: conversation('c1', { requestState: 'PENDING' }) } }),
+		() => handlers.onAcceptMessageRequest('c1')
+	);
+
+	const resolution = acceptResolution(value);
+	assert.deepEqual(resolution, { kind: 'unchanged', state: 'PENDING' });
+	assert.equal(isResolved(resolution), false, 'nothing may be removed for a request still pending');
+	assert.match(requestNotice(resolution, 'Ada').text, /still reports it as pending/);
+	assert.equal(requestNotice(resolution, 'Ada').tone, 'alert');
+
+	// And the row keeps the state lesser returned, so the card still behaves like
+	// the pending request it is.
+	const list = applyConversation([{ id: 'c1', requestState: 'PENDING' }], value);
+	assert.equal(list[0].requestState, 'PENDING');
+	assert.equal(list[0].folder, 'REQUESTS');
+	assert.equal(countPendingRequests(list), 1);
+});
+
+test('an accept that came back ACCEPTED is the only one that reads as accepted', async () => {
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	const { value } = await withStubbedFetch(
+		() => ({ data: { acceptMessageRequest: conversation('c1', { requestState: 'ACCEPTED' }) } }),
+		() => handlers.onAcceptMessageRequest('c1')
+	);
+
+	const resolution = acceptResolution(value);
+	assert.deepEqual(resolution, { kind: 'accepted' });
+	assert.equal(isResolved(resolution), true);
+	assert.match(requestNotice(resolution, 'Ada').text, /accepted/);
+	assert.equal(countPendingRequests(applyConversation([{ id: 'c1' }], value)), 0);
+});
+
+test('a DECLINED answer to an accept is reported as what it is', async () => {
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	const { value } = await withStubbedFetch(
+		() => ({ data: { acceptMessageRequest: conversation('c1', { requestState: 'DECLINED' }) } }),
+		() => handlers.onAcceptMessageRequest('c1')
+	);
+
+	assert.deepEqual(acceptResolution(value), { kind: 'unchanged', state: 'DECLINED' });
+	assert.match(
+		requestNotice(acceptResolution(value), 'Ada').text,
+		/declined, so it was not accepted/
+	);
+});
+
+test('a decline lesser did not confirm removes nothing and announces nothing', async () => {
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	const { value } = await withStubbedFetch(
+		() => ({ data: { declineMessageRequest: false } }),
+		() => handlers.onDeclineMessageRequest('c1')
+	);
+
+	const resolution = declineResolution(value);
+	assert.deepEqual(resolution, { kind: 'not-declined' });
+	assert.equal(isResolved(resolution), false);
+	assert.match(requestNotice(resolution, 'Ada').text, /did not confirm the decline/);
+	assert.equal(requestNotice(resolution, 'Ada').tone, 'alert');
+
+	// The list is untouched: the card stays where lesser still has it.
+	assert.deepEqual(withoutConversation([{ id: 'c1' }], 'other').length, 1);
+});
+
+test('a confirmed decline is the only one that removes the card', async () => {
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	const { value } = await withStubbedFetch(
+		() => ({ data: { declineMessageRequest: true } }),
+		() => handlers.onDeclineMessageRequest('c1')
+	);
+
+	assert.deepEqual(declineResolution(value), { kind: 'declined' });
+	assert.deepEqual(withoutConversation([{ id: 'c1' }, { id: 'c2' }], 'c1'), [{ id: 'c2' }]);
+	assert.match(requestNotice({ kind: 'declined' }, 'Ada').text, /declined/);
+});
+
+test('a request mutation that failed leaves the request where it was', async () => {
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	await withStubbedFetch(
+		() => ({ data: { acceptMessageRequest: null } }),
+		async () => {
+			await assert.rejects(() => handlers.onAcceptMessageRequest('c1'), /did not confirm/);
+		}
+	);
+
+	// Which is what the surface renders from: an accept that threw is not an
+	// accept, and the notice says the request is unchanged rather than naming an
+	// outcome nobody reported.
+	for (const failure of ['auth-required', 'unavailable', 'unknown']) {
+		const notice = requestNotice({ kind: 'failed', failure }, 'Ada');
+		assert.match(notice.text, /unchanged/);
+		assert.equal(notice.tone, 'alert');
+	}
+	assert.match(
+		requestNotice({ kind: 'failed', failure: 'auth-required' }, 'Ada').text,
+		/session expired/
+	);
+});
+
+test('the Requests badge counts what lesser listed as pending', async () => {
+	// Not the ids the vendored tracker has ever seen pending: it only forgets an
+	// id when a later read carries the same conversation as non-pending, and a
+	// request resolved here never appears in a folder read again.
+	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
+
+	const { value } = await withStubbedFetch(
+		() => ({
+			data: {
+				conversations: [
+					conversation('c1', { requestState: 'PENDING' }),
+					conversation('c2', { requestState: 'PENDING' }),
+					conversation('c3', { requestState: 'ACCEPTED' }),
+				],
+			},
+		}),
+		() => handlers.onFetchConversations('REQUESTS')
+	);
+
+	assert.equal(countPendingRequests(value), 2);
+	assert.equal(countPendingRequests(withoutConversation(value, 'c1')), 1);
 });

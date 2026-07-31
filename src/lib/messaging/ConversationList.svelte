@@ -35,7 +35,15 @@ about, and would be wrong the moment a request is accepted in another tab.
 		busy: boolean;
 		selectedId: string | null;
 		onSelect: (conversation: Conversation) => void;
-		onAccept: (conversation: Conversation) => Promise<void> | void;
+		/**
+		 * Both actions carry the NAME the card displayed.
+		 *
+		 * The outcome notice the surface renders names the person whose request it
+		 * was, and this component is the only place that name is derived — from
+		 * `getConversationName`, which is upstream's. Re-deriving it there would be
+		 * a second opinion about what to call somebody.
+		 */
+		onAccept: (conversation: Conversation, name: string) => Promise<void> | void;
 		onDecline: (conversation: Conversation, name: string) => Promise<void> | void;
 	}
 
@@ -169,7 +177,7 @@ about, and would be wrong the moment a request is accepted in another tab.
 								type="button"
 								class="contentus-conversations__accept"
 								disabled={busy}
-								onclick={() => onAccept(conversation)}
+								onclick={() => onAccept(conversation, name)}
 							>
 								Accept
 							</button>

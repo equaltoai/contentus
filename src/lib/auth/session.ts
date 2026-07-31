@@ -3,6 +3,7 @@ import { base } from '$app/paths';
 
 import { createPkcePair, generateRandomString } from './pkce';
 import { CLIENT_CLASS, CLIENT_NAME, DEFAULT_OAUTH_SCOPE, normalizeScopeValue } from './scopes';
+import { notifySessionChange } from './session-events';
 
 /**
  * OAuth Authorization Code + PKCE against lesser's auth surface.
@@ -78,13 +79,26 @@ export function readSession(): AuthSession | null {
 function writeSession(session: AuthSession): void {
 	if (!browser) return;
 	sessionStorage.setItem(STORAGE_KEYS.session, JSON.stringify(session));
+	// Announced AFTER the write, so a subscriber that reads the session in
+	// response finds the new one rather than the one it is replacing.
+	notifySessionChange('signed-in');
 }
 
+/**
+ * End the session.
+ *
+ * The keys go first and the announcement second, in that order for the same
+ * reason: a subscriber tearing down on `signed-out` must not be able to read a
+ * token that is on its way out. The announcement is not optional politeness —
+ * emptying storage does nothing to a page that already read it, and the
+ * messages face holds an authorized socket that only this signal closes.
+ */
 export function clearSession(): void {
 	if (!browser) return;
 	for (const key of Object.values(STORAGE_KEYS)) {
 		sessionStorage.removeItem(key);
 	}
+	notifySessionChange('signed-out');
 }
 
 export function isAuthenticated(): boolean {

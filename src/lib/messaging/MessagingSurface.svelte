@@ -21,6 +21,20 @@ components read — `getMessagesContext()` — so it shares their state, their
 handlers and their realtime updates rather than running a second model beside
 them.
 
+SHARING THAT STATE MEANS RECONCILING IT. The vendored state machine keys nothing
+by conversation: `selectConversation` writes whichever `onFetchMessages`
+resolves last into one `messages` array, `sendMessage` appends its confirmed
+message to whatever is selected when the mutation returns, and
+`acceptMessageRequest` removes a request card whatever request state comes back.
+On a surface where the selection changes faster than a read completes, those are
+not display glitches — they are one correspondent's words under another's name,
+and a request that vanished from the tab that still holds it. Contentus cannot
+change that source, so three reconciliations live here, each against evidence
+rather than assumption: messages are kept only when they carry the selected
+`conversationId` (`./selection`), pages are merged only into the conversation
+they were requested for, and request cards render the state lesser RETURNED
+(`./requests`).
+
 TWO PANES, ONE URL. `/messages` is the list; `/messages/{conversationId}` is a
 conversation. On a wide viewport both routes show both panes, and selecting a
 conversation from the list is an in-place selection. Below 960px the panes
@@ -44,8 +58,23 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	import type { MessageFolderTab } from '../../facetheory/types';
 	import ConversationList from './ConversationList.svelte';
 	import MessagesFolderTabs from './MessagesFolderTabs.svelte';
-	import { mergeMessages } from './contract';
-	import { classifyMessagingError, type MessagingBinding } from './handlers';
+	import { realtimeNotice } from './liveness';
+	import {
+		acceptResolution,
+		applyConversation,
+		countPendingRequests,
+		declineResolution,
+		requestNotice,
+		withoutConversation,
+		type RequestResolution,
+	} from './requests';
+	import { mergeForConversation, retainSelectedMessages } from './selection';
+	import {
+		classifyMessagingError,
+		type MessagingBinding,
+		type MessagingCatchUp,
+		type MessagingRereadState,
+	} from './handlers';
 	import { unreadStore } from './unread.svelte';
 	import type { SubscriptionState } from '$lib/timelines/subscription';
 
@@ -57,11 +86,16 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		conversationId: string | null;
 		/** The honest realtime state, as observed by the socket rather than assumed. */
 		realtime: SubscriptionState;
+		/** Whether a reconnected socket has re-read what it missed. */
+		catchUp: MessagingCatchUp;
+		/** What happened to the last re-read a realtime event asked for. */
+		reread: MessagingRereadState;
 		/** Operations that came back with data AND errors. */
 		partialOperations: string[];
 	}
 
-	let { binding, mode, folder, conversationId, realtime, partialOperations }: Props = $props();
+	let { binding, mode, folder, conversationId, realtime, catchUp, reread, partialOperations }: Props =
+		$props();
 
 	const context = getMessagesContext();
 	// NOT named `state`: a local by that name shadows the `$state` rune and every
@@ -90,18 +124,49 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	let pagedConversationId = $state<string | null>(null);
 
 	/**
-	 * A declined request, remembered.
+	 * The last accept or decline, and what lesser said about it.
 	 *
-	 * The context's `declineMessageRequest` filters the conversation out of the
-	 * array, so without this the card simply vanishes — which is exactly the
-	 * "silent disappearance" #33 rules out. Holding the name lets the surface say
-	 * what happened, and the decline stays honest: nothing is un-declined, the
-	 * notice just reports the state lesser now holds.
+	 * Held because both outcomes need a sentence: an accepted request LEAVES the
+	 * Requests tab, which without this reads as a card that simply vanished — the
+	 * silent disappearance #33 rules out — and an accept that came back PENDING
+	 * needs to say so, because nothing on screen changed. The notice never
+	 * describes the button that was pressed, only the state lesser returned.
 	 */
-	let declined = $state<{ id: string; name: string } | null>(null);
+	let requestOutcome = $state<{ name: string; resolution: RequestResolution } | null>(null);
+
+	/** The request card with a mutation in flight; its actions disable together. */
+	let resolvingRequest = $state<string | null>(null);
+
+	/**
+	 * Requests this reader declined here, which no folder read will mention again.
+	 *
+	 * The vendored request tracker only forgets an id when a later read carries
+	 * the same conversation as non-pending. An ACCEPTED request does come back
+	 * that way — in the inbox read below — but a DECLINED one is served in no
+	 * folder at all, so its id would sit in the tracker for the life of the page
+	 * and the tab would keep advertising a request that is gone.
+	 */
+	let declinedRequests = $state<string[]>([]);
 
 	const selected = $derived(dm.selectedConversation);
 	const failure = $derived(dm.error ? classifyMessagingError(new Error(dm.error)) : null);
+	const notice = $derived(realtimeNotice({ socket: realtime, catchUp, reread }));
+	const outcomeNotice = $derived(
+		requestOutcome ? requestNotice(requestOutcome.resolution, requestOutcome.name) : null
+	);
+
+	/**
+	 * The Requests badge.
+	 *
+	 * From the list lesser actually served whenever that list is on screen, and
+	 * from the context's own tracker — minus the declines it cannot know about —
+	 * when it is not. Never from an assumption that an accept moved something.
+	 */
+	const requestCount = $derived(
+		dm.folder === 'REQUESTS' && !dm.error && !dm.loadingConversations
+			? countPendingRequests(dm.conversations)
+			: Math.max(0, dm.requestCount - declinedRequests.length)
+	);
 
 	/**
 	 * Wide enough for two panes.
@@ -139,6 +204,42 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		if (conversationId) void resolveDeepLink(conversationId);
 	});
 
+	onMount(() => {
+		/**
+		 * What a reconnected socket has to re-read before it may be called live.
+		 *
+		 * Registered here rather than built into the binding because the folder a
+		 * reader is looking at and the thread they have open are this component's
+		 * state. `conversationUpdates` has no replay: the events published while
+		 * the socket was down were never delivered, so the list and the open
+		 * thread are the only places the missed messages can come from.
+		 *
+		 * THROWING IS PART OF THE CONTRACT. `fetchConversations` swallows its own
+		 * failure into `state.error`, so a re-read that failed would otherwise
+		 * resolve and the binding would report a reconciliation that did not
+		 * happen. Reading the error back and throwing is what makes the
+		 * "catching up failed" state reachable instead of decorative.
+		 */
+		binding.setReconciler(async () => {
+			await context.fetchConversations(dm.folder, { preserveSelection: true });
+			if (dm.error) throw new Error(dm.error);
+
+			const open = dm.selectedConversation;
+			if (!open) return;
+
+			const page = await binding.loadMessagePage(open.id);
+			const merged = mergeForConversation(
+				dm.messages,
+				page.messages,
+				open.id,
+				dm.selectedConversation?.id ?? null
+			);
+			if (merged) context.updateState({ messages: merged });
+		});
+
+		return () => binding.setReconciler(null);
+	});
+
 	/**
 	 * Resolve `/messages/{id}` into a selected conversation.
 	 *
@@ -159,6 +260,10 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		try {
 			const conversation = await binding.loadConversation(id);
 			if (!conversation) {
+				// A conversation this reader cannot open. Deliberately ONE state for
+				// two server answers — an id lesser has never heard of, and one it
+				// holds for other people — because telling those apart would answer
+				// "does this conversation exist?" for anybody who can type a URL.
 				resolution = 'not-found';
 				return;
 			}
@@ -169,6 +274,27 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 			resolution = 'failed';
 		}
 	}
+
+	/**
+	 * The thread renders only what belongs to the conversation on screen.
+	 *
+	 * `$effect.pre`, so a foreign message is gone before the DOM is written
+	 * rather than after a reader could have read it. This is the guard against
+	 * the vendored context's single unkeyed `messages` array: a slow
+	 * `conversationMessages` for a conversation the reader has left, or a send
+	 * confirmed after they moved on, lands in that array with no record of which
+	 * conversation asked. Every message contentus projects carries its
+	 * `conversationId`, so the ones that do not belong are identifiable and are
+	 * not shown.
+	 */
+	$effect.pre(() => {
+		const selectedId = dm.selectedConversation?.id ?? null;
+		const kept = retainSelectedMessages(dm.messages, selectedId);
+		// Identity, not length: `retainSelectedMessages` returns the same array
+		// when nothing is foreign, so this writes only on a real change and the
+		// effect settles instead of looping.
+		if (kept !== dm.messages) context.updateState({ messages: kept });
+	});
 
 	/**
 	 * Re-seed pagination whenever the selected conversation changes.
@@ -193,9 +319,17 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 			.then((page) => {
 				// Guard against a second selection landing first.
 				if (pagedConversationId !== conversation.id) return;
+				const merged = mergeForConversation(
+					dm.messages,
+					page.messages,
+					conversation.id,
+					dm.selectedConversation?.id ?? null
+				);
+				if (!merged) return;
+
 				cursor = page.endCursor;
 				hasOlder = page.hasNextPage;
-				context.updateState({ messages: mergeMessages(dm.messages, page.messages) });
+				context.updateState({ messages: merged });
 			})
 			.catch(() => {
 				// The thread already rendered from the handler's own read; a failed
@@ -209,20 +343,49 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		if (dm.folder === 'INBOX') unreadStore.adopt(dm.conversations);
 	});
 
+	/**
+	 * A session lesser has stopped accepting stops the realtime loop.
+	 *
+	 * The vendored context reconnects on every error with a backoff that resets,
+	 * and a socket refused for a credential reason will be refused again for the
+	 * same one — so without this an expired session becomes a socket opened every
+	 * few seconds forever. The reader is shown the one thing that fixes it.
+	 */
+	let realtimeStopped = $state(false);
+	$effect(() => {
+		if (realtimeStopped) return;
+		if (realtime !== 'requires-auth' && reread !== 'auth-required') return;
+		realtimeStopped = true;
+		context.stopRealtime();
+	});
+
 	async function loadOlder() {
 		const conversation = dm.selectedConversation;
 		if (!conversation || loadingOlder || !hasOlder) return;
 
+		const requested = conversation.id;
 		loadingOlder = true;
 		olderError = null;
 		try {
-			const page = await binding.loadMessagePage(conversation.id, cursor);
+			const page = await binding.loadMessagePage(requested, cursor);
+			// The selection can move while a page is in flight. Merged, not
+			// prepended: pagination and realtime write to the same list, so the page
+			// may contain a message that already arrived over the socket — and
+			// merged into the conversation it was REQUESTED for, or dropped, so it
+			// can never land in the thread the reader moved to.
+			const merged = mergeForConversation(
+				dm.messages,
+				page.messages,
+				requested,
+				dm.selectedConversation?.id ?? null
+			);
+			if (!merged) return;
+
 			cursor = page.endCursor;
 			hasOlder = page.hasNextPage;
-			// Merged, not prepended: pagination and realtime write to the same list,
-			// so the page may contain a message that already arrived over the socket.
-			context.updateState({ messages: mergeMessages(dm.messages, page.messages) });
+			context.updateState({ messages: merged });
 		} catch (error) {
+			if (dm.selectedConversation?.id !== requested) return;
 			const kind = classifyMessagingError(error);
 			olderError =
 				kind === 'auth-required'
@@ -244,12 +407,93 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		window.location.assign(conversationHref(conversation.id));
 	}
 
-	async function onDecline(conversation: Conversation, name: string) {
+	/**
+	 * Accept, and then believe the answer.
+	 *
+	 * Deliberately NOT `context.acceptMessageRequest`: that method removes the
+	 * card and switches the reader to Inbox whatever request state comes back, so
+	 * an accept lesser reports as still PENDING disappears from the only tab that
+	 * holds it. This posts the same mutation through the same handler and renders
+	 * what lesser returned — including the case where lesser returned "nothing
+	 * changed".
+	 */
+	async function onAccept(conversation: Conversation, name: string) {
+		const accept = binding.handlers.onAcceptMessageRequest;
+		if (!accept || resolvingRequest) return;
+
+		resolvingRequest = conversation.id;
+		requestOutcome = null;
 		try {
-			await context.declineMessageRequest(conversation.id);
-			declined = { id: conversation.id, name };
-		} catch {
-			// The context holds the error; the card stays put rather than vanishing.
+			const updated = await accept(conversation.id);
+			const outcome = acceptResolution(updated);
+
+			// The row takes the RETURNED state, whatever it says. A PENDING answer
+			// leaves a card that still looks and behaves like a pending request,
+			// because that is what lesser says it is.
+			if (updated) {
+				context.updateState({ conversations: applyConversation(dm.conversations, updated) });
+				if (dm.selectedConversation?.id === conversation.id) {
+					context.updateState({
+						selectedConversation: { ...dm.selectedConversation, ...updated },
+					});
+				}
+			}
+
+			requestOutcome = { name, resolution: outcome };
+
+			if (outcome.kind === 'accepted') {
+				// Server-authoritative removal: the card leaves Requests because
+				// lesser stopped listing it there, not because this client moved it.
+				await context.fetchConversations(dm.folder, { preserveSelection: true });
+				// And the inbox, in the background — which is also what lets the
+				// vendored request tracker see this conversation as non-pending and
+				// forget it, keeping the badge honest.
+				void context.fetchConversations('INBOX', { background: true });
+			}
+		} catch (error) {
+			requestOutcome = {
+				name,
+				resolution: { kind: 'failed', failure: classifyMessagingError(error) },
+			};
+		} finally {
+			resolvingRequest = null;
+		}
+	}
+
+	/**
+	 * Decline, and remove only what lesser confirmed.
+	 *
+	 * `declineMessageRequest` returns a boolean and a `false` is a decline that
+	 * did NOT happen. The vendored context is careful about that; the previous
+	 * version of this surface was not — it announced "Request declined" on any
+	 * resolved promise, including the ones that had just told it nothing changed.
+	 */
+	async function onDecline(conversation: Conversation, name: string) {
+		const decline = binding.handlers.onDeclineMessageRequest;
+		if (!decline || resolvingRequest) return;
+
+		resolvingRequest = conversation.id;
+		requestOutcome = null;
+		try {
+			const outcome = declineResolution(await decline(conversation.id));
+			requestOutcome = { name, resolution: outcome };
+
+			if (outcome.kind === 'declined') {
+				context.updateState({
+					conversations: withoutConversation(dm.conversations, conversation.id),
+				});
+				if (dm.selectedConversation?.id === conversation.id) {
+					context.updateState({ selectedConversation: null, messages: [] });
+				}
+				declinedRequests = [...declinedRequests, conversation.id];
+			}
+		} catch (error) {
+			requestOutcome = {
+				name,
+				resolution: { kind: 'failed', failure: classifyMessagingError(error) },
+			};
+		} finally {
+			resolvingRequest = null;
 		}
 	}
 
@@ -275,21 +519,23 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 
 			<MessagesFolderTabs
 				active={dm.folder}
-				requestCount={dm.requestCount}
+				{requestCount}
 				onSelect={(next) => {
-					declined = null;
+					requestOutcome = null;
 					void context.fetchConversations(next);
 				}}
 			/>
 
-			{#if declined}
-				<!-- The designed removed-state #33 requires. The context drops a
-				     declined conversation from the array, so without this the row
-				     would simply be gone and the reader would be left guessing
-				     whether the decline was recorded. -->
-				<p class="contentus-messages__notice" role="status">
-					Request from {declined.name} declined. They cannot message you again unless you start the
-					conversation.
+			{#if outcomeNotice}
+				<!-- The designed removed-state #33 requires, and the honest one M5's
+				     review found missing: a request the instance did NOT accept says
+				     so here rather than disappearing from the tab that still holds
+				     it. -->
+				<p
+					class="contentus-messages__notice"
+					role={outcomeNotice.tone === 'alert' ? 'alert' : 'status'}
+				>
+					{outcomeNotice.text}
 				</p>
 			{/if}
 
@@ -323,10 +569,10 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 					conversations={dm.conversations}
 					folder={dm.folder}
 					loading={dm.loadingConversations}
-					busy={dm.loading}
+					busy={dm.loading || resolvingRequest !== null}
 					selectedId={selected?.id ?? null}
 					{onSelect}
-					onAccept={(conversation) => context.acceptMessageRequest(conversation.id)}
+					{onAccept}
 					{onDecline}
 				/>
 			{/if}
@@ -392,7 +638,25 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 				{/if}
 
 				<Thread />
-				<Composer />
+
+				<!--
+				KEYED BY CONVERSATION, and it is the composer's only binding to one.
+
+				The vendored `Composer` holds its draft in component state and clears
+				it after a successful send. Nothing in it names a conversation: it
+				reads `selectedConversation` at SEND time, so on a wide viewport —
+				where selecting is in-place — text typed for one person and left
+				unsent is still in the box when the next conversation opens, and the
+				next Send delivers it to them. Keying destroys the box with the
+				conversation it belonged to, so a draft can only ever be sent where it
+				was typed. The cost is that switching away discards an unsent draft;
+				retaining one PER conversation needs a prop the component does not
+				expose, and that is the ask upstream
+				(docs/consumption/messaging-contract.md).
+				-->
+				{#key selected?.id ?? ''}
+					<Composer />
+				{/key}
 			{/if}
 		</section>
 	{/if}
@@ -418,21 +682,22 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		vendored message component, not a change contentus makes to what was sent.
 	</p>
 
-	{#if realtime !== 'live'}
-		<p class="contentus-messages__realtime" role="status" aria-live="polite">
-			{#if realtime === 'connecting'}
-				Connecting for live messages…
-			{:else if realtime === 'requires-auth'}
-				Live messages stopped because this session expired. Sign in again to resume.
-			{:else if realtime === 'degraded'}
-				Live messages are arriving, but something this instance sent could not be read. Reload to be
-				sure this thread is complete.
-			{:else if realtime === 'unsupported'}
-				Live messages are unavailable on this instance. New messages appear when you reload.
-			{:else}
-				Live messages are not connected. New messages appear when you reload.
-			{/if}
+	{#if notice}
+		<!-- The only state that renders nothing here is a socket that is live, with
+		     no gap left by a reconnect and no failed re-read behind it. Everything
+		     else is named; see `./liveness`. -->
+		<p
+			class="contentus-messages__realtime"
+			role={notice.tone === 'alert' ? 'alert' : 'status'}
+			aria-live="polite"
+		>
+			{notice.text}
 		</p>
+		{#if notice.signIn}
+			<button type="button" class="contentus-messages__signin" onclick={onSignIn}>
+				Sign in on this instance
+			</button>
+		{/if}
 	{/if}
 
 	{#if partialOperations.length > 0}

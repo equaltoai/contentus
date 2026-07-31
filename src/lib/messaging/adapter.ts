@@ -154,7 +154,13 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 	async function run<T>(
 		document: string,
 		variables: Record<string, unknown>,
-		operation: string
+		operation: string,
+		/**
+		 * Whether a data-AND-errors answer for THIS operation may be disclosed as
+		 * partial. Defaults to yes; `fetchConversation` is the one caller that
+		 * says no, and its reason is at the call site.
+		 */
+		disclosePartial: (data: T) => boolean = () => true
 	): Promise<T> {
 		let result: { data: T | null; errors: GraphQLError[] };
 		try {
@@ -174,7 +180,7 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 		if (result.data === null || result.data === undefined) {
 			throw new MessagingUnavailableError(`This instance could not complete ${operation}.`);
 		}
-		if (result.errors.length > 0) config.onPartial?.(operation);
+		if (result.errors.length > 0 && disclosePartial(result.data)) config.onPartial?.(operation);
 
 		return result.data;
 	}
@@ -194,14 +200,36 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 			return data.conversations;
 		},
 
+		/**
+		 * One conversation by id, and the ONE read on this surface that must not
+		 * tell the caller which kind of "no" it got.
+		 *
+		 * lesser answers a conversation this reader may not see and a conversation
+		 * that does not exist with two DIFFERENT envelopes: a missing id is a clean
+		 * `{ conversation: null }`, while an id that exists and belongs to other
+		 * people is `{ conversation: null }` PLUS a participant error
+		 * (`graph/query_resolvers_conversations.go`). No body leaks either way —
+		 * but the difference between the two is an oracle: anybody who can type a
+		 * URL could ask "does this conversation exist?" and read the answer off the
+		 * partial-read notice, one guessed id at a time.
+		 *
+		 * So the partial signal is suppressed for a null conversation, and both
+		 * answers reach the surface as the same value, on the same path, in the
+		 * same one round trip: `null`, rendered as one "this conversation is not
+		 * available" state. A partial answer that DID carry a conversation is still
+		 * disclosed — the reader can see it, so it says nothing they do not have.
+		 *
+		 * The error-shape difference itself is lesser's to fix and is routed
+		 * upstream (docs/consumption/messaging-contract.md); this is contentus
+		 * declining to relay it.
+		 */
 		fetchConversation: async (id) => {
 			const data = await run<{ conversation?: LesserConversation | null }>(
 				CONVERSATION_QUERY,
 				{ id },
-				'this conversation'
+				'this conversation',
+				(payload) => Boolean(payload.conversation)
 			);
-			// A null conversation with no errors is lesser saying it does not know
-			// this id — "not found", which is a different screen from "unavailable".
 			return data.conversation ?? null;
 		},
 
