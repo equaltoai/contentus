@@ -63,15 +63,15 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	import ScheduleField from '$lib/compose/ScheduleField.svelte';
 	import SensitiveField from '$lib/compose/SensitiveField.svelte';
 	import SourceContext from '$lib/compose/SourceContext.svelte';
-	import { STATUS_BYTE_LIMIT, statusByteLength } from '$lib/compose/budget';
+	import { STATUS_BYTE_LIMIT } from '$lib/compose/budget';
 	import { createComposeExtras } from '$lib/compose/extras.svelte';
 	import { composeSeed, type ComposeSeed } from '$lib/compose/seed';
+	import { buildComposeSubmission } from '$lib/compose/submission';
 	import {
 		createNote,
 		loadComposeViewer,
 		loadSourceStatus,
 		scheduleStatus,
-		toLesserVisibility,
 		updateStatus,
 		type ComposeFailure,
 		type ComposeViewer,
@@ -235,109 +235,59 @@ reviewer/publisher workflow, and nothing on this page touches them.
 		mode === 'edit' ? 'Save changes' : extras.state.scheduledAt ? 'Schedule' : 'Post'
 	);
 
+	/**
+	 * Report a write that did not happen, and stop the submit.
+	 *
+	 * Thrown rather than returned so `Compose.Root` keeps the draft: it resets
+	 * its state only on a RESOLVED submit, and a post the instance did not
+	 * accept must not clear the text the poster still needs.
+	 */
+	function refuse(reported: ComposeFailure): never {
+		failure = reported;
+		if (reported.reason === 'unauthenticated') session = 'anonymous';
+		throw new Error(reported.message);
+	}
+
 	const handlers: ComposeHandlers = {
 		onSubmit: async (formData) => {
 			failure = null;
 			posted = null;
 			scheduled = null;
 
-			// The byte guard, applied where it is decisive. lesser measures UTF-8
-			// bytes and the vendored counter measures UTF-16 units, so a post can
-			// pass the on-screen counter and still be rejected. Refusing here —
-			// rather than driving the vendored `overLimit` flag, which `Root`
-			// recomputes on every keystroke — means the composer's refusal and the
-			// instance's always agree.
-			const bytes = statusByteLength(formData.content, formData.contentWarning ?? '');
-			if (bytes > STATUS_BYTE_LIMIT) {
-				const message = `This post is ${bytes} bytes and the instance accepts ${STATUS_BYTE_LIMIT}.`;
-				failure = { reason: 'rejected', message };
-				throw new Error(message);
+			// What gets sent is decided in one pure place (`$lib/compose/submission`)
+			// and awaited here. The route's job on this path is the awaiting, the
+			// failure display, and what to show afterwards — not the contract.
+			const submission = buildComposeSubmission({
+				mode,
+				form: formData,
+				extras: extras.state,
+			});
+
+			if (submission.kind === 'rejected') {
+				refuse({ reason: 'rejected', message: submission.message });
 			}
 
-			const spoiler = formData.contentWarning ? { spoilerText: formData.contentWarning } : {};
-
-			if (mode === 'edit' && extras.state.editingStatusId) {
-				// No visibility and no poll: `UpdateStatusInput` carries neither,
-				// which is lesser saying a posted status keeps its reach and a poll
-				// with votes is not rewritten underneath them.
-				//
-				// `spoilerText` is sent unconditionally here, empty string included,
-				// and that is the difference between an edit that can remove a
-				// content warning and one that cannot. lesser seeds the field from
-				// the stored status and overwrites it only when the input carries
-				// it, so an omitted-because-emptied warning would leave the old one
-				// standing on a post whose composer showed none. Both values are
-				// honest because both were seeded from this status to begin with.
-				const result = await updateStatus(extras.state.editingStatusId, {
-					content: formData.content,
-					sensitive: extras.state.sensitive,
-					spoilerText: formData.contentWarning ?? '',
-					...(extras.state.attachmentIds.length
-						? { attachmentIds: extras.state.attachmentIds }
-						: {}),
-				});
-
-				if (!result.ok) {
-					failure = result.failure;
-					if (result.failure.reason === 'unauthenticated') session = 'anonymous';
-					throw new Error(result.failure.message);
-				}
+			if (submission.kind === 'update') {
+				const result = await updateStatus(submission.id, submission.input);
+				if (!result.ok) refuse(result.failure);
 
 				posted = { id: result.value.id, url: linkableUrl(result.value.id) };
 				return;
 			}
 
-			if (extras.state.scheduledAt) {
-				// `ScheduleStatusInput` spells the body `text` and attachments
-				// `mediaIds`, and has no `quoteId` — so the schedule control and the
-				// quote intent are mutually exclusive, stated rather than dropped.
-				const result = await scheduleStatus({
-					text: formData.content,
-					scheduledAt: extras.state.scheduledAt,
-					visibility: toLesserVisibility(formData.visibility),
-					sensitive: extras.state.sensitive,
-					...spoiler,
-					...(extras.state.inReplyToId ? { inReplyToId: extras.state.inReplyToId } : {}),
-					...(extras.state.attachmentIds.length
-						? { mediaIds: extras.state.attachmentIds }
-						: {}),
-					...(extras.state.poll ? { poll: extras.state.poll } : {}),
-				});
-
-				if (!result.ok) {
-					failure = result.failure;
-					if (result.failure.reason === 'unauthenticated') session = 'anonymous';
-					throw new Error(result.failure.message);
-				}
+			if (submission.kind === 'schedule') {
+				const result = await scheduleStatus(submission.input);
+				if (!result.ok) refuse(result.failure);
 
 				scheduled = result.value;
 				extras.reset();
 				return;
 			}
 
-			const result = await createNote({
-				content: formData.content,
-				visibility: toLesserVisibility(formData.visibility),
-				sensitive: extras.state.sensitive,
-				...spoiler,
-				...(extras.state.attachmentIds.length
-					? { attachmentIds: extras.state.attachmentIds }
-					: {}),
-				...(extras.state.poll ? { poll: extras.state.poll } : {}),
-				...(extras.state.inReplyToId ? { inReplyToId: extras.state.inReplyToId } : {}),
-				...(extras.state.quoteId ? { quoteId: extras.state.quoteId } : {}),
-				...(extras.state.agentAttribution
-					? { agentAttribution: extras.state.agentAttribution }
-					: {}),
-			});
+			const result = await createNote(submission.input);
 
 			if (!result.ok) {
-				failure = result.failure;
-				if (result.failure.reason === 'unauthenticated') session = 'anonymous';
-				// Thrown so `Compose.Root` keeps the draft: it resets its state only
-				// on a resolved submit, and a post that was not accepted must not
-				// clear the text the poster still needs.
-				throw new Error(result.failure.message);
+				refuse(result.failure);
 			}
 
 			posted = { id: result.value.id, url: linkableUrl(result.value.id) };
