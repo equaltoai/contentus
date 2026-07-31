@@ -2781,6 +2781,31 @@ export function validateEventEnvSinks(
 		if (!tainted.size) continue;
 		propagateTaint(runTexts, tainted);
 		const origin = composite ? 'caller-supplied' : 'event-derived';
+		// Every rule below reads a `run:` value as shell. A step — or a `defaults:` —
+		// that names another interpreter is running text this scanner does not read at
+		// all, and `os.system(os.environ["PAYLOAD"])` carries no appearance a shell
+		// scanner can see. So in a file that carries tainted data, an interpreter this
+		// scanner cannot read is a finding, on exactly the standard that refuses shell
+		// text it cannot parse. Adding one is a governance edit, not a step option.
+		for (const declaration of mappingLines) {
+			const declared =
+				declaration.key === 'shell'
+					? declaration.rawValue
+					: (declaration.rawValue.match(/\{[^}]*\bshell\s*:\s*([^,}]+)/)?.[1] ?? null);
+			if (declared === null) continue;
+			let value;
+			try {
+				value = scalar(declared);
+			} catch {
+				value = declared.trim();
+			}
+			if (value === 'bash' || value === 'sh') continue;
+			findings.push(
+				`${file}:${declaration.index + 1}: shell: \`${value}\` names an interpreter this ` +
+					`scanner does not read, and this file carries ${origin} data in env:; only bash ` +
+					'and sh are read, so any other shell is a finding rather than an unexamined pass'
+			);
+		}
 		for (const { line, text, inlineScalar } of runTexts) {
 			const scalar = inlineScalar ? yamlRunScalar(text) : { text };
 			if (scalar.error) {
