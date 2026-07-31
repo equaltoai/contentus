@@ -1,0 +1,626 @@
+/* =============================================================
+   Timelines theme — interim consumption layer
+   -------------------------------------------------------------
+   WHY THIS FILE EXISTS, and when it should stop existing.
+
+   Exactly the `compose.css` situation, one milestone later and with the
+   same upstream cause. `greater add timeline social-status-card
+   social-timeline profile` vendors the components and NO stylesheet: the
+   registry records for those entries list `component`, `types` and `utils`
+   files and no `styles` entry, while every `.timeline-*`, `.status-card`,
+   `.virtual-*` and `.gr-action-bar__*` class they emit is defined in
+   `packages/faces/social/src/theme.css`, reachable only by installing the
+   whole social face.
+
+   `--css-only` LOOKS LIKE THE NARROW FIX AND IS NOT. `greater add
+   faces/social --css-only --dry-run` at the pinned CLI still resolves the
+   face's registry dependencies and reports nine component files across
+   three target directories, including the `admin` shared module and three
+   patterns. The flag limits nothing that its name implies. Recorded with
+   the other CLI findings rather than worked around silently.
+
+   So this layer is contentus's own appearance for upstream's class
+   contract. It is APPEARANCE ONLY: no rule here changes what a component
+   does, what it emits, or how it behaves. Anything that would, belongs
+   upstream.
+
+   SUNSET: delete this file and its layer in `scripts/build-stylesheet.mjs`
+   the day the `greater` CLI emits per-module CSS, or the day `--css-only`
+   means what it says. The same day retires `compose.css`.
+
+   Values resolve to `--tc-*` and `--gr-*` tokens only; like `bridge.css`,
+   this file contains no brand literals of its own.
+   ============================================================= */
+
+/* =============================================================
+   The segmented tab control (contentus-owned)
+   -------------------------------------------------------------
+   Sticky at the top of the surface, and horizontally scrollable on
+   mobile rather than wrapping or shrinking — the 44px floor is not
+   negotiable against tab count (product design §4).
+   ============================================================= */
+
+.contentus-timeline-tabs {
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	background: var(--tc-bg);
+	border-bottom: 1px solid var(--tc-outline);
+	margin-bottom: var(--tc-space-4);
+}
+
+.contentus-timeline-tabs__list {
+	display: flex;
+	gap: var(--tc-space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	/* Horizontal scroll is the mobile collapse. `-webkit-overflow-scrolling`
+	   is deliberately absent: it is a no-op on current iOS and its presence
+	   suggests a behaviour this does not rely on. */
+	overflow-x: auto;
+	scrollbar-width: none;
+	scroll-snap-type: x proximity;
+}
+
+.contentus-timeline-tabs__list::-webkit-scrollbar {
+	display: none;
+}
+
+.contentus-timeline-tabs__item {
+	flex: 0 0 auto;
+	scroll-snap-align: start;
+}
+
+.contentus-timeline-tabs__tab {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	min-width: 44px;
+	padding: 0 var(--tc-space-4);
+	color: var(--tc-fg-muted);
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+	border-bottom: 2px solid transparent;
+}
+
+.contentus-timeline-tabs__tab:hover {
+	color: var(--tc-fg);
+}
+
+.contentus-timeline-tabs__tab:focus-visible {
+	outline: 2px solid var(--tc-core-blue);
+	outline-offset: -2px;
+}
+
+.contentus-timeline-tabs__tab[aria-current='page'] {
+	color: var(--tc-fg);
+	border-bottom-color: var(--tc-core-blue);
+}
+
+/* =============================================================
+   Surface chrome (contentus-owned)
+   ============================================================= */
+
+.contentus-timelines,
+.contentus-profile {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.contentus-timelines__eyebrow {
+	margin: 0;
+	color: var(--tc-fg-dim);
+	font-size: 0.8125rem;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.contentus-timelines__title {
+	margin: 0 0 var(--tc-space-3);
+	color: var(--tc-fg);
+}
+
+.contentus-timelines__description {
+	margin: 0 0 var(--tc-space-4);
+	color: var(--tc-fg-muted);
+}
+
+.contentus-timelines__signin {
+	min-height: 44px;
+	padding: 0 var(--tc-space-5);
+	border: 1px solid var(--tc-core-blue);
+	border-radius: var(--tc-radius-md, 8px);
+	background: var(--tc-core-blue);
+	color: var(--tc-core-blue-inverse, var(--tc-bg));
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-timelines__error {
+	margin-top: var(--tc-space-3);
+	color: var(--tc-error, var(--tc-fg));
+}
+
+/* =============================================================
+   Feed chrome (contentus-owned)
+   ============================================================= */
+
+.contentus-feed {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.contentus-feed__live {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+	min-height: 44px;
+	padding: 0 var(--tc-space-2);
+}
+
+.contentus-feed__live-note {
+	margin: 0;
+	color: var(--tc-fg-dim);
+	font-size: 0.875rem;
+}
+
+/* The new-items affordance. Prominent because it is the ONLY thing that
+   moves the reader's scroll position — nothing does that on its own. */
+.contentus-feed__new {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-core-blue);
+	border-radius: 999px;
+	background: var(--tc-core-blue-container);
+	color: var(--tc-fg);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-feed__retry,
+.contentus-feed__refresh button,
+.contentus-feed__more button {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md, 8px);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	cursor: pointer;
+}
+
+.contentus-feed__refresh {
+	display: flex;
+	justify-content: flex-end;
+	padding: 0 var(--tc-space-2) var(--tc-space-2);
+}
+
+.contentus-feed__more {
+	display: flex;
+	justify-content: center;
+	padding: var(--tc-space-4) 0;
+}
+
+.contentus-feed__refresh button:disabled,
+.contentus-feed__more button:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.contentus-feed__skipped,
+.contentus-feed__partial,
+.contentus-feed__limit,
+.contentus-feed__tail {
+	margin: 0 0 var(--tc-space-3);
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border-left: 3px solid var(--tc-outline-variant);
+	color: var(--tc-fg-muted);
+	font-size: 0.875rem;
+}
+
+/* The bound notice carries an action, so it needs room for a control that
+   still meets the touch floor. */
+.contentus-feed__limit {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--tc-space-3);
+}
+
+/* =============================================================
+   Upstream class contract — vendored timeline + status card
+   -------------------------------------------------------------
+   Everything below styles classes the VENDORED components emit. The
+   names are upstream's; only the values are ours.
+   ============================================================= */
+
+.timeline-virtualized,
+.timeline-scroll {
+	min-width: 0;
+}
+
+/* The scroller is bounded so virtualization has a viewport to measure
+   against. `100svh` rather than `100vh` per greater's shell precedent:
+   on mobile the dynamic toolbar makes `vh` taller than the visible area,
+   which pushes the last card under the browser chrome. */
+.timeline-scroll {
+	max-height: calc(100svh - var(--tc-space-20));
+	overflow-y: auto;
+	overscroll-behavior-y: contain;
+}
+
+.virtual-list {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.virtual-row {
+	min-width: 0;
+	border-bottom: 1px solid var(--tc-outline-variant);
+}
+
+.virtual-spacer {
+	display: block;
+	flex: 0 0 auto;
+}
+
+.status-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	padding: var(--tc-space-4) var(--tc-space-3);
+	min-width: 0;
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+}
+
+.status-card .status-header,
+.status-card .account-info {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-width: 0;
+}
+
+.status-card .avatar {
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	object-fit: cover;
+	flex: 0 0 auto;
+}
+
+.status-card .display-name {
+	color: var(--tc-fg);
+	font-weight: 600;
+}
+
+.status-card .account-handle {
+	color: var(--tc-fg-dim);
+	font-size: 0.875rem;
+}
+
+.status-card .bot-badge,
+.status-card .media-badge {
+	padding: 0 var(--tc-space-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: 999px;
+	color: var(--tc-fg-dim);
+	font-size: 0.75rem;
+}
+
+.status-card .status-content {
+	color: var(--tc-fg);
+	overflow-wrap: anywhere;
+}
+
+.status-card .status-content a,
+.status-card .mention,
+.status-card .hashtag {
+	color: var(--tc-core-blue);
+}
+
+.status-card .spoiler-warning {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	flex-wrap: wrap;
+}
+
+/* The content warning's reveal control is a real target, because hiding
+   sensitive content behind a control too small to hit reliably is the
+   same failure as not hiding it. */
+.status-card .spoiler-toggle,
+.status-card .media-reveal {
+	min-height: 44px;
+	min-width: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md, 8px);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	cursor: pointer;
+}
+
+.status-card .media-attachments {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: var(--tc-space-2);
+	min-width: 0;
+}
+
+.status-card .media-item {
+	position: relative;
+	min-width: 0;
+	border-radius: var(--tc-radius-md, 8px);
+	overflow: hidden;
+}
+
+.status-card .media-image,
+.status-card .media-video {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+
+.status-card .media-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--tc-midnight-depth);
+	color: var(--tc-fg);
+}
+
+.status-card .reblog-indicator,
+.status-card .reply-indicator {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	color: var(--tc-fg-dim);
+	font-size: 0.875rem;
+}
+
+/* The vendored ActionBar's buttons default to a 2rem box — 32px, below the
+   floor. Same correction M2d applied to the review verdict controls, and
+   the same reasoning: the floor is the design's, not the component's. */
+.gr-action-bar__button {
+	min-height: 44px;
+	min-width: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--tc-space-1);
+	border: 0;
+	background: none;
+	color: var(--tc-fg-muted);
+	cursor: pointer;
+}
+
+.gr-action-bar__button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.gr-action-bar__button:hover:not(:disabled) {
+	color: var(--tc-fg);
+}
+
+.gr-action-bar__button--active {
+	color: var(--tc-core-blue);
+}
+
+.gr-action-bar__count {
+	font-size: 0.8125rem;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Vendored Timeline state components. */
+.timeline-empty,
+.timeline-error {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--tc-space-2);
+	padding: var(--tc-space-10) var(--tc-space-4);
+	text-align: center;
+	color: var(--tc-fg-muted);
+}
+
+.timeline-empty__title,
+.timeline-error__title {
+	margin: 0;
+	color: var(--tc-fg);
+}
+
+.timeline-error__retry {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md, 8px);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	cursor: pointer;
+}
+
+.loading-indicator {
+	display: flex;
+	justify-content: center;
+	padding: var(--tc-space-4);
+}
+
+.end-of-feed {
+	padding: var(--tc-space-6) var(--tc-space-4);
+	text-align: center;
+	color: var(--tc-fg-dim);
+}
+
+/* =============================================================
+   Profile card (contentus-owned)
+   ============================================================= */
+
+.contentus-profile__card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	padding-bottom: var(--tc-space-4);
+	border-bottom: 1px solid var(--tc-outline);
+	margin-bottom: var(--tc-space-4);
+}
+
+.contentus-profile__banner {
+	width: 100%;
+	max-height: 180px;
+	object-fit: cover;
+	border-radius: var(--tc-radius-md, 8px);
+}
+
+.contentus-profile__identity {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-3);
+	min-width: 0;
+}
+
+.contentus-profile__avatar {
+	width: 72px;
+	height: 72px;
+	border-radius: 50%;
+	object-fit: cover;
+	flex: 0 0 auto;
+}
+
+.contentus-profile__names {
+	min-width: 0;
+}
+
+.contentus-profile__name {
+	margin: 0;
+	color: var(--tc-fg);
+	overflow-wrap: anywhere;
+}
+
+.contentus-profile__acct {
+	margin: 0;
+	color: var(--tc-fg-dim);
+	overflow-wrap: anywhere;
+}
+
+.contentus-profile__badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-2);
+	margin: var(--tc-space-2) 0 0;
+}
+
+.contentus-profile__badge {
+	padding: 0 var(--tc-space-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: 999px;
+	color: var(--tc-fg-dim);
+	font-size: 0.75rem;
+}
+
+.contentus-profile__badge[data-kind='agent'] {
+	border-color: var(--tc-phi-gold, var(--tc-outline));
+	color: var(--tc-fg);
+}
+
+.contentus-profile__summary {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	overflow-wrap: anywhere;
+}
+
+.contentus-profile__stats {
+	display: flex;
+	gap: var(--tc-space-5);
+	margin: 0;
+}
+
+.contentus-profile__stats div {
+	display: flex;
+	flex-direction: column;
+}
+
+.contentus-profile__stats dt {
+	color: var(--tc-fg-dim);
+	font-size: 0.8125rem;
+}
+
+.contentus-profile__stats dd {
+	margin: 0;
+	color: var(--tc-fg);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.contentus-profile__handle {
+	color: var(--tc-fg-dim);
+}
+
+/* The card's own half-failed marker. Same rule as the feed's disclosures — a
+   quiet aside rather than an alarm, because what it reports is incompleteness,
+   not breakage. */
+.contentus-profile__partial {
+	margin: 0;
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border-left: 3px solid var(--tc-outline-variant);
+	color: var(--tc-fg-muted);
+	font-size: 0.875rem;
+}
+
+/* =============================================================
+   Mobile
+   ============================================================= */
+
+@media (max-width: 960px) {
+	.contentus-timeline-tabs {
+		/* Full-bleed under the surface padding, so the scrollable strip
+		   reaches both edges and the first and last tabs are thumb-reachable
+		   rather than inset. */
+		margin-inline: calc(var(--tc-space-4) * -1);
+		padding-inline: var(--tc-space-4);
+	}
+
+	.timeline-scroll {
+		max-height: calc(
+			100svh - var(--tc-space-16) - var(--contentus-tabbar-height) - var(--contentus-safe-bottom)
+		);
+	}
+
+	.contentus-profile__avatar {
+		width: 56px;
+		height: 56px;
+	}
+
+	.contentus-profile__stats {
+		gap: var(--tc-space-4);
+	}
+}
+
+/* The disclosure of the two pinned upstream ContentRenderer gaps — no body
+   during SSR, and escaped markup after hydration. Styled as a notice rather
+   than an error: the surface works, one shared component renders one part of
+   it wrongly, and the reader is owed the explanation rather than an alarm.
+   Both classes share it; the no-script one adds the case where the text
+   never arrives at all. */
+.contentus-feed__gap,
+.contentus-feed__noscript {
+	margin: 0 0 var(--tc-space-3);
+	padding: var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md, 8px);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg-muted);
+	font-size: 0.875rem;
+}

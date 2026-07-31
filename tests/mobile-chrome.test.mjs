@@ -133,8 +133,28 @@ test('an unshipped face is a disabled tab, never a link that would 404', async (
 	// lesser has no SPA fallback under /l/*, so an href to a route that does not
 	// exist is a hard error page rather than a soft miss.
 	assert.match(rendered.html, /<span class="contentus-tabbar__tab" aria-disabled="true">/);
-	assert.doesNotMatch(rendered.html, /class="contentus-tabbar__tab" href="\/l\/timelines"/);
+	// Agents (M6) is still upcoming. Timelines moved to the shipped assertion
+	// below when M4 landed its route; this list shrinks by one each milestone,
+	// and a face that shipped without moving would leave a dead link behind.
 	assert.doesNotMatch(rendered.html, /class="contentus-tabbar__tab" href="\/l\/agents"/);
+	assert.doesNotMatch(rendered.html, /class="contentus-tabbar__tab" href="\/l\/messages"/);
+});
+
+test('a SHIPPED face is a real link, so the tab bar tracks what exists', async () => {
+	const rendered = await renderRoute(handler, { name: 'index', path: '/l/', expectStatus: 200 });
+
+	// The other half of the rule above, and the half that catches the opposite
+	// mistake: a face whose route landed while its nav entry stayed `upcoming`
+	// is a surface nobody can reach from the chrome.
+	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/timelines"/);
+
+	// And the route it points at must actually answer.
+	const timelines = await renderRoute(handler, {
+		name: 'timelines',
+		path: '/l/timelines',
+		expectStatus: 200,
+	});
+	assert.equal(timelines.status, 200);
 });
 
 test('the anonymous server render shows only anonymous tabs', async () => {

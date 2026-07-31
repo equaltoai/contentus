@@ -1,6 +1,9 @@
 import type { ArticleBodyDecision } from '$lib/cms/articles';
 import type { SourceStatus } from '$lib/cms/compose';
 import type { ArticleSummary, ArticleDetail, CategorySummary, SeriesSummary } from '$lib/cms/types';
+import type { TimelineFailure, TimelinePage } from '$lib/timelines/contract';
+import type { TimelineTabId } from '$lib/timelines/tabs';
+import type { Account } from '$lib/types';
 
 /** Stable identifier for each contentus surface in the route table. */
 export type AppPageKey =
@@ -11,6 +14,8 @@ export type AppPageKey =
 	| 'compose'
 	| 'review-queue'
 	| 'review-workspace'
+	| 'timelines'
+	| 'profile'
 	| 'auth-callback'
 	| 'not-found';
 
@@ -123,6 +128,68 @@ export interface ReviewRouteData {
  */
 export type ReviewPanel = 'details' | 'preview';
 
+/**
+ * What `/timelines` carries from the server.
+ *
+ * `page` is present for Instance and Federated and null for Home, and the
+ * asymmetry is the contract rather than an oversight. Those two are
+ * anonymous-safe reads of public content, so the server fetches them and a cold
+ * deep link paints a real timeline; Home needs a token the server does not have,
+ * and these props are serialized into a PUBLIC hydration endpoint, so a
+ * server-side Home fetch would put one reader's follow graph behind a URL
+ * anyone could request. See `isServerFetchable`.
+ */
+export interface TimelinesRouteData {
+	tab: TimelineTabId;
+	/** The first page, when the server could and should fetch it. */
+	page: TimelinePage | null;
+	/**
+	 * Why there is no page. Null alongside a null `page` means "not fetched
+	 * here" — the Home case — which the client resolves after reading the
+	 * session. A reason means the server tried and lesser said no.
+	 */
+	failure: TimelineFailure | null;
+	/**
+	 * lesser answered the server's read, and part of the answer failed. See
+	 * `TimelineResult.partial`.
+	 *
+	 * It travels because the server pass is the ONLY pass for a reader with no
+	 * script, and the first paint for everyone else. A failed nullable field
+	 * comes back looking exactly like an absent one, so dropping this marker at
+	 * the SSR boundary would hand the page a timeline it believes is complete —
+	 * the transport's whole reason for carrying the marker, undone one layer
+	 * later.
+	 */
+	partial: boolean;
+}
+
+/**
+ * What `/profiles/{username}` carries from the server.
+ *
+ * Both halves are anonymous-safe (`actor` is on lesser's public-read list and
+ * ACTOR timelines need no token), so a profile deep link server-renders
+ * completely — header, posts and all — which is the whole point of the surface.
+ */
+export interface ProfileRouteData {
+	/** The handle from the path, `user@host` or a bare local username. */
+	handle: string | null;
+	actor: Account | null;
+	page: TimelinePage | null;
+	failure: TimelineFailure | null;
+	/**
+	 * The ACTOR read half-failed. Two markers rather than one because the route
+	 * makes two reads and they fail independently: this one is about the posts.
+	 */
+	pagePartial: boolean;
+	/**
+	 * The `actor(username:)` read half-failed, so the card above the posts is
+	 * missing something. A distinct claim from `pagePartial` and a distinct
+	 * screen — "parts of this profile" is not "parts of these posts" — and
+	 * collapsing them would put the wrong sentence over the wrong element.
+	 */
+	actorPartial: boolean;
+}
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
@@ -131,4 +198,6 @@ export interface RouteProps {
 	reader: ArticleReaderData | null;
 	compose: ComposeData | null;
 	review: ReviewRouteData | null;
+	timelines: TimelinesRouteData | null;
+	profile: ProfileRouteData | null;
 }

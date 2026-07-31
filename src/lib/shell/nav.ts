@@ -46,11 +46,13 @@ export const NAV_ENTRIES: NavEntry[] = [
 	{
 		id: 'timelines',
 		label: 'Timelines',
-		href: null,
-		pageKey: null,
+		href: href('/timelines'),
+		pageKey: 'timelines',
 		surface: 'core',
+		// The route is anonymous: Instance and Federated are anonymous-safe
+		// reads. Only the Home TAB needs a token, and it says so itself.
 		requiresAuth: false,
-		upcoming: 'M4',
+		upcoming: null,
 	},
 	{
 		id: 'messages',

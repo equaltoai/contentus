@@ -1,4 +1,5 @@
 import { APP_BASE_PATH } from '$lib/config/base-path';
+import { DEFAULT_TIMELINE_TAB, tabFor, type TimelineTabId } from '$lib/timelines/tabs';
 
 import type {
 	AppPageDescriptor,
@@ -91,6 +92,29 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'journal',
 		requiresAuth: true,
 	},
+	timelines: {
+		key: 'timelines',
+		path: '/timelines',
+		title: 'Timelines',
+		eyebrow: 'Instance and fediverse',
+		summary: 'Posts from this instance and the wider fediverse.',
+		surface: 'core',
+		// The ROUTE is anonymous — Instance and Federated are anonymous-safe
+		// reads. Only the Home tab needs a token, and it says so itself rather
+		// than making the whole surface auth-gated; marking the page
+		// `requiresAuth` here would send `no-store, noindex` on a public
+		// reading surface.
+		requiresAuth: false,
+	},
+	profile: {
+		key: 'profile',
+		path: '/profiles',
+		title: 'Profile',
+		eyebrow: 'Actor',
+		summary: 'An actor on this instance or elsewhere in the fediverse, and their posts.',
+		surface: 'core',
+		requiresAuth: false,
+	},
 	'auth-callback': {
 		key: 'auth-callback',
 		path: '/auth/callback',
@@ -120,6 +144,8 @@ export const ROUTE_PATTERNS = [
 	'/compose',
 	'/review',
 	'/review/drafts/{id}',
+	'/timelines',
+	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
 ] as const;
@@ -161,6 +187,11 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// `/review/drafts` with no id names no draft, so it is not the workspace: it
 	// falls through to not-found rather than rendering an empty one.
 	if (segmentAfter(route, '/review/drafts/')) return PAGE_DEFINITIONS['review-workspace'];
+	if (route === '/timelines') return PAGE_DEFINITIONS.timelines;
+	// `/profiles` with no username names no actor, so it is not the profile
+	// surface: it falls through to not-found rather than rendering an empty one.
+	// Same rule as `/review/drafts` above.
+	if (segmentAfter(route, '/profiles/')) return PAGE_DEFINITIONS.profile;
 	if (route === '/auth/callback') return PAGE_DEFINITIONS['auth-callback'];
 	if (segmentAfter(route, '/articles/')) return PAGE_DEFINITIONS['article-reader'];
 	if (segmentAfter(route, '/series/')) return PAGE_DEFINITIONS.series;
@@ -243,6 +274,50 @@ export function composeHref(intent: ComposeIntent): string {
 
 	const key = intent.mode === 'edit' ? 'edit' : intent.mode === 'reply' ? 'inReplyTo' : 'quote';
 	return `${href('/compose')}?${key}=${encodeURIComponent(intent.statusId)}`;
+}
+
+/**
+ * The username captured from `/profiles/{username}`, or null.
+ *
+ * Kept separate from `resolveSlug` for the reason `resolveDraftId` is: a
+ * username names an actor, a slug names an article, and one shared accessor
+ * would let a route read whichever it did not mean.
+ */
+export function resolveProfileUsername(pathname: string): string | null {
+	return segmentAfter(normalizeRoutePath(pathname), '/profiles/');
+}
+
+/**
+ * Which timeline tab a link opens, from `?tab=`.
+ *
+ * An unrecognised value resolves to the default rather than to not-found: the
+ * tab is a view onto one surface, not a different address, and a stale link
+ * should land on the timelines page rather than on an error. `?tab=home` for an
+ * anonymous reader deliberately still resolves to Home — the route explains
+ * that it needs a sign-in, which is more useful than silently showing Instance
+ * under a URL that says otherwise.
+ */
+export function resolveTimelineTab(
+	query: Readonly<Record<string, string[] | undefined>> | undefined
+): TimelineTabId {
+	return tabFor(query?.['tab']?.[0]).id;
+}
+
+/** App-relative href for a timeline tab, so callers do not hand-build one. */
+export function timelinesHref(tab?: TimelineTabId): string {
+	const base = href('/timelines');
+	return !tab || tab === DEFAULT_TIMELINE_TAB ? base : `${base}?tab=${tab}`;
+}
+
+/**
+ * App-relative href for an actor.
+ *
+ * Takes the full `user@host` handle, because that is what identifies an actor
+ * across the fediverse and what lesser's `actor(username:)` resolves. A bare
+ * username would silently mean "the local one".
+ */
+export function profileHref(handle: string): string {
+	return href(`/profiles/${encodeURIComponent(handle)}`);
 }
 
 /** Build an app-relative href, base path included. */

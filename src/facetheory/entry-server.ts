@@ -21,6 +21,9 @@ import {
 import { loadSourceStatus } from '$lib/cms/compose';
 import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cms/loaders';
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
+import { fetchActor, fetchTimelinePage } from '$lib/timelines/transport';
+import { isServerFetchable, tabFor } from '$lib/timelines/tabs';
+import { subscriptionEndpoint } from '$lib/timelines/subscription';
 
 import App from './App.svelte';
 import { queryFromSearchString } from './query-parser';
@@ -29,8 +32,10 @@ import {
 	resolveComposeIntent,
 	resolveDraftId,
 	resolvePage,
+	resolveProfileUsername,
 	resolveReviewPanel,
 	resolveSlug,
+	resolveTimelineTab,
 	statusForRoute,
 	stripBasePath,
 } from './routing';
@@ -81,7 +86,16 @@ async function createRouteProps(
 	const endpoint = graphqlEndpointForOrigin(resolveRequestOrigin(headers));
 	const ctx = { endpoint };
 
-	const base: RouteProps = { page, slug, index: null, reader: null, compose: null, review: null };
+	const base: RouteProps = {
+		page,
+		slug,
+		index: null,
+		reader: null,
+		compose: null,
+		review: null,
+		timelines: null,
+		profile: null,
+	};
 
 	switch (page.key) {
 		case 'articles-index':
@@ -102,6 +116,91 @@ async function createRouteProps(
 			const intent = resolveComposeIntent(query);
 			const source = intent.statusId ? await loadSourceStatus(intent.statusId, { endpoint }) : null;
 			return { ...base, compose: { intent, source } };
+		}
+		case 'timelines': {
+			// Instance and Federated are anonymous-safe reads of public content,
+			// so the server fetches the first page and a cold deep link paints a
+			// real timeline rather than a spinner. Home is neither — it needs a
+			// token the server does not have, and these props are serialized
+			// into the PUBLIC hydration endpoint below — so it is left for the
+			// client, which is what a null page with a null failure means.
+			const tab = tabFor(resolveTimelineTab(query));
+			if (!isServerFetchable(tab)) {
+				return { ...base, timelines: { tab: tab.id, page: null, failure: null, partial: false } };
+			}
+
+			// `partial` travels with the page. The transport keeps a half-failed
+			// read's objects and marks it rather than reporting a false empty, and
+			// that marker has to survive the props boundary or the server pass —
+			// the only pass a no-script reader gets — paints a timeline that
+			// asserts completeness lesser never claimed.
+			const result = await fetchTimelinePage({ type: tab.type, endpoint });
+			return {
+				...base,
+				timelines: {
+					tab: tab.id,
+					page: result.ok ? result.page : null,
+					failure: result.ok ? null : result.failure,
+					partial: result.ok && result.partial,
+				},
+			};
+		}
+		case 'profile': {
+			// Both halves are anonymous-safe, so the profile renders completely
+			// on the server. The actor is resolved first because its `id` is
+			// what the ACTOR timeline is keyed on — lesser takes `actorId`, not
+			// a username — so a profile that does not resolve has no timeline to
+			// ask for either, and says so once instead of twice.
+			const handle = resolveProfileUsername(path);
+			if (!handle)
+				return {
+					...base,
+					profile: {
+						handle: null,
+						actor: null,
+						page: null,
+						failure: 'not-found',
+						pagePartial: false,
+						actorPartial: false,
+					},
+				};
+
+			const actorResult = await fetchActor(handle, { endpoint });
+			if (!actorResult.ok) {
+				return {
+					...base,
+					profile: {
+						handle,
+						actor: null,
+						page: null,
+						failure: actorResult.failure,
+						pagePartial: false,
+						actorPartial: false,
+					},
+				};
+			}
+
+			const timeline = await fetchTimelinePage({
+				type: 'ACTOR',
+				actorId: actorResult.actor.id,
+				endpoint,
+			});
+
+			// Both markers travel, and separately. The card and the posts are two
+			// reads that fail independently: an actor that half-resolved is shown
+			// with a field missing from the header, which is not the same event as
+			// a post whose boost could not be read.
+			return {
+				...base,
+				profile: {
+					handle,
+					actor: actorResult.actor,
+					page: timeline.ok ? timeline.page : null,
+					failure: timeline.ok ? null : timeline.failure,
+					pagePartial: timeline.ok && timeline.partial,
+					actorPartial: actorResult.partial,
+				},
+			};
 		}
 		case 'review-workspace':
 			// The ADDRESS travels, the DRAFT does not. Same rule as the queue
@@ -224,6 +323,35 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
 }
 
 /**
+ * The strict-CSP options for a route.
+ *
+ * FaceTheory's canonical policy is `connect-src 'self'`, which is right for
+ * every surface contentus had before face 4: the GraphQL endpoint, the media
+ * uploads and the hydration document are all same-origin. lesser's GraphQL
+ * SUBSCRIPTIONS are not — they are served from `wss://ws.<domain>`, a sibling
+ * host of the one serving this page — so without an addition here the browser
+ * blocks the socket before it opens and realtime silently never works.
+ *
+ * The addition is as narrow as the policy allows and stays strict in every
+ * other respect. It is ONE origin, DERIVED from the request that was actually
+ * served rather than configured, added ONLY on the routes that open a socket,
+ * and it never touches `script-src` or `style-src`: no `unsafe-inline`, no
+ * `unsafe-eval`, no third-party origin. When the origin cannot be resolved the
+ * policy is left exactly as it was — a page that cannot name its own instance
+ * gets no widening at all.
+ *
+ * `/profiles/{username}` deliberately does NOT get it: ACTOR timelines have no
+ * subscription (lesser's `timelineUpdates` takes a type and a listId, not an
+ * actor), so that route opens no socket and has no reason to permit one.
+ */
+function cspOptionsForRoute(props: RouteProps, origin: string | null) {
+	if (props.page.key !== 'timelines') return {};
+
+	const endpoint = subscriptionEndpoint(origin);
+	return endpoint ? { directives: { 'connect-src': [endpoint] } } : {};
+}
+
+/**
  * Response headers for a rendered route.
  *
  * WHY AN AUTH-REQUIRED ROUTE STILL ANSWERS 200, stated here because it looks
@@ -261,9 +389,9 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
  * is invisible to its own server. Routed rather than left silent; see
  * `docs/consumption/auth-boundary.md`.
  */
-function headersForRoute(props: RouteProps): Record<string, string> {
+function headersForRoute(props: RouteProps, origin: string | null): Record<string, string> {
 	const headers: Record<string, string> = {
-		'content-security-policy': buildStrictCspHeader(),
+		'content-security-policy': buildStrictCspHeader(cspOptionsForRoute(props, origin)),
 	};
 
 	if (props.page.requiresAuth) {
@@ -304,7 +432,7 @@ function createFaceForRoute(route: string) {
 			return {
 				status: statusForRoute(props),
 				csp: STRICT_CSP,
-				headers: headersForRoute(props),
+				headers: headersForRoute(props, origin),
 				htmlAttrs: { lang: 'en' },
 				head: { title: head.title },
 				headTags: [...head.tags, ...assets.headTags],

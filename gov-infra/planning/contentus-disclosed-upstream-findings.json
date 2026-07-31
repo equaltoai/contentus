@@ -59,7 +59,7 @@
   "greater_doctor": {
     "gate": "greater doctor --json",
     "rubric_item": "SEC-7",
-    "cli_pin": "greater-v0.11.9",
+    "cli_pin": "greater-v0.12.0",
     "must_pass": ["Component Files", "Orphaned Files"],
     "must_pass_reason": [
       "These are the two integrity properties the gate exists for: every vendored",
@@ -109,15 +109,22 @@
     ],
     "disclosed_warnings": [
       {
-        "names": ["Alias Path: utils", "Alias Path: ui", "Alias Path: hooks"],
+        "names": ["Alias Path: ui", "Alias Path: hooks"],
         "severity": "warning",
         "summary": [
           "components.json declares the CLI's default alias set. Contentus vendors",
-          "only the blog face and shared modules under the `greater` alias, so",
-          "src/lib/utils, src/lib/components/ui, and src/lib/primitives are never",
-          "created. Creating empty directories to silence a checker would be exactly",
-          "the cosmetic workaround this rubric refuses. These are pinned so that a",
-          "FOURTH warning — which would mean a real alias regression — fails SEC-7."
+          "only the faces and shared modules it consumes, so src/lib/components/ui and",
+          "src/lib/primitives are never created. Creating empty directories to silence",
+          "a checker would be exactly the cosmetic workaround this rubric refuses.",
+          "These are pinned so that a THIRD warning — which would mean a real alias",
+          "regression — fails SEC-7.",
+          "`Alias Path: utils` WAS pinned here and is now retired, which is what this",
+          "list is supposed to do. M4 vendored the social face's shared modules, whose",
+          "registry manifest places notificationGrouping.ts at `lib/utils/`; the `utils`",
+          "alias target src/lib/utils therefore exists and the check passes on its own.",
+          "It was removed rather than left in place because SEC-7 fails a disclosed",
+          "finding that has started passing — the retirement path working as designed,",
+          "not a silencing."
         ]
       }
     ]

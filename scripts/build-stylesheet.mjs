@@ -176,6 +176,19 @@ function stylesheetLayers() {
 			label: 'contentus compose theme — appearance for upstream class contract',
 			css: readRepoFile('src/lib/brand/compose.css'),
 		},
+		{
+			// Interim, and the same upstream cause as the compose layer above one
+			// milestone later: `greater add timeline social-status-card
+			// social-timeline profile` vendors components with no stylesheet, and
+			// their `.timeline-*`, `.status-card`, `.virtual-*` and
+			// `.gr-action-bar__*` classes live only in the social face theme.
+			// `--css-only` is not the narrow fix — at the pinned CLI it still
+			// resolves the face's registry dependencies and writes nine component
+			// files. See the header of the file itself. Deleted when the CLI
+			// emits per-module CSS.
+			label: 'contentus timelines theme — appearance for upstream class contract',
+			css: readRepoFile('src/lib/brand/timelines.css'),
+		},
 	];
 }
 
