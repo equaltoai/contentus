@@ -213,9 +213,14 @@ green report is read for what it is.
   executor inside a script the workflow calls, a value carried across a pipe into an
   interpreter in another segment, `${!VAR}` indirect expansion, and a heredoc written
   into `$GITHUB_ENV`. Those four are unchanged by the parse; the parse does newly read a
-  heredoc body as an interpreter's program text (`bash <<EOF` with an unquoted delimiter
-  is a sink; a quoted delimiter does not expand and is not), which is a different thing
-  from following taint out of a heredoc into `$GITHUB_ENV`. The four are limits of static
+  heredoc body as an interpreter's program text, whether or not the delimiter is quoted.
+  Quoting the delimiter stops the _outer_ shell expanding the body as it writes it, and
+  an interpreter handed that body as its program expands it itself — `bash <<'EOF'` over
+  a line reading `$PAYLOAD` runs the payload, confirmed in bash — so the quotes buy
+  nothing at a sink. They buy the whole difference at a data use, which is why
+  `cat <<'EOF' >> "$GITHUB_ENV"` is untouched: `cat` executes nothing, and following
+  taint back out of that heredoc remains the residual it always was. The four are limits
+  of static
   analysis over shell rather than unguarded shapes: each would land as `run:` text in a
   `.github/` diff, which is the review's subject, and none is expressible without it.
   They are recorded here under the convergence rule below rather than implied to be

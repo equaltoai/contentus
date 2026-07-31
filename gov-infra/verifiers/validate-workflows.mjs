@@ -2059,7 +2059,6 @@ function lexShellScript(text) {
 		pendingRedirect.target = word;
 		if (pendingRedirect.op === '<<' || pendingRedirect.op === '<<-') {
 			if (word.expanded) fail('a heredoc delimiter built from an expansion is unmodelled');
-			pendingRedirect.expands = !word.quoted;
 			pendingHeredocs.push({
 				delimiter: word.literal,
 				stripTabs: pendingRedirect.op === '<<-',
@@ -2183,7 +2182,7 @@ function lexShellScript(text) {
 		if (pendingRedirect) fail(`redirection \`${pendingRedirect.op}\` has no target`);
 		const op = redirectionOperators.find((candidate) => text.startsWith(candidate, start));
 		if (!op) return fail(`unmodelled redirection at \`${text.slice(start, start + 4)}\``);
-		pendingRedirect = { kind: 'redirect', op, fd, target: null, body: null, expands: false };
+		pendingRedirect = { kind: 'redirect', op, fd, target: null, body: null };
 		tokens.push(pendingRedirect);
 		return start + op.length;
 	};
@@ -2494,17 +2493,20 @@ function resolveExecution(words) {
 	};
 }
 
-// The text a redirection carries. A heredoc whose delimiter was quoted does not
-// expand, so its body is not a path a value can travel down.
+// The text a redirection carries. A heredoc's body counts whether or not its
+// delimiter was quoted: quoting only stops the *outer* shell from expanding the body
+// as it writes it, and an interpreter handed that body as its program expands it
+// itself. `bash <<'EOF'` / `$PAYLOAD` / `EOF` runs the payload — verified in bash —
+// so the delimiter's quotes buy nothing at a sink. They buy plenty at a data use,
+// which is why `cat <<'EOF' >> "$GITHUB_ENV"` is untouched: `cat` executes nothing.
 function redirectText(redirect) {
-	if (redirect.op === '<<' || redirect.op === '<<-')
-		return redirect.expands ? (redirect.body ?? '') : '';
+	if (redirect.op === '<<' || redirect.op === '<<-') return redirect.body ?? '';
 	return redirect.target?.source ?? '';
 }
 
 /**
- * Program text an interpreter reads from standard input: a herestring, a heredoc
- * that expands, a process substitution redirected onto stdin, or an ordinary `<`
+ * Program text an interpreter reads from standard input: a herestring, a heredoc,
+ * a process substitution redirected onto stdin, or an ordinary `<`
  * whose operand the interpreter then runs. The interpreter executes what it reads,
  * and none of these carries the `-c` flag the inline-script rule looks for.
  *
