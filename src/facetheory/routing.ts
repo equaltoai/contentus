@@ -11,14 +11,15 @@ export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
  * `/l/*`, so every route here must server-render on a cold request. A route
  * that is not in this table and not matched by the catch-all does not exist.
  *
- * Faces 2 and 4-7 (review, timelines, messages, agents, drones) land in later
- * milestones and are deliberately absent rather than stubbed — a nav entry
- * pointing at a route that 404s is worse than one that is not there.
+ * Faces 4-7 (timelines, messages, agents, drones) land in later milestones and
+ * are deliberately absent rather than stubbed — a nav entry pointing at a route
+ * that 404s is worse than one that is not there.
  *
- * `/compose` (face 3) requires an authenticated caller, but it is still a fully
- * server-rendered route: the session lives in `sessionStorage`, so the server
- * cannot know who is asking, and rendering the signed-out state is both the
- * honest answer and the only one a cold deep link can produce.
+ * `/compose` (face 3) and the `/review` pair (face 2) require an authenticated
+ * caller, but they are still fully server-rendered routes: the session lives in
+ * `sessionStorage`, so the server cannot know who is asking, and rendering the
+ * signed-out state is both the honest answer and the only one a cold deep link
+ * can produce.
  */
 const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 	'articles-index': {
@@ -66,6 +67,15 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'core',
 		requiresAuth: true,
 	},
+	'review-queue': {
+		key: 'review-queue',
+		path: '/review',
+		title: 'Review',
+		eyebrow: 'Article review',
+		summary: 'Drafts shared with you for review, and your own agent-generated drafts.',
+		surface: 'journal',
+		requiresAuth: true,
+	},
 	'auth-callback': {
 		key: 'auth-callback',
 		path: '/auth/callback',
@@ -93,6 +103,7 @@ export const ROUTE_PATTERNS = [
 	'/series/{slug}',
 	'/categories/{slug}',
 	'/compose',
+	'/review',
 	'/auth/callback',
 	'/{proxy+}',
 ] as const;
@@ -130,6 +141,7 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 
 	if (route === '/') return PAGE_DEFINITIONS['articles-index'];
 	if (route === '/compose') return PAGE_DEFINITIONS.compose;
+	if (route === '/review') return PAGE_DEFINITIONS['review-queue'];
 	if (route === '/auth/callback') return PAGE_DEFINITIONS['auth-callback'];
 	if (segmentAfter(route, '/articles/')) return PAGE_DEFINITIONS['article-reader'];
 	if (segmentAfter(route, '/series/')) return PAGE_DEFINITIONS.series;
@@ -205,6 +217,10 @@ export function categoryHref(slug: string): string {
 
 export function seriesHref(slug: string): string {
 	return href(`/series/${encodeURIComponent(slug)}`);
+}
+
+export function reviewQueueHref(): string {
+	return href('/review');
 }
 
 /**

@@ -477,6 +477,49 @@ code {
 	max-width: var(--gr-blog-content-max-width);
 }
 
+/* =============================================================
+   Face 2 — review queue (product design §5; contentus-owned, M2d.1)
+
+   Only the queue AROUND the cards. Every `.gr-blog-review-*` class the
+   vendored `Review.QueueCard` / `AttributionStrip` / `VerdictActions`
+   emit is styled by the blog face's own theme.css, which the site
+   stylesheet already adopts — unlike `compose` at M3, the `review`
+   registry entry ships its appearance upstream, so there is no shim
+   here and nothing for a pin bump to drift away from.
+   ============================================================= */
+.contentus-h2 {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h3);
+	font-weight: var(--tc-w-semibold);
+	margin: 0 0 var(--tc-space-4) 0;
+}
+
+.contentus-review-group {
+	border-top: 1px solid var(--tc-outline-variant);
+	padding-top: var(--tc-space-6);
+	margin-bottom: var(--tc-space-8);
+}
+
+.contentus-review-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-4);
+}
+
+.contentus-review-empty {
+	color: var(--tc-fg-muted);
+	max-width: 60ch;
+	margin: 0;
+}
+
+.contentus-review-hint {
+	color: var(--tc-fg-muted);
+	margin: var(--tc-space-6) 0;
+}
+
 .contentus-visually-hidden {
 	position: absolute;
 	width: 1px;

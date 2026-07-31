@@ -102,8 +102,15 @@ async function createRouteProps(
 			return { ...base, compose: { intent, source } };
 		}
 		default:
-			// auth-callback and not-found render without server data: the former
-			// needs sessionStorage, the latter has nothing to fetch.
+			// auth-callback, not-found, and the review queue render without server
+			// data. The first needs sessionStorage and the second has nothing to
+			// fetch; the review queue is the load-bearing one, and its emptiness
+			// here is deliberate. Every review operation needs a bearer token,
+			// and these props are serialized verbatim into the PUBLIC hydration
+			// endpoint below — so a server-side queue fetch would put one
+			// reviewer's unpublished drafts behind a URL anyone could request.
+			// The server ships the route and its signed-out chrome; the client
+			// loads the queue once it has read the session.
 			return base;
 	}
 }

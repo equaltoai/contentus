@@ -37,11 +37,11 @@ export const NAV_ENTRIES: NavEntry[] = [
 	{
 		id: 'review',
 		label: 'Review',
-		href: null,
-		pageKey: null,
+		href: href('/review'),
+		pageKey: 'review-queue',
 		surface: 'journal',
 		requiresAuth: true,
-		upcoming: 'M2',
+		upcoming: null,
 	},
 	{
 		id: 'timelines',

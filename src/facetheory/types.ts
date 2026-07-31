@@ -9,6 +9,7 @@ export type AppPageKey =
 	| 'series'
 	| 'category'
 	| 'compose'
+	| 'review-queue'
 	| 'auth-callback'
 	| 'not-found';
 
