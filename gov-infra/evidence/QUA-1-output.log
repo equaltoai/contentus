@@ -10,40 +10,45 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785521257538 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785521257540 COMPLETED 495 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785525425521 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785525425523 COMPLETED 810 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 708 modules transformed.
+[2Ktransforming...✓ 732 modules transformed.
 rendering chunks...
 computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-Dzp_aSgn.css                19.36 kB │ gzip:   3.27 kB
-build/client/assets/entry-client-qnF9hj6M.js                472.16 kB │ gzip: 147.46 kB
+build/client/assets/entry-client-DgTz-SCz.js                546.93 kB │ gzip: 169.89 kB
 
-✓ built in 846ms
+✓ built in 936ms
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
 
 > @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 692 modules transformed.
+[2Ktransforming...✓ 716 modules transformed.
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 780.16 kB │ gzip: 189.82 kB
+build/server/handler.mjs                 927.00 kB │ gzip: 224.44 kB
 
-✓ built in 787ms
+✓ built in 865ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 268805 bytes, 143 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 283363 bytes, 143 --tc-* definitions, integrity assertions passed
 brand assets: copied 12 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -62,7 +67,7 @@ brand assets: copied 12 files to build/client/brand/
 - owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 12
+- Contentus-owned source roots scanned: 13
 - Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
 
 Renderer-authority audit: clean.
@@ -72,22 +77,26 @@ Renderer-authority audit: clean.
 
 # CSP Audit — contentus SSR output
 
-- Routes rendered from build/server/handler.mjs: 10
-- Documents scanned: 9
+- Routes rendered from build/server/handler.mjs: 14
+- Documents scanned: 13
 - Ship-blocking findings: 0
 - Off-origin script/style references: 0
 - Route status mismatches: 0
 
 ## Per-route
-- articles-index   200    5312 bytes  findings=0
-- article-reader   200    5024 bytes  findings=0
-- series           200    5225 bytes  findings=0
-- category         200    5239 bytes  findings=0
-- compose          200    6168 bytes  findings=0
-- review-queue     200    5599 bytes  findings=0
-- review-workspace 200    5603 bytes  findings=0
-- auth-callback    200    5047 bytes  findings=0
-- not-found        404    5047 bytes  findings=0
-- hydration-data   200     476 bytes  findings=0
+- articles-index   200    5200 bytes  findings=0
+- article-reader   200    4912 bytes  findings=0
+- series           200    5113 bytes  findings=0
+- category         200    5127 bytes  findings=0
+- compose          200    6056 bytes  findings=0
+- review-queue     200    5487 bytes  findings=0
+- review-workspace 200    5491 bytes  findings=0
+- timelines-instance 200    6525 bytes  findings=0
+- timelines-federated 200    6582 bytes  findings=0
+- timelines-home   200    5663 bytes  findings=0
+- profile          200    5132 bytes  findings=0
+- auth-callback    200    4935 bytes  findings=0
+- not-found        404    4935 bytes  findings=0
+- hydration-data   200     508 bytes  findings=0
 
 CSP audit: clean.
