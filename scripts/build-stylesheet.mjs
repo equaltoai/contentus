@@ -167,6 +167,15 @@ function stylesheetLayers() {
 			label: 'contentus brand bridge — maps --gr-* onto --tc-*',
 			css: readRepoFile('src/lib/brand/bridge.css'),
 		},
+		{
+			// Interim: `greater add compose` (and the media/poll/emoji patterns)
+			// vendors components with no stylesheet, and their `.compose-*` classes
+			// live only in the social face theme. See the header of the file itself
+			// for why installing that whole face is the wider fix, not the narrower
+			// one. Deleted when the CLI emits per-module CSS.
+			label: 'contentus compose theme — appearance for upstream class contract',
+			css: readRepoFile('src/lib/brand/compose.css'),
+		},
 	];
 }
 

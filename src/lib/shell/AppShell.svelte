@@ -11,13 +11,20 @@ anonymous nav because the session token lives in `sessionStorage` — there is n
 cookie for the server to read, by design. That means SSR output for the public
 article surfaces is identical for every visitor and safe to cache, and the
 authenticated entries appear on hydration.
+
+Below 960px the sidebar nav gives way to the bottom tab bar (product design
+§4). Both are rendered — the swap is CSS, not a JS viewport measurement, because
+lesser performs no SPA fallback under `/l/*` and a phone's first paint is the
+server's document. The duplication is one nav model (`./nav.ts`) presented
+twice, not two navigation systems.
 -->
 
 <script lang="ts">
 	import { onMount } from 'svelte';
 
 	import { isAuthenticated, clearSession, startLogin } from '$lib/auth/session';
-	import { visibleNavEntries } from './nav';
+	import MobileTabBar from './MobileTabBar.svelte';
+	import { COMPOSE_ACTION, visibleNavEntries } from './nav';
 	import type { AppPageDescriptor } from '../../facetheory/types';
 	import { href as appHref } from '../../facetheory/routing';
 
@@ -54,7 +61,11 @@ authenticated entries appear on hydration.
 
 <a class="contentus-skip-link" href="#contentus-main">Skip to content</a>
 
-<div class="contentus-shell" data-surface={page.surface}>
+<!-- `data-page` so a face can claim the whole viewport at a breakpoint without
+     JavaScript deciding it. The composer uses it to become a full-screen sheet
+     below 960px (product design §5) while the same document still renders as a
+     panel on a desktop. -->
+<div class="contentus-shell" data-surface={page.surface} data-page={page.key}>
 	<header class="contentus-sidebar">
 		<a class="contentus-brand" href={appHref('/')} aria-label="Contentus home">
 			<img
@@ -86,6 +97,21 @@ authenticated entries appear on hydration.
 					</span>
 				{/if}
 			{/each}
+
+			<!-- The compose action, which the tab bar carries as the FAB on mobile.
+			     Shown to everyone for the same reason it is there: /compose renders
+			     a sign-in state rather than rejecting, so advertising the action
+			     costs an anonymous visitor nothing, and hiding it until hydration
+			     would move the nav under them. -->
+			{#if COMPOSE_ACTION.href}
+				<a
+					class="contentus-nav__compose"
+					href={COMPOSE_ACTION.href}
+					aria-current={COMPOSE_ACTION.pageKey === page.key ? 'page' : undefined}
+				>
+					{COMPOSE_ACTION.label}
+				</a>
+			{/if}
 		</nav>
 
 		<div class="contentus-session">
@@ -107,4 +133,6 @@ authenticated entries appear on hydration.
 	<main class="contentus-main" id="contentus-main">
 		{@render children?.()}
 	</main>
+
+	<MobileTabBar {page} {authenticated} />
 </div>

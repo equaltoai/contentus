@@ -1,9 +1,16 @@
 import type { ArticleBodyDecision } from '$lib/cms/articles';
+import type { SourceStatus } from '$lib/cms/compose';
 import type { ArticleSummary, ArticleDetail, CategorySummary, SeriesSummary } from '$lib/cms/types';
 
-/** Stable identifier for each contentus surface in the M1 route table. */
+/** Stable identifier for each contentus surface in the route table. */
 export type AppPageKey =
-	'articles-index' | 'article-reader' | 'series' | 'category' | 'auth-callback' | 'not-found';
+	| 'articles-index'
+	| 'article-reader'
+	| 'series'
+	| 'category'
+	| 'compose'
+	| 'auth-callback'
+	| 'not-found';
 
 /**
  * Brand surface variant, applied as `data-surface` on the shell root. Face 1
@@ -64,10 +71,37 @@ export interface ArticleReaderData {
 	unavailable: ContentUnavailable | null;
 }
 
+/**
+ * What the composer was opened to do. Derived from the query string, because
+ * a reply is the same surface as a new post with a target attached — not a
+ * different route.
+ */
+export type ComposeMode = 'new' | 'reply' | 'quote' | 'edit';
+
+export interface ComposeIntent {
+	mode: ComposeMode;
+	/** lesser Object id the intent refers to; null for a plain new post. */
+	statusId: string | null;
+}
+
+export interface ComposeData {
+	intent: ComposeIntent;
+	/**
+	 * The source status, when the server could load it.
+	 *
+	 * The SSR pass is anonymous by design — the session lives in
+	 * `sessionStorage` — so this resolves for public statuses and comes back
+	 * null for anything narrower. The client reloads it with the token on
+	 * mount. A null here is "not yet", never "does not exist".
+	 */
+	source: SourceStatus | null;
+}
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
 	slug: string | null;
 	index: ArticlesIndexData | null;
 	reader: ArticleReaderData | null;
+	compose: ComposeData | null;
 }

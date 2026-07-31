@@ -1,1 +1,6 @@
- ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND  No package.json (or package.yaml, or package.json5) was found in "/tmp/r8-spine.JH0qhY".
+
+> @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+1785504314978 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785504314979 COMPLETED 482 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS

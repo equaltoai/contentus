@@ -1,0 +1,722 @@
+/* =============================================================
+   Compose theme — interim consumption layer
+   -------------------------------------------------------------
+   WHY THIS FILE EXISTS, and when it should stop existing.
+
+   `greater add compose` vendors twelve Svelte components plus their
+   utilities and NO stylesheet. The registry record for the `compose`
+   shared module (`packages/cli/src/registry/shared.ts`) lists only
+   `component`, `types`, and `utils` files — there is no `styles` entry —
+   while every `.compose-*` class those components emit is defined in
+   `packages/faces/social/src/theme.css`, which is only reachable by
+   installing the entire social face. The same holds for the
+   `media-composer`, `poll-composer`, and `custom-emoji-picker` patterns.
+
+   So a consumer that vendors the compose module the way the CLI offers it
+   gets working components with no appearance at all. Installing the whole
+   social face to obtain its stylesheet would drag in timeline, status,
+   profile, lists, filters, hashtags, messaging, and admin — modules
+   milestones 4 through 6 own, none of them verified SSR-safe here, plus a
+   virtualisation dependency contentus does not use. That is not a narrower
+   fix than this file; it is a much wider one.
+
+   This layer is therefore contentus's own appearance for upstream's class
+   contract. It is APPEARANCE ONLY: no rule here changes what a component
+   does, what it emits, or how it behaves. Anything that would, belongs
+   upstream.
+
+   SUNSET: delete this file and its layer in `scripts/build-stylesheet.mjs`
+   when the `greater` CLI emits per-module CSS for the shared and pattern
+   registry records — routed upstream as the M3 consumption finding.
+
+   Values resolve to `--tc-*` and `--gr-*` tokens only; like `bridge.css`,
+   this file contains no brand literals of its own.
+   ============================================================= */
+
+/* =============================================================
+   Pattern variable bridge
+   -------------------------------------------------------------
+   The `media-composer`, `poll-composer`, and `custom-emoji-picker`
+   patterns DO ship styles — Svelte `<style>` blocks, which the client
+   build emits as a real stylesheet and FaceTheory links. So unlike the
+   compose compound they are not unstyled; they are styled for a LIGHT
+   theme, because every colour they read is spelled
+   `var(--bg-primary, #fff)` and the variable is defined nowhere in the
+   greater token set. Undefined name, literal fallback, white boxes on the
+   Midnight ground.
+
+   These declarations define the names, so the fallbacks never apply. This
+   is the same job `bridge.css` does for `--gr-*`, on a second vocabulary
+   the patterns invented — and it is a mapping, not an override: no rule
+   below restyles a pattern, it only answers the question the pattern asked.
+
+   Routed upstream with the missing-CSS finding: patterns should read the
+   `--gr-*` semantic tokens the rest of the kit uses, and then a consumer
+   that has themed greater has themed them too.
+   ============================================================= */
+
+:root {
+	--bg-primary: var(--tc-surface-1);
+	--bg-secondary: var(--tc-surface-2);
+	--bg-tertiary: var(--tc-surface-3);
+	--bg-hover: var(--tc-surface-2);
+	--bg-selected: var(--tc-core-blue-container);
+	--border-color: var(--tc-outline-variant);
+	--border-hover: var(--tc-outline);
+	--focus-color: var(--tc-core-blue);
+	--text-primary: var(--tc-fg);
+	--text-secondary: var(--tc-fg-muted);
+	--text-tertiary: var(--tc-fg-dim);
+	--primary-color: var(--tc-core-blue);
+	--primary-color-dark: var(--tc-core-blue-fixed);
+	--primary-color-light: var(--tc-core-blue-fixed-dim);
+	--danger-color: var(--tc-error);
+	--warning-color: var(--tc-phi-gold);
+	--warning-icon: var(--tc-phi-gold);
+	--warning-bg: var(--tc-phi-gold-container);
+	--warning-bg-hover: var(--tc-phi-gold-container);
+	--warning-border: var(--tc-phi-gold);
+}
+
+/* ---- Compose.Root: the form container ---- */
+.compose-root {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-4);
+}
+
+.compose-root__error {
+	border: 1px solid var(--tc-error);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-error-container);
+	color: var(--tc-fg);
+	padding: var(--tc-space-3) var(--tc-space-4);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.compose-root__reply-indicator {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.compose-root--submitting {
+	opacity: 0.85;
+}
+
+/* ---- Compose.Editor: the textarea ----
+   The autosize mechanics (`gr-autosize-textarea`) already ship in the
+   vendored primitives theme; only the box around them is missing. */
+.compose-editor {
+	min-height: 8rem;
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font-size: var(--tc-fs-body-lg);
+	line-height: var(--tc-lh-body-lg);
+}
+
+.compose-editor:focus-within {
+	border-color: var(--tc-core-blue);
+	outline: 2px solid var(--tc-core-blue);
+	outline-offset: 1px;
+}
+
+.compose-editor--disabled {
+	opacity: 0.7;
+}
+
+.compose-editor > textarea::placeholder {
+	color: var(--tc-fg-dim);
+}
+
+/* ---- Compose.VisibilitySelect ---- */
+.compose-visibility-select {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+	min-width: 0;
+}
+
+.compose-visibility-select__label {
+	font-size: var(--tc-fs-label-sm);
+	letter-spacing: var(--tc-ls-eyebrow);
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.compose-visibility-select__select {
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+}
+
+.compose-visibility-select__description {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* ---- Compose.CharacterCount ---- */
+.compose-character-count {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	font-variant-numeric: tabular-nums;
+	/* The vendored component paints its ring background from this variable and
+	   falls back to a light-theme literal when it is undefined. */
+	--compose-progress-bg: var(--tc-outline-variant);
+}
+
+.compose-character-count--near-limit {
+	color: var(--tc-phi-gold);
+}
+
+.compose-character-count--over-limit {
+	color: var(--tc-error);
+}
+
+.compose-character-count__progress-circle {
+	transition: stroke-dashoffset var(--tc-dur-base) var(--tc-ease-out);
+}
+
+/* ---- Compose.Submit ---- */
+.compose-submit {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-6);
+	border: 1px solid var(--tc-core-blue);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-core-blue);
+	color: var(--tc-midnight);
+	font: inherit;
+	font-weight: var(--tc-w-semibold);
+	cursor: pointer;
+}
+
+.compose-submit:disabled {
+	border-color: var(--tc-outline);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg-dim);
+	cursor: not-allowed;
+}
+
+.compose-submit__spinner {
+	display: inline-flex;
+	width: 1em;
+	height: 1em;
+}
+
+.compose-submit__spinner svg {
+	width: 100%;
+	height: 100%;
+	animation: contentus-compose-spin 900ms linear infinite;
+}
+
+@keyframes contentus-compose-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.compose-submit__spinner svg {
+		animation: none;
+	}
+
+	.compose-character-count__progress-circle {
+		transition: none;
+	}
+}
+
+/* =============================================================
+   Contentus-owned composer chrome
+   -------------------------------------------------------------
+   The controls lesser's contract needs and greater's compose state does
+   not model: content warning, `sensitive`, and the byte-budget notice.
+   ============================================================= */
+
+.contentus-compose {
+	max-width: var(--gr-shell-content-max-narrow);
+}
+
+.contentus-compose-controls {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: var(--tc-space-4);
+	align-items: start;
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	min-width: 0;
+}
+
+.contentus-compose-field__row {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+}
+
+.contentus-compose-field__label {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--tc-space-2);
+	font-size: var(--tc-fs-label-sm);
+	letter-spacing: var(--tc-ls-eyebrow);
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-compose-field__count {
+	font-variant-numeric: tabular-nums;
+	letter-spacing: normal;
+	text-transform: none;
+}
+
+.contentus-compose-input {
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+}
+
+.contentus-compose-input::placeholder {
+	color: var(--tc-fg-dim);
+}
+
+/* The whole label is the target, so the 44px minimum applies to the row
+   rather than to the checkbox glyph — a 16px box is not a touch target no
+   matter how large the text beside it is. */
+.contentus-compose-toggle {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-3);
+	min-height: 44px;
+	cursor: pointer;
+}
+
+.contentus-compose-toggle input[type='checkbox'] {
+	width: 20px;
+	height: 20px;
+	accent-color: var(--tc-core-blue);
+	flex: none;
+}
+
+.contentus-compose-toggle__label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	color: var(--tc-fg);
+	font-size: var(--tc-fs-body);
+}
+
+.contentus-compose-hint {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-hint code {
+	color: var(--tc-fg);
+}
+
+/* Said when a reply or quote would reach further than the post it answers.
+   Warning weight, not error weight: the poster chose it, and the choice is
+   allowed — it just is not allowed to be invisible. */
+.contentus-compose-reach {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--tc-space-2);
+	margin: 0;
+	padding: var(--tc-space-3) var(--tc-space-4);
+	border: 1px solid var(--tc-phi-gold);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-phi-gold-container);
+	color: var(--tc-fg);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-budget {
+	margin: 0;
+	padding: var(--tc-space-3) var(--tc-space-4);
+	border: 1px solid var(--tc-phi-gold);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-phi-gold-container);
+	color: var(--tc-fg);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+	padding-top: var(--tc-space-2);
+}
+
+.contentus-compose-actions__buttons {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-3);
+}
+
+/* ---- Reply / quote / edit context ---- */
+
+.contentus-compose-source {
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-left: 3px solid var(--tc-accent);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-source__eyebrow {
+	margin: 0 0 var(--tc-space-1) 0;
+	font-size: var(--tc-fs-eyebrow);
+	letter-spacing: var(--tc-ls-eyebrow);
+	text-transform: uppercase;
+	color: var(--tc-accent);
+}
+
+.contentus-compose-source__author {
+	margin: 0 0 var(--tc-space-1) 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--tc-space-2);
+}
+
+.contentus-compose-source__handle {
+	color: var(--tc-fg-muted);
+	font-family: var(--tc-font-mono);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-source__warning {
+	margin: var(--tc-space-2) 0 0 0;
+	color: var(--tc-phi-gold);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-source__attribution {
+	margin: var(--tc-space-2) 0 0 0;
+	color: var(--tc-violet-signal);
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* ---- Agent attribution ---- */
+
+.contentus-compose-attribution {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-violet-signal);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-attribution__title {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	margin: 0;
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h4);
+	font-weight: var(--tc-w-semibold);
+	color: var(--tc-violet-signal);
+}
+
+/* ---- Destructive action ---- */
+
+.contentus-compose-delete {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-error);
+	border-radius: var(--tc-radius-pill);
+	background: transparent;
+	color: var(--tc-error);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-compose-delete:hover {
+	background: var(--tc-error-container);
+}
+
+.contentus-compose-delete:disabled {
+	border-color: var(--tc-outline);
+	color: var(--tc-fg-dim);
+	cursor: not-allowed;
+}
+
+/* ---- Media, poll, emoji fields ---- */
+
+.contentus-compose-media {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+}
+
+.contentus-compose-media__error {
+	margin: 0;
+	color: var(--tc-error);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-media__progress {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	font-variant-numeric: tabular-nums;
+}
+
+.contentus-compose-poll,
+.contentus-compose-emoji {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	align-items: flex-start;
+}
+
+.contentus-compose-poll__toggle,
+.contentus-compose-emoji__toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-compose-poll__toggle:hover,
+.contentus-compose-emoji__toggle:hover {
+	border-color: var(--tc-accent);
+}
+
+.contentus-compose-poll__toggle:disabled,
+.contentus-compose-emoji__toggle:disabled {
+	color: var(--tc-fg-dim);
+	cursor: not-allowed;
+}
+
+.contentus-compose-poll__summary {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+	width: 100%;
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-poll__title {
+	margin: 0 0 var(--tc-space-2) 0;
+	font-weight: var(--tc-w-semibold);
+}
+
+.contentus-compose-poll__options {
+	margin: 0 0 var(--tc-space-2) 0;
+	padding-left: var(--tc-space-5);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-poll__remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	min-height: 44px;
+	min-width: 44px;
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md);
+	background: transparent;
+	color: var(--tc-fg-muted);
+	cursor: pointer;
+}
+
+.contentus-compose-poll__remove:hover {
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+}
+
+.contentus-compose-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+}
+
+/* Desktop: the composer is a Panel. Above 960px the close affordance is
+   redundant — the sidebar nav is on screen and nothing is covered. */
+.contentus-compose-close {
+	display: none;
+}
+
+/* =============================================================
+   The mobile composer sheet (product design §5, M3.5)
+   -------------------------------------------------------------
+   Below 960px the composer is the whole screen: it is the highest-frequency
+   mobile write path, and a panel floating in a scrolling page wastes the
+   room the editor needs.
+
+   The swap is CSS on `[data-page='compose']`, not a JavaScript viewport
+   measurement, so the SSR document is already correct on a cold deep link —
+   which is the only kind lesser can serve, having no SPA fallback
+   under `/l/*`.
+
+   `100svh`, not `100vh`. The large viewport is the pre-scroll one, so
+   `100vh` puts the sticky action bar behind the browser's own chrome
+   exactly when the keyboard is up and the submit button is what the thumb
+   is reaching for.
+   ============================================================= */
+
+@media (max-width: 960px) {
+	[data-page='compose'] .contentus-main {
+		display: flex;
+		flex-direction: column;
+		/* The sheet owns the viewport: no tab-bar reserve, because the tab bar
+		   is hidden below and the composer's own close affordance replaces it. */
+		min-height: 100svh;
+		padding: var(--tc-space-6) 0 0;
+	}
+
+	/* The composer covers the tab bar rather than sitting above it. A
+	   full-screen sheet with a persistent nav underneath is not full screen,
+	   and the two bottom bars would stack into the safe area. */
+	[data-page='compose'] .contentus-tabbar,
+	[data-page='compose'] .contentus-fab {
+		display: none;
+	}
+
+	[data-page='compose'] .contentus-compose {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		max-width: none;
+	}
+
+	/* Panel flattens: no border, no radius, no elevation. It is not a card on
+	   a page any more, it is the page. */
+	[data-page='compose'] .contentus-compose-panel {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+		padding: 0;
+	}
+
+	[data-page='compose'] .contentus-compose-panel .gr-shell-panel__body {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		padding: 0;
+	}
+
+	[data-page='compose'] .compose-root {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+	}
+
+	/* The editor takes the room nothing else claims — a large textarea is the
+	   single most useful thing on this screen. */
+	[data-page='compose'] .compose-editor {
+		flex: 1 1 auto;
+		min-height: 9rem;
+	}
+
+	/* Sticky submit, above the keyboard-safe area. Media thumbnails sit in the
+	   flow directly under the editor and therefore ABOVE this bar, which is
+	   the whole point of their position: attachments stay visible while the
+	   keyboard is up rather than being pushed under it. */
+	[data-page='compose'] .contentus-compose-actions {
+		position: sticky;
+		bottom: 0;
+		z-index: 2;
+		margin-top: auto;
+		padding: var(--tc-space-3) 0;
+		padding-bottom: calc(var(--tc-space-3) + var(--contentus-safe-bottom));
+		border-top: 1px solid var(--tc-outline-variant);
+		background: var(--tc-bg);
+	}
+
+	.contentus-compose-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+		/* 44px minimum touch target (product design §4). */
+		min-height: 44px;
+		min-width: 44px;
+		border: 1px solid var(--tc-outline);
+		border-radius: var(--tc-radius-pill);
+		color: var(--tc-fg-muted);
+		text-decoration: none;
+	}
+}
+
+@media (max-width: 720px) {
+	.contentus-compose-controls {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--tc-space-3);
+	}
+}
+
+@media (max-width: 640px) {
+	/* The lede is the first thing to go: on a 640px screen the heading already
+	   says what the surface is, and the editor wants the rows. */
+	[data-page='compose'] .contentus-compose-header .contentus-lede {
+		display: none;
+	}
+}
+
+@media (max-width: 480px) {
+	[data-page='compose'] .contentus-main {
+		padding-top: var(--tc-space-4);
+	}
+
+	[data-page='compose'] .contentus-compose-header {
+		margin-bottom: var(--tc-space-6);
+	}
+}

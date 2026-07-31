@@ -18,12 +18,20 @@ import {
 	graphqlEndpointForOrigin,
 	resolveRequestOrigin,
 } from '$lib/cms/origin';
+import { loadSourceStatus } from '$lib/cms/compose';
 import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cms/loaders';
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
 
 import App from './App.svelte';
 import { queryFromSearchString } from './query-parser';
-import { ROUTE_PATTERNS, resolvePage, resolveSlug, statusForRoute, stripBasePath } from './routing';
+import {
+	ROUTE_PATTERNS,
+	resolveComposeIntent,
+	resolvePage,
+	resolveSlug,
+	statusForRoute,
+	stripBasePath,
+} from './routing';
 import type { RouteProps } from './types';
 
 const CLIENT_ENTRY = 'src/facetheory/entry-client.ts';
@@ -61,13 +69,17 @@ type HeaderBag = Readonly<Record<string, string | string[] | undefined>>;
  * loader throws — each returns a designed state instead — so a slow or
  * unavailable instance degrades to an explained page rather than a 500.
  */
-async function createRouteProps(path: string, headers: HeaderBag | undefined): Promise<RouteProps> {
+async function createRouteProps(
+	path: string,
+	headers: HeaderBag | undefined,
+	query?: Query
+): Promise<RouteProps> {
 	const page = resolvePage(path);
 	const slug = resolveSlug(path);
 	const endpoint = graphqlEndpointForOrigin(resolveRequestOrigin(headers));
 	const ctx = { endpoint };
 
-	const base: RouteProps = { page, slug, index: null, reader: null };
+	const base: RouteProps = { page, slug, index: null, reader: null, compose: null };
 
 	switch (page.key) {
 		case 'articles-index':
@@ -78,6 +90,17 @@ async function createRouteProps(path: string, headers: HeaderBag | undefined): P
 			return { ...base, index: await loadFilteredIndex(ctx, 'category', slug ?? '') };
 		case 'article-reader':
 			return { ...base, reader: await loadArticleBySlug(ctx, slug ?? '') };
+		case 'compose': {
+			// Anonymous, like every server pass: there is no token to attach. A
+			// public reply target resolves here and appears in the first paint; a
+			// followers-only or direct one comes back null and the client loads it
+			// with the session token on mount. No token is ever attached here, so
+			// a cached SSR document can never carry a status its reader could not
+			// otherwise see.
+			const intent = resolveComposeIntent(query);
+			const source = intent.statusId ? await loadSourceStatus(intent.statusId, { endpoint }) : null;
+			return { ...base, compose: { intent, source } };
+		}
 		default:
 			// auth-callback and not-found render without server data: the former
 			// needs sessionStorage, the latter has nothing to fetch.
@@ -185,7 +208,8 @@ function createFaceForRoute(route: string) {
 	return createSvelteFace({
 		route,
 		mode: 'ssr',
-		load: async (ctx) => createRouteProps(ctx.request.path, ctx.request.headers as HeaderBag),
+		load: async (ctx) =>
+			createRouteProps(ctx.request.path, ctx.request.headers as HeaderBag, ctx.request.query),
 		// FaceTheory types component props as an open `Record<string, unknown>`;
 		// `RouteProps` is a closed interface, so it needs a widening cast here.
 		// App.svelte re-declares the shape it expects, so the type is still
@@ -237,8 +261,11 @@ const hydrationResource = {
 		}
 
 		const path = stripBasePath(params.get('path') ?? '/');
-		void queryFromSearchString(params.get('search') ?? '');
-		const props = await createRouteProps(path, ctx.request.headers);
+		// The document's own query string travels in `search`, so hydration
+		// resolves the SAME intent the server rendered. Without it, a deep-linked
+		// reply would hydrate into a blank new post.
+		const search = queryFromSearchString(params.get('search') ?? '');
+		const props = await createRouteProps(path, ctx.request.headers, search);
 
 		return {
 			status: 200,

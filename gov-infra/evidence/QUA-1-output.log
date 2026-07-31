@@ -1,1 +1,91 @@
- ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND  No package.json (or package.yaml, or package.json5) was found in "/tmp/r8-spine.JH0qhY".
+
+> @equaltoai/contentus@0.1.0 build /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate
+
+
+> @equaltoai/contentus@0.1.0 typecheck /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> tsc --noEmit
+
+
+> @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+1785504309353 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785504309355 COMPLETED 482 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+
+> @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> vite build
+
+vite v8.2.0 building client environment for production...
+[2Ktransforming...✓ 696 modules transformed.
+rendering chunks...
+computing gzip size...
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
+build/client/assets/entry-client-Bkcf1ZlV.css                18.41 kB │ gzip:   3.03 kB
+build/client/assets/entry-client-DK4eLebh.js                424.19 kB │ gzip: 134.23 kB
+
+✓ built in 828ms
+
+> @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> vite build --ssr src/facetheory/entry-server.ts
+
+vite v8.2.0 building ssr environment for production...
+[2Ktransforming...✓ 680 modules transformed.
+rendering chunks...
+computing gzip size...
+build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
+build/server/handler.mjs                 771.19 kB │ gzip: 187.27 kB
+
+✓ built in 758ms
+
+> @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
+
+manifest: copied client manifest to build/server/client-manifest.json
+stylesheet: brand/contentus.css — 248364 bytes, 143 --tc-* definitions, integrity assertions passed
+brand assets: copied 12 files to build/client/brand/
+
+> @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> pnpm run validate:renderer-authority && pnpm run validate:csp
+
+
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-renderer-authority.mjs
+
+# Renderer-authority audit
+
+- dependencies: clean
+- owned-source imports: clean
+- owned-source {@html} sinks: clean
+- vendored blog-face escape fallback: clean
+- owned-source coverage: clean
+
+- Forbidden renderer packages checked: 17
+- Contentus-owned source roots scanned: 11
+- Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
+
+Renderer-authority audit: clean.
+
+> @equaltoai/contentus@0.1.0 validate:csp /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 8
+- Documents scanned: 7
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    5312 bytes  findings=0
+- article-reader   200    5024 bytes  findings=0
+- series           200    5225 bytes  findings=0
+- category         200    5239 bytes  findings=0
+- compose          200    6168 bytes  findings=0
+- auth-callback    200    5047 bytes  findings=0
+- not-found        404    5047 bytes  findings=0
+- hydration-data   200     462 bytes  findings=0
+
+CSP audit: clean.
