@@ -48,45 +48,32 @@ export type { ComposeVisibility, LesserVisibility } from './visibility';
 
 import type { LesserVisibility } from './visibility';
 
-/** lesser `PollParamsInput`. */
-export interface PollParamsInput {
-	options: string[];
-	expiresIn: number;
-	multiple?: boolean;
-	hideTotals?: boolean;
-}
+// The input shapes and the variable builders live in their own dependency-free
+// module for the same reason the visibility mapping does: they decide what
+// actually goes over the wire, so a probe loads them without a bundler in
+// between. Re-exported here because this module is the compose face's one door
+// onto lesser's status contract.
+export {
+	createNoteVariables,
+	scheduleStatusVariables,
+	updateStatusVariables,
+} from './compose-inputs';
+export type {
+	AgentPostAttributionInput,
+	CreateNoteInput,
+	PollParamsInput,
+	ScheduleStatusInput,
+	UpdateStatusInput,
+} from './compose-inputs';
 
-/** lesser `AgentPostAttributionInput`. */
-export interface AgentPostAttributionInput {
-	triggerType?: string;
-	triggerDetails?: string;
-	memoryCitations?: string[];
-	delegatedBy?: string;
-	delegatedByDid?: string;
-	scopes?: string[];
-	constraints?: string[];
-	schemaVersion?: string;
-	modelId?: string;
-}
-
-/**
- * lesser `CreateNoteInput`, minus `contentMap`, `mentions`, and `tags`.
- *
- * `mentions`/`tags` are omitted for the reason recorded at the top of this file.
- * `contentMap` is lesser's per-language content variant, which contentus has no
- * control for; adding one is a product decision, not a gap to paper over.
- */
-export interface CreateNoteInput {
-	content: string;
-	visibility: LesserVisibility;
-	sensitive?: boolean;
-	spoilerText?: string;
-	attachmentIds?: string[];
-	poll?: PollParamsInput;
-	inReplyToId?: string;
-	quoteId?: string;
-	agentAttribution?: AgentPostAttributionInput;
-}
+import {
+	createNoteVariables,
+	scheduleStatusVariables,
+	updateStatusVariables,
+	type CreateNoteInput,
+	type ScheduleStatusInput,
+	type UpdateStatusInput,
+} from './compose-inputs';
 
 /**
  * The subset of lesser's `Object` a composer needs back.
@@ -241,31 +228,6 @@ function toCreatedNote(raw: unknown): CreatedNote | null {
 	};
 }
 
-/**
- * Build the GraphQL variables for `createNote`.
- *
- * Optional fields are omitted rather than sent as null. lesser reads them with
- * `input.X != nil` checks, so an explicit null and an absent field mean the same
- * thing to the resolver — but only the absent form says the composer had nothing
- * to say about it, which is what the poster actually expressed.
- */
-export function createNoteVariables(input: CreateNoteInput): { input: Record<string, unknown> } {
-	const payload: Record<string, unknown> = {
-		content: input.content,
-		visibility: input.visibility,
-	};
-
-	if (input.sensitive !== undefined) payload['sensitive'] = input.sensitive;
-	if (input.spoilerText) payload['spoilerText'] = input.spoilerText;
-	if (input.attachmentIds?.length) payload['attachmentIds'] = input.attachmentIds;
-	if (input.poll) payload['poll'] = input.poll;
-	if (input.inReplyToId) payload['inReplyToId'] = input.inReplyToId;
-	if (input.quoteId) payload['quoteId'] = input.quoteId;
-	if (input.agentAttribution) payload['agentAttribution'] = input.agentAttribution;
-
-	return { input: payload };
-}
-
 export async function createNote(input: CreateNoteInput): Promise<ComposeResult<CreatedNote>> {
 	return authenticatedWrite(CREATE_NOTE_MUTATION, createNoteVariables(input), (data) =>
 		toCreatedNote((data as { createNote?: { object?: unknown } } | null)?.createNote?.object)
@@ -275,15 +237,6 @@ export async function createNote(input: CreateNoteInput): Promise<ComposeResult<
 /* -------------------------------------------------------------------------
  * Editing, deleting, and scheduling
  * ---------------------------------------------------------------------- */
-
-/** lesser `UpdateStatusInput`. No visibility: a posted status keeps its reach. */
-export interface UpdateStatusInput {
-	content: string;
-	sensitive?: boolean;
-	spoilerText?: string;
-	language?: string;
-	attachmentIds?: string[];
-}
 
 const UPDATE_STATUS_MUTATION = `
 	mutation ContentusUpdateStatus($id: ID!, $input: UpdateStatusInput!) {
@@ -320,13 +273,7 @@ export async function updateStatus(
 	id: string,
 	input: UpdateStatusInput
 ): Promise<ComposeResult<CreatedNote>> {
-	const payload: Record<string, unknown> = { content: input.content };
-	if (input.sensitive !== undefined) payload['sensitive'] = input.sensitive;
-	if (input.spoilerText) payload['spoilerText'] = input.spoilerText;
-	if (input.language) payload['language'] = input.language;
-	if (input.attachmentIds?.length) payload['attachmentIds'] = input.attachmentIds;
-
-	return authenticatedWrite(UPDATE_STATUS_MUTATION, { id, input: payload }, (data) =>
+	return authenticatedWrite(UPDATE_STATUS_MUTATION, updateStatusVariables(id, input), (data) =>
 		toCreatedNote((data as { updateStatus?: unknown } | null)?.updateStatus)
 	);
 }
@@ -341,19 +288,6 @@ export async function deleteObject(id: string): Promise<ComposeResult<true>> {
 	return authenticatedWrite(DELETE_OBJECT_MUTATION, { id }, (data) =>
 		(data as { deleteObject?: unknown } | null)?.deleteObject === true ? true : null
 	);
-}
-
-/** lesser `ScheduleStatusInput`. */
-export interface ScheduleStatusInput {
-	text: string;
-	scheduledAt: string;
-	visibility?: LesserVisibility;
-	sensitive?: boolean;
-	spoilerText?: string;
-	inReplyToId?: string;
-	language?: string;
-	mediaIds?: string[];
-	poll?: PollParamsInput;
 }
 
 export interface ScheduledStatus {
@@ -373,20 +307,7 @@ export interface ScheduledStatus {
 export async function scheduleStatus(
 	input: ScheduleStatusInput
 ): Promise<ComposeResult<ScheduledStatus>> {
-	const payload: Record<string, unknown> = {
-		text: input.text,
-		scheduledAt: input.scheduledAt,
-	};
-
-	if (input.visibility) payload['visibility'] = input.visibility;
-	if (input.sensitive !== undefined) payload['sensitive'] = input.sensitive;
-	if (input.spoilerText) payload['spoilerText'] = input.spoilerText;
-	if (input.inReplyToId) payload['inReplyToId'] = input.inReplyToId;
-	if (input.language) payload['language'] = input.language;
-	if (input.mediaIds?.length) payload['mediaIds'] = input.mediaIds;
-	if (input.poll) payload['poll'] = input.poll;
-
-	return authenticatedWrite(SCHEDULE_STATUS_MUTATION, { input: payload }, (data) => {
+	return authenticatedWrite(SCHEDULE_STATUS_MUTATION, scheduleStatusVariables(input), (data) => {
 		const scheduled = (data as { scheduleStatus?: Record<string, unknown> } | null)?.scheduleStatus;
 		if (!scheduled || typeof scheduled['id'] !== 'string') return null;
 		return {

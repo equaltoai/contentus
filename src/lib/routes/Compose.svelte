@@ -167,7 +167,7 @@ reviewer/publisher workflow, and nothing on this page touches them.
 		// already resolved is already here. Waiting on the viewer query in either
 		// case would hold the editor for a round trip that only decides whether
 		// the agent-attribution panel appears.
-		if (!targetId || source) seed = composeSeed(mode, source);
+		if (!targetId || source) applySeed(composeSeed(mode, source));
 
 		// The server pass is anonymous, so anything narrower than a public status
 		// arrives null. Re-ask with the session token.
@@ -192,8 +192,22 @@ reviewer/publisher workflow, and nothing on this page touches them.
 			return;
 		}
 
-		seed = composeSeed(mode, source);
+		applySeed(composeSeed(mode, source));
 	});
+
+	/**
+	 * Plant a settled seed, then let the composer exist.
+	 *
+	 * `sensitive` lives in the extras store rather than the vendored context,
+	 * so it is planted here while the content, warning, and visibility travel
+	 * as `initialState` on the subtree this call is about to create. Assigning
+	 * `seed` last is what makes the order safe: nothing is on screen to
+	 * overwrite until every starting value is in place.
+	 */
+	function applySeed(settled: ComposeSeed) {
+		extras.update({ sensitive: settled.sensitive });
+		seed = settled;
+	}
 
 	async function onSignIn() {
 		signInError = null;
@@ -246,10 +260,18 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				// No visibility and no poll: `UpdateStatusInput` carries neither,
 				// which is lesser saying a posted status keeps its reach and a poll
 				// with votes is not rewritten underneath them.
+				//
+				// `spoilerText` is sent unconditionally here, empty string included,
+				// and that is the difference between an edit that can remove a
+				// content warning and one that cannot. lesser seeds the field from
+				// the stored status and overwrites it only when the input carries
+				// it, so an omitted-because-emptied warning would leave the old one
+				// standing on a post whose composer showed none. Both values are
+				// honest because both were seeded from this status to begin with.
 				const result = await updateStatus(extras.state.editingStatusId, {
 					content: formData.content,
 					sensitive: extras.state.sensitive,
-					...spoiler,
+					spoilerText: formData.contentWarning ?? '',
 					...(extras.state.attachmentIds.length
 						? { attachmentIds: extras.state.attachmentIds }
 						: {}),
@@ -446,7 +468,12 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				defaultVisibility: seed.visibility,
 				class: 'contentus-compose__form',
 			}}
-			initialState={{ content: seed.content, visibility: seed.visibility }}
+			initialState={{
+				content: seed.content,
+				visibility: seed.visibility,
+				contentWarning: seed.contentWarning,
+				contentWarningEnabled: seed.contentWarningEnabled,
+			}}
 			{handlers}
 		>
 			<!-- `@` and `#` complete against lesser's `search`, `:` against the

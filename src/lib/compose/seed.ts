@@ -27,12 +27,19 @@ import { seedVisibilityFrom, type ComposeVisibility } from '../cms/visibility';
 export interface SeedSource {
 	visibility: string;
 	content: string;
+	sensitive: boolean;
+	spoilerText: string | null;
 }
 
 export interface ComposeSeed {
 	/** The vendored compose vocabulary, because it seeds a vendored control. */
 	visibility: ComposeVisibility;
 	content: string;
+	/** lesser `sensitive` — the media gate, seeded into the extras store. */
+	sensitive: boolean;
+	/** lesser `spoilerText`, seeded into the vendored context's CW pair. */
+	contentWarning: string;
+	contentWarningEnabled: boolean;
 }
 
 /**
@@ -57,10 +64,27 @@ export interface ComposeSeed {
  * CONTENT is seeded only for an edit, from what lesser's own sanitizer stored
  * on write. A reply starts empty: lesser has no rule that an answer inherits
  * anything from the post it answers, so neither does this.
+ *
+ * SENSITIVE and the CONTENT WARNING are seeded only for an edit, and for a
+ * blunter reason: `updateStatus` starts from the stored status and replaces
+ * only the fields the input carries, and the composer always sends
+ * `sensitive`. An unseeded editor therefore sent `sensitive: false` on every
+ * save — silently ungating the media on a post whose author had gated it,
+ * without any control on screen having moved. Seeding them is what makes
+ * "leave it alone and press save" mean leave it alone.
+ *
+ * They are NOT seeded for a reply. Inheriting a parent's warning would be
+ * contentus inventing a rule lesser does not have, and the warning it invented
+ * would be attributed to the person replying.
  */
 export function composeSeed(mode: ComposeMode, source: SeedSource | null): ComposeSeed {
+	const editing = mode === 'edit' ? source : null;
+
 	return {
 		visibility: mode === 'new' ? 'public' : seedVisibilityFrom(source?.visibility),
-		content: mode === 'edit' ? (source?.content ?? '') : '',
+		content: editing?.content ?? '',
+		sensitive: editing?.sensitive ?? false,
+		contentWarning: editing?.spoilerText ?? '',
+		contentWarningEnabled: Boolean(editing?.spoilerText),
 	};
 }
