@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 import {
 	REVIEW_DOCUMENTS,
+	emptyHalfCopy,
 	failureFromErrors,
 	isAgentGenerated,
 	orderQueueEntries,
@@ -174,16 +175,21 @@ test('a DraftReview projects with its grant and verdict history', () => {
 	assert.equal(review.generatedBy.isAgent, true);
 });
 
-test('an own draft projects with NO review activity rather than an invented one', () => {
-	// lesser's `Draft` carries no reviewStatus, editorNotes, or grant. Leaving
-	// them absent is what makes the chrome say "No review activity recorded" —
-	// which is true — instead of implying a review that never happened.
+test('an own draft projects with no review activity INVENTED, and none implied', () => {
+	// lesser's `Draft` carries no reviewStatus, editorNotes, grant, or verdict
+	// history. They stay absent — nothing is fabricated — and the entry built
+	// from this shape is marked `listing-only` so the absence is never read as
+	// an answer. See the `listing-only` cases below.
 	const review = toOwnDraftReview({
 		id: 'draft-2',
 		title: 'Mine',
 		status: 'DRAFT',
 		updatedAt: '2026-07-31T10:00:00Z',
 		generatedBy: actor(),
+		// lesser sets `reviewedBy` and `reviewStatus` TOGETHER on every verdict
+		// (`draft_review.go`), so this listing describes a draft that HAS been
+		// reviewed — and carries not one field that says what the verdict was.
+		reviewedBy: actor({ id: 'r1', username: 'ed', isAgent: false }),
 	});
 
 	assert.equal(review.draftId, 'draft-2');
@@ -191,6 +197,10 @@ test('an own draft projects with NO review activity rather than an invented one'
 	assert.equal(review.editorNotes, undefined);
 	assert.equal(review.grant, undefined);
 	assert.deepEqual(review.verdicts, []);
+
+	// The projection knows a reviewer ruled on this draft and nothing about the
+	// ruling. That gap is precisely why this shape may not drive a state badge.
+	assert.equal(review.reviewedBy.username, 'ed');
 });
 
 test('a verdict row with an unknown verdict value is dropped, not coerced', () => {
@@ -265,11 +275,14 @@ test('a successful preview renders as html, unpublished, with the generator as a
 
 const stub = (draftId, extra = {}) => ({ draftId, updatedAt: '', verdicts: [], ...extra });
 
+/** An own-draft entry, with the projection it was built from. */
+const owned = (draftId, projection = 'review', extra = {}) => ({
+	review: stub(draftId, { generatedBy: actor(), ...extra }),
+	projection,
+});
+
 test('shared drafts come before the viewer own agent drafts', () => {
-	const entries = orderQueueEntries(
-		[stub('shared-a'), stub('shared-b')],
-		[stub('own-a', { generatedBy: actor() })]
-	);
+	const entries = orderQueueEntries([stub('shared-a'), stub('shared-b')], [owned('own-a')]);
 
 	assert.deepEqual(
 		entries.map((entry) => [entry.review.draftId, entry.source]),
@@ -284,16 +297,84 @@ test('shared drafts come before the viewer own agent drafts', () => {
 test('a draft that is both shared and owned appears once, on the shared side', () => {
 	// The shared projection is the one carrying the grant and the verdict
 	// history, so it is the one worth keeping.
-	const entries = orderQueueEntries([stub('both')], [stub('both', { generatedBy: actor() })]);
+	const entries = orderQueueEntries([stub('both')], [owned('both')]);
 
 	assert.equal(entries.length, 1);
 	assert.equal(entries[0].source, 'shared-with-me');
+});
+
+test('every entry carries WHICH projection its review came from', () => {
+	// The shared half is `DraftReview` by construction. The own half is whatever
+	// arrived — and an entry that only got the `myDrafts` listing must say so,
+	// because that shape cannot support a review-state claim either way.
+	const entries = orderQueueEntries(
+		[stub('shared-a')],
+		[owned('own-full', 'review'), owned('own-thin', 'listing-only')]
+	);
+
+	assert.deepEqual(
+		entries.map((entry) => [entry.review.draftId, entry.projection]),
+		[
+			['shared-a', 'review'],
+			['own-full', 'review'],
+			['own-thin', 'listing-only'],
+		]
+	);
 });
 
 test('only drafts with a recorded generator count as agent-generated', () => {
 	assert.equal(isAgentGenerated(stub('x', { generatedBy: actor() })), true);
 	assert.equal(isAgentGenerated(stub('x', { generatedBy: null })), false);
 	assert.equal(isAgentGenerated(stub('x')), false);
+});
+
+/* ---------------------------------------------------------------------------
+ * What an empty half of the queue is allowed to say
+ *
+ * The finding this section exists for: a half whose query FAILED was being
+ * substituted with `[]`, and the template then printed "No drafts are currently
+ * shared with you for review" underneath the load error. Emptiness and
+ * unavailability are different states and only one of them is a claim about the
+ * instance's contents.
+ * ------------------------------------------------------------------------ */
+
+test('an unavailable half never claims the instance has nothing', () => {
+	for (const source of ['shared-with-me', 'my-agent-draft']) {
+		const copy = emptyHalfCopy({ status: 'unavailable' }, source);
+
+		assert.match(copy, /could not be loaded/, `${source} must name the failure`);
+		assert.match(
+			copy,
+			/Nothing here means there are none/,
+			`${source} must say the absence is not an answer`
+		);
+
+		// The definite sentences, which are true only of a loaded half.
+		assert.doesNotMatch(copy, /^No drafts are currently shared/);
+		assert.doesNotMatch(copy, /You have no agent-generated article drafts/);
+	}
+});
+
+test('a loaded-and-complete half is allowed the definite sentence', () => {
+	assert.match(
+		emptyHalfCopy({ status: 'loaded', more: false }, 'shared-with-me'),
+		/^No drafts are currently shared with you for review\./
+	);
+	assert.match(
+		emptyHalfCopy({ status: 'loaded', more: false }, 'my-agent-draft'),
+		/^You have no agent-generated article drafts\./
+	);
+});
+
+test('a loaded half with more to come speaks only about what was scanned', () => {
+	// `myDrafts` filters after it paginates, so an empty page is not an empty
+	// set — and the same caution applies to a shared page that has a next one.
+	for (const source of ['shared-with-me', 'my-agent-draft']) {
+		const copy = emptyHalfCopy({ status: 'loaded', more: true }, source);
+		assert.match(copy, /loaded so far/);
+		assert.doesNotMatch(copy, /^No drafts are currently shared/);
+		assert.doesNotMatch(copy, /^You have no agent-generated article drafts/);
+	}
 });
 
 /* ---------------------------------------------------------------------------
@@ -304,6 +385,8 @@ test('no review source imports a Markdown renderer or holds an {@html} sink', ()
 	for (const file of [
 		'src/lib/cms/review.ts',
 		'src/lib/cms/review-contract.ts',
+		'src/lib/cms/review-transport.ts',
+		'src/lib/review/verdict-offer.ts',
 		'src/lib/routes/ReviewQueue.svelte',
 		'src/lib/routes/ReviewWorkspace.svelte',
 		'src/lib/review/PublishAction.svelte',

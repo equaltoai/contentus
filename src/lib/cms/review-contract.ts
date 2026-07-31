@@ -449,12 +449,24 @@ export function toDraftReview(raw: unknown): DraftReviewData | null {
  * render partial query selections" — which is what makes this projection a use
  * of the contract rather than a fabrication of one.
  *
- * The fields lesser's `Draft` genuinely does not carry stay ABSENT: no
- * `reviewStatus`, no `editorNotes`, no `grant`, and an empty verdict history.
- * That is not a gap to paper over. It is what makes the chrome render "No
- * review activity recorded" for an own draft nobody has reviewed — which is
- * true, and is the neutral state the design calls for where the projection
- * lacks data.
+ * THIS PROJECTION IS INCOMPLETE, AND THAT IS THE WHOLE POINT OF SAYING SO.
+ * lesser's `type Draft` carries no `reviewStatus`, no `editorNotes`, no `grant`,
+ * and no verdict history — only `reviewedBy` (`graph/phase1.graphql`). Those
+ * fields therefore stay ABSENT here, and nothing is invented in their place.
+ *
+ * What absence must NOT become is a claim. The vendored `resolveReviewState`
+ * turns an empty verdict history plus a missing `reviewStatus` into the definite
+ * label "No review activity recorded", which is false for any own draft that a
+ * reviewer has already ruled on: lesser sets `Draft.ReviewedBy` AND
+ * `Draft.ReviewStatus` together on every `SubmitDraftReview`
+ * (`pkg/services/cms/draft_review.go`), so this listing can carry a reviewer and
+ * still show no verdicts.
+ *
+ * So an entry built from this projection is marked `listing-only` (see
+ * {@link OwnDraft}) and the queue is not allowed to render the vendored state
+ * badge for it. The queue first tries `draftReview(id)` — which
+ * `DraftReviewForCaller` authorizes for the draft's owner — and only falls back
+ * to this shape when that answer did not arrive.
  */
 export function toOwnDraftReview(raw: unknown): DraftReviewData | null {
 	const node = record(raw);
@@ -583,9 +595,29 @@ export function toPreviewFaceArticle(
 /** Where a queue entry came from, which is also the sort order. */
 export type QueueSource = 'shared-with-me' | 'my-agent-draft';
 
+/**
+ * Which of lesser's two projections an entry's `review` actually came from.
+ *
+ * `review` is `DraftReview` — reviewStatus, grant, and the verdict history are
+ * all present, so the vendored chrome's state badge is lesser's own answer.
+ *
+ * `listing-only` is the `myDrafts` shape, which carries none of them. The badge
+ * would report absent data as a decided absence, so an entry marked this way is
+ * rendered by contentus's own chrome and says the review state is not known
+ * rather than that there is none.
+ */
+export type EntryProjection = 'review' | 'listing-only';
+
 export interface ReviewQueueEntry {
 	review: DraftReviewData;
 	source: QueueSource;
+	projection: EntryProjection;
+}
+
+/** One of the viewer's own drafts, with the projection it was built from. */
+export interface OwnDraft {
+	review: DraftReviewData;
+	projection: EntryProjection;
 }
 
 /**
@@ -604,7 +636,7 @@ export interface ReviewQueueEntry {
  */
 export function orderQueueEntries(
 	shared: readonly DraftReviewData[],
-	own: readonly DraftReviewData[]
+	own: readonly OwnDraft[]
 ): ReviewQueueEntry[] {
 	const entries: ReviewQueueEntry[] = [];
 	const seen = new Set<string>();
@@ -612,16 +644,90 @@ export function orderQueueEntries(
 	for (const review of shared) {
 		if (seen.has(review.draftId)) continue;
 		seen.add(review.draftId);
-		entries.push({ review, source: 'shared-with-me' });
+		// The shared half is `DraftReview` by construction: `sharedDraftReviews`
+		// returns nothing else.
+		entries.push({ review, source: 'shared-with-me', projection: 'review' });
 	}
 
-	for (const review of own) {
-		if (seen.has(review.draftId)) continue;
-		seen.add(review.draftId);
-		entries.push({ review, source: 'my-agent-draft' });
+	for (const draft of own) {
+		if (seen.has(draft.review.draftId)) continue;
+		seen.add(draft.review.draftId);
+		entries.push({
+			review: draft.review,
+			source: 'my-agent-draft',
+			projection: draft.projection,
+		});
 	}
 
 	return entries;
+}
+
+/* -------------------------------------------------------------------------
+ * What a half of the queue may truthfully say
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Whether a half of the queue was actually answered, and how completely.
+ *
+ * `unavailable` is not "empty". A half whose query failed has told the client
+ * NOTHING about what is in it, and substituting an empty list — which is what
+ * this face used to do — turns a load error into the sentence "no drafts are
+ * shared with you". Keeping the two apart is the whole reason this type exists.
+ */
+export type QueueHalfState = { status: 'loaded'; more: boolean } | { status: 'unavailable' };
+
+/**
+ * The line a half of the queue renders when it has no entries to show.
+ *
+ * Here rather than in the template because the CLAIM is the thing under test:
+ * exactly one of these three sentences is true for a given state, and only the
+ * first is a statement about the instance's contents.
+ *
+ *   - loaded, nothing more     — a real, complete, empty answer. Definite.
+ *   - loaded, more to come     — nothing in what was scanned. Not a claim about
+ *                                the set, because `myDrafts` filters after it
+ *                                paginates and `sharedDraftReviews` pages.
+ *   - unavailable              — no answer at all. The queue says so and says
+ *                                nothing else; the failure itself is rendered
+ *                                separately, above.
+ */
+export function emptyHalfCopy(half: QueueHalfState, source: QueueSource): string {
+	if (half.status === 'unavailable') {
+		return source === 'shared-with-me'
+			? 'The drafts shared with you could not be loaded, so this instance has not said whether any are waiting for you. Nothing here means there are none.'
+			: 'Your own drafts could not be loaded, so this instance has not said whether any agent-generated drafts are waiting. Nothing here means there are none.';
+	}
+
+	if (half.more) {
+		return source === 'shared-with-me'
+			? 'None of the drafts loaded so far are shared with you, and this instance has more to send.'
+			: 'None of the drafts loaded so far were generated by an agent, and this instance has more drafts than were scanned.';
+	}
+
+	return source === 'shared-with-me'
+		? 'No drafts are currently shared with you for review. A draft appears here when its author invites you through this instance or over MCP.'
+		: 'You have no agent-generated article drafts. Drafts an agent writes for you appear here with their attribution, so you can see exactly what was produced on your behalf.';
+}
+
+/**
+ * The assembled queue: both halves, what each of them managed to say, and the
+ * failures behind any that did not.
+ */
+export interface ReviewQueue {
+	entries: ReviewQueueEntry[];
+	/** Drafts shared with the viewer — loaded (with or without more), or not. */
+	shared: QueueHalfState;
+	/**
+	 * The viewer's own agent-generated drafts.
+	 *
+	 * `more` is load-bearing for honesty, not just for a button: `myDrafts`
+	 * filters AFTER paginating (`graph/query_resolvers_cms.go`), so a page can
+	 * come back with nothing while more drafts wait behind it. "No
+	 * agent-generated drafts" and "none in the first N" are different claims.
+	 */
+	own: QueueHalfState;
+	/** Non-fatal partial failures, so one empty half never hides the other. */
+	failures: ReviewFailure[];
 }
 
 /** Only drafts an agent produced belong in the second half of the queue. */

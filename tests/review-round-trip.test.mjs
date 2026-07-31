@@ -30,6 +30,16 @@ import {
  * is what the live trenchcoat round trip is for — recorded, with its outcome,
  * in `docs/consumption/review-contract.md` and on issue #14.
  *
+ * AND ONE MORE THING IT IS NOT, named because it was previously implied. The
+ * steps here call the PROJECTIONS. They do not execute the adapters: step 4
+ * hands its error string to `failureFromErrors` directly, and step 5 reads a
+ * literal out of the stand-in's own return value, so neither one runs
+ * `publishDraft`. That is deliberate — this file is about the contract shapes —
+ * but it means a broken adapter cannot fail here.
+ * `tests/review-adapters.test.mjs` is where the shipped `publishDraft`,
+ * `submitDraftReview`, and queue assembly are driven for real, with the mock at
+ * the GraphQL boundary rather than above it.
+ *
  * The gate step is the one to read closely: the refusal is asserted as the
  * SUCCESS condition. A draft that publishes without approval would fail this
  * test, which is the right way round for a face whose product property is that
@@ -143,10 +153,18 @@ test('round trip 1: a shared draft reaches the queue, above the viewer own draft
 		after: null,
 	}).sharedDraftReviews.edges.map((edge) => toDraftReview(edge.node));
 
+	// `myDrafts` returns `type Draft`, which carries no reviewStatus, no grant,
+	// and no verdict history — so an entry built from it is `listing-only` and
+	// the queue is not allowed to render a review-state claim for it. The
+	// shipped queue then asks `draftReview(id)` to fill that in; that fan-out is
+	// driven for real in `tests/review-adapters.test.mjs`.
 	const own = ask(REVIEW_DOCUMENTS.MY_DRAFTS_QUERY, {
 		first: 20,
 		after: null,
-	}).myDrafts.edges.map((edge) => toOwnDraftReview(edge.node));
+	}).myDrafts.edges.map((edge) => ({
+		review: toOwnDraftReview(edge.node),
+		projection: 'listing-only',
+	}));
 
 	const entries = orderQueueEntries(shared, own);
 
@@ -162,8 +180,12 @@ test('round trip 1: a shared draft reaches the queue, above the viewer own draft
 	// The shared entry carries the reviewer's invitation, which is what the
 	// workspace reads to decide whether to offer the verdict controls.
 	assert.equal(entries[0].review.grant.reviewer.username, 'editor');
-	// And the own entry carries no invented review activity.
+	assert.equal(entries[0].projection, 'review');
+
+	// And the own entry carries no invented review activity — nor a claim that
+	// there is none, which is what `listing-only` exists to prevent.
 	assert.deepEqual(entries[1].review.verdicts, []);
+	assert.equal(entries[1].projection, 'listing-only');
 });
 
 /* ------------------------------------------------------------------------
