@@ -59,11 +59,13 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	import EmojiField from '$lib/compose/EmojiField.svelte';
 	import MediaField from '$lib/compose/MediaField.svelte';
 	import PollField from '$lib/compose/PollField.svelte';
+	import ReachNotice from '$lib/compose/ReachNotice.svelte';
 	import ScheduleField from '$lib/compose/ScheduleField.svelte';
 	import SensitiveField from '$lib/compose/SensitiveField.svelte';
 	import SourceContext from '$lib/compose/SourceContext.svelte';
 	import { STATUS_BYTE_LIMIT, statusByteLength } from '$lib/compose/budget';
 	import { createComposeExtras } from '$lib/compose/extras.svelte';
+	import { composeSeed, type ComposeSeed } from '$lib/compose/seed';
 	import {
 		createNote,
 		loadComposeViewer,
@@ -133,22 +135,39 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	let signInError = $state<string | null>(null);
 
 	/**
-	 * The edit body, seeded once from the source status.
+	 * The composer's starting values, or null while they are still unknown.
 	 *
-	 * `Object.content` is what lesser's own sanitizer stored on write
-	 * (`htmlsafe.SanitizeHTMLByContract`), and `updateStatus` sanitizes again on
-	 * the way back — so an edit is a round trip through the server's sanitizer,
-	 * with the client neither rendering nor transforming anything. There is no
-	 * separate raw source for a note to withhold: the stored content IS the
-	 * sanitized content, and editing it is editing text.
+	 * THE COMPOSER DOES NOT EXIST UNTIL THIS IS SET, and that is the whole
+	 * point. Visibility is seeded from the reach of the post being answered
+	 * (`$lib/compose/seed`), so a composer mounted before its source resolved
+	 * would have to start at some default and be corrected afterwards — and the
+	 * default it started at is exactly what gets sent by a poster who types and
+	 * presses Post inside that window. Holding removes the window instead of
+	 * racing it, and it means no seed can ever overwrite something already
+	 * typed: the subtree that would hold the typing is not there yet.
+	 *
+	 * `content` carries `Object.content` for an edit, which is what lesser's own
+	 * sanitizer stored on write (`htmlsafe.SanitizeHTMLByContract`);
+	 * `updateStatus` sanitizes again on the way back, so an edit is a round trip
+	 * through the server's sanitizer with the client neither rendering nor
+	 * transforming anything.
 	 */
-	let editSeed = $state(untrack(() => (mode === 'edit' ? (data.source?.content ?? '') : '')));
-	let editSeeded = $state(untrack(() => mode !== 'edit' || Boolean(data.source)));
+	let seed = $state<ComposeSeed | null>(null);
+
+	/** A target intent whose status could not be loaded. Not composable. */
+	let sourceUnavailable = $state(false);
 
 	onMount(async () => {
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
 
 		if (session !== 'authenticated') return;
+
+		// Seed straight away when nothing has to be fetched first: a new post has
+		// no parent to inherit reach from, and a target the anonymous server pass
+		// already resolved is already here. Waiting on the viewer query in either
+		// case would hold the editor for a round trip that only decides whether
+		// the agent-attribution panel appears.
+		if (!targetId || source) seed = composeSeed(mode, source);
 
 		// The server pass is anonymous, so anything narrower than a public status
 		// arrives null. Re-ask with the session token.
@@ -161,10 +180,19 @@ reviewer/publisher workflow, and nothing on this page touches them.
 
 		viewer = loadedViewer;
 		if (loadedSource) source = loadedSource;
-		if (mode === 'edit' && !editSeeded && loadedSource) {
-			editSeed = loadedSource.content;
-			editSeeded = true;
+
+		if (!targetId || seed) return;
+
+		// A reply, quote, or edit whose target did not resolve. There is no reach
+		// to inherit and no body to edit, so there is nothing honest to compose
+		// against: refuse rather than fall back to a default that would be wider
+		// than the post being answered.
+		if (!source) {
+			sourceUnavailable = true;
+			return;
 		}
+
+		seed = composeSeed(mode, source);
 	});
 
 	async function onSignIn() {
@@ -389,18 +417,36 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				<p class="contentus-meta" role="alert">{signInError}</p>
 			{/if}
 		</section>
+	{:else if sourceUnavailable}
+		<!-- Not a transient state and not a spinner. The instance did not return
+		     the post this intent points at — deleted, or narrower than this
+		     session can see — and there is no honest composer to offer for it:
+		     the reach to inherit and the body to edit both live on that status. -->
+		<section class="contentus-notice">
+			<h2 class="contentus-notice__title">That post could not be loaded</h2>
+			<p class="contentus-notice__body">
+				This instance did not return the post you are {mode === 'edit' ? 'editing' : mode}-ing.
+				It may have been deleted, or your account may not be able to see it. Reload to try
+				again, or open the original.
+			</p>
+		</section>
+	{:else if !seed}
+		<p class="contentus-compose-hint" role="status">Preparing the composer…</p>
 	{:else}
-	{#key editSeed}
 		<ComposeRoot
 			config={{
 				characterLimit: STATUS_BYTE_LIMIT,
 				placeholder: mode === 'reply' ? 'Write your reply…' : 'What do you want to say?',
 				allowMedia: true,
 				allowPolls: mode !== 'edit',
-				defaultVisibility: 'public',
+				// BOTH, and they must agree. `Root` reads `initialState.visibility`
+				// for the first render and `config.defaultVisibility` for the reset
+				// it performs after a resolved submit — so seeding only the first
+				// would send the second reply of a thread at the wrong reach.
+				defaultVisibility: seed.visibility,
 				class: 'contentus-compose__form',
 			}}
-			initialState={{ content: editSeed }}
+			initialState={{ content: seed.content, visibility: seed.visibility }}
 			{handlers}
 		>
 			<!-- `@` and `#` complete against lesser's `search`, `:` against the
@@ -429,6 +475,13 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				{/if}
 			</div>
 
+			<!-- Silent for every seeded default, because the seed is never wider
+			     than the post being answered. It speaks when the poster widens it
+			     themselves — their call, but not an invisible one. -->
+			{#if mode !== 'edit' && source}
+				<ReachNotice sourceVisibility={source.visibility} />
+			{/if}
+
 			{#if mode !== 'edit'}
 				<PollField />
 			{/if}
@@ -454,7 +507,6 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				</div>
 			</footer>
 		</ComposeRoot>
-	{/key}
 	{/if}
 	</Panel>
 </div>

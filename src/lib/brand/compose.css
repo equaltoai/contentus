@@ -342,6 +342,22 @@
 	color: var(--tc-fg);
 }
 
+/* Said when a reply or quote would reach further than the post it answers.
+   Warning weight, not error weight: the poster chose it, and the choice is
+   allowed — it just is not allowed to be invisible. */
+.contentus-compose-reach {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--tc-space-2);
+	margin: 0;
+	padding: var(--tc-space-3) var(--tc-space-4);
+	border: 1px solid var(--tc-phi-gold);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-phi-gold-container);
+	color: var(--tc-fg);
+	font-size: var(--tc-fs-body-sm);
+}
+
 .contentus-compose-budget {
 	margin: 0;
 	padding: var(--tc-space-3) var(--tc-space-4);
