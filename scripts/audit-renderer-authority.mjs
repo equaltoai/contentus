@@ -13,13 +13,23 @@
  * quietly become a second canonical renderer. This audit makes the erosion
  * fail the build.
  *
- * Four checks:
+ * Five checks:
  *
  *   1. No Markdown-rendering package is a direct contentus dependency.
  *   2. No contentus-owned source imports a Markdown/HTML rendering package.
  *   3. No contentus-owned Svelte template contains an `{@html}` sink.
  *   4. The vendored blog face still ESCAPES non-HTML content instead of
  *      rendering it.
+ *   5. Every source file under `src/` is classified — owned and therefore
+ *      scanned by 2 and 3, or explicitly declared vendored.
+ *
+ * Check 5 exists because checks 2 and 3 are only ever as good as their list of
+ * directories, and that list silently fell behind: `src/lib/compose` was
+ * written whole in M3 without being added, so an audit that reported "clean"
+ * had not looked at twelve contentus-owned components — one of which cites
+ * this audit as the reason it does not render a status body. A new directory
+ * is now a FINDING until somebody says which side of the line it is on, which
+ * is the difference between a gate and a list somebody has to remember.
  *
  * Check 4 deserves explanation: contentus's reader delegates body display to
  * the vendored `Article.Content`, which renders `{@html}` only when
@@ -36,7 +46,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -70,16 +80,51 @@ const FORBIDDEN_RENDERER_PACKAGES = [
  * upstream-owned and deliberately excluded: it is CLI-managed, verified by
  * `greater doctor`, and its `{@html}` usage is greater's sanitizer boundary,
  * not ours. Check 4 covers the part of it we actually depend on.
+ *
+ * THE RULE FOR ADDING TO THIS LIST, because it was got wrong once: a directory
+ * belongs here when contentus AUTHORS the files in it, not when it happens to
+ * sit under `src/lib`. `src/lib/compose` was written whole in M3 — twelve
+ * contentus-owned components, including one whose header cites this audit as
+ * the reason it does not render the source status's body — and was not added,
+ * so for the length of that milestone the audit's claim to cover
+ * contentus-owned templates was true of every directory except the newest one.
+ * A `{@html}` in any of them would have shipped clean.
+ *
+ * `src/lib/components`, `src/lib/patterns`, `src/lib/generics`, and
+ * `src/lib/greater` stay out: every one of them is `greater` CLI-managed
+ * (`components.json` → `installMode: vendored`).
  */
 const OWNED_SOURCE_DIRS = [
 	'src/facetheory',
 	'src/lib/auth',
 	'src/lib/brand',
+	'src/lib/build',
 	'src/lib/cms',
+	'src/lib/compose',
 	'src/lib/config',
 	'src/lib/routes',
 	'src/lib/shell',
+	'src/types',
 	'scripts',
+];
+
+/**
+ * The `greater` CLI-managed trees, declared so check 5 can tell "upstream owns
+ * this" apart from "nobody remembered to audit this". Mirrors
+ * `components.json` → `installMode: vendored` and its alias targets.
+ */
+const VENDORED_SOURCE_ROOTS = [
+	'src/lib/components',
+	'src/lib/generics',
+	'src/lib/greater',
+	'src/lib/patterns',
+];
+
+/** Vendored modules the CLI emits loose at the `src/lib` root, not in a tree. */
+const VENDORED_SOURCE_FILES = [
+	'src/lib/blog-share.ts',
+	'src/lib/blog-types.ts',
+	'src/lib/types.ts',
 ];
 
 const VENDORED_ARTICLE_CONTENT = 'src/lib/greater/faces/blog/components/Article/Content.svelte';
@@ -204,12 +249,41 @@ function checkVendoredEscapeFallback() {
 	return problems;
 }
 
+/**
+ * Every source file under `src/` is either owned (and scanned) or declared
+ * vendored. Neither is a finding, because "unclassified" is exactly the state
+ * `src/lib/compose` sat in while this audit called itself clean.
+ *
+ * Scoped to `src/`. `scripts/` is listed whole in OWNED_SOURCE_DIRS, and
+ * `gov-infra/` is the governance tree — bound by CON-5's content pins rather
+ * than by renderer authority.
+ */
+function checkOwnedSourceCoverage() {
+	const isUnder = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
+	const problems = [];
+
+	for (const file of walkFiles('src')) {
+		const path = relative(repoRoot, file).split(sep).join('/');
+		if (OWNED_SOURCE_DIRS.some((dir) => isUnder(path, dir))) continue;
+		if (VENDORED_SOURCE_ROOTS.some((dir) => isUnder(path, dir))) continue;
+		if (VENDORED_SOURCE_FILES.includes(path)) continue;
+
+		problems.push(
+			`${path} is scanned by neither the owned-source checks nor declared vendored. ` +
+				'Add its directory to OWNED_SOURCE_DIRS, or declare it in VENDORED_SOURCE_ROOTS/FILES.'
+		);
+	}
+
+	return problems;
+}
+
 function main() {
 	const checks = [
 		['dependencies', checkDependencies()],
 		['owned-source imports', checkImports()],
 		['owned-source {@html} sinks', checkHtmlSinks()],
 		['vendored blog-face escape fallback', checkVendoredEscapeFallback()],
+		['owned-source coverage', checkOwnedSourceCoverage()],
 	];
 
 	console.log('# Renderer-authority audit\n');
