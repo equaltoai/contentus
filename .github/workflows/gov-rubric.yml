@@ -24,12 +24,15 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       # The greater CLI is not published to the npm registry; it ships as a
       # release asset, so nothing about the bytes that arrive is checked by a
-      # package manager. The installer verifies the asset against the SHA-256
-      # pinned in the repo contract before anything unpacks, and leaves the
-      # tarball for SEC-7 to re-verify at gate time. Without this step SEC-7 is
-      # BLOCKED and the report does not pass; MAI-4 binds the step so it cannot be
-      # dropped to turn a hard gate into a soft one.
-      - name: Install pinned greater CLI
+      # package manager. This step verifies the asset against the SHA-256 pinned
+      # in the repo contract and leaves the tarball on disk. That tarball is what
+      # SEC-7 uses: it re-verifies the digest at gate time, extracts its own
+      # quarantined copy and runs that, never the tree this step installs — an
+      # editable installer is a self-report one step removed. Without this step
+      # there is no archive to extract, SEC-7 is BLOCKED and the report does not
+      # pass; MAI-4 binds the step so it cannot be dropped to turn a hard gate
+      # into a soft one.
+      - name: Fetch the pinned greater CLI release asset
         run: node gov-infra/verifiers/install-greater-cli.mjs
       - name: Run governance rubric
         run: bash gov-infra/verifiers/gov-verify-rubric.sh

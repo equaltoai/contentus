@@ -1,18 +1,29 @@
 #!/usr/bin/env node
 /**
- * Install the pinned `greater` CLI from its release asset, digest first.
+ * Fetch the pinned `greater` CLI release asset, digest first, and install it for
+ * local use.
  *
  * The CLI is not published to the npm registry; it ships as a GitHub release
- * asset, which means the install step is a plain download and nothing about the
- * bytes that arrive is checked by a package manager. `greater doctor` is the whole
- * of SEC-7's evidence, so an unverified download is a tool of unknown provenance
- * auditing the vendored tree and reporting whatever it likes.
+ * asset, which means the fetch is a plain download and nothing about the bytes
+ * that arrive is checked by a package manager. So the asset URL and its SHA-256
+ * are pinned in the repo contract, the download is verified against that digest
+ * before anything unpacks it, and the tarball is left on disk. A mismatch deletes
+ * the download and fails: a tarball that is not the pinned one is not a version to
+ * reason about, it is a different artifact.
  *
- * So the asset URL and its SHA-256 are pinned in the repo contract, the download
- * is verified against that digest before anything unpacks it, and the tarball is
- * left on disk so SEC-7 can re-verify at gate time rather than trusting that this
- * script ran. A mismatch deletes the download and fails: a tarball that is not the
- * pinned one is not a version to reason about, it is a different artifact.
+ * **SEC-7 does not trust this script, and does not run what it installs.** This
+ * file is an ordinary repository file: the pull request being gated can edit it,
+ * and a few appended lines that overwrite the installed entry point after the
+ * digest check would leave the contract, the workflow and the tarball all
+ * untouched. A gate that verified one artifact and executed another would be
+ * binding nothing. `check-greater-provenance.mjs` therefore re-verifies the
+ * tarball, extracts its own copy into a quarantine, and runs that — every time.
+ *
+ * What this script is for, then, is two things that are not evidence: leaving the
+ * digest-verified tarball where the gate can find it (in CI, that is its whole
+ * job, and MAI-4 binds the step so it cannot be dropped to soften SEC-7 into
+ * BLOCKED), and giving local development a `greater` on hand. The tree under
+ * `gov-infra/.tools/node_modules` is convenience, not provenance.
  *
  * `--ignore-scripts` is passed here for the same reason it is passed everywhere
  * else in this repository: no install anywhere runs lifecycle code.
@@ -82,3 +93,5 @@ if (!existsSync(binary)) {
 	process.exit(1);
 }
 console.log(`Installed the pinned greater CLI to ${binary} from the digest-verified asset.`);
+console.log(`The gate does not execute this tree: SEC-7 re-verifies ${TARBALL} and extracts`);
+console.log('its own quarantined copy. What CI needs from this step is that tarball.');
