@@ -30,9 +30,47 @@ const render = (path, expectStatus = 200) =>
 test('the review queue server-renders a complete document', async () => {
 	const result = await render('/l/review');
 
+	// 200, AND WHY THAT IS THE HONEST ANSWER rather than the convenient one.
+	// A protected route answering 200 to an anonymous caller looks wrong, and it
+	// is the shape this face has: lesser's auth contract keeps the access token
+	// in `sessionStorage`, never a cookie, so NOTHING about an authenticated
+	// reviewer's document request differs from an anonymous one. The server
+	// cannot tell them apart, and a blanket 401 would be returned to the
+	// authorized reviewer on every cold deep link — lesser performs no SPA
+	// fallback under `/l/*`, so every navigation is one. What this response
+	// truthfully reports is that the sign-in shell was delivered; the protected
+	// resource is the drafts, and those answer 401 over authenticated GraphQL.
+	// The caching and indexing half is closed below. Recorded in full, with the
+	// upstream routing, in `docs/consumption/auth-boundary.md`.
 	assert.equal(result.status, 200);
 	assert.match(result.html, /^<!doctype html>/i);
 	assert.ok(result.html.includes('contentus-shell'), 'the review route renders inside the shell');
+});
+
+test('an auth-required route is never cached and never indexed', async () => {
+	// The residual risk in that 200 is a shared cache or a crawler treating a
+	// protected surface as ordinary public content. Both are the origin's to
+	// prevent — lesser injects no headers on `/l` routes — so contentus sets
+	// them, on every route whose descriptor carries `requiresAuth`.
+	for (const path of ['/l/review', '/l/review/drafts/draft-123', '/l/compose']) {
+		const { headers, status } = await render(path);
+
+		assert.equal(status, 200, `${path} status`);
+		assert.equal(headers['cache-control'], 'no-store', `${path} must not be cacheable`);
+		assert.equal(headers['x-robots-tag'], 'noindex, nofollow', `${path} must not be indexable`);
+	}
+});
+
+test('the public reading surface keeps its cacheability', async () => {
+	// The negative half, and the reason it is here: `no-store` applied to every
+	// route would be a quiet performance regression on the surface the whole
+	// client exists to serve, and nothing else in the suite would notice.
+	for (const path of ['/l/', '/l/articles/example-article']) {
+		const { headers } = await render(path);
+
+		assert.notEqual(headers['cache-control'], 'no-store', `${path} must stay cacheable`);
+		assert.equal(headers['x-robots-tag'], undefined, `${path} must stay indexable`);
+	}
 });
 
 test('the review queue renders its sign-in state, not a queue', async () => {
@@ -111,6 +149,8 @@ test('the hydration payload for the review queue carries no draft data', async (
 test('the review workspace server-renders its sign-in state, never a draft', async () => {
 	const result = await render('/l/review/drafts/draft-123');
 
+	// Same 200, same reason as the queue above — and the assertions below are
+	// what make it correct: the anonymous document carries no draft at all.
 	assert.equal(result.status, 200);
 	assert.match(result.html, /^<!doctype html>/i);
 	assert.match(result.html, /Sign in to review this draft/i);
