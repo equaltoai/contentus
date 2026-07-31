@@ -35,56 +35,18 @@ import { accessTokenOrNull } from '$lib/auth/session';
 
 import { graphqlRequest, GraphQLTransportError, type GraphQLError } from './graphql';
 
-/** lesser's `Visibility` enum, verbatim. */
-export type LesserVisibility = 'PUBLIC' | 'UNLISTED' | 'FOLLOWERS' | 'DIRECT';
+// The visibility mapping lives in its own dependency-free module so a test can
+// load it without a bundler between the assertion and the shipped code — it is
+// the field that decides who can see a post.
+export {
+	LESSER_VISIBILITIES,
+	VISIBILITY_DESCRIPTIONS,
+	fromLesserVisibility,
+	toLesserVisibility,
+} from './visibility';
+export type { ComposeVisibility, LesserVisibility } from './visibility';
 
-export const LESSER_VISIBILITIES: readonly LesserVisibility[] = [
-	'PUBLIC',
-	'UNLISTED',
-	'FOLLOWERS',
-	'DIRECT',
-];
-
-/**
- * The vendored compose compound's visibility vocabulary.
- *
- * greater's `PostVisibility` is Mastodon's — `public | unlisted | private |
- * direct` — where lesser's enum spells the followers-only case `FOLLOWERS`.
- * That single rename is the whole translation, and it belongs here at the
- * adapter boundary rather than in either vocabulary.
- */
-export type ComposeVisibility = 'public' | 'unlisted' | 'private' | 'direct';
-
-const TO_LESSER: Record<ComposeVisibility, LesserVisibility> = {
-	public: 'PUBLIC',
-	unlisted: 'UNLISTED',
-	private: 'FOLLOWERS',
-	direct: 'DIRECT',
-};
-
-const FROM_LESSER: Record<LesserVisibility, ComposeVisibility> = {
-	PUBLIC: 'public',
-	UNLISTED: 'unlisted',
-	FOLLOWERS: 'private',
-	DIRECT: 'direct',
-};
-
-export function toLesserVisibility(visibility: ComposeVisibility): LesserVisibility {
-	return TO_LESSER[visibility] ?? 'PUBLIC';
-}
-
-export function fromLesserVisibility(visibility: string | null | undefined): ComposeVisibility {
-	const key = String(visibility ?? '').toUpperCase() as LesserVisibility;
-	return FROM_LESSER[key] ?? 'public';
-}
-
-/** Reader-facing description of each visibility, for the selector. */
-export const VISIBILITY_DESCRIPTIONS: Record<LesserVisibility, { label: string; hint: string }> = {
-	PUBLIC: { label: 'Public', hint: 'Anyone can see this, and it appears in public timelines.' },
-	UNLISTED: { label: 'Unlisted', hint: 'Anyone with the link can see this; public timelines will not show it.' },
-	FOLLOWERS: { label: 'Followers', hint: 'Only your followers can see this.' },
-	DIRECT: { label: 'Direct', hint: 'Only the people you mention can see this.' },
-};
+import type { LesserVisibility } from './visibility';
 
 /** lesser `PollParamsInput`. */
 export interface PollParamsInput {
@@ -271,7 +233,8 @@ function toCreatedNote(raw: unknown): CreatedNote | null {
 	return {
 		id: object['id'],
 		content: typeof object['content'] === 'string' ? object['content'] : '',
-		visibility: (String(object['visibility'] ?? 'PUBLIC').toUpperCase() as LesserVisibility) ?? 'PUBLIC',
+		visibility:
+			(String(object['visibility'] ?? 'PUBLIC').toUpperCase() as LesserVisibility) ?? 'PUBLIC',
 		sensitive: object['sensitive'] === true,
 		spoilerText: typeof object['spoilerText'] === 'string' ? object['spoilerText'] : null,
 		createdAt: typeof object['createdAt'] === 'string' ? object['createdAt'] : '',

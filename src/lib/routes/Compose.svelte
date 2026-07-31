@@ -300,16 +300,23 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	</a>
 </header>
 
-{#if session === 'anonymous'}
+{#if session !== 'authenticated'}
+	<!-- Rendered on the server too, where `session` is `unknown`. The server
+	     cannot know who is asking — the token lives in `sessionStorage` — but
+	     "posting requires an account" is true regardless, so the SSR document
+	     says it. The sign-in button appears once the client has actually looked,
+	     rather than the server asserting a session state it cannot see. -->
 	<section class="contentus-notice">
 		<h2 class="contentus-notice__title">Sign in to post</h2>
 		<p class="contentus-notice__body">
 			Posting requires an account on this instance. You can write here first — signing in
 			returns you to this page.
 		</p>
-		<button class="contentus-session__button" type="button" onclick={onSignIn}>
-			Sign in
-		</button>
+		{#if session === 'anonymous'}
+			<button class="contentus-session__button" type="button" onclick={onSignIn}>
+				Sign in
+			</button>
+		{/if}
 		{#if signInError}
 			<p class="contentus-meta" role="alert">{signInError}</p>
 		{/if}

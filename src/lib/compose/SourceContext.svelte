@@ -25,7 +25,7 @@ a candidate for the upstream brief alongside the mobile chrome.
 
 <script lang="ts">
 	import type { SourceStatus } from '$lib/cms/compose';
-	import { VISIBILITY_DESCRIPTIONS } from '$lib/cms/compose';
+	import { VISIBILITY_DESCRIPTIONS } from '$lib/cms/visibility';
 	import type { ComposeMode } from '../../facetheory/types';
 
 	interface Props {

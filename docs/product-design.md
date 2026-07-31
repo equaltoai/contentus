@@ -453,6 +453,30 @@ Gaps filed from the M1 rework round (same day, at rework head `20e03ea2`):
 | `FaceApp` never forwards `allowedOrigin` into `renderFaceHead`; absolute `<link href>` 500s under strict CSP  | `FaceTheory`         | Filed theory-cloud/FaceTheory#404 — relative-canonical workaround; cross-origin canonicals unserved  |
 | `CLIENT_APP_GUIDE.md` pins FaceTheory v3.2.2; proven pin is v4.0.1                                            | `lesser`             | Filed lesser#1290 — minor doc fix                                                                   |
 
+Gaps found consuming the compose surface in M3 (2026-07-31, on branch
+`theorymcp/equaltoai/contentus/m3-mobile-compose`). Each is recorded in the
+code that hits it, with the sunset condition stated there; none is patched
+around and no vendored file is edited:
+
+| Item                                                                                                          | Owner                | Status                                                                                              |
+| ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| `greater add compose` vendors twelve components and no stylesheet; every `.compose-*` class lives only in the social face theme, unreachable without installing the whole face | `greater-components` | Interim: `src/lib/brand/compose.css`, an appearance-only layer with a sunset on per-module CSS emission |
+| The `media-composer`, `poll-composer`, and `custom-emoji-picker` patterns read `var(--bg-primary, #fff)`-style names the greater token set never defines — light-theme literals on a dark ground | `greater-components` | Interim: the pattern variable bridge in `src/lib/brand/compose.css`; patterns should read `--gr-*`   |
+| `Compose.MediaUpload` renders alt-text and spoiler editors whose changes have no handler and stop at internal state | `greater-components` | Avoided: the composer uses `MediaComposer`, which reports every edit, mapped onto `updateMedia`      |
+| `MediaComposer` learns of an attachment only once `onUpload` resolves, so its own per-file progress bar can never run | `greater-components` | Interim: real XHR progress surfaced in a contentus-owned line above the pattern                     |
+| `PollComposer` is built to create-and-reset, but lesser has no standalone poll — a poll is a field on `CreateNoteInput` | `greater-components` | Interim: "create" attaches to the draft and the attached poll is shown back as a summary            |
+| `Compose.Submit` disables on empty content, so a media-only post — which lesser accepts (`ValidateContentOrAttachments`) — cannot be submitted | `greater-components` | Recorded limitation; forking `Submit` to widen it would be a component reimplementation             |
+| No compose-side content-warning control, and no status-context component that renders sanitized bodies through the kit's own sanitizer boundary | `greater-components` | Interim: contentus-owned CW field; the reply/quote strip shows metadata and links out, never the body |
+| `CreateNoteInput` exposes `mentions` and `tags`, and `buildCreateNoteCommand` reads neither — the service extracts both from the content | `lesser`             | Contentus does not send them; the autocomplete writes into the content, which is the path that works |
+| Status length is validated as UTF-8 **bytes** (`len(content) > 500` in Go) while every JS counter measures UTF-16 units, and no GraphQL field advertises the limit | `lesser`             | Interim: `src/lib/compose/budget.ts` mirrors the constant and refuses at submit so client and server agree |
+| `MaxUploadSize` is enforced but not advertised on the GraphQL surface       | `lesser`             | Contentus does not guess: an oversized file is refused by the instance and the message shown as-is  |
+| No `deleteMedia` on the GraphQL surface, so an upload detached before posting stays on the instance unreferenced | `lesser`             | Contentus detaches it, which is all the contract allows a client to do                              |
+
+Contentus-owned components offered upstream once proven on an instance
+(framework feedback lane), each carrying a swap-to-vendored note in its header:
+`src/lib/shell/MobileTabBar.svelte`, `src/lib/shell/Sheet.svelte`, and the
+compose-side content-warning field.
+
 Advisory pinned by the gov-infra spine (SEC-2 disclosed set, same day):
 
 | Item                                                                                                          | Owner                | Status                                                                                              |

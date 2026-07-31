@@ -98,9 +98,7 @@ async function createRouteProps(
 			// a cached SSR document can never carry a status its reader could not
 			// otherwise see.
 			const intent = resolveComposeIntent(query);
-			const source = intent.statusId
-				? await loadSourceStatus(intent.statusId, { endpoint })
-				: null;
+			const source = intent.statusId ? await loadSourceStatus(intent.statusId, { endpoint }) : null;
 			return { ...base, compose: { intent, source } };
 		}
 		default:
