@@ -68,6 +68,19 @@ so that this matrix is not read as a stronger claim than the gates support.
   that dependency is load-bearing rather than decorative. The dividing line: a bypass
   that needs the pin moved is a documented limit; a bypass that works without touching
   the pin is a defect and is closed with a content hash.
+- **The convergence rule was amended on 2026-07-31 by operator ruling** (`#50`,
+  `issuecomment-5141933985`), and the amended form governs from that date. A bypass
+  needing no contract co-edit may now _also_ be recorded as a documented residual when it
+  lives in the evaluation-semantics layer — where the executor is reached by the host
+  language's own evaluation of a value it already holds, not by any textual appearance a
+  gate can read — provided it is recorded in the threat model with its shape, execution
+  semantics and severity. Everything else stays a defect and is still closed
+  deterministically; no control in this matrix is relaxed by the amendment. In both
+  residual cases the compensating control is mandatory cross-client adversarial review of
+  every `.github/` diff by a client that did not implement the change. For the
+  evaluation-semantics case that review is the _only_ control. The full statement, the
+  three-way rule and the residuals it admits are in `contentus-threat-model.md` under
+  THR-9 and THR-12.
 - **SEC-7 depends on a CLI that is not on the registry.** The `greater` CLI is
   distributed as a GitHub release asset, so no package manager checks the bytes and
   `--version` is only the tool describing itself. `install-greater-cli.mjs` verifies the
@@ -88,10 +101,21 @@ so that this matrix is not read as a stronger claim than the gates support.
   argv to a contract-pinned, digest-verified script or as an argument to `printf` after a
   literal format; every other appearance is a finding, and so is any `run:` this scanner
   cannot read. Both workflows carrying event data were migrated behind pinned scripts to
-  satisfy the rule by construction. The analysis still reads `run:` text: a value that
-  reaches an executor inside the pinned script itself, across a pipe out of an allowed
-  command, or through `${!VAR}` is outside it, and the threat model records those three
-  rather than implying coverage.
+  satisfy the rule by construction.
+- **SEC-3's appearance rule carries six recorded residuals, not none.** Three are limits
+  of static analysis over `run:` text: a value that reaches an executor inside the pinned
+  script itself; the _output_ of an allowed command, wherever the carrier takes it — a
+  pipe, a file redirect and later execution, or a `$GITHUB_PATH` write that alters `PATH`
+  for the rest of the job; and `${!VAR}` indirect expansion. Three more sit below the
+  appearance layer, in bash's own evaluation semantics, and were accepted as documented
+  residuals by the 2026-07-31 operator ruling: bare-name arithmetic recursive evaluation
+  (`$(( ))`, `let`, `declare -i`, and the same expansion as pinned-script argv — _high_),
+  `printf -v` laundering a value into a variable the allowance never examined (_medium_),
+  and a computed-key `$GITHUB_ENV` write whose new name taint propagation cannot learn
+  (_medium_). Each is written out in the threat model under THR-12 with its exact shape,
+  so a reviewer can reconstruct it; none needs the pinned contract moved; the compensating
+  control for all six is mandatory cross-client adversarial review of every `.github/`
+  diff.
 - **SEC-4 is not a CSP header.** It audits built output for inline execution surfaces and
   prints external origins. The enforced header is the FaceTheory host's.
 - **SEC-6 uses stubbed GraphQL responses.** It proves the built handler's behaviour on

@@ -129,6 +129,37 @@ green report is read for what it is.
   deterministically — by content hashes, not by command text. Every binding added under
   THR-9 exists because it fell on the second side of that line.
 
+  **Amendment — operator ruling, 2026-07-31** (`equaltoai/contentus#50`,
+  `issuecomment-5141933985`). Through rounds 1–7 the rule reserved documented residuals
+  for that first case alone: needing the pinned contract moved was the only ground on
+  which a residual could be recorded rather than closed. The operator has widened it. A
+  bypass that needs no contract co-edit may _also_ be recorded as a documented residual
+  when it lives in the **evaluation-semantics layer** — where what reaches an executor is
+  the host language's own evaluation of a value it already holds, rather than any textual
+  appearance of that value in the artifact a gate reads. There a repository-side gate has
+  nothing to refuse: the shape is invisible at the layer the gate operates on, and closing
+  it would mean reimplementing the language's evaluator inside a scanner this repository
+  declares, in its first paragraph, is not one.
+
+  The amended rule in full, as it now stands:
+
+  1. A bypass that requires co-editing `contentus-pinned-repo-contract.json` in the same
+     diff is a **documented residual**.
+  2. A bypass that needs no contract co-edit but lives in the evaluation-semantics layer
+     is a **documented residual**, provided it is recorded here with its shape, its
+     execution semantics and its severity, in enough detail that a reviewer can
+     reconstruct it from the text.
+  3. Every other bypass — anything expressible as an appearance, a path, a digest, a
+     content hash or an exact invocation — remains a **defect** and is closed
+     deterministically. Widening the residual category does not widen it here, and no
+     control added in rounds 1–7 is relaxed by this amendment.
+
+  In both residual cases the compensating control is the same, and it is mandatory:
+  **cross-client adversarial review of every `.github/` diff**, performed by a client that
+  did not implement the change. That control was already load-bearing for case 1. For case
+  2 it is the _only_ control, so relaxing the review requirement would not weaken these
+  limits — it would remove them.
+
 - **The executable closure has a declared boundary.** CON-5 hashes every `node <path>`
   target of a guarded command, every file its glob arguments expand to, and every
   relative module those files import, transitively. Two roots are outside it by
@@ -247,16 +278,120 @@ green report is read for what it is.
   either script's behaviour therefore requires co-editing the pinned contract in the same
   diff — the documented-limit side of the convergence rule below, not the defect side.
 
-  What this still does not follow, because a `run:`-text scanner cannot: a value that
-  reaches an executor inside the pinned script itself, a value carried across a pipe out of
-  an allowed command, and `${!VAR}` indirect expansion, which is deliberately not matched as
-  a reference. A heredoc body written into `$GITHUB_ENV` is no longer among them — under the
-  appearance rule the value in that body is a finding where it is written. The three that
-  remain are limits of static analysis over shell rather than unguarded shapes: each would
-  land as `run:` text in a `.github/` diff, which is the review's subject, and none is
-  expressible without it. Install-invocation pinning still reads the older flat
-  segmentation, which is strictly more suspicious than the parse — a grammar prefix makes an
-  install fail to match its pinned text rather than hide it — so it is left as it is.
+  **Residuals of the appearance rule.** Six, recorded by shape, because the rule's whole
+  claim is that nothing is left unexamined and a residual nobody wrote down is
+  indistinguishable from one that was missed. A heredoc body written into `$GITHUB_ENV` is
+  no longer among them — under the appearance rule the value in that body is a finding
+  where it is written. The first three are limits of static analysis over `run:` text. The
+  last three were surfaced by round-7 cross-client review, survived the stop rule, and are
+  accepted under case 2 of the amended convergence rule above by the operator's 2026-07-31
+  ruling. Every one of the six lands as `run:` text in a `.github/` diff, which is the
+  review's subject, and none is expressible without it.
+
+  1. **Inside the pinned script.** A value that reaches an executor within the pinned
+     script itself. The SHA-256 binds what the script _is_, byte for byte; it does not
+     model what the script does with its argv. _Low_ — moving that behaviour requires
+     co-editing the pinned contract in the same diff, which is case 1.
+
+  2. **The output of an allowed command, by any carrier.** `printf '%s' "$PAYLOAD"` is
+     allowed because printf executes nothing; where its _output_ then goes is not
+     followed. A pipe is one carrier of this and not the class — the same residual is
+     reached by `printf '%s' "$PAYLOAD" | bash`, by
+     `printf '%s' "$PAYLOAD" > payload.sh` with `bash payload.sh` after it, and by
+     `printf '%s' "$PAYLOAD" >> "$GITHUB_PATH"`, which prepends an attacker-named
+     directory to `PATH` for every later step in the job. In each the appearance is inside
+     the printf allowance and the carrier operand is a literal, so nothing tainted appears
+     anywhere the rule looks. _Medium._ (Rounds 5–7 worded this entry as "a pipe". Round 8
+     restated it as the class it always was; the wording changed, the residual did not.)
+
+  3. **`${!VAR}` indirect expansion.** Deliberately not matched as a reference, because
+     matching it would make every `$`-sigil name a possible alias for every other. _Low._
+
+  4. **Bare-name arithmetic recursive evaluation.** _High._
+
+     _Shapes._ `X=$((PAYLOAD + 1))`; `let "X = PAYLOAD + 1"`; `declare -i X=PAYLOAD+1`;
+     and the same expansion handed to a pinned script as argv,
+     `node scripts/dco-check.mjs "$((PAYLOAD+1))"`.
+
+     _Execution semantics._ In an arithmetic context bash resolves a bare name to the
+     variable's value and then evaluates that value **as an arithmetic expression**,
+     recursively. An array subscript is itself an arithmetic context, so a payload of
+     `a[$(id >&2)]` reaches the command substitution inside it and executes it. None of
+     this requires the value to be spelled `$PAYLOAD` anywhere. Confirmed by kimi against
+     bash 5.2, and by factory with the array-subscript vector.
+
+     _Why the whitelist sees no appearance._ An appearance is recognised by a `$` sigil
+     followed by the name — `$NAME`, `${NAME}`. In arithmetic context the reference is the
+     bare word `PAYLOAD`, so no appearance is found, including inside the arithmetic spans
+     the substitution walk already visits, which look for that same sigil. In the
+     pinned-script argv case the word sits inside the allowance in any event: bash
+     performs the arithmetic expansion _before_ the script is executed, so the pin binds
+     what the script receives and not what the shell did to produce it.
+
+     _Why no contract co-edit is needed._ None of these shapes touches
+     `contentus-pinned-repo-contract.json`, or any pinned digest, path or invocation. Each
+     is ordinary `run:` text.
+
+     _Why it is accepted._ Case 2 of the amended rule. Closing it deterministically would
+     mean modelling bash's arithmetic evaluator — every context that evaluates a bare name
+     (`$(( ))`, `let`, `declare -i`, an array subscript, `[[ … -eq … ]]`) and its recursion
+     into the value — inside a scanner declared from its first paragraph not to be a Bash
+     interpreter. Severity is high because it executes attacker-authored payload with no
+     textual appearance for any appearance rule to refuse.
+
+     _Compensating control._ Mandatory cross-client adversarial review of every `.github/`
+     diff.
+
+  5. **`printf` option surfaces.** _Medium._
+
+     _Shape._ `printf -v PROG '%s' "$PAYLOAD"`, then `bash -c "$PROG"` after it.
+
+     _Execution semantics._ The printf allowance models one data shape —
+     `printf <literal-format> <arguments>`, which writes to stdout and executes nothing.
+     It does not model printf's _options_. `-v NAME` sends the formatted result into the
+     shell variable NAME instead of stdout, laundering the value into a name the allowance
+     never examined. Two things then compose: the allowance accepts `-v` as the format
+     word, so `$PAYLOAD` sits inside allowed argv; and taint propagation learns new names
+     only from `NAME=` assignment tokens, so `PROG` never joins the tainted set and its
+     later use is not an appearance at all.
+
+     _Why no contract co-edit is needed._ Ordinary `run:` text; no pin moves.
+
+     _Why it is accepted._ Case 2. The allowance is a claim about a data _shape_, and a
+     builtin's option set is evaluation semantics rather than shape: `printf -v` is one
+     member of a class — any builtin whose options change where its result lands — that a
+     shape-level allowance cannot enumerate closed. Severity medium: it needs two visible
+     commands in the same diff.
+
+     _Compensating control._ Mandatory cross-client adversarial review of every `.github/`
+     diff.
+
+  6. **Computed-key `$GITHUB_ENV` and write-file laundering.** _Medium._
+
+     _Shape._ `printf '%s=%s' MODE "$PAYLOAD" >> "$GITHUB_ENV"` in one step, then
+     `bash -c "$MODE"` in a later step of the same workflow.
+
+     _Execution semantics._ Taint propagation follows `$GITHUB_ENV` writes by reading a
+     `NAME=` prefix off a token, so the literal-key spelling is caught: in
+     `printf 'MODE=%s' "$PAYLOAD" >> "$GITHUB_ENV"` the token `MODE=%s` yields the name
+     `MODE`, and `MODE` is tainted for every later step in the file. When the key arrives
+     as its own argv word and the `=` comes from the format string, no token carries a
+     `NAME=` prefix, no name is learned, and `MODE` is untainted everywhere downstream.
+     The same holds for any spelling that computes the key rather than writing it
+     literally.
+
+     _Why no contract co-edit is needed._ Ordinary `run:` text; no pin moves.
+
+     _Why it is accepted._ Case 2. Recovering the key would mean evaluating printf's
+     format against its arguments — running the formatter rather than reading the text.
+     Severity medium, for the same reason as the entry above.
+
+     _Compensating control._ Mandatory cross-client adversarial review of every `.github/`
+     diff.
+
+  Install-invocation pinning still reads the older flat segmentation, which is strictly
+  more suspicious than the parse — a grammar prefix makes an install fail to match its
+  pinned text rather than hide it — so it is left as it is.
 
 - **Composite evidence is separate evidence.** A run against another tree writes to its
   own directory under `gov-infra/evidence/`, so it neither deletes nor overwrites the
