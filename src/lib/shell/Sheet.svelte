@@ -58,7 +58,7 @@ sheets.
 		onClose,
 	}: Props = $props();
 
-	const titleId = `${id}-title`;
+	const titleId = $derived(`${id}-title`);
 
 	let panel = $state<HTMLElement | null>(null);
 
