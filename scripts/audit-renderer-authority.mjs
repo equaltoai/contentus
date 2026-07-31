@@ -129,6 +129,35 @@ const VENDORED_SOURCE_FILES = [
 
 const VENDORED_ARTICLE_CONTENT = 'src/lib/greater/faces/blog/components/Article/Content.svelte';
 
+/**
+ * Extensions the walk opens: source this toolchain executes or compiles.
+ *
+ * Deliberately wider than what the repo happens to contain today, because the
+ * narrow version was the bug. The walk recognized `ts|svelte|mjs|js`, so an
+ * `.mts` — a module `node` runs and `vite` compiles without comment — was
+ * invisible to every check that walks, including check 5, whose entire job is
+ * to notice source nobody classified. A file the walk never opens is a file
+ * each check silently passes: the same failure as `src/lib/compose`, one level
+ * further down, and worse for being in the mechanism rather than the list.
+ *
+ * So the set is defined by what runs, not by what exists. `.css`, `.json`, and
+ * assets stay out: they are not module code, and admitting them would make
+ * check 5 demand a classification for every stylesheet.
+ */
+const EXECUTABLE_SOURCE_EXTENSIONS = [
+	'ts',
+	'mts',
+	'cts',
+	'tsx',
+	'js',
+	'mjs',
+	'cjs',
+	'jsx',
+	'svelte',
+];
+
+const EXECUTABLE_SOURCE = new RegExp(`\\.(${EXECUTABLE_SOURCE_EXTENSIONS.join('|')})$`);
+
 function walkFiles(dir) {
 	const absolute = join(repoRoot, dir);
 	const results = [];
@@ -142,7 +171,7 @@ function walkFiles(dir) {
 		const full = join(absolute, entry);
 		if (statSync(full).isDirectory()) {
 			results.push(...walkFiles(relative(repoRoot, full)));
-		} else if (/\.(ts|svelte|mjs|js)$/.test(entry)) {
+		} else if (EXECUTABLE_SOURCE.test(entry)) {
 			results.push(full);
 		}
 	}
@@ -296,7 +325,8 @@ function main() {
 
 	console.log(
 		`\n- Forbidden renderer packages checked: ${FORBIDDEN_RENDERER_PACKAGES.length}` +
-			`\n- Contentus-owned source roots scanned: ${OWNED_SOURCE_DIRS.length}`
+			`\n- Contentus-owned source roots scanned: ${OWNED_SOURCE_DIRS.length}` +
+			`\n- Executable source extensions walked: ${EXECUTABLE_SOURCE_EXTENSIONS.join(', ')}`
 	);
 
 	if (total > 0) {
