@@ -1682,10 +1682,18 @@ export function validateRunExpressions(directory = workflowDirectory, root = '.'
  *     caller passed may well be event payload.
  *   - An env value carrying a `github.event` expression may not be referenced from
  *     an executable sink in any `run:` text: `bash -c`/`sh -c`, `eval`, `node -e`,
- *     `python -c` and their siblings, a command substitution, or the command word
- *     of a segment. Referencing it as data — as an argument to a non-executing
- *     command, or as argv to a pinned script — stays exactly as allowed as before,
- *     because that is the pattern this repository's own workflows use.
+ *     `python -c` and their siblings, `source`/`.`, an interpreter fed its program
+ *     on standard input, a command substitution, or the command word of a segment.
+ *     Referencing it as data — as an argument to a non-executing command, or as
+ *     argv to a pinned script — stays exactly as allowed as before, because that is
+ *     the pattern this repository's own workflows use.
+ *
+ * A sink is identified by what a segment *executes*, never by the word it starts
+ * with. `env bash -c "$VALUE"` runs the same interpreter as `bash -c "$VALUE"`, so
+ * resolution steps over launcher wrappers; `bash <<< "$VALUE"` and `bash < <(…)`
+ * hand the interpreter its program on stdin, where no `-c` flag ever appears; and
+ * `source <(…)` executes a substitution's output that the same substitution
+ * standing alone would only produce as data.
  *
  * Taint follows shell assignment and same-line `$GITHUB_ENV` writes, to a fixpoint,
  * so renaming a value does not launder it. What it does not follow is recorded as a
@@ -1705,6 +1713,43 @@ const inlineScriptFlags = new Map([
 	['ruby', /^-e$/],
 ]);
 const assignmentDeclarators = new Set(['export', 'declare', 'local', 'readonly', 'typeset']);
+
+// A wrapper that launches another command: what runs is what follows it, so a rule
+// that reads the word a segment starts with reads the wrapper and misses the sink.
+const launcherWrappers = new Set([
+	'builtin',
+	'command',
+	'doas',
+	'env',
+	'exec',
+	'ionice',
+	'nice',
+	'nohup',
+	'setsid',
+	'stdbuf',
+	'sudo',
+	'time',
+	'timeout',
+	'xargs',
+]);
+
+// `source` and `.` name the program to run rather than pass an argument to one.
+const sourceCommands = new Set(['source', '.']);
+
+// Interpreters that take their program from standard input when given no script
+// operand, so text fed to one there is program text and not the operand's data.
+const stdinInterpreters = new Set([...shellInterpreters, ...inlineScriptFlags.keys()]);
+const interpreterWords = new Set([...stdinInterpreters, ...sourceCommands, 'eval']);
+
+// An operand naming a script means stdin belongs to that script: `bash pinned.sh
+// <<< "$VALUE"` feeds data to a called script, which this model records as a
+// residual rather than judges. A word that is neither a path nor a script name
+// does not suppress the rule, so an option's value cannot pose as an operand.
+// A name that *is* standard input takes nothing away, so `bash /dev/stdin <<<
+// "$VALUE"` and `bash --rcfile /dev/stdin <<< "$VALUE"` remain the interpreter
+// reading its own program.
+const scriptOperand = /\/|\.(?:sh|bash|dash|zsh|ksh|js|mjs|cjs|ts|py|rb|pl)$/;
+const standardInputNames = new Set(['-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0']);
 
 const eventReference = /\bgithub\s*\.\s*event\b/;
 const inputReference = /\binputs\s*\.\s*[A-Za-z_-]/;
@@ -1820,6 +1865,19 @@ function envDeclarations(mappingLines, blockTexts) {
 // them can reach the executor: `$((x))` evaluates array subscripts, and `<(cmd)`
 // runs a command. Only spans that actually reference a tainted name are reported,
 // so ordinary arithmetic in a workflow stays untouched.
+// The interior of the parenthesised group whose `(` sits at `open`, and the index
+// of its closing `)`. An unbalanced group runs to the end of the text, which is the
+// reading that fails closed: everything after it is treated as inside it.
+function balancedInterior(text, open) {
+	let depth = 1;
+	let cursor = open + 1;
+	for (; cursor < text.length && depth; cursor += 1) {
+		if (text[cursor] === '(') depth += 1;
+		else if (text[cursor] === ')') depth -= 1;
+	}
+	return { text: text.slice(open + 1, depth ? text.length : cursor - 1), end: cursor - 1 };
+}
+
 function substitutionSpans(text) {
 	const spans = [];
 	for (let index = 0; index < text.length; index += 1) {
@@ -1838,17 +1896,12 @@ function substitutionSpans(text) {
 			(character === '$' && text[index + 1] === '(') ||
 			((character === '<' || character === '>') && text[index + 1] === '(');
 		if (!opensSubstitution) continue;
-		let depth = 1;
-		let cursor = index + 2;
-		for (; cursor < text.length && depth; cursor += 1) {
-			if (text[cursor] === '(') depth += 1;
-			else if (text[cursor] === ')') depth -= 1;
-		}
+		const group = balancedInterior(text, index + 1);
 		spans.push({
 			kind: character === '$' ? 'a $(...) command substitution' : 'a <(...) process substitution',
-			text: text.slice(index + 2, depth ? text.length : cursor - 1),
+			text: group.text,
 		});
-		index = cursor - 1;
+		index = group.end;
 	}
 	return spans;
 }
@@ -1899,6 +1952,91 @@ function propagateTaint(runTexts, tainted) {
 	return tainted;
 }
 
+/**
+ * The command word a segment actually executes, plus the interpreters a launcher
+ * wrapper may still reach. Judging `segment[0]` alone lets `env bash -c "$VALUE"`
+ * and `command bash -c "$VALUE"` past a rule that stops the bare `bash -c` it
+ * contains, so resolution steps over each wrapper and over the assignments and
+ * options that belong to it, chained as deeply as the segment nests them.
+ *
+ * Wrapper option grammars differ, and one whose option takes a separate value
+ * (`env -u NAME bash -c …`) would otherwise resolve to that value. So once a
+ * wrapper has been consumed, every later unquoted interpreter word is returned as
+ * an additional head. Those extra heads carry the interpreter rules only, never the
+ * command-word rule, so `env printf '%s' "$VALUE"` stays the data use it is.
+ */
+function resolveExecution(segment) {
+	let index = 0;
+	let wrapped = false;
+	while (
+		index < segment.length &&
+		!segment[index].quoted &&
+		launcherWrappers.has(segment[index].value)
+	) {
+		wrapped = true;
+		index += 1;
+		while (
+			index < segment.length &&
+			!segment[index].quoted &&
+			(assignedName(segment[index].value) || /^[-+]/.test(segment[index].value))
+		)
+			index += 1;
+	}
+	if (index >= segment.length) return { heads: [], wrapped };
+	const heads = [index];
+	if (wrapped)
+		for (let cursor = index + 1; cursor < segment.length; cursor += 1)
+			if (!segment[cursor].quoted && interpreterWords.has(segment[cursor].value))
+				heads.push(cursor);
+	return { heads, wrapped };
+}
+
+/**
+ * Program text an interpreter reads from standard input: a `<<<` herestring, or a
+ * process substitution redirected onto stdin with `< <(…)`. The interpreter runs
+ * what it reads, so a tainted value in either is execution — and neither carries
+ * the `-c` flag the inline-script rule looks for.
+ *
+ * A script operand suppresses the rule: stdin then belongs to that script, and a
+ * value reaching a sink inside a called script is a recorded residual rather than a
+ * shape this scanner judges. An operand that names standard input itself suppresses
+ * nothing, because it takes nothing away.
+ */
+function stdinProgramSpans(rest) {
+	for (const entry of rest) {
+		if (/^0?[<>]/.test(entry.value)) break;
+		if (entry.quoted) return [];
+		if (standardInputNames.has(entry.value)) continue;
+		if (/^[-+]/.test(entry.value) || assignedName(entry.value)) continue;
+		if (scriptOperand.test(entry.value)) return [];
+	}
+	const spans = [];
+	const trailing = (from) =>
+		rest
+			.slice(from)
+			.map((entry) => entry.value)
+			.join(' ');
+	for (let index = 0; index < rest.length; index += 1) {
+		const value = rest[index].value;
+		if (value.startsWith('<<<')) {
+			spans.push({ kind: 'a `<<<` herestring', text: value.slice(3) || trailing(index + 1) });
+			continue;
+		}
+		// `< <(cmd)` and its explicit-descriptor spelling `0< <(cmd)`; a redirection
+		// onto any other descriptor is not the interpreter's program.
+		const stdinRedirection = value.match(/^0?<(?!<)/);
+		if (!stdinRedirection) continue;
+		const redirected =
+			`${value.slice(stdinRedirection[0].length)} ${trailing(index + 1)}`.trimStart();
+		if (redirected.startsWith('<('))
+			spans.push({
+				kind: 'a `< <(...)` stdin process substitution',
+				text: balancedInterior(redirected, 1).text,
+			});
+	}
+	return spans;
+}
+
 function executableSinkFindings(text, tainted) {
 	const findings = [];
 	const names = [...tainted];
@@ -1908,26 +2046,50 @@ function executableSinkFindings(text, tainted) {
 	};
 
 	for (const segment of runSegments(text)) {
-		const head = segment[0];
-		if (!head) continue;
-		const rest = segment.slice(1);
+		const { heads, wrapped } = resolveExecution(segment);
+		if (!heads.length) continue;
+		const via = wrapped ? ' reached through a launcher wrapper' : '';
 		// A variable that resolves to the command word is execution, not data. An
 		// assignment is neither; propagateTaint has already followed it.
-		if (!assignedName(head.value)) report(hits(head.value), 'the command word of a shell segment');
-		const headWord = head.quoted ? '' : head.value;
-		if (shellInterpreters.has(headWord)) {
-			const command = rest.find(
-				(entry) => !entry.quoted && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(entry.value)
-			);
-			if (command)
-				for (const entry of rest) report(hits(entry.value), `\`${headWord} ${command.value}\``);
-		}
-		if (headWord === 'eval') for (const entry of rest) report(hits(entry.value), '`eval`');
-		const flag = inlineScriptFlags.get(headWord);
-		if (flag) {
-			const inline = rest.find((entry) => !entry.quoted && flag.test(entry.value));
-			if (inline)
-				for (const entry of rest) report(hits(entry.value), `\`${headWord} ${inline.value}\``);
+		const commandWord = segment[heads[0]];
+		if (!assignedName(commandWord.value))
+			report(hits(commandWord.value), `the command word of a shell segment${via}`);
+		for (const position of heads) {
+			const head = segment[position];
+			const rest = segment.slice(position + 1);
+			const headWord = head.quoted ? '' : head.value;
+			// Whether the interpreter already holds its program inline. If it does,
+			// its standard input is that program's data rather than a second program.
+			let inlineProgram = false;
+			if (shellInterpreters.has(headWord)) {
+				const command = rest.find(
+					(entry) => !entry.quoted && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(entry.value)
+				);
+				if (command) {
+					inlineProgram = true;
+					for (const entry of rest)
+						report(hits(entry.value), `\`${headWord} ${command.value}\`${via}`);
+				}
+			}
+			if (headWord === 'eval')
+				for (const entry of rest) report(hits(entry.value), `\`eval\`${via}`);
+			// `source`/`.` take a program, not an argument, so every operand is program
+			// text: `source <(printf '%s' "$VALUE")` executes what the substitution
+			// prints, though that same substitution standing alone only prints it.
+			if (sourceCommands.has(headWord))
+				for (const entry of rest) report(hits(entry.value), `\`${headWord}\`${via}`);
+			const flag = inlineScriptFlags.get(headWord);
+			if (flag) {
+				const inline = rest.find((entry) => !entry.quoted && flag.test(entry.value));
+				if (inline) {
+					inlineProgram = true;
+					for (const entry of rest)
+						report(hits(entry.value), `\`${headWord} ${inline.value}\`${via}`);
+				}
+			}
+			if (!inlineProgram && stdinInterpreters.has(headWord))
+				for (const span of stdinProgramSpans(rest))
+					report(hits(span.text), `${span.kind} run by \`${headWord}\`${via}`);
 		}
 	}
 	// A substitution is a nested shell, so it is judged by the same rules rather
