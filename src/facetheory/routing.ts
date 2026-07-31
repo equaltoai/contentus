@@ -1,6 +1,6 @@
 import { APP_BASE_PATH } from '$lib/config/base-path';
 
-import type { AppPageDescriptor, AppPageKey, RouteProps } from './types';
+import type { AppPageDescriptor, AppPageKey, ComposeIntent, RouteProps } from './types';
 
 export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
 
@@ -146,6 +146,47 @@ export function resolveSlug(pathname: string): string | null {
 		segmentAfter(route, '/series/') ??
 		segmentAfter(route, '/categories/')
 	);
+}
+
+/**
+ * What `/compose` was opened to do, read from the query string.
+ *
+ * One route, four intents. A reply is not a different surface from a new post —
+ * it is the same composer with a target attached — so it is not a different
+ * route either, and `/compose?inReplyTo=…` deep-links and server-renders like
+ * anything else.
+ *
+ * Exactly one intent wins, in a fixed order, because a link carrying two is
+ * malformed rather than ambiguous: guessing which the caller meant would make
+ * the composer's behaviour depend on parameter order in a URL somebody else
+ * built.
+ */
+export function resolveComposeIntent(
+	query: Readonly<Record<string, string[] | undefined>> | undefined
+): ComposeIntent {
+	const first = (key: string): string | null => {
+		const value = query?.[key]?.[0];
+		return typeof value === 'string' && value.trim() ? value.trim() : null;
+	};
+
+	const edit = first('edit');
+	if (edit) return { mode: 'edit', statusId: edit };
+
+	const inReplyTo = first('inReplyTo');
+	if (inReplyTo) return { mode: 'reply', statusId: inReplyTo };
+
+	const quote = first('quote');
+	if (quote) return { mode: 'quote', statusId: quote };
+
+	return { mode: 'new', statusId: null };
+}
+
+/** App-relative href for a compose intent, so callers do not hand-build one. */
+export function composeHref(intent: ComposeIntent): string {
+	if (!intent.statusId || intent.mode === 'new') return href('/compose');
+
+	const key = intent.mode === 'edit' ? 'edit' : intent.mode === 'reply' ? 'inReplyTo' : 'quote';
+	return `${href('/compose')}?${key}=${encodeURIComponent(intent.statusId)}`;
 }
 
 /** Build an app-relative href, base path included. */

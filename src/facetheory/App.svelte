@@ -16,14 +16,17 @@ is no catch-all render path that could silently show the wrong surface.
 
 	import type { RouteProps } from './types';
 
-	let { page, slug, index, reader }: RouteProps = $props();
+	let { page, slug, index, reader, compose }: RouteProps = $props();
 </script>
 
 <AppShell {page}>
 	{#if page.key === 'article-reader'}
 		<ArticleReaderRoute {page} data={reader ?? { article: null, body: null, unavailable: null }} />
 	{:else if page.key === 'compose'}
-		<ComposeRoute {page} />
+		<ComposeRoute
+			{page}
+			data={compose ?? { intent: { mode: 'new', statusId: null }, source: null }}
+		/>
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />
 	{:else if page.key === 'not-found'}

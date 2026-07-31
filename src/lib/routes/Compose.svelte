@@ -4,20 +4,27 @@ Face 3 — Post to Timeline (product design §5) · core surface.
 Composed from the vendored `shared/compose` compound. `ComposeBox` is deprecated
 upstream and is not used anywhere here.
 
-WHAT IS VENDORED AND WHAT IS OURS. `Root`, `Editor`, `CharacterCount`,
-`VisibilitySelect`, and `Submit` come from `src/lib/components/compose/`
-untouched. The controls beside them — content warning, `sensitive`, the byte
-budget — are contentus-owned because greater's compose state models the
-Mastodon-shaped subset and lesser's contract is wider. Neither the compound nor
-its state is forked; the extras store in `$lib/compose/extras.svelte` runs
-alongside it and both are read together at submit.
+FOUR INTENTS, ONE SURFACE. `/compose`, `?inReplyTo=`, `?quote=`, and `?edit=`
+are the same composer with a target attached, so they are the same route. Each
+deep-links and server-renders like anything else, which matters because lesser
+performs no SPA fallback under `/l/*`.
+
+WHAT IS VENDORED AND WHAT IS OURS. `Root`, `EditorWithAutocomplete`,
+`CharacterCount`, `VisibilitySelect`, and `Submit` come from
+`src/lib/components/compose/` untouched, and `MediaComposer`, `PollComposer`,
+`CustomEmojiPicker`, and `Modal` are vendored patterns and primitives. The
+controls beside them — content warning, `sensitive`, schedule, agent
+attribution, the byte budget — are contentus-owned because greater's compose
+state models the Mastodon-shaped subset and lesser's contract is wider. Neither
+the compound nor its state is forked; the extras store in
+`$lib/compose/extras.svelte` runs alongside it and both are read together at
+submit.
 
 AUTH AND SSR. The form renders for everyone, including on the anonymous server
-pass. lesser has no SPA fallback under `/l/*`, so a cold deep link to /compose
-has to produce a complete page, and the session lives in `sessionStorage` where
-the server cannot see it. Rendering the composer and stating the sign-in
-requirement beside it beats a page that flashes from "sign in" to a form a beat
-later — and nothing a signed-out visitor types is lost when they do sign in.
+pass. The session lives in `sessionStorage` where the server cannot see it, and
+a cold deep link has to produce a complete page — so the composer renders and
+the sign-in requirement is stated beside it, rather than the page flashing from
+"sign in" to a form a beat later. Nothing a signed-out visitor types is lost.
 
 THE REVIEW GATE IS NOT HERE. This face posts notes to the timeline, which is a
 direct authenticated write. Article drafts are face 2, they go through lesser's
@@ -33,28 +40,65 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	import ComposeSubmit from '$lib/components/compose/Submit.svelte';
 	import ComposeVisibilitySelect from '$lib/components/compose/VisibilitySelect.svelte';
 	import type { ComposeHandlers } from '$lib/components/compose/context';
+	import AgentAttributionField from '$lib/compose/AgentAttributionField.svelte';
 	import ComposeBudget from '$lib/compose/ComposeBudget.svelte';
 	import ContentWarningField from '$lib/compose/ContentWarningField.svelte';
+	import DeleteAction from '$lib/compose/DeleteAction.svelte';
 	import EmojiField from '$lib/compose/EmojiField.svelte';
 	import MediaField from '$lib/compose/MediaField.svelte';
 	import PollField from '$lib/compose/PollField.svelte';
+	import ScheduleField from '$lib/compose/ScheduleField.svelte';
 	import SensitiveField from '$lib/compose/SensitiveField.svelte';
+	import SourceContext from '$lib/compose/SourceContext.svelte';
 	import { STATUS_BYTE_LIMIT, statusByteLength } from '$lib/compose/budget';
 	import { createComposeExtras } from '$lib/compose/extras.svelte';
-	import { createNote, toLesserVisibility, type ComposeFailure } from '$lib/cms/compose';
+	import {
+		createNote,
+		loadComposeViewer,
+		loadSourceStatus,
+		scheduleStatus,
+		toLesserVisibility,
+		updateStatus,
+		type ComposeFailure,
+		type ComposeViewer,
+		type SourceStatus,
+	} from '$lib/cms/compose';
 	import { composeSearchHandler } from '$lib/cms/discovery';
-	import { isAuthenticated, startLogin } from '$lib/auth/session';
+	import { accessTokenOrNull, isAuthenticated, startLogin } from '$lib/auth/session';
 
-	import type { AppPageDescriptor } from '../../facetheory/types';
+	import type { AppPageDescriptor, ComposeData } from '../../facetheory/types';
+	import { href as appHref } from '../../facetheory/routing';
 	import Notice from './Notice.svelte';
 
 	interface Props {
 		page: AppPageDescriptor;
+		data: ComposeData;
 	}
 
-	let { page }: Props = $props();
+	let { page, data }: Props = $props();
 
-	const extras = createComposeExtras();
+	// Route props are settled for the life of a page load — FaceTheory hydrates
+	// once and there is no client-side navigation into this route — so the
+	// init-time reads below capture the only value these ever have. `$derived`
+	// for the two the template also reads, so the intent stays in one place.
+	const mode = $derived(data.intent.mode);
+	const targetId = $derived(data.intent.statusId);
+
+	let source = $state<SourceStatus | null>(data.source);
+	let viewer = $state<ComposeViewer | null>(null);
+
+	/**
+	 * The intent's target, planted in the extras store before the first render so
+	 * a reply is a reply from the moment it exists — not after an effect fires.
+	 *
+	 * `quoteId` is only set for a quote intent. A reply carries `inReplyToId`,
+	 * an edit carries neither and drives `updateStatus` instead.
+	 */
+	const extras = createComposeExtras({
+		...(mode === 'reply' && targetId ? { inReplyToId: targetId } : {}),
+		...(mode === 'quote' && targetId ? { quoteId: targetId } : {}),
+		...(mode === 'edit' && targetId ? { editingStatusId: targetId } : {}),
+	});
 
 	/**
 	 * Three states, not two. `unknown` is the server's honest answer and the
@@ -64,16 +108,49 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	let session = $state<'unknown' | 'anonymous' | 'authenticated'>('unknown');
 	let failure = $state<ComposeFailure | null>(null);
 	let posted = $state<{ id: string; url: string | null } | null>(null);
+	let scheduled = $state<{ id: string; scheduledAt: string } | null>(null);
+	let deleted = $state(false);
 	let signInError = $state<string | null>(null);
 
-	onMount(() => {
+	/**
+	 * The edit body, seeded once from the source status.
+	 *
+	 * `Object.content` is what lesser's own sanitizer stored on write
+	 * (`htmlsafe.SanitizeHTMLByContract`), and `updateStatus` sanitizes again on
+	 * the way back — so an edit is a round trip through the server's sanitizer,
+	 * with the client neither rendering nor transforming anything. There is no
+	 * separate raw source for a note to withhold: the stored content IS the
+	 * sanitized content, and editing it is editing text.
+	 */
+	let editSeed = $state(mode === 'edit' ? (data.source?.content ?? '') : '');
+	let editSeeded = $state(mode !== 'edit' || Boolean(data.source));
+
+	onMount(async () => {
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
+
+		if (session !== 'authenticated') return;
+
+		// The server pass is anonymous, so anything narrower than a public status
+		// arrives null. Re-ask with the session token.
+		const [loadedViewer, loadedSource] = await Promise.all([
+			loadComposeViewer(),
+			targetId && !source
+				? loadSourceStatus(targetId, { endpoint: null, accessToken: accessTokenOrNull() })
+				: Promise.resolve(source),
+		]);
+
+		viewer = loadedViewer;
+		if (loadedSource) source = loadedSource;
+		if (mode === 'edit' && !editSeeded && loadedSource) {
+			editSeed = loadedSource.content;
+			editSeeded = true;
+		}
 	});
 
 	async function onSignIn() {
 		signInError = null;
 		try {
-			await startLogin({ returnTo: `${page.path}` });
+			await startLogin({ returnTo: `${appHref('/compose')}` });
 		} catch (error) {
 			signInError = error instanceof Error ? error.message : 'Sign-in could not start.';
 		}
@@ -89,33 +166,96 @@ reviewer/publisher workflow, and nothing on this page touches them.
 		}
 	}
 
+	const submitLabel = $derived(
+		mode === 'edit' ? 'Save changes' : extras.state.scheduledAt ? 'Schedule' : 'Post'
+	);
+
 	const handlers: ComposeHandlers = {
-		onSubmit: async (data) => {
+		onSubmit: async (formData) => {
 			failure = null;
 			posted = null;
+			scheduled = null;
 
 			// The byte guard, applied where it is decisive. lesser measures UTF-8
 			// bytes and the vendored counter measures UTF-16 units, so a post can
 			// pass the on-screen counter and still be rejected. Refusing here —
-			// rather than trying to drive the vendored `overLimit` flag, which
-			// `Root` recomputes on every keystroke — means the composer's refusal
-			// and the instance's refusal always agree.
-			const bytes = statusByteLength(data.content, data.contentWarning ?? '');
+			// rather than driving the vendored `overLimit` flag, which `Root`
+			// recomputes on every keystroke — means the composer's refusal and the
+			// instance's always agree.
+			const bytes = statusByteLength(formData.content, formData.contentWarning ?? '');
 			if (bytes > STATUS_BYTE_LIMIT) {
 				const message = `This post is ${bytes} bytes and the instance accepts ${STATUS_BYTE_LIMIT}.`;
 				failure = { reason: 'rejected', message };
 				throw new Error(message);
 			}
 
+			const spoiler = formData.contentWarning ? { spoilerText: formData.contentWarning } : {};
+
+			if (mode === 'edit' && extras.state.editingStatusId) {
+				// No visibility and no poll: `UpdateStatusInput` carries neither,
+				// which is lesser saying a posted status keeps its reach and a poll
+				// with votes is not rewritten underneath them.
+				const result = await updateStatus(extras.state.editingStatusId, {
+					content: formData.content,
+					sensitive: extras.state.sensitive,
+					...spoiler,
+					...(extras.state.attachmentIds.length
+						? { attachmentIds: extras.state.attachmentIds }
+						: {}),
+				});
+
+				if (!result.ok) {
+					failure = result.failure;
+					if (result.failure.reason === 'unauthenticated') session = 'anonymous';
+					throw new Error(result.failure.message);
+				}
+
+				posted = { id: result.value.id, url: linkableUrl(result.value.id) };
+				return;
+			}
+
+			if (extras.state.scheduledAt) {
+				// `ScheduleStatusInput` spells the body `text` and attachments
+				// `mediaIds`, and has no `quoteId` — so the schedule control and the
+				// quote intent are mutually exclusive, stated rather than dropped.
+				const result = await scheduleStatus({
+					text: formData.content,
+					scheduledAt: extras.state.scheduledAt,
+					visibility: toLesserVisibility(formData.visibility),
+					sensitive: extras.state.sensitive,
+					...spoiler,
+					...(extras.state.inReplyToId ? { inReplyToId: extras.state.inReplyToId } : {}),
+					...(extras.state.attachmentIds.length
+						? { mediaIds: extras.state.attachmentIds }
+						: {}),
+					...(extras.state.poll ? { poll: extras.state.poll } : {}),
+				});
+
+				if (!result.ok) {
+					failure = result.failure;
+					if (result.failure.reason === 'unauthenticated') session = 'anonymous';
+					throw new Error(result.failure.message);
+				}
+
+				scheduled = result.value;
+				extras.reset();
+				return;
+			}
+
 			const result = await createNote({
-				content: data.content,
-				visibility: toLesserVisibility(data.visibility),
+				content: formData.content,
+				visibility: toLesserVisibility(formData.visibility),
 				sensitive: extras.state.sensitive,
-				...(data.contentWarning ? { spoilerText: data.contentWarning } : {}),
+				...spoiler,
 				...(extras.state.attachmentIds.length
 					? { attachmentIds: extras.state.attachmentIds }
 					: {}),
 				...(extras.state.poll ? { poll: extras.state.poll } : {}),
+				...(extras.state.inReplyToId ? { inReplyToId: extras.state.inReplyToId } : {}),
+				...(extras.state.quoteId ? { quoteId: extras.state.quoteId } : {}),
+				...(extras.state.agentAttribution
+					? { agentAttribution: extras.state.agentAttribution }
+					: {}),
 			});
 
 			if (!result.ok) {
@@ -135,7 +275,9 @@ reviewer/publisher workflow, and nothing on this page touches them.
 
 <header class="contentus-page-header">
 	<p class="contentus-eyebrow">{page.eyebrow}</p>
-	<h1 class="contentus-h1">{page.title}</h1>
+	<h1 class="contentus-h1">
+		{mode === 'edit' ? 'Edit post' : mode === 'reply' ? 'Reply' : mode === 'quote' ? 'Quote' : page.title}
+	</h1>
 	<p class="contentus-lede">{page.summary}</p>
 </header>
 
@@ -155,10 +297,20 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	</section>
 {/if}
 
+{#if deleted}
+	<Notice
+		title="Deleted"
+		message="The post is gone from this instance, and a delete has gone out to the instances that
+			received it."
+	/>
+{/if}
+
 {#if posted}
 	<Notice
-		title="Posted"
-		message="Your post is live on this instance and on its way to the fediverse."
+		title={mode === 'edit' ? 'Saved' : 'Posted'}
+		message={mode === 'edit'
+			? 'Your changes are live, and an update has gone out to the fediverse.'
+			: 'Your post is live on this instance and on its way to the fediverse.'}
 		detail={posted.url ? null : posted.id}
 	/>
 	{#if posted.url}
@@ -166,49 +318,86 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	{/if}
 {/if}
 
+{#if scheduled}
+	<Notice
+		title="Scheduled"
+		message="This post is queued and will publish at the time you chose."
+		detail={scheduled.scheduledAt}
+	/>
+{/if}
+
 {#if failure && failure.reason === 'unauthenticated'}
 	<Notice title="Not signed in" message={failure.message} />
 {/if}
 
 <div class="contentus-compose">
-	<ComposeRoot
-		config={{
-			characterLimit: STATUS_BYTE_LIMIT,
-			placeholder: 'What do you want to say?',
-			allowMedia: true,
-			allowPolls: true,
-			defaultVisibility: 'public',
-			class: 'contentus-compose__form',
-		}}
-		{handlers}
-	>
-		<!-- `@` and `#` complete against lesser's `search`, `:` against the
-		     instance's `customEmojis`. The completion writes into the post text,
-		     which is the only path lesser reads: its resolver never looks at
-		     CreateNoteInput.mentions or .tags. -->
-		<ComposeEditorWithAutocomplete rows={6} searchHandler={composeSearchHandler} />
+	{#if targetId && mode !== 'new'}
+		<SourceContext {mode} statusId={targetId} {source} />
+	{/if}
 
-		<!-- Media sits directly under the editor so its thumbnails stay above the
-		     action bar — and so, on a phone, above the keyboard-safe area rather
-		     than behind the keyboard (product design §5). -->
-		<MediaField />
+	{#key editSeed}
+		<ComposeRoot
+			config={{
+				characterLimit: STATUS_BYTE_LIMIT,
+				placeholder: mode === 'reply' ? 'Write your reply…' : 'What do you want to say?',
+				allowMedia: true,
+				allowPolls: mode !== 'edit',
+				defaultVisibility: 'public',
+				class: 'contentus-compose__form',
+			}}
+			initialState={{ content: editSeed }}
+			{handlers}
+		>
+			<!-- `@` and `#` complete against lesser's `search`, `:` against the
+			     instance's `customEmojis`. The completion writes into the post text,
+			     which is the only path lesser reads: its resolver never looks at
+			     CreateNoteInput.mentions or .tags. -->
+			<ComposeEditorWithAutocomplete rows={6} searchHandler={composeSearchHandler} />
 
-		<!-- Visibility and the content warning are first-class controls on the
-		     surface, not entries in an overflow menu (product design §5). -->
-		<div class="contentus-compose-controls">
-			<ComposeVisibilitySelect />
-			<ContentWarningField />
-			<SensitiveField />
-		</div>
+			<!-- Media sits directly under the editor so its thumbnails stay above the
+			     action bar — and so, on a phone, above the keyboard-safe area rather
+			     than behind the keyboard (product design §5). -->
+			<MediaField />
 
-		<PollField />
-		<EmojiField />
+			<!-- Visibility and the content warning are first-class controls on the
+			     surface, not entries in an overflow menu (product design §5).
+			     Visibility is hidden while editing: `UpdateStatusInput` has no
+			     visibility field, so the control would change nothing. -->
+			<div class="contentus-compose-controls">
+				{#if mode !== 'edit'}
+					<ComposeVisibilitySelect />
+				{/if}
+				<ContentWarningField />
+				<SensitiveField />
+				{#if mode !== 'edit'}
+					<ScheduleField />
+				{/if}
+			</div>
 
-		<ComposeBudget />
+			{#if mode !== 'edit'}
+				<PollField />
+			{/if}
+			<EmojiField />
 
-		<footer class="contentus-compose-actions">
-			<ComposeCharacterCount />
-			<ComposeSubmit text="Post" loadingText="Posting…" />
-		</footer>
-	</ComposeRoot>
+			<AgentAttributionField {viewer} />
+
+			<ComposeBudget />
+
+			<footer class="contentus-compose-actions">
+				<ComposeCharacterCount />
+				<div class="contentus-compose-actions__buttons">
+					{#if mode === 'edit' && targetId}
+						<DeleteAction
+							statusId={targetId}
+							onDeleted={() => {
+								deleted = true;
+								posted = null;
+							}}
+						/>
+					{/if}
+					<ComposeSubmit text={submitLabel} loadingText="Sending…" />
+				</div>
+			</footer>
+		</ComposeRoot>
+	{/key}
 </div>
