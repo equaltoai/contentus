@@ -33,6 +33,51 @@
    this file contains no brand literals of its own.
    ============================================================= */
 
+/* =============================================================
+   Pattern variable bridge
+   -------------------------------------------------------------
+   The `media-composer`, `poll-composer`, and `custom-emoji-picker`
+   patterns DO ship styles — Svelte `<style>` blocks, which the client
+   build emits as a real stylesheet and FaceTheory links. So unlike the
+   compose compound they are not unstyled; they are styled for a LIGHT
+   theme, because every colour they read is spelled
+   `var(--bg-primary, #fff)` and the variable is defined nowhere in the
+   greater token set. Undefined name, literal fallback, white boxes on the
+   Midnight ground.
+
+   These declarations define the names, so the fallbacks never apply. This
+   is the same job `bridge.css` does for `--gr-*`, on a second vocabulary
+   the patterns invented — and it is a mapping, not an override: no rule
+   below restyles a pattern, it only answers the question the pattern asked.
+
+   Routed upstream with the missing-CSS finding: patterns should read the
+   `--gr-*` semantic tokens the rest of the kit uses, and then a consumer
+   that has themed greater has themed them too.
+   ============================================================= */
+
+:root {
+	--bg-primary: var(--tc-surface-1);
+	--bg-secondary: var(--tc-surface-2);
+	--bg-tertiary: var(--tc-surface-3);
+	--bg-hover: var(--tc-surface-2);
+	--bg-selected: var(--tc-core-blue-container);
+	--border-color: var(--tc-outline-variant);
+	--border-hover: var(--tc-outline);
+	--focus-color: var(--tc-core-blue);
+	--text-primary: var(--tc-fg);
+	--text-secondary: var(--tc-fg-muted);
+	--text-tertiary: var(--tc-fg-dim);
+	--primary-color: var(--tc-core-blue);
+	--primary-color-dark: var(--tc-core-blue-fixed);
+	--primary-color-light: var(--tc-core-blue-fixed-dim);
+	--danger-color: var(--tc-error);
+	--warning-color: var(--tc-phi-gold);
+	--warning-icon: var(--tc-phi-gold);
+	--warning-bg: var(--tc-phi-gold-container);
+	--warning-bg-hover: var(--tc-phi-gold-container);
+	--warning-border: var(--tc-phi-gold);
+}
+
 /* ---- Compose.Root: the form container ---- */
 .compose-root {
 	display: flex;
@@ -313,6 +358,104 @@
 	justify-content: space-between;
 	gap: var(--tc-space-4);
 	padding-top: var(--tc-space-2);
+}
+
+/* ---- Media, poll, emoji fields ---- */
+
+.contentus-compose-media {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+}
+
+.contentus-compose-media__error {
+	margin: 0;
+	color: var(--tc-error);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-media__progress {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	font-variant-numeric: tabular-nums;
+}
+
+.contentus-compose-poll,
+.contentus-compose-emoji {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	align-items: flex-start;
+}
+
+.contentus-compose-poll__toggle,
+.contentus-compose-emoji__toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-compose-poll__toggle:hover,
+.contentus-compose-emoji__toggle:hover {
+	border-color: var(--tc-accent);
+}
+
+.contentus-compose-poll__toggle:disabled,
+.contentus-compose-emoji__toggle:disabled {
+	color: var(--tc-fg-dim);
+	cursor: not-allowed;
+}
+
+.contentus-compose-poll__summary {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+	width: 100%;
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+}
+
+.contentus-compose-poll__title {
+	margin: 0 0 var(--tc-space-2) 0;
+	font-weight: var(--tc-w-semibold);
+}
+
+.contentus-compose-poll__options {
+	margin: 0 0 var(--tc-space-2) 0;
+	padding-left: var(--tc-space-5);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-compose-poll__remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	min-height: 44px;
+	min-width: 44px;
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md);
+	background: transparent;
+	color: var(--tc-fg-muted);
+	cursor: pointer;
+}
+
+.contentus-compose-poll__remove:hover {
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
 }
 
 @media (max-width: 720px) {

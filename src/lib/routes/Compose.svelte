@@ -28,17 +28,21 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	import { onMount } from 'svelte';
 
 	import ComposeCharacterCount from '$lib/components/compose/CharacterCount.svelte';
-	import ComposeEditor from '$lib/components/compose/Editor.svelte';
+	import ComposeEditorWithAutocomplete from '$lib/components/compose/EditorWithAutocomplete.svelte';
 	import ComposeRoot from '$lib/components/compose/Root.svelte';
 	import ComposeSubmit from '$lib/components/compose/Submit.svelte';
 	import ComposeVisibilitySelect from '$lib/components/compose/VisibilitySelect.svelte';
 	import type { ComposeHandlers } from '$lib/components/compose/context';
 	import ComposeBudget from '$lib/compose/ComposeBudget.svelte';
 	import ContentWarningField from '$lib/compose/ContentWarningField.svelte';
+	import EmojiField from '$lib/compose/EmojiField.svelte';
+	import MediaField from '$lib/compose/MediaField.svelte';
+	import PollField from '$lib/compose/PollField.svelte';
 	import SensitiveField from '$lib/compose/SensitiveField.svelte';
 	import { STATUS_BYTE_LIMIT, statusByteLength } from '$lib/compose/budget';
 	import { createComposeExtras } from '$lib/compose/extras.svelte';
 	import { createNote, toLesserVisibility, type ComposeFailure } from '$lib/cms/compose';
+	import { composeSearchHandler } from '$lib/cms/discovery';
 	import { isAuthenticated, startLogin } from '$lib/auth/session';
 
 	import type { AppPageDescriptor } from '../../facetheory/types';
@@ -108,6 +112,10 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				visibility: toLesserVisibility(data.visibility),
 				sensitive: extras.state.sensitive,
 				...(data.contentWarning ? { spoilerText: data.contentWarning } : {}),
+				...(extras.state.attachmentIds.length
+					? { attachmentIds: extras.state.attachmentIds }
+					: {}),
+				...(extras.state.poll ? { poll: extras.state.poll } : {}),
 			});
 
 			if (!result.ok) {
@@ -167,14 +175,23 @@ reviewer/publisher workflow, and nothing on this page touches them.
 		config={{
 			characterLimit: STATUS_BYTE_LIMIT,
 			placeholder: 'What do you want to say?',
-			allowMedia: false,
-			allowPolls: false,
+			allowMedia: true,
+			allowPolls: true,
 			defaultVisibility: 'public',
 			class: 'contentus-compose__form',
 		}}
 		{handlers}
 	>
-		<ComposeEditor rows={6} />
+		<!-- `@` and `#` complete against lesser's `search`, `:` against the
+		     instance's `customEmojis`. The completion writes into the post text,
+		     which is the only path lesser reads: its resolver never looks at
+		     CreateNoteInput.mentions or .tags. -->
+		<ComposeEditorWithAutocomplete rows={6} searchHandler={composeSearchHandler} />
+
+		<!-- Media sits directly under the editor so its thumbnails stay above the
+		     action bar — and so, on a phone, above the keyboard-safe area rather
+		     than behind the keyboard (product design §5). -->
+		<MediaField />
 
 		<!-- Visibility and the content warning are first-class controls on the
 		     surface, not entries in an overflow menu (product design §5). -->
@@ -183,6 +200,9 @@ reviewer/publisher workflow, and nothing on this page touches them.
 			<ContentWarningField />
 			<SensitiveField />
 		</div>
+
+		<PollField />
+		<EmojiField />
 
 		<ComposeBudget />
 
