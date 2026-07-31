@@ -1,9 +1,20 @@
 note: a PATH `greater` exists (/home/aron/.local/share/pnpm/greater) and is deliberately not used.
-GOV-BLOCKED: gov-infra/.tools/greater-components-cli.tgz is absent, so SEC-7 has no verified archive to execute from
-The greater CLI is not published to the npm registry. Fetch the pinned,
-digest-verified release asset with the repository-local installer:
-  node gov-infra/verifiers/install-greater-cli.mjs
-CI runs exactly that step. SEC-7 consumes the tarball it leaves behind and
-extracts its own copy; it never executes the tree that installer produces,
-and a PATH `greater` is not accepted at all — provenance by self-report is
-not provenance. BLOCKED is not green: this report will not pass.
+note: a repo-local install exists under gov-infra/.tools and is deliberately not executed;
+      SEC-7 runs only what it extracts itself from the digest-verified tarball.
+greater CLI release asset: https://github.com/equaltoai/greater-components/releases/download/greater-v0.11.9/greater-components-cli.tgz
+  SHA-256 cc16a72cfe516ceaf39699a6b9c98398aeb93451d5c066559bfe8720452385eb verified against gov-infra/planning/contentus-pinned-repo-contract.json at gate time.
+  171 archive members validated; entry point package/dist/index.js
+  entry-point SHA-256 4e5e5418f9edd96286c27ce0fb1a36fe4dd4dbe3914637ccce7cb9b5ecc97b76 (from the verified archive)
+  extracted 171 files into a quarantine and re-verified every digest.
+  runtime dependencies installed into the quarantine with --ignore-scripts.
+  version=0.11.9, pinned 0.11.9
+greater doctor: 9/13 checks passed.
+  PASS Component Files — 161 file(s) verified
+  PASS Orphaned Files — No orphaned component files detected
+
+Disclosed and unchanged, matched as (name, severity) tuples
+(PASS here means "unchanged", not "clean"):
+  ERROR NPM Dependencies — equaltoai/greater-components#917
+  WARNING Alias Path: utils
+  WARNING Alias Path: ui
+  WARNING Alias Path: hooks

@@ -1,1 +1,6 @@
- ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND  No package.json (or package.yaml, or package.json5) was found in "/tmp/r8-spine.JH0qhY".
+
+> @equaltoai/contentus@0.1.0 lint /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!
