@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+	AUDIT_HEADERS,
 	AUDIT_ROUTES,
 	loadHandler,
 	renderRoute,
@@ -30,6 +31,35 @@ import {
 } from '../scripts/render-routes.mjs';
 
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
+
+/**
+ * The same request, carrying a credential.
+ *
+ * WHY IT MATTERS THAT THIS EXISTS. Every probe below used the default header
+ * bag, which has no `Authorization` — so the whole file was evidence about the
+ * ANONYMOUS request only. A future "fetch only when the caller is
+ * authenticated" path would have walked straight past it, and the claim these
+ * tests make ("the server reads nothing on this surface") would have quietly
+ * become "the server reads nothing when nobody is signed in". lesser's edge does
+ * forward request headers, so an authenticated reader's own document request can
+ * carry one.
+ *
+ * The token is a marker as well as a credential: nothing in any response may
+ * contain it, which also catches an echo into the hydration payload.
+ */
+const INBOUND_CREDENTIAL = 'Bearer probe-token-never-to-be-forwarded';
+const AUTHENTICATED_HEADERS = {
+	...AUDIT_HEADERS,
+	authorization: INBOUND_CREDENTIAL,
+	cookie: 'contentus_probe=should-not-be-read',
+};
+
+/** The hydration URL a rendered document actually tells the browser to fetch. */
+function hydrationUrl(html) {
+	const found = html.match(/\/l\/_facetheory\/hydration\?[^"']+/);
+	assert.ok(found, 'the document advertises no hydration URL');
+	return found[0];
+}
 
 /**
  * Every messaging route, so a route added to the audit table without a probe
@@ -97,18 +127,117 @@ test('no messaging route sends an Authorization header from the server', async (
 	}
 });
 
-test('the anonymous document carries no conversation, participant or message', async () => {
+/**
+ * Values that could only appear if the server had read the DM surface. If any of
+ * these reaches the document, it reaches the public hydration endpoint too.
+ */
+const SECRETS = [
+	'conversation-123',
+	'lastStatus',
+	'viewerMetadata',
+	'requestState',
+	'conversationMessages',
+];
+
+test('a request carrying a credential still makes the server read nothing', async () => {
 	const handler = await loadHandler();
 
-	// Values that could only appear if the server had read the DM surface. If any
-	// of these reaches the document, it reaches the public hydration endpoint too.
-	const SECRETS = [
-		'conversation-123',
-		'lastStatus',
-		'viewerMetadata',
-		'requestState',
-		'conversationMessages',
-	];
+	for (const name of MESSAGING_ROUTES) {
+		const { value, requests } = await withStubbedGraphql(
+			() => {
+				// Reaching here at all is the failure, and this is the version of that
+				// failure the anonymous probe above could never see: a server that
+				// fetches only when the caller presented a token.
+				assert.fail(`${name} made a GraphQL request for an authenticated caller`);
+			},
+			() => renderRoute(handler, { ...route(name), headers: AUTHENTICATED_HEADERS })
+		);
+
+		assert.equal(requests.length, 0, `${name} fetched on behalf of an authenticated caller`);
+		assert.equal(value.status, 200);
+		assert.ok(
+			!value.html.includes('probe-token-never-to-be-forwarded'),
+			`${name} echoed the inbound credential into the document`
+		);
+		for (const secret of SECRETS) {
+			if (name === 'message-thread' && secret === 'conversation-123') continue;
+			assert.ok(
+				!value.html.includes(secret),
+				`${name} document contains "${secret}" for an authenticated caller`
+			);
+		}
+	}
+});
+
+test('the hydration payload reads nothing either, credential or not', async () => {
+	const handler = await loadHandler();
+
+	// THE RESOURCE, NOT ONLY THE DOCUMENT. These props are the same object the
+	// document was rendered from, served at a URL anybody can request — so a
+	// server-side read added here would put private correspondence behind a plain
+	// GET. Probed at the URL the document itself advertises rather than one this
+	// test composed, so it is the request the browser actually makes.
+	for (const name of MESSAGING_ROUTES) {
+		const document = await renderRoute(handler, route(name));
+		const path = hydrationUrl(document.html);
+
+		for (const headers of [AUDIT_HEADERS, AUTHENTICATED_HEADERS]) {
+			const { value, requests } = await withStubbedGraphql(
+				() => {
+					assert.fail(`the hydration payload for ${name} made a GraphQL request`);
+				},
+				() => renderRoute(handler, { name: `${name}-hydration`, path, headers })
+			);
+
+			assert.equal(requests.length, 0, `${name} hydration fetched something`);
+			assert.equal(value.status, 200, `${name} hydration should answer 200`);
+			assert.ok(
+				!value.html.includes('probe-token-never-to-be-forwarded'),
+				`${name} hydration echoed the inbound credential`
+			);
+			assert.ok(
+				!value.html.includes('should-not-be-read'),
+				`${name} hydration echoed an inbound cookie`
+			);
+
+			for (const secret of SECRETS) {
+				// The thread's own address is the one value it legitimately carries:
+				// the id came from the caller's URL and is echoed back as the route it
+				// asked to hydrate.
+				if (name === 'message-thread' && secret === 'conversation-123') continue;
+				assert.ok(!value.html.includes(secret), `${name} hydration payload contains "${secret}"`);
+			}
+		}
+	}
+});
+
+test('the hydration payload is uncacheable and unindexed, like the document it hydrates', async () => {
+	const handler = await loadHandler();
+
+	for (const name of MESSAGING_ROUTES) {
+		const document = await renderRoute(handler, route(name));
+		const hydration = await renderRoute(handler, {
+			name: `${name}-hydration`,
+			path: hydrationUrl(document.html),
+		});
+
+		// The document carries both headers; the payload carried only the first.
+		// A protected surface whose JSON twin was indexable is a header gap
+		// whether or not today's payload is empty — and "today's payload is
+		// empty" is exactly the kind of fact that changes.
+		assert.equal(hydration.headers['cache-control'], 'no-store', `${name} hydration is cacheable`);
+		assert.equal(
+			hydration.headers['x-robots-tag'],
+			'noindex, nofollow',
+			`${name} hydration is indexable`
+		);
+		assert.equal(hydration.headers['x-content-type-options'], 'nosniff');
+		assert.match(hydration.headers['content-type'] ?? '', /application\/json/);
+	}
+});
+
+test('the anonymous document carries no conversation, participant or message', async () => {
+	const handler = await loadHandler();
 
 	for (const name of MESSAGING_ROUTES) {
 		const rendered = await renderRoute(handler, route(name));

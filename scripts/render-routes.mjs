@@ -107,7 +107,14 @@ export const AUDIT_ROUTES = [
  * instance domain is baked into source.
  */
 const AUDIT_HOST = 'contentus-audit.invalid';
-const AUDIT_HEADERS = {
+
+/**
+ * Exported so a probe can EXTEND it — an inbound `Authorization` on an otherwise
+ * ordinary request — rather than hand-rolling a header bag and accidentally
+ * testing a request lesser's edge would never deliver. `renderRoute` REPLACES
+ * these when a route carries its own, so a probe that wants both has to spread.
+ */
+export const AUDIT_HEADERS = {
 	host: AUDIT_HOST,
 	'x-lesser-forwarded-host': AUDIT_HOST,
 	'x-lesser-forwarded-proto': 'https',

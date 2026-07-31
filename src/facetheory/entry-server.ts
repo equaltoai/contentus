@@ -482,6 +482,18 @@ function createFaceForRoute(route: string) {
  * document. The client fetches it from here instead, same-origin. Registered as
  * a FaceTheory resource route so it participates in normal routing rather than
  * being intercepted ahead of the app.
+ *
+ * IT CARRIES THE SAME HEADERS AS THE DOCUMENT IT HYDRATES, and that was a gap:
+ * `/messages` and `/messages/{id}` are served `no-store` AND
+ * `noindex, nofollow`, but their hydration payload — the same props, at a URL
+ * anybody can request — carried only the first. The props are deliberately
+ * data-free (`tests/ssr-messages.test.mjs` drives both response kinds, with and
+ * without an inbound credential, and asserts the server makes no fetch and
+ * carries no conversation), so this closes a header gap rather than a leak.
+ *
+ * Applied unconditionally rather than only for `requiresAuth` routes, because
+ * the reasoning does not depend on the route: a JSON hydration payload is never
+ * the indexable representation of anything. The document is.
  */
 const hydrationResource = {
 	route: HYDRATION_DATA_PATH,
@@ -505,6 +517,7 @@ const hydrationResource = {
 				'content-security-policy': buildStrictCspHeader(),
 				'content-type': 'application/json; charset=utf-8',
 				'x-content-type-options': 'nosniff',
+				'x-robots-tag': 'noindex, nofollow',
 			},
 			cookies: [],
 			body: new TextEncoder().encode(`${JSON.stringify(props)}\n`),
