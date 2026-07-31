@@ -13,12 +13,14 @@ is no catch-all render path that could silently show the wrong surface.
 	import AuthCallbackRoute from '$lib/routes/AuthCallback.svelte';
 	import ComposeRoute from '$lib/routes/Compose.svelte';
 	import NotFoundRoute from '$lib/routes/NotFound.svelte';
+	import ProfileRoute from '$lib/routes/Profile.svelte';
 	import ReviewQueueRoute from '$lib/routes/ReviewQueue.svelte';
 	import ReviewWorkspaceRoute from '$lib/routes/ReviewWorkspace.svelte';
+	import TimelinesRoute from '$lib/routes/Timelines.svelte';
 
 	import type { RouteProps } from './types';
 
-	let { page, slug, index, reader, compose, review }: RouteProps = $props();
+	let { page, slug, index, reader, compose, review, timelines, profile }: RouteProps = $props();
 </script>
 
 <AppShell {page}>
@@ -33,6 +35,16 @@ is no catch-all render path that could silently show the wrong surface.
 		<ReviewQueueRoute {page} />
 	{:else if page.key === 'review-workspace'}
 		<ReviewWorkspaceRoute {page} data={review ?? { draftId: null, panel: 'details' }} />
+	{:else if page.key === 'timelines'}
+		<TimelinesRoute
+			{page}
+			data={timelines ?? { tab: 'instance', page: null, failure: null }}
+		/>
+	{:else if page.key === 'profile'}
+		<ProfileRoute
+			{page}
+			data={profile ?? { handle: null, actor: null, page: null, failure: 'not-found' }}
+		/>
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />
 	{:else if page.key === 'not-found'}

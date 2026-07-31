@@ -29,6 +29,77 @@ const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
  */
 const UNCOMPILED_RUNE = /(?<![.\w$])\$(?:state|derived|effect|props|bindable|host|inspect)\s*\(/;
 
+/**
+ * Blank out comments and string literals, preserving offsets.
+ *
+ * THIS IS THE PROBE, not a tidying step, and it was added because the raw scan
+ * asserted something narrower than it claimed. Svelte's own runtime carries a
+ * JSDoc block on `untrack` whose prose contains the literal text `$effect(`.
+ * The moment contentus imported `untrack` — a legitimate import — that comment
+ * entered the server bundle and the probe went red on a bundle with no
+ * uncompiled rune anywhere in it. A gate that fails on prose is not measuring
+ * what it says it measures, and would have been silenced rather than believed.
+ *
+ * Offsets are preserved by replacing each masked character with a space, so the
+ * match index still points at the real source position.
+ *
+ * Deliberately does NOT try to recognise regex literals: telling `/` division
+ * from `/` regex needs a parser, and guessing wrong the OTHER way — masking
+ * real code as a literal — would turn a false positive into a false negative,
+ * which is the failure that matters. A rune call inside a regex literal would
+ * still be reported; that is the safe direction to be wrong in.
+ */
+function maskCommentsAndStrings(source) {
+	const out = source.split('');
+	let i = 0;
+
+	const blank = (from, to) => {
+		for (let j = from; j < to && j < out.length; j += 1) {
+			if (out[j] !== '\n') out[j] = ' ';
+		}
+	};
+
+	while (i < source.length) {
+		const two = source.slice(i, i + 2);
+
+		if (two === '//') {
+			const end = source.indexOf('\n', i);
+			const stop = end === -1 ? source.length : end;
+			blank(i, stop);
+			i = stop;
+			continue;
+		}
+
+		if (two === '/*') {
+			const end = source.indexOf('*/', i + 2);
+			const stop = end === -1 ? source.length : end + 2;
+			blank(i, stop);
+			i = stop;
+			continue;
+		}
+
+		const quote = source[i];
+		if (quote === '"' || quote === "'" || quote === '`') {
+			let j = i + 1;
+			while (j < source.length) {
+				if (source[j] === '\\') {
+					j += 2;
+					continue;
+				}
+				if (source[j] === quote) break;
+				j += 1;
+			}
+			blank(i, Math.min(j + 1, source.length));
+			i = j + 1;
+			continue;
+		}
+
+		i += 1;
+	}
+
+	return out.join('');
+}
+
 function bundleFiles() {
 	const roots = ['build/server', 'build/client'];
 	const found = [];
@@ -60,14 +131,45 @@ test('no shipped bundle carries an uncompiled rune', () => {
 	);
 
 	for (const bundle of bundles) {
-		const match = UNCOMPILED_RUNE.exec(readFileSync(join(repoRoot, bundle), 'utf8'));
+		const source = readFileSync(join(repoRoot, bundle), 'utf8');
+		const match = UNCOMPILED_RUNE.exec(maskCommentsAndStrings(source));
 		assert.equal(
 			match,
 			null,
-			`${bundle} ships ${match?.[0] ?? ''} uncompiled — a module using runes is not reaching ` +
-				"Svelte's compiler, and will throw ReferenceError at runtime"
+			`${bundle} ships ${match?.[0] ?? ''} uncompiled at offset ${match?.index} — a module using ` +
+				"runes is not reaching Svelte's compiler, and will throw ReferenceError at runtime. " +
+				`Context: ${JSON.stringify(source.slice(Math.max(0, (match?.index ?? 0) - 120), (match?.index ?? 0) + 80))}`
 		);
 	}
+});
+
+test('the rune scan can still see a rune, and no longer sees one in prose', () => {
+	// A differential on the masking itself, because the masking is now the part
+	// of this gate most able to break it. Silently masking everything would make
+	// the probe above pass forever.
+	const real = 'let count = $state(0);';
+	assert.match(
+		maskCommentsAndStrings(real),
+		UNCOMPILED_RUNE,
+		'a real rune call must survive masking'
+	);
+
+	for (const prose of [
+		'/** any state read inside `$effect(...)` is a dependency */ const x = 1;',
+		'// see $state( for details\nconst y = 2;',
+		'const doc = "call $derived( to compute";',
+		'const tpl = `use $props( here`;',
+	]) {
+		assert.doesNotMatch(
+			maskCommentsAndStrings(prose),
+			UNCOMPILED_RUNE,
+			`a rune named in prose must not be reported: ${prose}`
+		);
+	}
+
+	// Offsets must survive, or the failure message points somewhere useless.
+	assert.equal(maskCommentsAndStrings(real).length, real.length);
+	assert.equal(maskCommentsAndStrings(real).indexOf('$state('), real.indexOf('$state('));
 });
 
 test('the vendored source this guard exists for is still unedited', () => {

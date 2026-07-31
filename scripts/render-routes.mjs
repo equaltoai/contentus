@@ -59,6 +59,19 @@ export const AUDIT_ROUTES = [
 	// is the sign-in state — and the probe that matters is that the document
 	// contains no draft at all, which `tests/ssr-review.test.mjs` asserts.
 	{ name: 'review-workspace', path: '/l/review/drafts/draft-123', expectStatus: 200 },
+	// Face 4. Unlike compose and review, these are genuinely anonymous READS:
+	// lesser answers LOCAL, PUBLIC and ACTOR without a token, so a 200 here is a
+	// real timeline for a real visitor rather than a sign-in shell. The
+	// degraded rendering these produce against an unreachable instance is the
+	// designed unavailable state, which is exactly what the audits should see.
+	{ name: 'timelines-instance', path: '/l/timelines', expectStatus: 200 },
+	{ name: 'timelines-federated', path: '/l/timelines?tab=federated', expectStatus: 200 },
+	// The auth-gated tab, deep-linked cold and anonymously. Still a 200: the
+	// route exists for everyone and server-renders its sign-in state, and
+	// `tests/ssr-timelines.test.mjs` asserts the document carries no timeline
+	// data and that the server made no authenticated fetch for it.
+	{ name: 'timelines-home', path: '/l/timelines?tab=home', expectStatus: 200 },
+	{ name: 'profile', path: '/l/profiles/ada', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },
 	{ name: 'hydration-data', path: '/l/_facetheory/hydration', expectStatus: 200 },
