@@ -79,6 +79,45 @@ function timelineEnvelope(nodes) {
 	};
 }
 
+/** A lesser `Actor` shaped as `actor(username:)` returns one. */
+function actor(overrides = {}) {
+	return {
+		id: 'actor-ada',
+		username: 'ada',
+		domain: null,
+		displayName: 'Ada Lovelace',
+		summary: 'Writes about engines',
+		avatar: null,
+		header: null,
+		followers: 12,
+		following: 3,
+		statusesCount: 40,
+		bot: false,
+		locked: false,
+		createdAt: '2026-01-01T00:00:00Z',
+		isAgent: false,
+		...overrides,
+	};
+}
+
+/**
+ * An error on a field this client SELECTS and lesser declares nullable.
+ *
+ * `boostedObject` is the load-bearing example and the reason the marker exists:
+ * a boost that failed to resolve arrives as `null` beside its error, which is
+ * byte-identical to a post that simply is not a boost. An error on a field
+ * nobody asked for would prove nothing, because the projection never looks at
+ * it.
+ */
+const BOOSTED_OBJECT_ERROR = {
+	message: 'failed to resolve boosted object',
+	path: ['timeline', 'edges', 0, 'node', 'boostedObject'],
+};
+
+/** The copy each marker renders. Asserted as text, because that is what a reader gets. */
+const FEED_PARTIAL_COPY = /Parts of these posts could not be loaded/;
+const PROFILE_PARTIAL_COPY = /Parts of this profile could not be loaded/;
+
 /* ---------------------------------------------------------------------------
  * Anonymous reads render real posts
  * ------------------------------------------------------------------------ */
@@ -206,26 +245,7 @@ test('a profile deep link server-renders the actor card AND their posts', async 
 	const { value, requests } = await withStubbedGraphql(
 		({ operation }) => {
 			if (operation === 'ContentusActor') {
-				return {
-					data: {
-						actor: {
-							id: 'actor-ada',
-							username: 'ada',
-							domain: null,
-							displayName: 'Ada Lovelace',
-							summary: 'Writes about engines',
-							avatar: null,
-							header: null,
-							followers: 12,
-							following: 3,
-							statusesCount: 40,
-							bot: false,
-							locked: false,
-							createdAt: '2026-01-01T00:00:00Z',
-							isAgent: false,
-						},
-					},
-				};
+				return { data: { actor: actor() } };
 			}
 			if (operation === 'ContentusTimeline') {
 				return timelineEnvelope([object('obj-3', '<p>On the Analytical Engine</p>')]);
@@ -249,6 +269,169 @@ test('a profile deep link server-renders the actor card AND their posts', async 
 		'actor-ada',
 		'the ACTOR timeline is keyed on the id the actor query returned, never on the username'
 	);
+});
+
+/* ---------------------------------------------------------------------------
+ * Half-failed reads — the marker has to survive the props boundary
+ *
+ * `tests/timeline-adapters.test.mjs` pins the TRANSPORT half: a read that
+ * half-failed keeps its objects and reports `partial`. These pin the half that
+ * was missing, and the reason it mattered. The server pass is the ONLY pass a
+ * reader with no script gets and the first paint for everyone else, so a marker
+ * that is set on the wire and dropped on the way to the component is a marker
+ * that never reaches a reader — the page renders a timeline it believes is
+ * whole, which is the exact claim the transport refused to make.
+ * ------------------------------------------------------------------------ */
+
+test('a half-failed timeline read renders its marker in the server’s paint', async () => {
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusTimeline'
+				? {
+						...timelineEnvelope([object('obj-5', '<p>Still worth showing</p>')]),
+						errors: [BOOSTED_OBJECT_ERROR],
+					}
+				: { data: null },
+		() => renderRoute(handler, route('timelines-instance'))
+	);
+
+	assert.equal(value.status, 200, 'losing a field is not losing the timeline');
+	assert.ok(value.html.includes('class="status-card'), 'the objects that survived are shown');
+	assert.match(
+		value.html,
+		/class="contentus-feed__partial"/,
+		'and the document must carry the marker, not just the props behind it'
+	);
+	assert.match(value.html, FEED_PARTIAL_COPY, 'with copy that says what happened');
+});
+
+test('a clean timeline read renders no marker, or the marker would mean nothing', async () => {
+	// The other half of the differential, at the SSR boundary this time. A marker
+	// that is always on is a marker readers learn to ignore.
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusTimeline'
+				? timelineEnvelope([object('obj-6', '<p>Nothing failed here</p>')])
+				: { data: null },
+		() => renderRoute(handler, route('timelines-instance'))
+	);
+
+	assert.ok(value.html.includes('class="status-card'), 'the timeline still renders');
+	assert.doesNotMatch(value.html, /class="contentus-feed__partial"/);
+	assert.doesNotMatch(value.html, FEED_PARTIAL_COPY);
+});
+
+test('a half-failed read that carried NO objects still says so', async () => {
+	// The state that had no marker on it at all: lesser answered, part of the
+	// answer failed, and nothing survived to render. "No posts yet" here would be
+	// this client asserting an emptiness that only half an answer supports.
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusTimeline'
+				? {
+						data: { timeline: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+						errors: [BOOSTED_OBJECT_ERROR],
+					}
+				: { data: null },
+		() => renderRoute(handler, route('timelines-instance'))
+	);
+
+	assert.match(value.html, /class="contentus-feed__partial"/);
+	assert.match(value.html, /posts may be missing from it/);
+	assert.ok(
+		!value.html.includes('No posts yet'),
+		'an empty state and a half-failed read cannot both be claimed'
+	);
+});
+
+test('a half-failed ACTOR read marks the profile card, and only the card', async () => {
+	// `fetchActor` carries its own marker and it was discarded before the props
+	// ever reached the route. The two reads on this page fail independently, so
+	// the markers are separate claims about separate elements: a `trustScore` that
+	// failed says nothing about the posts below it.
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) => {
+			if (operation === 'ContentusActor') {
+				return {
+					data: { actor: actor({ trustScore: null }) },
+					errors: [{ message: 'trust score unavailable', path: ['actor', 'trustScore'] }],
+				};
+			}
+			if (operation === 'ContentusTimeline') {
+				return timelineEnvelope([object('obj-7', '<p>On the Analytical Engine</p>')]);
+			}
+			return { data: null };
+		},
+		() => renderRoute(handler, route('profile'))
+	);
+
+	assert.equal(value.status, 200);
+	assert.ok(value.html.includes('Ada Lovelace'), 'what resolved is still shown');
+	assert.match(value.html, /class="contentus-profile__partial"/, 'and the card says it is partial');
+	assert.match(value.html, PROFILE_PARTIAL_COPY);
+	assert.doesNotMatch(
+		value.html,
+		/class="contentus-feed__partial"/,
+		'the posts read cleanly, so nothing may claim otherwise about them'
+	);
+});
+
+test('a half-failed profile TIMELINE marks the posts, and only the posts', async () => {
+	// The mirror image, which is what makes the two markers evidence rather than
+	// one marker rendered twice.
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) => {
+			if (operation === 'ContentusActor') return { data: { actor: actor() } };
+			if (operation === 'ContentusTimeline') {
+				return {
+					...timelineEnvelope([object('obj-8', '<p>On the Analytical Engine</p>')]),
+					errors: [BOOSTED_OBJECT_ERROR],
+				};
+			}
+			return { data: null };
+		},
+		() => renderRoute(handler, route('profile'))
+	);
+
+	assert.match(value.html, /class="contentus-feed__partial"/);
+	assert.match(value.html, FEED_PARTIAL_COPY);
+	assert.doesNotMatch(
+		value.html,
+		/class="contentus-profile__partial"/,
+		'the actor resolved completely, so the card may not say otherwise'
+	);
+});
+
+test('the hydration payload carries the markers the document rendered from', async () => {
+	// SSR and hydration are the same `createRouteProps` call, and this is what
+	// holds them to it: if the marker reached the document but not the payload,
+	// the feed would seed `partial = false` on mount and the disclosure would
+	// vanish the moment the page became interactive.
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusTimeline'
+				? {
+						...timelineEnvelope([object('obj-10', '<p>Still worth showing</p>')]),
+						errors: [BOOSTED_OBJECT_ERROR],
+					}
+				: { data: null },
+		() =>
+			renderRoute(handler, {
+				name: 'hydration-timelines',
+				path: '/l/_facetheory/hydration?path=%2Ftimelines',
+				expectStatus: 200,
+			})
+	);
+
+	const props = JSON.parse(value.html);
+	assert.equal(props.timelines.partial, true, 'the marker must travel to the hydrating client');
+	assert.equal(props.timelines.page.items.length, 1, 'alongside the objects that survived');
 });
 
 /* ---------------------------------------------------------------------------

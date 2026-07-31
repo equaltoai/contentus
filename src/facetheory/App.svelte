@@ -38,12 +38,19 @@ is no catch-all render path that could silently show the wrong surface.
 	{:else if page.key === 'timelines'}
 		<TimelinesRoute
 			{page}
-			data={timelines ?? { tab: 'instance', page: null, failure: null }}
+			data={timelines ?? { tab: 'instance', page: null, failure: null, partial: false }}
 		/>
 	{:else if page.key === 'profile'}
 		<ProfileRoute
 			{page}
-			data={profile ?? { handle: null, actor: null, page: null, failure: 'not-found' }}
+			data={profile ?? {
+				handle: null,
+				actor: null,
+				page: null,
+				failure: 'not-found',
+				pagePartial: false,
+				actorPartial: false,
+			}}
 		/>
 	{:else if page.key === 'auth-callback'}
 		<AuthCallbackRoute {page} />

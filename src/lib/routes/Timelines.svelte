@@ -115,6 +115,7 @@ page is worse than one that says what it needs.
 				type={tab.type}
 				initialPage={data.page}
 				initialFailure={data.failure}
+				initialPartial={data.partial}
 				{authenticated}
 				{accessToken}
 				realtime

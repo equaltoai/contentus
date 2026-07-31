@@ -568,6 +568,17 @@
 	color: var(--tc-fg-dim);
 }
 
+/* The card's own half-failed marker. Same rule as the feed's disclosures — a
+   quiet aside rather than an alarm, because what it reports is incompleteness,
+   not breakage. */
+.contentus-profile__partial {
+	margin: 0;
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border-left: 3px solid var(--tc-outline-variant);
+	color: var(--tc-fg-muted);
+	font-size: 0.875rem;
+}
+
 /* =============================================================
    Mobile
    ============================================================= */

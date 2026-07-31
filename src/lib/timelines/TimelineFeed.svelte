@@ -103,6 +103,12 @@ write face's job, not a stub's.
 		initialPage: TimelinePage | null;
 		/** Why the server has no page, when it tried and failed. */
 		initialFailure: TimelineFailure | null;
+		/**
+		 * The server's page half-failed. Optional only so a caller with no server
+		 * read at all (there is none today) is not forced to say `false` about a
+		 * read it never made; every route that passes `initialPage` passes this.
+		 */
+		initialPartial?: boolean;
 		authenticated: boolean;
 		accessToken?: string | null;
 		/** Shown when the timeline is genuinely empty. */
@@ -117,6 +123,7 @@ write face's job, not a stub's.
 		actorId = null,
 		initialPage,
 		initialFailure,
+		initialPartial = false,
 		authenticated,
 		accessToken = null,
 		emptyTitle,
@@ -137,8 +144,16 @@ write face's job, not a stub's.
 	let hasNextPage = $state(untrack(() => initialPage)?.hasNextPage ?? false);
 	let skipped = $state(untrack(() => initialPage)?.skipped ?? 0);
 	let failure = $state<TimelineFailure | null>(untrack(() => initialFailure));
-	/** lesser answered, and part of the answer failed. See `TimelineResult.partial`. */
-	let partial = $state(false);
+	/**
+	 * lesser answered, and part of the answer failed. See `TimelineResult.partial`.
+	 *
+	 * SEEDED from the server's read like every other field above, and it was not
+	 * always: this started at `false` unconditionally, so a server page that
+	 * arrived marked rendered as a whole one. The reader with no script saw a
+	 * timeline the client knew was incomplete and had nothing to tell them, and
+	 * the reader with script saw it that way until something refetched.
+	 */
+	let partial = $state(untrack(() => initialPartial));
 
 	let mounted = $state(false);
 	let loadingMore = $state(false);
@@ -411,6 +426,16 @@ write face's job, not a stub's.
 			title="Loading your timeline"
 			description="This timeline is loaded once your session is read."
 		/>
+	{:else if !items.length && partial}
+		<!-- lesser answered, part of the answer failed, and nothing survived to
+		     render. "No posts yet" below would be this client asserting an
+		     emptiness that only half an answer supports — the false empty the
+		     marker exists to stop, arriving through the one state that never
+		     carried it. The unconditional Refresh above is the action. -->
+		<p class="contentus-feed__partial" role="status">
+			Part of this timeline could not be loaded, so posts may be missing from it. Refresh to try
+			reading it again.
+		</p>
 	{:else if !items.length}
 		<Timeline.EmptyState title={emptyTitle} description={emptyDescription} />
 	{:else}

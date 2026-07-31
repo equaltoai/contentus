@@ -126,9 +126,14 @@ async function createRouteProps(
 			// client, which is what a null page with a null failure means.
 			const tab = tabFor(resolveTimelineTab(query));
 			if (!isServerFetchable(tab)) {
-				return { ...base, timelines: { tab: tab.id, page: null, failure: null } };
+				return { ...base, timelines: { tab: tab.id, page: null, failure: null, partial: false } };
 			}
 
+			// `partial` travels with the page. The transport keeps a half-failed
+			// read's objects and marks it rather than reporting a false empty, and
+			// that marker has to survive the props boundary or the server pass —
+			// the only pass a no-script reader gets — paints a timeline that
+			// asserts completeness lesser never claimed.
 			const result = await fetchTimelinePage({ type: tab.type, endpoint });
 			return {
 				...base,
@@ -136,6 +141,7 @@ async function createRouteProps(
 					tab: tab.id,
 					page: result.ok ? result.page : null,
 					failure: result.ok ? null : result.failure,
+					partial: result.ok && result.partial,
 				},
 			};
 		}
@@ -149,14 +155,28 @@ async function createRouteProps(
 			if (!handle)
 				return {
 					...base,
-					profile: { handle: null, actor: null, page: null, failure: 'not-found' },
+					profile: {
+						handle: null,
+						actor: null,
+						page: null,
+						failure: 'not-found',
+						pagePartial: false,
+						actorPartial: false,
+					},
 				};
 
 			const actorResult = await fetchActor(handle, { endpoint });
 			if (!actorResult.ok) {
 				return {
 					...base,
-					profile: { handle, actor: null, page: null, failure: actorResult.failure },
+					profile: {
+						handle,
+						actor: null,
+						page: null,
+						failure: actorResult.failure,
+						pagePartial: false,
+						actorPartial: false,
+					},
 				};
 			}
 
@@ -166,6 +186,10 @@ async function createRouteProps(
 				endpoint,
 			});
 
+			// Both markers travel, and separately. The card and the posts are two
+			// reads that fail independently: an actor that half-resolved is shown
+			// with a field missing from the header, which is not the same event as
+			// a post whose boost could not be read.
 			return {
 				...base,
 				profile: {
@@ -173,6 +197,8 @@ async function createRouteProps(
 					actor: actorResult.actor,
 					page: timeline.ok ? timeline.page : null,
 					failure: timeline.ok ? null : timeline.failure,
+					pagePartial: timeline.ok && timeline.partial,
+					actorPartial: actorResult.partial,
 				},
 			};
 		}

@@ -116,6 +116,18 @@ IS the identity, and linked no further.
 				<div><dt>Followers</dt><dd>{actor.followersCount ?? 0}</dd></div>
 				<div><dt>Following</dt><dd>{actor.followingCount ?? 0}</dd></div>
 			</dl>
+
+			{#if data.actorPartial}
+				<!-- lesser answered the actor read and part of the answer failed.
+				     A field that failed comes back null, which is exactly what a
+				     field this actor genuinely does not have looks like — so an
+				     absent bio or a zero count above could be either, and only this
+				     says which. Distinct from the feed's own marker below: that one
+				     is about the posts, this one is about the card. -->
+				<p class="contentus-profile__partial" role="status">
+					Parts of this profile could not be loaded, so something may be missing from it.
+				</p>
+			{/if}
 		</header>
 
 		<TimelineFeed
@@ -123,6 +135,7 @@ IS the identity, and linked no further.
 			actorId={actor.id}
 			initialPage={data.page}
 			initialFailure={data.failure}
+			initialPartial={data.pagePartial}
 			{authenticated}
 			{accessToken}
 			emptyTitle="No posts"

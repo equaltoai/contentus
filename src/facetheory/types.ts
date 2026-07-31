@@ -149,6 +149,18 @@ export interface TimelinesRouteData {
 	 * session. A reason means the server tried and lesser said no.
 	 */
 	failure: TimelineFailure | null;
+	/**
+	 * lesser answered the server's read, and part of the answer failed. See
+	 * `TimelineResult.partial`.
+	 *
+	 * It travels because the server pass is the ONLY pass for a reader with no
+	 * script, and the first paint for everyone else. A failed nullable field
+	 * comes back looking exactly like an absent one, so dropping this marker at
+	 * the SSR boundary would hand the page a timeline it believes is complete —
+	 * the transport's whole reason for carrying the marker, undone one layer
+	 * later.
+	 */
+	partial: boolean;
 }
 
 /**
@@ -164,6 +176,18 @@ export interface ProfileRouteData {
 	actor: Account | null;
 	page: TimelinePage | null;
 	failure: TimelineFailure | null;
+	/**
+	 * The ACTOR read half-failed. Two markers rather than one because the route
+	 * makes two reads and they fail independently: this one is about the posts.
+	 */
+	pagePartial: boolean;
+	/**
+	 * The `actor(username:)` read half-failed, so the card above the posts is
+	 * missing something. A distinct claim from `pagePartial` and a distinct
+	 * screen — "parts of this profile" is not "parts of these posts" — and
+	 * collapsing them would put the wrong sentence over the wrong element.
+	 */
+	actorPartial: boolean;
 }
 
 export interface RouteProps {
