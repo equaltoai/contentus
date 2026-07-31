@@ -40,6 +40,8 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	import ComposeSubmit from '$lib/components/compose/Submit.svelte';
 	import ComposeVisibilitySelect from '$lib/components/compose/VisibilitySelect.svelte';
 	import type { ComposeHandlers } from '$lib/components/compose/context';
+	import Panel from '$lib/greater/shell/components/Panel.svelte';
+	import XIcon from '$lib/greater/icons/icons/x.svelte';
 	import AgentAttributionField from '$lib/compose/AgentAttributionField.svelte';
 	import ComposeBudget from '$lib/compose/ComposeBudget.svelte';
 	import ContentWarningField from '$lib/compose/ContentWarningField.svelte';
@@ -273,12 +275,29 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	};
 </script>
 
-<header class="contentus-page-header">
-	<p class="contentus-eyebrow">{page.eyebrow}</p>
-	<h1 class="contentus-h1">
-		{mode === 'edit' ? 'Edit post' : mode === 'reply' ? 'Reply' : mode === 'quote' ? 'Quote' : page.title}
-	</h1>
-	<p class="contentus-lede">{page.summary}</p>
+<header class="contentus-page-header contentus-compose-header">
+	<div>
+		<p class="contentus-eyebrow">{page.eyebrow}</p>
+		<h1 class="contentus-h1">
+			{mode === 'edit'
+				? 'Edit post'
+				: mode === 'reply'
+					? 'Reply'
+					: mode === 'quote'
+						? 'Quote'
+						: page.title}
+		</h1>
+		<p class="contentus-lede">{page.summary}</p>
+	</div>
+
+	<!-- The mobile sheet covers the tab bar, so it owns the way out. Hidden
+	     above 960px, where the sidebar nav is still on screen. A link rather
+	     than a history-back button: the composer is a real route, and a reader
+	     who deep-linked into it has no history to go back to. -->
+	<a class="contentus-compose-close" href={appHref('/')}>
+		<XIcon size={20} aria-hidden="true" />
+		<span class="contentus-visually-hidden">Close the composer</span>
+	</a>
 </header>
 
 {#if session === 'anonymous'}
@@ -335,6 +354,10 @@ reviewer/publisher workflow, and nothing on this page touches them.
 		<SourceContext {mode} statusId={targetId} {source} />
 	{/if}
 
+	<!-- The desktop presentation product design §5 names: a greater `Panel`.
+	     Below 960px the same markup is flattened to a full-bleed sheet by CSS —
+	     one document, two presentations, no viewport measurement. -->
+	<Panel class="contentus-compose-panel" padding="md" aria-label="Composer">
 	{#key editSeed}
 		<ComposeRoot
 			config={{
@@ -400,4 +423,5 @@ reviewer/publisher workflow, and nothing on this page touches them.
 			</footer>
 		</ComposeRoot>
 	{/key}
+	</Panel>
 </div>
