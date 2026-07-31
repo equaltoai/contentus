@@ -557,9 +557,150 @@
 	color: var(--tc-fg);
 }
 
+.contentus-compose-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+}
+
+/* Desktop: the composer is a Panel. Above 960px the close affordance is
+   redundant — the sidebar nav is on screen and nothing is covered. */
+.contentus-compose-close {
+	display: none;
+}
+
+/* =============================================================
+   The mobile composer sheet (product design §5, M3.5)
+   -------------------------------------------------------------
+   Below 960px the composer is the whole screen: it is the highest-frequency
+   mobile write path, and a panel floating in a scrolling page wastes the
+   room the editor needs.
+
+   The swap is CSS on `[data-page='compose']`, not a JavaScript viewport
+   measurement, so the SSR document is already correct on a cold deep link —
+   which is the only kind lesser can serve, having no SPA fallback
+   under `/l/*`.
+
+   `100svh`, not `100vh`. The large viewport is the pre-scroll one, so
+   `100vh` puts the sticky action bar behind the browser's own chrome
+   exactly when the keyboard is up and the submit button is what the thumb
+   is reaching for.
+   ============================================================= */
+
+@media (max-width: 960px) {
+	[data-page='compose'] .contentus-main {
+		display: flex;
+		flex-direction: column;
+		/* The sheet owns the viewport: no tab-bar reserve, because the tab bar
+		   is hidden below and the composer's own close affordance replaces it. */
+		min-height: 100svh;
+		padding: var(--tc-space-6) 0 0;
+	}
+
+	/* The composer covers the tab bar rather than sitting above it. A
+	   full-screen sheet with a persistent nav underneath is not full screen,
+	   and the two bottom bars would stack into the safe area. */
+	[data-page='compose'] .contentus-tabbar,
+	[data-page='compose'] .contentus-fab {
+		display: none;
+	}
+
+	[data-page='compose'] .contentus-compose {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		max-width: none;
+	}
+
+	/* Panel flattens: no border, no radius, no elevation. It is not a card on
+	   a page any more, it is the page. */
+	[data-page='compose'] .contentus-compose-panel {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+		padding: 0;
+	}
+
+	[data-page='compose'] .contentus-compose-panel .gr-shell-panel__body {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+		padding: 0;
+	}
+
+	[data-page='compose'] .compose-root {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-height: 0;
+	}
+
+	/* The editor takes the room nothing else claims — a large textarea is the
+	   single most useful thing on this screen. */
+	[data-page='compose'] .compose-editor {
+		flex: 1 1 auto;
+		min-height: 9rem;
+	}
+
+	/* Sticky submit, above the keyboard-safe area. Media thumbnails sit in the
+	   flow directly under the editor and therefore ABOVE this bar, which is
+	   the whole point of their position: attachments stay visible while the
+	   keyboard is up rather than being pushed under it. */
+	[data-page='compose'] .contentus-compose-actions {
+		position: sticky;
+		bottom: 0;
+		z-index: 2;
+		margin-top: auto;
+		padding: var(--tc-space-3) 0;
+		padding-bottom: calc(var(--tc-space-3) + var(--contentus-safe-bottom));
+		border-top: 1px solid var(--tc-outline-variant);
+		background: var(--tc-bg);
+	}
+
+	.contentus-compose-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+		/* 44px minimum touch target (product design §4). */
+		min-height: 44px;
+		min-width: 44px;
+		border: 1px solid var(--tc-outline);
+		border-radius: var(--tc-radius-pill);
+		color: var(--tc-fg-muted);
+		text-decoration: none;
+	}
+}
+
 @media (max-width: 720px) {
 	.contentus-compose-controls {
 		grid-template-columns: minmax(0, 1fr);
 		gap: var(--tc-space-3);
+	}
+}
+
+@media (max-width: 640px) {
+	/* The lede is the first thing to go: on a 640px screen the heading already
+	   says what the surface is, and the editor wants the rows. */
+	[data-page='compose'] .contentus-compose-header .contentus-lede {
+		display: none;
+	}
+}
+
+@media (max-width: 480px) {
+	[data-page='compose'] .contentus-main {
+		padding-top: var(--tc-space-4);
+	}
+
+	[data-page='compose'] .contentus-compose-header {
+		margin-bottom: var(--tc-space-6);
 	}
 }

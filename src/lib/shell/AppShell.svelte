@@ -61,7 +61,11 @@ twice, not two navigation systems.
 
 <a class="contentus-skip-link" href="#contentus-main">Skip to content</a>
 
-<div class="contentus-shell" data-surface={page.surface}>
+<!-- `data-page` so a face can claim the whole viewport at a breakpoint without
+     JavaScript deciding it. The composer uses it to become a full-screen sheet
+     below 960px (product design §5) while the same document still renders as a
+     panel on a desktop. -->
+<div class="contentus-shell" data-surface={page.surface} data-page={page.key}>
 	<header class="contentus-sidebar">
 		<a class="contentus-brand" href={appHref('/')} aria-label="Contentus home">
 			<img
