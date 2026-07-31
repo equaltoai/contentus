@@ -1,19 +1,19 @@
 
-> @equaltoai/contentus@0.1.0 build /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 build /tmp/contentus-r6-comp2.SObv9R
 > pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate
 
 
-> @equaltoai/contentus@0.1.0 typecheck /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 typecheck /tmp/contentus-r6-comp2.SObv9R
 > tsc --noEmit
 
 
-> @equaltoai/contentus@0.1.0 svelte-check /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 svelte-check /tmp/contentus-r6-comp2.SObv9R
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785464986996 START "/tmp/contentus-r5-comp-final.reihmk"
-1785464986997 COMPLETED 425 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785471819758 START "/tmp/contentus-r6-comp2.SObv9R"
+1785471819759 COMPLETED 425 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
-> @equaltoai/contentus@0.1.0 build:client /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 build:client /tmp/contentus-r6-comp2.SObv9R
 > vite build
 
 vite v8.2.0 building client environment for production...
@@ -24,9 +24,9 @@ build/client/.vite/manifest.json                              0.39 kB │ gzip: 
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-BhUW12yO.js                311.43 kB │ gzip: 101.86 kB
 
-✓ built in 662ms
+✓ built in 670ms
 
-> @equaltoai/contentus@0.1.0 build:server /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 build:server /tmp/contentus-r6-comp2.SObv9R
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
@@ -36,20 +36,20 @@ computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
 build/server/handler.mjs                 741.49 kB │ gzip: 179.44 kB
 
-✓ built in 638ms
+✓ built in 632ms
 
-> @equaltoai/contentus@0.1.0 build:assets /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 build:assets /tmp/contentus-r6-comp2.SObv9R
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
 stylesheet: brand/contentus.css — 219633 bytes, 143 --tc-* definitions, integrity assertions passed
 brand assets: copied 12 files to build/client/brand/
 
-> @equaltoai/contentus@0.1.0 validate /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 validate /tmp/contentus-r6-comp2.SObv9R
 > pnpm run validate:renderer-authority && pnpm run validate:csp
 
 
-> @equaltoai/contentus@0.1.0 validate:renderer-authority /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /tmp/contentus-r6-comp2.SObv9R
 > node scripts/audit-renderer-authority.mjs
 
 # Renderer-authority audit
@@ -64,7 +64,7 @@ brand assets: copied 12 files to build/client/brand/
 
 Renderer-authority audit: clean.
 
-> @equaltoai/contentus@0.1.0 validate:csp /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 validate:csp /tmp/contentus-r6-comp2.SObv9R
 > node scripts/audit-csp.mjs
 
 # CSP Audit — contentus SSR output

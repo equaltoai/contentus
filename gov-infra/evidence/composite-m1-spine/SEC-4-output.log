@@ -1,5 +1,5 @@
 
-> @equaltoai/contentus@0.1.0 validate:csp /tmp/contentus-r5-comp-final.reihmk
+> @equaltoai/contentus@0.1.0 validate:csp /tmp/contentus-r6-comp2.SObv9R
 > node scripts/audit-csp.mjs
 
 # CSP Audit — contentus SSR output
