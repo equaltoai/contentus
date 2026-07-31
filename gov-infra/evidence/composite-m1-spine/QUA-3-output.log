@@ -1,6 +1,6 @@
 
-> @equaltoai/contentus@0.1.0 svelte-check /tmp/contentus-r6-comp2.SObv9R
+> @equaltoai/contentus@0.1.0 svelte-check /tmp/r7-comp-f2.NCnsQc
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785471824235 START "/tmp/contentus-r6-comp2.SObv9R"
-1785471824236 COMPLETED 425 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785478779054 START "/tmp/r7-comp-f2.NCnsQc"
+1785478779055 COMPLETED 425 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
