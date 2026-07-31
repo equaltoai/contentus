@@ -44,8 +44,27 @@ export interface TimelineRequest {
 	signal?: AbortSignal;
 }
 
+/**
+ * A page, or a reason there is none.
+ *
+ * `partial` is the half that was missing and is the reason this is not a bare
+ * boolean-plus-page. GraphQL answers a request that half-failed with BOTH data
+ * and errors, and lesser's timeline document selects nullable fields —
+ * `boostedObject` above all — so a field that failed comes back as `null`
+ * alongside an error explaining it. Reporting that as `ok` with no marker makes
+ * a failed field indistinguishable from a genuinely absent one: a post whose
+ * boost could not be resolved renders as a post that was never a boost. The
+ * objects are still worth showing, so they are shown — and the screen is told
+ * that something under them is missing rather than being left to assert
+ * completeness it does not have.
+ *
+ * It carries no server text. lesser's timeline errors are plain `errors.New`
+ * values with no extension code (routed upstream), so the message is a raw
+ * internal string and the only honest thing a client can say from it is THAT
+ * something failed.
+ */
 export type TimelineResult =
-	{ ok: true; page: TimelinePage } | { ok: false; failure: TimelineFailure };
+	{ ok: true; page: TimelinePage; partial: boolean } | { ok: false; failure: TimelineFailure };
 
 /**
  * Read one page of a timeline.
@@ -100,14 +119,26 @@ export async function fetchTimelinePage(request: TimelineRequest): Promise<Timel
 	// it carried — losing eight of twenty objects is not the same event as
 	// losing the timeline, and reporting the whole read as failed would be the
 	// false-empty M2d settled against. Only a MISSING connection is fatal.
+	//
+	// But the errors are NOT discarded with the decision to render. They are
+	// carried as `partial`, because a nullable field that failed comes back
+	// looking exactly like a nullable field that was legitimately null, and only
+	// the errors tell the two apart. Keeping the objects and dropping the errors
+	// would turn "we could not read this post's boost" into "this post is not a
+	// boost" — a claim the client would be making up.
 	const failure = classifyTimelineFailure(errors);
 	if (failure && !data?.timeline) return { ok: false, failure };
 	if (!data?.timeline) return { ok: false, failure: 'unavailable' };
 
-	return { ok: true, page: toTimelinePage(data.timeline, { viewerAuthenticated }) };
+	return {
+		ok: true,
+		page: toTimelinePage(data.timeline, { viewerAuthenticated }),
+		partial: errors.length > 0,
+	};
 }
 
-export type ActorResult = { ok: true; actor: Account } | { ok: false; failure: TimelineFailure };
+export type ActorResult =
+	{ ok: true; actor: Account; partial: boolean } | { ok: false; failure: TimelineFailure };
 
 /**
  * Load a profile header.
@@ -135,7 +166,9 @@ export async function fetchActor(
 		);
 
 		const actor = toAccount(result.data?.actor);
-		if (actor) return { ok: true, actor };
+		// Same rule as the timeline read: an actor that resolved alongside errors
+		// is shown, and the fact that part of it did not resolve travels with it.
+		if (actor) return { ok: true, actor, partial: result.errors.length > 0 };
 
 		return { ok: false, failure: classifyTimelineFailure(result.errors) ?? 'not-found' };
 	} catch (cause) {

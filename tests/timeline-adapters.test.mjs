@@ -186,21 +186,83 @@ test('excludeAgents and mediaOnly reach lesser rather than being applied here', 
  * ------------------------------------------------------------------------ */
 
 test('a partial failure that still carried objects renders the objects, not a false empty', async () => {
+	// The failure is on `boostedObject`, which this client SELECTS and lesser
+	// declares nullable (`boostedObject: Object` in graph/core.graphql). That
+	// matters: an error on a field nobody asked for proves nothing, because the
+	// projection would never have looked at it. A failed nullable field arrives
+	// as `null` beside its error, indistinguishable from a post that simply is
+	// not a boost — which is exactly the confusion the marker below exists to
+	// stop.
 	const { value } = await withStubbedFetch(
 		() => ({
 			data: {
 				timeline: {
-					edges: [{ cursor: 'c0', node: object() }],
+					edges: [{ cursor: 'c0', node: object({ boostedObject: null }) }],
 					pageInfo: { hasNextPage: false, endCursor: 'c0' },
 				},
 			},
-			errors: [{ message: 'moderationScore unavailable' }],
+			errors: [
+				{
+					message: 'failed to resolve boosted object',
+					path: ['timeline', 'edges', 0, 'node', 'boostedObject'],
+				},
+			],
 		}),
 		() => fetchTimelinePage({ type: 'LOCAL' })
 	);
 
 	assert.equal(value.ok, true, 'losing a field is not losing the timeline');
 	assert.equal(value.page.items.length, 1);
+	assert.equal(value.page.items[0].reblog, undefined, 'the failed field is absent, as it must be');
+	assert.equal(
+		value.partial,
+		true,
+		'and the read must say so: a boost that FAILED to resolve renders identically to a post ' +
+			'that was never a boost, so discarding the errors would have the client asserting the ' +
+			'second when lesser only said the first'
+	);
+});
+
+test('a clean read is not marked partial, or the marker would mean nothing', async () => {
+	// The other half of the differential. A marker that is always on is a marker
+	// the screen learns to ignore.
+	const { value } = await withStubbedFetch(
+		() => connection([object({ boostedObject: null })]),
+		() => fetchTimelinePage({ type: 'LOCAL' })
+	);
+
+	assert.equal(value.ok, true);
+	assert.equal(value.partial, false);
+	assert.equal(value.page.items[0].reblog, undefined, 'a genuine non-boost, and known to be one');
+});
+
+test('an actor that half-resolved is shown, and marked', async () => {
+	const { value } = await withStubbedFetch(
+		() => ({
+			data: {
+				actor: {
+					id: 'actor-9',
+					username: 'grace',
+					domain: null,
+					displayName: 'Grace',
+					followers: 3,
+					following: 1,
+					statusesCount: 9,
+					bot: false,
+					locked: false,
+					createdAt: '2026-01-01T00:00:00Z',
+					isAgent: false,
+					trustScore: null,
+				},
+			},
+			errors: [{ message: 'trust score unavailable', path: ['actor', 'trustScore'] }],
+		}),
+		() => fetchActor('grace')
+	);
+
+	assert.equal(value.ok, true);
+	assert.equal(value.actor.username, 'grace');
+	assert.equal(value.partial, true);
 });
 
 test('errors with NO connection are classified, and never shown as an empty timeline', async () => {
