@@ -8,8 +8,9 @@
 - owned-source imports: clean
 - owned-source {@html} sinks: clean
 - vendored blog-face escape fallback: clean
+- owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 8
+- Contentus-owned source roots scanned: 11
 
 Renderer-authority audit: clean.

@@ -15,7 +15,7 @@
 - article-reader   200    5024 bytes  findings=0
 - series           200    5225 bytes  findings=0
 - category         200    5239 bytes  findings=0
-- compose          200   11620 bytes  findings=0
+- compose          200    6168 bytes  findings=0
 - auth-callback    200    5047 bytes  findings=0
 - not-found        404    5047 bytes  findings=0
 - hydration-data   200     462 bytes  findings=0

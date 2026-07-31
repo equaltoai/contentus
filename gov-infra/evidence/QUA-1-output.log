@@ -10,40 +10,40 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785498984888 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785498984890 COMPLETED 477 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785502399034 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785502399035 COMPLETED 482 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 691 modules transformed.
+[2Ktransforming...✓ 696 modules transformed.
 rendering chunks...
 computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-Bkcf1ZlV.css                18.41 kB │ gzip:   3.03 kB
-build/client/assets/entry-client-B3ochEcT.js                420.51 kB │ gzip: 132.81 kB
+build/client/assets/entry-client-CBi3XFCb.js                423.73 kB │ gzip: 134.07 kB
 
-✓ built in 781ms
+✓ built in 807ms
 
 > @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 675 modules transformed.
+[2Ktransforming...✓ 680 modules transformed.
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 869.28 kB │ gzip: 209.61 kB
+build/server/handler.mjs                 771.19 kB │ gzip: 187.27 kB
 
-✓ built in 731ms
+✓ built in 742ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 247825 bytes, 143 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 248364 bytes, 143 --tc-* definitions, integrity assertions passed
 brand assets: copied 12 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -59,9 +59,10 @@ brand assets: copied 12 files to build/client/brand/
 - owned-source imports: clean
 - owned-source {@html} sinks: clean
 - vendored blog-face escape fallback: clean
+- owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 8
+- Contentus-owned source roots scanned: 11
 
 Renderer-authority audit: clean.
 
@@ -81,7 +82,7 @@ Renderer-authority audit: clean.
 - article-reader   200    5024 bytes  findings=0
 - series           200    5225 bytes  findings=0
 - category         200    5239 bytes  findings=0
-- compose          200   11620 bytes  findings=0
+- compose          200    6168 bytes  findings=0
 - auth-callback    200    5047 bytes  findings=0
 - not-found        404    5047 bytes  findings=0
 - hydration-data   200     462 bytes  findings=0
