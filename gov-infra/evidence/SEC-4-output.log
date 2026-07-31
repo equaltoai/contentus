@@ -18,8 +18,8 @@
 - compose          200    6056 bytes  findings=0
 - review-queue     200    5487 bytes  findings=0
 - review-workspace 200    5491 bytes  findings=0
-- timelines-instance 200    6525 bytes  findings=0
-- timelines-federated 200    6582 bytes  findings=0
+- timelines-instance 200    6913 bytes  findings=0
+- timelines-federated 200    6970 bytes  findings=0
 - timelines-home   200    5663 bytes  findings=0
 - profile          200    5132 bytes  findings=0
 - auth-callback    200    4935 bytes  findings=0
