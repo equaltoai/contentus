@@ -64,12 +64,15 @@ test('hydration data travels out of band, not in an inline script', async () => 
 	// The document advertises an external same-origin JSON endpoint...
 	assert.match(result.html, /rel="facetheory-hydration"/);
 	// ...and carries no inline script body at all.
-	// `</script\s*>`, not `</script>`: an end tag may carry trailing whitespace,
-	// and the strict spelling matches nothing on a document that uses it — so
-	// the loop runs zero times and the assertion passes having examined nothing.
+	// `</script(?=[\s/>])[^>]*>`, matching scripts/audit-csp.mjs: a browser
+	// closes the element on `</script\t\n bar>` just as it does on `</script>`,
+	// so a narrower spelling matches nothing on a document that uses one — the
+	// loop runs zero times and the assertion passes having examined nothing.
 	// Same defect CodeQL flagged in the M2d probe that was copied from here; the
 	// two are fixed together rather than leaving a known-weak twin behind.
-	for (const match of result.html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+	for (const match of result.html.matchAll(
+		/<script\b[^>]*>([\s\S]*?)<\/script(?=[\s/>])[^>]*>/gi
+	)) {
 		assert.equal((match[1] ?? '').trim(), '', 'no <script> may have an inline body');
 	}
 });

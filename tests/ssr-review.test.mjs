@@ -201,13 +201,18 @@ test('the review queue response carries the same strict CSP as every other route
 test('the review queue emits no inline script and no inline style', async () => {
 	const result = await render('/l/review');
 
-	// `</script\s*>`, not `</script>`. HTML lets an end tag carry trailing
-	// whitespace — `</script >` closes a script exactly as `</script>` does — so
-	// the strict spelling matches nothing on such a document and the loop runs
-	// zero times. A test whose evidence is "the loop found no violations" passes
-	// most convincingly when it examined nothing at all, which is the failure
-	// CodeQL's js/bad-tag-filter names.
-	for (const match of result.html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+	// `</script(?=[\s/>])[^>]*>`, matching scripts/audit-csp.mjs. A browser
+	// closes the element on any end tag whose name matches, however much junk
+	// rides before the `>` — `</script\t\n bar>` closes a script exactly as
+	// `</script>` does. A narrower spelling (`</script>`, or `</script\s*>`,
+	// which still stops at the first non-space) matches nothing on such a
+	// document, so the loop runs zero times. A test whose evidence is "the loop
+	// found no violations" passes most convincingly when it examined nothing at
+	// all, which is the failure CodeQL's js/bad-html-filtering-regexp names. The
+	// lookahead keeps `</scriptfoo>` — not an end tag — from matching.
+	for (const match of result.html.matchAll(
+		/<script\b[^>]*>([\s\S]*?)<\/script(?=[\s/>])[^>]*>/gi
+	)) {
 		assert.equal((match[1] ?? '').trim(), '', 'no <script> may have an inline body');
 	}
 
@@ -215,7 +220,8 @@ test('the review queue emits no inline script and no inline style', async () => 
 	// been paired by the matcher above; a count mismatch means a script element
 	// this assertion never looked inside.
 	const opens = [...result.html.matchAll(/<script\b/gi)].length;
-	const paired = [...result.html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi)].length;
+	const paired = [...result.html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script(?=[\s/>])[^>]*>/gi)]
+		.length;
 	assert.equal(opens, paired, 'every <script> element must have been examined');
 	assert.doesNotMatch(result.html, /<style\b/i, 'no inline <style> may reach the document');
 });
