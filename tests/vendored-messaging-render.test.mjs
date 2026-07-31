@@ -46,6 +46,33 @@ function compileServer(path) {
 	return compile(source, { generate: 'server', name: 'Probe' }).js.code;
 }
 
+/**
+ * A source file with its comments removed, applied to a FIXED POINT.
+ *
+ * The same routine `scripts/audit-renderer-authority.mjs` uses, and looped for
+ * the same reason: a single pass over `/<!--[\s\S]*?-->/` can REINTRODUCE a
+ * delimiter it did not have before — `<!<!-- -->-- … -->` becomes `<!-- … -->`
+ * after the inner match is removed, a comment the pass has already moved past.
+ * CodeQL flagged the un-looped idiom here as
+ * `js/incomplete-multi-character-sanitization` (CWE-116), and it was fixed in
+ * both places rather than dismissed as test-only: a scanner with a blind spot
+ * makes the direction it fails in load-bearing, and that is what should not be.
+ *
+ * Line comments are deliberately NOT stripped. `//` inside a string or a URL is
+ * indistinguishable from a comment without parsing, and removing to end-of-line
+ * on a false match could delete real code — including, in the worst case, the
+ * very `{@html}` this is looking for.
+ */
+function stripComments(source) {
+	let previous;
+	let current = source;
+	do {
+		previous = current;
+		current = current.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+	} while (current !== previous);
+	return current;
+}
+
 const MESSAGE = 'src/lib/components/messaging/Message.svelte';
 const CONVERSATIONS = 'src/lib/components/messaging/Conversations.svelte';
 
@@ -153,6 +180,30 @@ test('contentus discloses the gap unconditionally, not only when a message exist
 	);
 });
 
+test('the comment stripper survives a delimiter it reintroduces', () => {
+	// The concrete case behind the fixed-point loop, kept as a regression rather
+	// than as a comment. A SINGLE pass over the nested form leaves a comment
+	// behind — one the pass has already scanned past — so the `{@html}` inside it
+	// survives into the scan.
+	const nested = '<!<!-- -->-- {@html evil} -->';
+
+	const singlePass = nested.replace(/<!--[\s\S]*?-->/g, '');
+	assert.match(
+		singlePass,
+		/\{@html evil\}/,
+		'the un-looped strip is supposed to leave the sink behind — that is the defect'
+	);
+
+	assert.equal(stripComments(nested), '', 'the looped strip must reach a fixed point');
+
+	// And the ordinary case still works, so the loop did not become a
+	// scorched-earth pass that eats real template text.
+	assert.equal(
+		stripComments('<p>keep</p><!-- drop --><span>keep</span>'),
+		'<p>keep</p><span>keep</span>'
+	);
+});
+
 test('contentus owns no client-side rendering of a message body', () => {
 	// The invariant the disclosure exists to protect. Escaping is upstream's
 	// defect; the fix is upstream's too, and contentus must not have quietly
@@ -164,14 +215,11 @@ test('contentus owns no client-side rendering of a message body', () => {
 		'src/lib/messaging/handlers.ts',
 		'src/lib/messaging/adapter.ts',
 	]) {
-		// Comments are stripped first, the same way `audit-renderer-authority.mjs`
-		// does it. These files EXPLAIN the `{@html}` rule in prose, and a probe
-		// that failed on the explanation would be measuring its own documentation
-		// rather than its code.
-		const source = readFileSync(file, 'utf8')
-			.replace(/<!--[\s\S]*?-->/g, '')
-			.replace(/\/\*[\s\S]*?\*\//g, '')
-			.replace(/(^|[^:])\/\/.*$/gm, '$1');
+		// Comments are stripped first, to a FIXED POINT, the same way
+		// `audit-renderer-authority.mjs` does it. These files EXPLAIN the
+		// `{@html}` rule in prose, and a probe that failed on the explanation
+		// would be measuring its own documentation rather than its code.
+		const source = stripComments(readFileSync(file, 'utf8'));
 
 		assert.ok(!/\{@html\b/.test(source), `${file} contains an {@html} sink`);
 		assert.ok(

@@ -257,16 +257,43 @@ function checkImports() {
 	return problems;
 }
 
+/**
+ * A source file with its comments removed, applied to a FIXED POINT.
+ *
+ * The token has to be ignored inside comments — several owned files, this one
+ * included, state the `{@html}` rule in prose, and a check that failed on its
+ * own documentation would be measuring the wrong thing.
+ *
+ * THE LOOP IS THE POINT, and it is not theoretical. A single pass over
+ * `/<!--[\s\S]*?-->/` can REINTRODUCE a comment delimiter it did not have
+ * before: given `<!<!-- -->-- … -->`, removing the inner match leaves
+ * `<!-- … -->`, a comment the pass has already moved past. CodeQL names this
+ * `js/incomplete-multi-character-sanitization` (CWE-116) and flagged the same
+ * two-line idiom in `tests/vendored-messaging-render.test.mjs` at M5.
+ *
+ * For this gate the realistic consequence is a FALSE POSITIVE — a surviving
+ * `{@html}` inside what is really a comment fails the build — which is the safe
+ * direction. It is fixed anyway rather than argued down: a gate whose scanner
+ * has a known blind spot invites the next person to reason about which
+ * direction it fails in, and that reasoning is exactly what should not be load
+ * bearing. Re-running until the text stops changing removes the question.
+ */
+function stripComments(source) {
+	let previous;
+	let current = source;
+	do {
+		previous = current;
+		current = current.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+	} while (current !== previous);
+	return current;
+}
+
 function checkHtmlSinks() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
 			if (!file.endsWith('.svelte')) continue;
-			const content = readFileSync(file, 'utf8');
-			// Ignore the token inside comments: this file's own rationale mentions it.
-			const withoutComments = content
-				.replace(/<!--[\s\S]*?-->/g, '')
-				.replace(/\/\*[\s\S]*?\*\//g, '');
+			const withoutComments = stripComments(readFileSync(file, 'utf8'));
 			if (/\{@html\b/.test(withoutComments)) {
 				problems.push(
 					`${relative(repoRoot, file)} contains an {@html} sink — contentus-owned templates ` +

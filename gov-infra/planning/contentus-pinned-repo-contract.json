@@ -77,7 +77,7 @@
     "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
     "sha256": {
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
-      "scripts/audit-renderer-authority.mjs": "62fa475cc02592a2695fb4bd81e0ada59d2c58aee346fbb993e2b911112aa0df",
+      "scripts/audit-renderer-authority.mjs": "567cbb164f209a9aa87dd4c38dafce5994a37b5928eaebdec1d1fb02bf58ceb7",
       "scripts/build-stylesheet.mjs": "0c55da54e354565196a8785ba3a4f1d401c6709894c1dd4a8634ac3dbdfa5b2d",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
@@ -103,7 +103,7 @@
       "tests/timeline-feed-state.test.mjs": "bd850c59dd3bd6f2b203b00dcf8a1868eb03c306d429717810378595f91431f5",
       "tests/timeline-subscription.test.mjs": "c38b67766d3ddadb8945466aed2a2899f06c8abd7ab00c5a2376e52fcb959374",
       "tests/vendored-content-renderer.test.mjs": "17085c07adbcedd4c4f3d89d6123ea645517238236fa84e44547bb3bb659dd8f",
-      "tests/vendored-messaging-render.test.mjs": "4990b31ae8d77455268aa76ead62d925b4c86431d48cde2407f1815209b812aa",
+      "tests/vendored-messaging-render.test.mjs": "3ed7f1a855e4e48437b60d5f41e84688f9b3d12aa2dac6d22793270840b9520a",
       "tests/vendored-runes.test.mjs": "b35d47a32182afedc28fd80ee797f94602514efaafbdba22f2fb2d31dda10bb2"
     }
   },
