@@ -1,0 +1,2 @@
+# contentus Supply-Chain Allowlist (SEC-3)
+# One exact finding ID per line. This pack intentionally has no allowlisted findings.

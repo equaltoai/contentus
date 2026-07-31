@@ -1,0 +1,2 @@
+build artifact missing: build/server/handler.mjs (run `pnpm run build`)
+client asset directory missing: build/client

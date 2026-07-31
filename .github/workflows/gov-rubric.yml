@@ -1,0 +1,44 @@
+name: Governance Rubric
+
+on:
+  pull_request:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  rubric:
+    name: Governance Rubric
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 10.22.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      # The greater CLI is not published to the npm registry; it ships as a
+      # release asset, so nothing about the bytes that arrive is checked by a
+      # package manager. This step verifies the asset against the SHA-256 pinned
+      # in the repo contract and leaves the tarball on disk. That tarball is what
+      # SEC-7 uses: it re-verifies the digest at gate time, extracts its own
+      # quarantined copy and runs that, never the tree this step installs — an
+      # editable installer is a self-report one step removed. Without this step
+      # there is no archive to extract, SEC-7 is BLOCKED and the report does not
+      # pass; MAI-4 binds the step so it cannot be dropped to turn a hard gate
+      # into a soft one.
+      - name: Fetch the pinned greater CLI release asset
+        run: node gov-infra/verifiers/install-greater-cli.mjs
+      - name: Run governance rubric
+        run: bash gov-infra/verifiers/gov-verify-rubric.sh
+      - name: Upload governance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gov-rubric-evidence
+          path: gov-infra/evidence/

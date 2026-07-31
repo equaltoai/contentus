@@ -1,0 +1,6 @@
+
+> @equaltoai/contentus@0.1.0 lint /tmp/r8-comp.cvvIrk
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!

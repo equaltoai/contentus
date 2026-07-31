@@ -1,0 +1,29 @@
+name: DCO Check
+
+on:
+  pull_request:
+    branches: [staging, main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco:
+    name: DCO Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+      # The two SHAs are event-derived, so they reach the shell only as argv to a
+      # script whose content is pinned in the repo contract. Nothing here parses
+      # them: `scripts/dco-check.mjs` runs `git log` through an argument vector.
+      - name: Require DCO sign-off on every PR commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/dco-check.mjs "${BASE_SHA}" "${HEAD_SHA}"

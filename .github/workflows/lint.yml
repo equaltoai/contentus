@@ -1,0 +1,26 @@
+name: Lint
+
+on:
+  pull_request:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Format and type checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: 10.22.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run svelte-check
