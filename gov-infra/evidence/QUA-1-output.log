@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785502399034 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785502399035 COMPLETED 482 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785504309353 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785504309355 COMPLETED 482 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -23,9 +23,9 @@ computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-Bkcf1ZlV.css                18.41 kB │ gzip:   3.03 kB
-build/client/assets/entry-client-CBi3XFCb.js                423.73 kB │ gzip: 134.07 kB
+build/client/assets/entry-client-DK4eLebh.js                424.19 kB │ gzip: 134.23 kB
 
-✓ built in 807ms
+✓ built in 828ms
 
 > @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build --ssr src/facetheory/entry-server.ts
@@ -37,7 +37,7 @@ computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
 build/server/handler.mjs                 771.19 kB │ gzip: 187.27 kB
 
-✓ built in 742ms
+✓ built in 758ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -63,6 +63,7 @@ brand assets: copied 12 files to build/client/brand/
 
 - Forbidden renderer packages checked: 17
 - Contentus-owned source roots scanned: 11
+- Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
 
 Renderer-authority audit: clean.
 
