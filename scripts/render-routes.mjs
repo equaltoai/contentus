@@ -156,6 +156,13 @@ export async function renderRoute(handler, route) {
  * Recording `url` is the point as much as the responses are: it is the only
  * direct evidence of which host the SERVER chose to fetch from, which is exactly
  * the question a spoofed forwarding header raises.
+ *
+ * `authorization` is recorded for the same reason and read the same way the
+ * runtime would: through `Headers`, so a `Authorization`/`authorization` case
+ * difference or a `Headers` instance rather than a plain object cannot make an
+ * assertion pass by reading a field that was never populated. Only that one
+ * header is kept — a probe asserting on the whole bag would be asserting on the
+ * transport's defaults rather than on what the server chose to send.
  */
 export async function withStubbedGraphql(respond, body) {
 	const requests = [];
@@ -166,8 +173,9 @@ export async function withStubbedGraphql(respond, body) {
 		const payload = init.body ? JSON.parse(init.body) : {};
 		const operation = /query\s+([A-Za-z0-9_]+)/.exec(payload.query ?? '')?.[1] ?? '';
 		const variables = payload.variables ?? {};
+		const authorization = new Headers(init.headers).get('authorization');
 
-		requests.push({ url, operation, variables });
+		requests.push({ url, operation, variables, authorization });
 
 		const envelope = respond({ operation, variables }) ?? { data: null };
 		return new Response(JSON.stringify(envelope), {
