@@ -12,6 +12,10 @@ jobs:
     name: Enforce promotion-only main
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      # `HEAD_REPOSITORY` is event-derived, so the comparison runs inside a script
+      # whose content is pinned in the repo contract rather than as shell words.
+      # The pin binds what the guard does; MAI-4 binds the invocation below.
       - name: Require PR from staging
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -20,6 +24,4 @@ jobs:
           CURRENT_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test "${BASE_REF}" = main
-          test "${HEAD_REF}" = staging
-          test "${HEAD_REPOSITORY}" = "${CURRENT_REPOSITORY}"
+          node scripts/main-guard-check.mjs "${BASE_REF}" "${HEAD_REF}" "${HEAD_REPOSITORY}" "${CURRENT_REPOSITORY}"

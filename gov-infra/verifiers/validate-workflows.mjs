@@ -13,8 +13,10 @@
  * assignments/time/env prefixes and output redirections). Shell substitutions, reserved
  * words, `||`, grouping, and unmodelled syntax reject the whole script. A YAML
  * double-quoted run scalar containing a backslash is opaque: safely unescaping it is
- * outside this scanner. DCO remains presence-only evidence; CodeQL's `uses:` ref is
- * presence-only evidence too. Main-guard is executable evidence. Reusable-workflow job-level
+ * outside this scanner. CodeQL's `uses:` ref is presence-only evidence. DCO and
+ * main-guard are executable evidence: each runs its logic from a script pinned by
+ * SHA-256 in the repo contract, so the sentinel is the exact invocation and the
+ * behaviour behind it is bound by content. Reusable-workflow job-level
  * `uses:` remains a structural finding. The known unloadable-but-uncertified shapes are
  * undefined aliases, failed merge keys, duplicate job/root keys, and non-mapping step
  * entries; branch protection contains them because an unloadable workflow reports no
@@ -41,9 +43,12 @@
  *   - The `env:` indirection that rule recommends is only safe where the value is
  *     consumed as data. `env: PAYLOAD: ${{ github.event.* }}` plus `run: bash -c
  *     "$PAYLOAD"` contains no `${{ }}` in its `run:` and executes a pull-request title
- *     anyway. So an event-derived env value may not reach an executable sink, in
- *     workflows or in reached composites, and a composite may not carry an event
- *     expression in `env:` at all.
+ *     anyway. Four rounds of deciding that by where the value lands in the shell each
+ *     lost to a spelling they had not enumerated, so the rule is now about where it
+ *     APPEARS: in a reached workflow or composite `run:`, event-derived data may appear
+ *     only as argv to a script pinned by SHA-256 in the repo contract, or as an argument
+ *     to `printf` after a literal format. Every other appearance is a finding, and a
+ *     composite may not carry an event expression in `env:` at all.
  *   - Every package-manager install in CI is exactly one of the pinned invocations. The
  *     boundary SEC-3 rests on is that no install anywhere runs dependency lifecycle
  *     scripts. The rubric could only ever fix its own install; the three installs in the
@@ -51,12 +56,14 @@
  *     of them executes dependency code and the rubric then reports green on the tree
  *     that code produced. An unasserted boundary is not a boundary.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readStrictJson } from './strict-json.mjs';
 
 const workflowDirectory = '.github/workflows';
+const pinnedContractPath = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 const requiredWorkflows = {
 	'gov-rubric.yml': [
 		'bash gov-infra/verifiers/gov-verify-rubric.sh',
@@ -66,16 +73,19 @@ const requiredWorkflows = {
 		// step so it cannot be quietly dropped to convert a hard gate into a soft one.
 		'node gov-infra/verifiers/install-greater-cli.mjs',
 	],
-	'dco.yml': ['Signed-off-by'],
+	// Both of the workflows that carry event-derived data run their logic from a
+	// script pinned by content in the repo contract, because event-derived data may
+	// appear in a `run:` only as argv to such a script. So the sentinel here is the
+	// exact invocation — argument for argument — and the behaviour behind it is
+	// bound by the SHA-256 the policy run verifies, not by matching command text.
+	'dco.yml': ['node scripts/dco-check.mjs "${BASE_SHA}" "${HEAD_SHA}"'],
 	'lint.yml': ['pnpm run lint'],
 	'test.yml': ['pnpm test'],
 	'codeql.yml': ['github/codeql-action/init@'],
 	// Promotion-only main enforcement must retain both its source-branch and
 	// same-repository checks; workflow presence alone cannot establish that.
 	'main-guard.yml': [
-		'test "${BASE_REF}" = main',
-		'test "${HEAD_REF}" = staging',
-		'test "${HEAD_REPOSITORY}" = "${CURRENT_REPOSITORY}"',
+		'node scripts/main-guard-check.mjs "${BASE_REF}" "${HEAD_REF}" "${HEAD_REPOSITORY}" "${CURRENT_REPOSITORY}"',
 	],
 };
 // Production callers use the fixed directory above. The optional argv directory
@@ -118,7 +128,37 @@ function blockScalarHeader(value) {
 		return null;
 	}
 	const indicator = match[2].match(/\d/);
-	return { explicitIndent: indicator ? Number(indicator[0]) : null };
+	return {
+		explicitIndent: indicator ? Number(indicator[0]) : null,
+		folded: match[1] === '>',
+	};
+}
+
+/**
+ * YAML block folding, for the `>` indicator. A line break between two lines that
+ * both sit at the content indent folds to a single space; a break next to a blank
+ * line or a more-indented line stays a break. Literal (`|`) blocks keep every
+ * break and never reach this.
+ *
+ * Every consumer of a `run:` body needs this before it reads anything, in both
+ * directions. Unfolded, a folded `printf '%s'` / `"$VALUE"` reads as two lines and
+ * the second is judged as its own command — a false finding on a legitimate shape.
+ * Folded, a `bash -c` / `"$VALUE"` pair reads as the one command GitHub actually
+ * runs instead of two harmless-looking halves.
+ */
+function foldBlockLines(lines, contentIndent) {
+	return lines
+		.map(({ body }, index) => {
+			if (index === 0) return body;
+			const previous = lines[index - 1];
+			return previous.blank ||
+				lines[index].blank ||
+				previous.indent > contentIndent ||
+				lines[index].indent > contentIndent
+				? `\n${body}`
+				: ` ${body}`;
+		})
+		.join('');
 }
 
 function rejectNonPlainUsesValue(value) {
@@ -662,20 +702,6 @@ function executableWorkflowText(content) {
 		else runBlock.commands.push(command);
 	};
 
-	const foldedRun = (lines, contentIndent) =>
-		lines
-			.map(({ body }, index) => {
-				if (index === 0) return body;
-				const previous = lines[index - 1];
-				return previous.blank ||
-					lines[index].blank ||
-					previous.indent > contentIndent ||
-					lines[index].indent > contentIndent
-					? `\n${body}`
-					: ` ${body}`;
-			})
-			.join('');
-
 	const processRunPhysicalLine = (runBlock, source) => {
 		let command = source;
 		if (runBlock.pendingContinuation) {
@@ -706,7 +732,7 @@ function executableWorkflowText(content) {
 			block.subject.disabled = true;
 		if (block?.kind === 'run') {
 			if (block.folded) {
-				for (const physicalLine of foldedRun(block.lines, block.contentIndent).split('\n')) {
+				for (const physicalLine of foldBlockLines(block.lines, block.contentIndent).split('\n')) {
 					processRunPhysicalLine(block, physicalLine);
 				}
 				if (block.pendingContinuation) processRunCommand(block, block.pendingContinuation);
@@ -1202,9 +1228,8 @@ const execSentinels = new Set([
 	'pnpm run lint',
 	'bash gov-infra/verifiers/gov-verify-rubric.sh',
 	'node gov-infra/verifiers/install-greater-cli.mjs',
-	'test "${BASE_REF}" = main',
-	'test "${HEAD_REF}" = staging',
-	'test "${HEAD_REPOSITORY}" = "${CURRENT_REPOSITORY}"',
+	'node scripts/dco-check.mjs "${BASE_SHA}" "${HEAD_SHA}"',
+	'node scripts/main-guard-check.mjs "${BASE_REF}" "${HEAD_REF}" "${HEAD_REPOSITORY}" "${CURRENT_REPOSITORY}"',
 ]);
 const reservedWords = new Set(
 	'if then else elif fi for do done while until case esac select coproc function in { } ( ) ! [ [['.split(
@@ -1475,6 +1500,11 @@ export function validatePullRequestTriggers(directory = workflowDirectory) {
 	return findings;
 }
 
+// A line that would itself be recorded as a mapping. A multi-line plain scalar
+// cannot contain one — `key: value` inside a plain scalar is a YAML error — so
+// this is exactly the boundary at which a scalar's continuation stops.
+const mappingLine = /^(\s*(?:-\s*)?)([^:#]+?)\s*:\s*(.*)$/;
+
 /**
  * One structural pass that yields the mapping lines outside block scalars, the
  * text of every `run:` value, and the body of every block scalar by its header
@@ -1483,6 +1513,26 @@ export function validatePullRequestTriggers(directory = workflowDirectory) {
  * in a comment above a job is not an injected command. `blockTexts` exists so an
  * `env:` entry whose value is a block scalar is read rather than skipped: a value
  * this pass cannot see is a value the env-sink rule below cannot judge.
+ *
+ * This pass produces the value GitHub's YAML loader produces, because every rule
+ * below reads what it hands over and a rule cannot judge text it never saw. Two
+ * places where reading physical lines and reading YAML differ, and both of them
+ * hid appearances:
+ *
+ *   - A folded (`>`) block joins its lines with spaces. Read per physical line, a
+ *     legitimate `printf '%s'` / `"$VALUE"` is two commands and the second is a
+ *     false finding, while a `bash -c` / `"$VALUE"` pair is two harmless-looking
+ *     halves of the one command GitHub runs.
+ *   - A plain scalar continues onto any following line that is more indented than
+ *     its key, folding the same way. `run: bash -c` with `"$VALUE"` on the next
+ *     line is one command to YAML and was one physical line — the value's half —
+ *     to this pass, which dropped the continuation entirely.
+ *
+ * So a plain scalar is accumulated until a line that is not its continuation, and
+ * the mapping entry carries the folded value rather than its first line. The one
+ * shape this still does not fold is a continuation that is itself mapping-shaped:
+ * that is not a YAML scalar at all, it is a load error, and a workflow GitHub
+ * cannot load runs nothing.
  */
 function scanWorkflowLines(content) {
 	const lines = content.split(/\r\n|\r|\n/);
@@ -1490,14 +1540,31 @@ function scanWorkflowLines(content) {
 	const runTexts = [];
 	const blockTexts = new Map();
 	let block = null;
+	let plain = null;
 	const closeBlock = () => {
 		if (!block) return;
-		const text = block.body.join('\n');
+		const text = block.folded
+			? foldBlockLines(block.body, block.contentIndent ?? 0)
+			: block.body.map(({ body }) => body).join('\n');
 		blockTexts.set(block.headerLine, { key: block.key, text });
 		// A block scalar's body is already shell text; an inline `run:` value is a
 		// YAML scalar and its quoting comes off first, so the two are distinguished.
 		if (block.isRun) runTexts.push({ line: block.headerLine, text, inlineScalar: false });
 		block = null;
+	};
+	// A plain scalar's continuation lines fold to spaces; a blank line between two
+	// of them is a break. The mapping entry is rewritten in place so every consumer
+	// of `rawValue` reads the whole value.
+	const closePlain = () => {
+		if (!plain) return;
+		if (plain.parts.length) plain.mapping.rawValue += plain.parts.join('');
+		if (plain.mapping.key === 'run' && plain.mapping.rawValue.trim())
+			runTexts.push({
+				line: plain.mapping.index,
+				text: plain.mapping.rawValue,
+				inlineScalar: true,
+			});
+		plain = null;
 	};
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = lines[index];
@@ -1505,23 +1572,36 @@ function scanWorkflowLines(content) {
 		const nonBlank = /\S/.test(line);
 		if (block) {
 			if (!nonBlank) {
-				block.body.push('');
+				block.body.push({ body: '', indent, blank: true });
 				continue;
 			}
 			if (block.contentIndent === null && indent > block.headerIndent)
 				block.contentIndent = block.explicitIndent ?? indent;
 			if (block.contentIndent !== null && indent >= block.contentIndent) {
-				block.body.push(line.slice(block.contentIndent));
+				block.body.push({ body: line.slice(block.contentIndent), indent, blank: false });
 				continue;
 			}
 			closeBlock();
 		}
+		if (plain) {
+			if (!nonBlank) {
+				plain.blanks += 1;
+				continue;
+			}
+			if (indent > plain.keyIndent && !mappingLine.test(line)) {
+				plain.parts.push(`${plain.blanks ? '\n'.repeat(plain.blanks) : ' '}${line.trim()}`);
+				plain.blanks = 0;
+				continue;
+			}
+			closePlain();
+		}
 		if (!nonBlank || /^\s*#/.test(line)) continue;
-		const mapping = line.match(/^\s*(?:-\s*)?([^:#]+?)\s*:\s*(.*)$/);
+		const mapping = line.match(mappingLine);
 		if (!mapping) continue;
-		const key = mapping[1].replace(/^['"]|['"]$/g, '');
-		const rawValue = mapping[2];
-		mappingLines.push({ index, indent, line, key, rawValue });
+		const key = mapping[2].replace(/^['"]|['"]$/g, '');
+		const rawValue = mapping[3];
+		const entry = { index, indent, line, key, rawValue };
+		mappingLines.push(entry);
 		let header = null;
 		try {
 			header = blockScalarHeader(rawValue.trimStart());
@@ -1535,16 +1615,18 @@ function scanWorkflowLines(content) {
 				headerLine: index,
 				explicitIndent: header.explicitIndent === null ? null : indent + header.explicitIndent,
 				contentIndent: null,
+				folded: header.folded,
 				key,
 				isRun: key === 'run',
 				body: [],
 			};
 			continue;
 		}
-		if (key === 'run' && rawValue.trim())
-			runTexts.push({ line: index, text: rawValue, inlineScalar: true });
+		if (!rawValue.trim()) continue;
+		plain = { mapping: entry, keyIndent: mapping[1].length, parts: [], blanks: 0 };
 	}
 	closeBlock();
+	closePlain();
 	return { mappingLines, runTexts, blockTexts };
 }
 
@@ -1683,80 +1765,80 @@ export function validateRunExpressions(directory = workflowDirectory, root = '.'
  *     is a finding. Carrying an input through `env:` is the safe pattern and stays
  *     allowed; the value is then tainted for the sink rule below, because what the
  *     caller passed may well be event payload.
- *   - An env value carrying a `github.event` expression may not be referenced from
- *     an executable sink in any `run:` text: `bash -c`/`sh -c`, `eval`, `node -e`,
- *     `python -c` and their siblings, `source`/`.`, an interpreter fed its program
- *     on standard input, a command substitution, or the command word of a segment.
- *     Referencing it as data — as an argument to a non-executing command, or as
- *     argv to a pinned script — stays exactly as allowed as before, because that is
- *     the pattern this repository's own workflows use.
+ *   - An env value carrying a `github.event` expression may APPEAR in a `run:`
+ *     script in exactly two shapes, and every other appearance of it is a finding.
  *
- * A sink is identified by what a segment *executes*, never by the word it starts
- * with, and — since three successive rounds of this rule each lost to a spelling it
- * had not enumerated — never by spelling at all. Quoting and backslashes rewrite the
- * executing word (`"bash"`, `b\ash`); assignment, empty-expansion and redirection
- * prefixes move it off the front (`FOO=bar bash`, `$UNSET bash`, `> /dev/null bash`);
- * `!`, subshells and keyword compounds put it after a grammar token (`( bash … )`,
- * `if …; then bash …`); and a variable can be the word itself (`VAR=bash; $VAR -c`).
- * A rule that enumerates sink spellings cannot win against a grammar, so the standard
- * of proof is inverted: the scanner must PROVE a segment safe, and a segment it
- * cannot resolve is a finding. See `lexShellScript` for what that parse covers.
+ * That last rule is the round this thread converges on, and it is a different kind
+ * of rule from the four that preceded it. Each of those asked where in the shell
+ * the value ends up and allowed everything that was not an execution position.
+ * Round 4 named the sink by its head word and lost to `env bash -c`. Round 5 named
+ * the resolved head word and lost to fifteen shapes across quoting, assignment and
+ * redirection prefixes, keyword compounds and a variable in command position. Round
+ * 6 stopped naming spellings altogether and PROVED the command word of every parsed
+ * segment — and lost anyway, because execution is not only in command position: it
+ * is in the argv of `find -exec`, `trap` and `awk`, in a `<(…)` operand a shell is
+ * handed as its script, on a non-zero file descriptor a heredoc was shelved onto,
+ * behind `read` and `mapfile`, and in YAML's own fold. "Data position" is no more
+ * provable by grammar than "command position" was; each round proved its own claim
+ * and the claim kept being the wrong one.
+ *
+ * So the standard is inverted a second time, from position to APPEARANCE. In a
+ * `run:` that a reached workflow or composite carries, event-derived data may appear
+ * only as:
+ *
+ *   (a) argv to a script pinned by SHA-256 in the repo contract — `node
+ *       scripts/dco-check.mjs "$SHA"`, the shape both of this repository's real
+ *       workflows now use — where the pin binds what the value is handed to; or
+ *   (b) an argument to printf-style data emission, after a literal format —
+ *       `printf '%s' "$VALUE"`, which executes nothing.
+ *
+ * Everything else is a finding, without asking what it would do. `bash -c`, `bash
+ * <(…)`, `bash <<<`, a `read` or `mapfile` carrying it, the argv of any command that
+ * is not a pinned script, a redirection target, a heredoc body, an assignment, a
+ * substitution interior: all findings, by appearance, with no inference to lose.
+ * There is nothing left for a new spelling to be a new spelling *of*.
+ *
+ * The parse is still needed and still has to be right, but only to recognise the two
+ * allowances — to tell argv-to-a-pinned-script from program text, and a literal
+ * printf format from an expanded one. Everything it cannot parse is a finding, as
+ * before. See `lexShellScript` for what that parse covers.
  *
  * Taint follows shell assignment and same-line `$GITHUB_ENV` writes, to a fixpoint,
- * so renaming a value does not launder it. What it does not follow is recorded as a
- * residual limit in the threat model rather than implied to be covered: this reads
- * `run:` text, so a value that reaches a sink inside a called script, through a
- * pipe, or through a heredoc written to `$GITHUB_ENV` is outside it.
+ * so a renamed value is tainted too — though under the appearance rule the rename is
+ * already a finding where it is written. What this cannot follow is recorded as a
+ * residual limit in the threat model rather than implied to be covered: it reads
+ * `run:` text, so a value that reaches an executor inside the pinned script itself,
+ * across a pipe out of an allowed command, or through `${!VAR}` indirect expansion
+ * is outside it.
  */
 const eventExpressionPattern = /\$\{\{([^}]*)\}\}/g;
 const shellIdentifier = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const shellInterpreters = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh']);
-const inlineScriptFlags = new Map([
-	['node', /^(?:-e|--eval|-p|--print)$/],
-	['nodejs', /^(?:-e|--eval|-p|--print)$/],
-	['python', /^-c$/],
-	['python3', /^-c$/],
-	['perl', /^-[eE]$/],
-	['ruby', /^-e$/],
-]);
 const assignmentDeclarators = new Set(['export', 'declare', 'local', 'readonly', 'typeset']);
 
-// A wrapper that launches another command: what runs is what follows it, so a rule
-// that reads the word a segment starts with reads the wrapper and misses the sink.
-const launcherWrappers = new Set([
-	'builtin',
-	'command',
-	'doas',
-	'env',
-	'exec',
-	'ionice',
-	'nice',
-	'nohup',
-	'setsid',
-	'stdbuf',
-	'sudo',
-	'time',
-	'timeout',
-	'xargs',
+// The interpreters a pinned script may be launched through. This list is not a
+// sink list and nothing turns on it being complete: a name that is missing from it
+// simply does not receive the allowance, and every appearance in that command is a
+// finding. That asymmetry is the point — under the appearance rule an incomplete
+// list over-blocks, where under the sink rules it under-blocked.
+const scriptLaunchers = new Set([
+	'bash',
+	'sh',
+	'dash',
+	'zsh',
+	'ksh',
+	'node',
+	'nodejs',
+	'python',
+	'python3',
+	'perl',
+	'ruby',
 ]);
 
-// `source` and `.` name the program to run rather than pass an argument to one.
-const sourceCommands = new Set(['source', '.']);
-
-// Interpreters that take their program from standard input when given no script
-// operand, so text fed to one there is program text and not the operand's data.
-const stdinInterpreters = new Set([...shellInterpreters, ...inlineScriptFlags.keys()]);
-const interpreterWords = new Set([...stdinInterpreters, ...sourceCommands, 'eval']);
-
-// An operand naming a script means stdin belongs to that script: `bash pinned.sh
-// <<< "$VALUE"` feeds data to a called script, which this model records as a
-// residual rather than judges. A word that is neither a path nor a script name
-// does not suppress the rule, so an option's value cannot pose as an operand.
-// A name that *is* standard input takes nothing away, so `bash /dev/stdin <<<
-// "$VALUE"` and `bash --rcfile /dev/stdin <<< "$VALUE"` remain the interpreter
-// reading its own program.
-const scriptOperand = /\/|\.(?:sh|bash|dash|zsh|ksh|js|mjs|cjs|ts|py|rb|pl)$/;
-const standardInputNames = new Set(['-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0']);
+// Printf-style data emission: the command that formats a value without executing
+// it. Held to `printf` alone, and to a literal format, because a narrow allowance
+// is the whole posture — `echo "$VALUE"` is data emission too and is deliberately
+// not allowed, since nothing in this repository needs it.
+const dataEmissionCommands = new Set(['printf']);
 
 const eventReference = /\bgithub\s*\.\s*event\b/;
 const inputReference = /\binputs\s*\.\s*[A-Za-z_-]/;
@@ -1962,8 +2044,7 @@ function propagateTaint(runTexts, tainted) {
 class ShellParseError extends Error {}
 
 // Reserved words that hold a command position without being the command: what runs
-// is the word after them. `time` is deliberately absent — it is a launcher wrapper
-// here, so the finding still records that the sink was reached through one.
+// is the word after them.
 const commandPositionKeywords = new Set([
 	'!',
 	'{',
@@ -1978,9 +2059,6 @@ const commandPositionKeywords = new Set([
 	'until',
 	'while',
 ]);
-
-// Redirection operators that can put an interpreter's program on its standard input.
-const stdinRedirections = new Set(['<', '<<', '<<-', '<<<', '<>']);
 
 // Longest-first, because `<<<` must win over `<<` and `<`.
 const redirectionOperators = [
@@ -1997,15 +2075,6 @@ const redirectionOperators = [
 	'<',
 	'>',
 ];
-
-// Options whose value the interpreter reads as program text rather than as data.
-const programTextOptions = new Map([
-	...[...shellInterpreters].map((name) => [name, /^--(?:rcfile|init-file)$/]),
-	['node', /^(?:-r|--require|--import)$/],
-	['nodejs', /^(?:-r|--require|--import)$/],
-	['python', /^-m$/],
-	['python3', /^-m$/],
-]);
 
 const assignmentWord = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/;
 
@@ -2439,127 +2508,149 @@ function parseSimpleCommands(tokens) {
 }
 
 /**
- * What a parsed command executes. Judging the first word alone lets `env bash -c
- * "$VALUE"` past a rule that stops the bare `bash -c` it contains, so resolution
- * steps over each launcher wrapper and over the assignments and options that belong
- * to it, chained as deeply as the command nests them.
+ * The allowance, and the only thing the parse is still asked to establish.
  *
- * The command word must then resolve to a *literal*. `$UNSET bash -c "$VALUE"` and
- * `VAR=bash; $VAR -c "$VALUE"` execute an interpreter while naming no word this
- * scanner can read, so they are returned as unresolved and reported — no literal
- * tracking, no enumeration of what a variable might hold.
+ * Returns the word tokens of `command` in which event-derived data is permitted to
+ * appear, or `null` when the command is not one of the two allowed shapes:
  *
- * Wrapper option grammars differ, and one whose option takes a separate value
- * (`env -u NAME bash -c …`) would otherwise resolve to that value. So once a wrapper
- * has been consumed — or once the command word has failed to resolve — every later
- * literal interpreter word is an additional head. Those extra heads carry the
- * interpreter rules only, so `env printf '%s' "$VALUE"` stays the data use it is.
+ *   - `<pinned-script> …` or `<launcher> <pinned-script> …`, where the script's
+ *     path is pinned by SHA-256 in the repo contract and that digest has already
+ *     been verified against the file on disk. The launcher's operand must be the
+ *     script itself, immediately: `bash -c` never reaches this because `-c` is not
+ *     a pinned path, and `bash -s pinned.sh` does not either.
+ *   - `printf <literal-format> …`, where the format resolves to a literal. An
+ *     expanded format is not the allowance, so `printf "$VALUE"` is a finding.
+ *
+ * An assignment prefix disqualifies the command outright. `FOO="$VALUE" node
+ * pinned.mjs` puts the value somewhere this scanner does not follow, and the
+ * appearance rule does not need to guess which.
  */
-function resolveExecution(words) {
-	const isLiteral = (entry) => !entry.expanded;
-	let index = 0;
-	let wrapped = false;
-	while (
-		index < words.length &&
-		isLiteral(words[index]) &&
-		launcherWrappers.has(words[index].literal)
-	) {
-		wrapped = true;
-		index += 1;
-		// The wrapper's own assignments and options. An assignment is recognised by its
-		// unquoted prefix, so `env COPY="$VALUE" ./pinned.sh` still resolves to the
-		// script — the value is being placed in an environment, not executed.
-		while (
-			index < words.length &&
-			(assignmentWord.test(words[index].plain) ||
-				(isLiteral(words[index]) && /^[-+]/.test(words[index].literal)))
-		)
-			index += 1;
-	}
-	const trailingInterpreters = (from) => {
-		const heads = [];
-		for (let cursor = from; cursor < words.length; cursor += 1)
-			if (isLiteral(words[cursor]) && interpreterWords.has(words[cursor].literal))
-				heads.push(cursor);
-		return heads;
-	};
-	if (index >= words.length) return { heads: [], wrapped, unresolved: null };
-	if (!isLiteral(words[index]))
-		return { heads: trailingInterpreters(index + 1), wrapped, unresolved: words[index] };
-	return {
-		heads: [index, ...(wrapped ? trailingInterpreters(index + 1) : [])],
-		wrapped,
-		unresolved: null,
-	};
-}
-
-// The text a redirection carries. A heredoc's body counts whether or not its
-// delimiter was quoted: quoting only stops the *outer* shell from expanding the body
-// as it writes it, and an interpreter handed that body as its program expands it
-// itself. `bash <<'EOF'` / `$PAYLOAD` / `EOF` runs the payload — verified in bash —
-// so the delimiter's quotes buy nothing at a sink. They buy plenty at a data use,
-// which is why `cat <<'EOF' >> "$GITHUB_ENV"` is untouched: `cat` executes nothing.
-function redirectText(redirect) {
-	if (redirect.op === '<<' || redirect.op === '<<-') return redirect.body ?? '';
-	return redirect.target?.source ?? '';
+function allowanceArgv(command, pinnedScripts) {
+	if (command.assignments.length) return null;
+	const words = command.words;
+	if (!words.length || words[0].expanded) return null;
+	const pinned = (word) =>
+		word && !word.expanded && pinnedScripts.has(word.literal.replace(/^\.\//, ''));
+	if (pinned(words[0])) return words.slice(1);
+	if (scriptLaunchers.has(words[0].literal)) return pinned(words[1]) ? words.slice(2) : null;
+	if (dataEmissionCommands.has(words[0].literal))
+		return words[1] && !words[1].expanded ? words.slice(2) : null;
+	return null;
 }
 
 /**
- * Program text an interpreter reads from standard input: a herestring, a heredoc,
- * a process substitution redirected onto stdin, or an ordinary `<`
- * whose operand the interpreter then runs. The interpreter executes what it reads,
- * and none of these carries the `-c` flag the inline-script rule looks for.
- *
- * A literal script operand suppresses the rule: stdin then belongs to that script,
- * and a value reaching a sink inside a called script is a recorded residual rather
- * than a shape this scanner judges. An operand that names standard input itself
- * suppresses nothing, because it takes nothing away, and an operand that is an
- * expansion suppresses nothing either — an unreadable operand is not a proof.
+ * The two spellings this scanner reads as "the value, whole": `$NAME` and
+ * `${NAME}`. Every other `${NAME…}` form applies an operator to the value rather
+ * than passing it — `${NAME@P}` re-expands it as a prompt string, which executes
+ * command substitutions inside it; `${NAME/a/b}` rewrites it — so a word carrying
+ * one is not proven to be a plain argument and does not get the allowance.
  */
-function stdinProgramSpans(rest, redirects) {
-	for (const entry of rest) {
-		if (entry.expanded) continue;
-		if (standardInputNames.has(entry.literal)) continue;
-		if (/^[-+]/.test(entry.literal) || assignmentWord.test(entry.plain)) continue;
-		if (scriptOperand.test(entry.literal)) return [];
-	}
-	const spans = [];
-	for (const redirect of redirects) {
-		if (!stdinRedirections.has(redirect.op) || (redirect.fd ?? '0') !== '0') continue;
-		const text = redirectText(redirect);
-		if (redirect.op === '<<<') spans.push({ kind: 'a `<<<` herestring', text });
-		else if (redirect.op === '<<' || redirect.op === '<<-') spans.push({ kind: 'a heredoc', text });
-		else if (/^<\(/.test(redirect.target?.source ?? ''))
-			spans.push({
-				kind: 'a `< <(...)` stdin process substitution',
-				text: balancedInterior(redirect.target.source, 1).text,
-			});
-		else spans.push({ kind: `a \`${redirect.op}\` stdin redirection`, text });
-	}
-	return spans;
+function wholeValueReference(source, name) {
+	const pattern = new RegExp(`\\$\\{?${name}(?![A-Za-z0-9_])`, 'g');
+	for (const match of source.matchAll(pattern))
+		if (match[0].startsWith('${') && source[match.index + match[0].length] !== '}') return false;
+	return true;
 }
 
-// An option whose value the interpreter reads as program text: `bash --rcfile FILE`
-// sources FILE before anything else, and `node -r MODULE` runs MODULE.
-function programOptionSpans(headWord, rest) {
-	const option = programTextOptions.get(headWord);
-	if (!option) return [];
-	const spans = [];
-	for (let index = 0; index < rest.length; index += 1) {
-		const entry = rest[index];
-		if (entry.expanded) continue;
-		const separator = entry.literal.indexOf('=');
-		if (separator > 0 && option.test(entry.literal.slice(0, separator))) {
-			spans.push({
-				kind: `\`${headWord} ${entry.literal.slice(0, separator)}\``,
-				text: entry.source.slice(entry.source.indexOf('=') + 1),
+// A tainted name inside a command substitution, a process substitution or an
+// arithmetic expansion is a nested shell, not an argument. `node pinned.mjs
+// "$(bash -c "$VALUE")"` is argv by shape and an interpreter by behaviour, so an
+// argv word carrying one does not get the allowance either.
+function carriesSubstitutedTaint(source, names) {
+	return substitutionSpans(source).some((span) =>
+		names.some((name) => referencesVariable(span.text, name))
+	);
+}
+
+// Findings quote the text they are about. Collapse it so a heredoc body or a
+// folded scalar stays one readable line.
+function quoteAppearance(source) {
+	const collapsed = source.replace(/\s+/g, ' ').trim();
+	return collapsed.length > 80 ? `${collapsed.slice(0, 77)}…` : collapsed;
+}
+
+/**
+ * Every appearance of a tainted name in one `run:` script, minus the appearances
+ * the allowance covers.
+ *
+ * Completeness is the whole property, so the walk is over the lexer's own output
+ * rather than over the parser's. `lexShellScript` consumes every byte of the script
+ * into a word, an operator or a redirection, and operators carry no names — so
+ * classifying words, redirection targets and heredoc bodies classifies everything
+ * that is there. That is why the shapes the parser deliberately skips (a `for`
+ * header's word list, a `case` pattern) cannot hide an appearance the way they
+ * could hide a command, and why nothing recurses into substitutions: a name inside
+ * one is already inside some word's source, and no word carrying a substituted name
+ * is ever allowed.
+ *
+ * Comments are the one appearance this does not report. The lexer drops them, and a
+ * `#` comment is the single position in a shell script from which no expansion of
+ * any kind reaches an executor.
+ */
+function taintedAppearanceFindings(text, tainted, pinnedScripts) {
+	const names = [...tainted];
+	const hits = (source) => names.filter((name) => referencesVariable(source ?? '', name));
+
+	let tokens;
+	let commands;
+	try {
+		tokens = lexShellScript(text);
+		commands = parseSimpleCommands(tokens);
+	} catch (error) {
+		if (!(error instanceof ShellParseError)) throw error;
+		return [{ kind: 'unproven', reason: error.message }];
+	}
+
+	const allowed = new Set();
+	for (const command of commands) {
+		const argv = allowanceArgv(command, pinnedScripts);
+		if (!argv) continue;
+		for (const word of argv) {
+			const matched = hits(word.source);
+			if (!matched.length) continue;
+			if (carriesSubstitutedTaint(word.source, names)) continue;
+			if (!matched.every((name) => wholeValueReference(word.source, name))) continue;
+			allowed.add(word);
+		}
+	}
+
+	const findings = [];
+	const report = (source, where) => {
+		const matched = hits(source);
+		if (matched.length) findings.push({ kind: 'appearance', names: matched, where });
+	};
+	// The appearance rule does not need to know what a command word resolves to —
+	// but a script this scanner cannot read is refused whether or not a tainted name
+	// is spelled in it, exactly as an unparseable one is. `$VAR -c …` in a file that
+	// carries event data is a construct with an unread half, and an unread half is
+	// never a pass.
+	for (const command of commands)
+		if (command.words[0]?.expanded)
+			findings.push({
+				kind: 'unproven',
+				reason:
+					`the command word \`${quoteAppearance(command.words[0].source)}\` is an expansion, ` +
+					'so what this segment runs cannot be read',
 			});
+	for (const token of tokens) {
+		if (token.kind === 'word') {
+			if (!allowed.has(token))
+				report(token.source, `the word \`${quoteAppearance(token.source)}\``);
 			continue;
 		}
-		if (option.test(entry.literal) && rest[index + 1])
-			spans.push({ kind: `\`${headWord} ${entry.literal}\``, text: rest[index + 1].source });
+		if (token.kind !== 'redirect') continue;
+		const fd = token.fd === null ? '' : ` on fd ${token.fd}`;
+		if (token.op === '<<' || token.op === '<<-') {
+			// A heredoc body is program text to whatever reads it, whatever quotes its
+			// delimiter and whatever descriptor it is shelved onto, so both the body and
+			// the delimiter are appearances wherever they sit.
+			report(token.body, `the body of a \`${token.op}\` heredoc${fd}`);
+			report(token.target?.source, `the delimiter of a \`${token.op}\` heredoc${fd}`);
+			continue;
+		}
+		report(token.target?.source, `the target of a \`${token.op}\` redirection${fd}`);
 	}
-	return spans;
+	return findings;
 }
 
 /**
@@ -2595,107 +2686,50 @@ function yamlRunScalar(value) {
 		: { text: value };
 }
 
-function executableSinkFindings(text, tainted) {
+/**
+ * Every path a pinned run script's digest can fail to bind, before any allowance
+ * rests on it. A path that escapes the repository, a missing file, a symlink, or
+ * content that does not hash to the pinned value all leave that script out of the
+ * verified set — so a `run:` that hands event-derived data to it is judged as an
+ * appearance in an ordinary command, which is a finding.
+ */
+export function validatePinnedRunScripts(pins, root = '.') {
 	const findings = [];
-	const names = [...tainted];
-	const hits = (token) => names.filter((name) => referencesVariable(token, name));
-	const report = (matched, sink) => {
-		if (matched.length) findings.push({ kind: 'sink', names: matched, sink });
-	};
-
-	let commands;
-	try {
-		commands = parseSimpleCommands(lexShellScript(text));
-	} catch (error) {
-		if (!(error instanceof ShellParseError)) throw error;
-		return [{ kind: 'unproven', reason: error.message }];
-	}
-
-	for (const { words, redirects } of commands) {
-		if (!words.length) continue;
-		const { heads, wrapped, unresolved } = resolveExecution(words);
-		const via = wrapped ? ' reached through a launcher wrapper' : '';
-		if (unresolved) {
-			// A variable that resolves to the command word is execution, not data —
-			// and a command word this scanner cannot resolve is not proven to be data
-			// either, which is the same finding for a different reason.
-			const matched = hits(unresolved.source);
-			if (matched.length)
-				findings.push({
-					kind: 'sink',
-					names: matched,
-					sink: `the command word of a shell segment${via}`,
-				});
-			else
-				findings.push({
-					kind: 'unproven',
-					reason:
-						`the command word \`${unresolved.source}\`${via} is an expansion, so what this ` +
-						'segment executes cannot be resolved to a literal',
-				});
+	const verified = new Set();
+	for (const [path, digest] of Object.entries(pins)) {
+		const label = `${pinnedContractPath}: workflows.pinned_run_scripts["${path}"]`;
+		if (!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(path) || path.split('/').includes('..')) {
+			findings.push(`${label}: path must be repository-relative with no \`..\` segment`);
+			continue;
 		}
-		for (const position of heads) {
-			const headWord = words[position].literal;
-			const rest = words.slice(position + 1);
-			// A redirection belongs to the same command as its words, so a value that
-			// arrives through one is judged with the rest of that command's text.
-			const attached = [...rest.map((entry) => entry.source), ...redirects.map(redirectText)];
-			// Whether the interpreter already holds its program inline. If it does,
-			// its standard input is that program's data rather than a second program.
-			let inlineProgram = false;
-			if (shellInterpreters.has(headWord)) {
-				const flag = rest.find(
-					(entry) => !entry.expanded && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(entry.literal)
-				);
-				if (flag) {
-					inlineProgram = true;
-					for (const value of attached)
-						report(hits(value), `\`${headWord} ${flag.literal}\`${via}`);
-				}
-			}
-			if (headWord === 'eval') for (const value of attached) report(hits(value), `\`eval\`${via}`);
-			// `source`/`.` take a program, not an argument, so every operand is program
-			// text: `source <(printf '%s' "$VALUE")` executes what the substitution
-			// prints, though that same substitution standing alone only prints it.
-			if (sourceCommands.has(headWord))
-				for (const value of attached) report(hits(value), `\`${headWord}\`${via}`);
-			const inline = inlineScriptFlags.get(headWord);
-			if (inline) {
-				const flag = rest.find((entry) => !entry.expanded && inline.test(entry.literal));
-				if (flag) {
-					inlineProgram = true;
-					for (const value of attached)
-						report(hits(value), `\`${headWord} ${flag.literal}\`${via}`);
-				}
-			}
-			for (const span of programOptionSpans(headWord, rest))
-				report(hits(span.text), `${span.kind}${via}`);
-			if (!inlineProgram && stdinInterpreters.has(headWord))
-				for (const span of stdinProgramSpans(rest, redirects))
-					report(hits(span.text), `${span.kind} run by \`${headWord}\`${via}`);
+		if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
+			findings.push(`${label}: value must be a lowercase 64-character SHA-256 digest`);
+			continue;
 		}
+		const file = join(root, path);
+		if (!existsSync(file) || !lstatSync(file).isFile()) {
+			findings.push(`${label}: pinned run script is missing or is not a regular file`);
+			continue;
+		}
+		const actual = createHash('sha256').update(readFileSync(file)).digest('hex');
+		if (actual !== digest) {
+			findings.push(`${label}: content hashes to ${actual}, not the pinned digest`);
+			continue;
+		}
+		verified.add(path);
 	}
-	// A substitution is a nested shell, so it is judged by the same rules rather
-	// than by the mere presence of the name: `$(printf '%s' "$TITLE")` consumes the
-	// value as data exactly as `printf '%s' "$TITLE"` does, while `$($TITLE)` and
-	// `$(bash -c "$TITLE")` reach an executor and are reported as such.
-	for (const span of substitutionSpans(text)) {
-		if (!names.some((name) => referencesVariable(span.text, name))) continue;
-		for (const finding of executableSinkFindings(span.text, tainted))
-			findings.push(
-				finding.kind === 'sink'
-					? { ...finding, sink: `${finding.sink} inside ${span.kind}` }
-					: { ...finding, reason: `${finding.reason}, inside ${span.kind}` }
-			);
-	}
-	return findings;
+	return { findings, verified };
 }
 
 /**
- * The composite `env:` prohibition and the executable-sink rule, over the workflow
- * set and every local composite action manifest it reaches.
+ * The composite `env:` prohibition and the appearance rule, over the workflow set
+ * and every local composite action manifest it reaches.
  */
-export function validateEventEnvSinks(directory = workflowDirectory, root = '.') {
+export function validateEventEnvSinks(
+	directory = workflowDirectory,
+	root = '.',
+	pinnedScripts = new Set()
+) {
 	const findings = [];
 	const targets = [
 		...yamlFiles(directory).map((file) => ({ file, composite: false })),
@@ -2728,7 +2762,7 @@ export function validateEventEnvSinks(directory = workflowDirectory, root = '.')
 				continue;
 			}
 			// Inside a composite an input is caller-supplied and may be event payload,
-			// so it is tainted for the sink rule even though carrying it is allowed.
+			// so it is tainted for the appearance rule even though carrying it is allowed.
 			const carried = expressions.length
 				? expressions
 				: composite
@@ -2751,22 +2785,23 @@ export function validateEventEnvSinks(directory = workflowDirectory, root = '.')
 			const scalar = inlineScalar ? yamlRunScalar(text) : { text };
 			if (scalar.error) {
 				findings.push(
-					`${file}:${line + 1}: run: cannot be proven free of an executable sink: ` +
+					`${file}:${line + 1}: run: cannot be read as shell: ` +
 						`${scalar.error}. This file carries ${origin} data in env:, so a run: value ` +
 						'this scanner cannot read as shell is a finding, not a pass'
 				);
 				continue;
 			}
-			for (const finding of executableSinkFindings(scalar.text, tainted))
+			for (const finding of taintedAppearanceFindings(scalar.text, tainted, pinnedScripts))
 				findings.push(
-					finding.kind === 'sink'
-						? `${file}:${line + 1}: run: reaches ${finding.sink} with ${origin} ` +
-								`${finding.names.map((name) => `$${name}`).join(', ')}; ` +
-								'pass the value as data (an argument to a non-executing command, or argv to a ' +
-								'pinned script) instead of as program text'
-						: `${file}:${line + 1}: run: cannot be proven free of an executable sink: ` +
-								`${finding.reason}. This file carries ${origin} data in env:, so a segment ` +
-								'this scanner cannot resolve is a finding, not a pass'
+					finding.kind === 'appearance'
+						? `${file}:${line + 1}: run: ${origin} ` +
+								`${finding.names.map((name) => `$${name}`).join(', ')} appears at ${finding.where}; ` +
+								'in a run: script such a value may appear only as argv to a script pinned in ' +
+								'the repo contract, or as an argument to printf after a literal format — every ' +
+								'other appearance is a finding, whatever the shell would do with it'
+						: `${file}:${line + 1}: run: cannot be read as shell: ${finding.reason}. ` +
+								`This file carries ${origin} data in env:, so a script this scanner cannot ` +
+								'parse is a finding, not a pass'
 				);
 		}
 	}
@@ -2894,7 +2929,7 @@ export function validateInstallInvocations(
 
 if (import.meta.url === `file://${process.argv[1]}`) {
 	const [mode, directory] = process.argv.slice(2);
-	const contractPath = 'gov-infra/planning/contentus-pinned-repo-contract.json';
+	const contractPath = pinnedContractPath;
 	const policy = () => {
 		let workflows;
 		try {
@@ -2904,6 +2939,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		}
 		const allowedWrites = workflows?.allowed_write_permissions;
 		const allowedInstalls = workflows?.allowed_install_invocations;
+		const pinnedRunScripts = workflows?.pinned_run_scripts?.sha256;
 		if (!Array.isArray(allowedWrites))
 			return [`${contractPath}: workflows.allowed_write_permissions must be an array`];
 		if (!Array.isArray(allowedInstalls) || allowedInstalls.length === 0)
@@ -2911,10 +2947,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 				`${contractPath}: workflows.allowed_install_invocations must be a non-empty array; ` +
 					'an empty allowlist would let any install shape pass',
 			];
+		// The map may be empty — a repository whose workflows carry no event data
+		// needs no allowance — but it may not be absent, because a missing key would
+		// silently make every pinned-script allowance unavailable and read as a
+		// stricter gate rather than as an unread contract.
+		if (
+			pinnedRunScripts === null ||
+			typeof pinnedRunScripts !== 'object' ||
+			Array.isArray(pinnedRunScripts)
+		)
+			return [`${contractPath}: workflows.pinned_run_scripts.sha256 must be an object`];
+		const pinned = validatePinnedRunScripts(pinnedRunScripts);
 		return [
 			...validateWorkflowPermissions(directory, allowedWrites),
 			...validateRunExpressions(directory),
-			...validateEventEnvSinks(directory),
+			...pinned.findings,
+			...validateEventEnvSinks(directory, '.', pinned.verified),
 			...validateInstallInvocations(directory, allowedInstalls),
 		];
 	};

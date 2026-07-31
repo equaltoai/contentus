@@ -193,9 +193,31 @@
       "the flag from one of them executes dependency lifecycle code and the rubric then",
       "reports green on the tree that code produced. The greater CLI no longer appears",
       "here because it installs through `node gov-infra/verifiers/install-greater-cli.mjs`,",
-      "which verifies the release-asset digest first and passes `--ignore-scripts` itself."
+      "which verifies the release-asset digest first and passes `--ignore-scripts` itself.",
+      "",
+      "`pinned_run_scripts` is what makes the workflow scanner's appearance rule usable.",
+      "Event-derived data may appear in a `run:` script in two shapes only: argv to a",
+      "script pinned below, or an argument to printf after a literal format. Everything",
+      "else is a finding — `bash -c`, a `<(…)` operand, a heredoc body, a `read` carrier,",
+      "the argv of any command that is not one of these scripts. Four rounds of naming",
+      "execution positions each lost to a shell spelling they had not enumerated, so the",
+      "rule stopped asking what a position would do.",
+      "",
+      "The pin is the allowance. A script whose file is missing, is a symlink, or does not",
+      "hash to the value below is not in the verified set, and a `run:` handing event data",
+      "to it is judged as an ordinary command — a finding. That is also what binds the",
+      "behaviour these two workflows used to spell out inline: `main-guard`'s three `test`",
+      "comparisons and DCO's commit walk are now content-bound here rather than matched as",
+      "command text, while MAI-4 still binds the exact invocation in the workflow."
     ],
     "allowed_install_invocations": ["pnpm install --frozen-lockfile --ignore-scripts"],
+    "pinned_run_scripts": {
+      "rubric_items": ["SEC-3"],
+      "sha256": {
+        "scripts/dco-check.mjs": "9774468f7f40852c34c6903870cd4fb18323e8e7ebde611aa24d43e71bb505e8",
+        "scripts/main-guard-check.mjs": "37a68ec6fc26fb17b7bbac3362b14a25548b6dadea3fb820dc036f9ea0a93639"
+      }
+    },
     "allowed_write_permissions": [
       {
         "workflow": "codeql.yml",

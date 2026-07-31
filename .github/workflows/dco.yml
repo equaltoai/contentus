@@ -17,19 +17,13 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
+      # The two SHAs are event-derived, so they reach the shell only as argv to a
+      # script whose content is pinned in the repo contract. Nothing here parses
+      # them: `scripts/dco-check.mjs` runs `git log` through an argument vector.
       - name: Require DCO sign-off on every PR commit
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git log --no-merges --format='%H%x00%B%x00' "${BASE_SHA}..${HEAD_SHA}" | node -e '
-            const fs = require("node:fs");
-            const parts = fs.readFileSync(0, "utf8").split("\0");
-            const bad = [];
-            for (let i = 0; i + 1 < parts.length; i += 2) {
-              const sha = parts[i]; const body = parts[i + 1];
-              if (sha && !/^Signed-off-by: .+ <[^>]+>$/mi.test(body)) bad.push(sha);
-            }
-            if (bad.length) { console.error(`Missing Signed-off-by trailer: ${bad.join(", ")}`); process.exit(1); }
-          '
+          node scripts/dco-check.mjs "${BASE_SHA}" "${HEAD_SHA}"
