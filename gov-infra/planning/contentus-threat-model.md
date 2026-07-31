@@ -33,19 +33,20 @@
   same commit that the gate is meant to judge.
 - **Entry points:** pull requests to `staging`. No workflow runs on direct pushes.
 
-| Threat ID | Title                         | What can go wrong                                                                                                                                                                                                                                         | Primary controls                         | Verification                                                                   |
-| --------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------ |
-| THR-1     | Supply-chain compromise       | A mutable Action, a lifecycle hook, or an unlocked dependency executes in CI — including through a CI install that quietly drops `--ignore-scripts` before the rubric can object.                                                                         | SEC-3, COM-2                             | `check_supply_chain`, pinned install invocations                               |
-| THR-2     | Client regression             | SSR routes, types, Svelte components, or the two-pass build regress.                                                                                                                                                                                      | QUA-1, QUA-2, CON-2                      | build, tests, type checks                                                      |
-| THR-3     | Web-integrity regression      | Built output introduces inline scripts, styles, or event handlers, or a third-party script origin, breaking the strict CSP the FaceTheory host enforces.                                                                                                  | SEC-4                                    | built-output CSP audit                                                         |
-| THR-4     | Governance drift              | The deterministic rubric or the pull-request CI hook disappears or goes stale.                                                                                                                                                                            | MAI-4, DOC-5                             | CI-hook and threat/control parity checks                                       |
-| THR-5     | Renderer-authority violation  | A Markdown or HTML rendering path, a client-side excerpt/TOC generator, or a raw-draft-source display appears in the client, creating a second canonical renderer.                                                                                        | SEC-5                                    | `pnpm run validate:renderer-authority`                                         |
-| THR-6     | SSR trust-boundary regression | The handler resolves its origin from an unverified `Host`, leaks withheld article source, or serves 200 for a CMS object that does not exist.                                                                                                             | SEC-6                                    | built-handler SSR probes                                                       |
-| THR-7     | Vendored-source drift         | A vendored greater-components file is hand-edited, an orphan appears under the vendored root, or the CLI-copy and tarball channels drift out of lockstep.                                                                                                 | SEC-7, CON-4                             | `greater doctor`, pin-lockstep check                                           |
-| THR-8     | Disclosed-finding drift       | A known, unfixed upstream finding silently changes shape, or a new finding hides behind an old one.                                                                                                                                                       | SEC-2, SEC-7                             | exact-set assertion against the pinned disclosures                             |
-| THR-9     | Gate self-neutralization      | The change under review edits what the rubric trusts — a `package.json` script, the file a pinned command _executes_, a probe's assertions, the install manifest, a pin — so a control exits 0 without its property holding.                              | CON-3, CON-4, CON-5, COM-1, SEC-6, SEC-7 | content hashes and shapes asserted against the pinned repo contract            |
-| THR-10    | Tool-provenance substitution  | The tool that produces a control's evidence is not the pinned tool. `greater` is not on the npm registry, so a PATH binary that prints the pinned version and emits a plausible `doctor` document satisfies a self-attested check while auditing nothing. | SEC-7, MAI-4                             | release-asset digest verified at gate time; unverifiable provenance is BLOCKED |
-| THR-11    | Install-artifact escape       | A build artifact is a symlink rather than a file. Every lexical containment check still passes, and `lesser client install` follows the link on upload, packaging a file from the build host into the installed app.                                      | CON-3, COM-1                             | real-path containment and a symlink walk of the artifact directories           |
+| Threat ID | Title                         | What can go wrong                                                                                                                                                                                                                                                                                                          | Primary controls                         | Verification                                                                                        |
+| --------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| THR-1     | Supply-chain compromise       | A mutable Action, a lifecycle hook, or an unlocked dependency executes in CI — including through a CI install that quietly drops `--ignore-scripts` before the rubric can object.                                                                                                                                          | SEC-3, COM-2                             | `check_supply_chain`, pinned install invocations                                                    |
+| THR-2     | Client regression             | SSR routes, types, Svelte components, or the two-pass build regress.                                                                                                                                                                                                                                                       | QUA-1, QUA-2, CON-2                      | build, tests, type checks                                                                           |
+| THR-3     | Web-integrity regression      | Built output introduces inline scripts, styles, or event handlers, or a third-party script origin, breaking the strict CSP the FaceTheory host enforces.                                                                                                                                                                   | SEC-4                                    | built-output CSP audit                                                                              |
+| THR-4     | Governance drift              | The deterministic rubric or the pull-request CI hook disappears or goes stale.                                                                                                                                                                                                                                             | MAI-4, DOC-5                             | CI-hook and threat/control parity checks                                                            |
+| THR-5     | Renderer-authority violation  | A Markdown or HTML rendering path, a client-side excerpt/TOC generator, or a raw-draft-source display appears in the client, creating a second canonical renderer.                                                                                                                                                         | SEC-5                                    | `pnpm run validate:renderer-authority`                                                              |
+| THR-6     | SSR trust-boundary regression | The handler resolves its origin from an unverified `Host`, leaks withheld article source, or serves 200 for a CMS object that does not exist.                                                                                                                                                                              | SEC-6                                    | built-handler SSR probes                                                                            |
+| THR-7     | Vendored-source drift         | A vendored greater-components file is hand-edited, an orphan appears under the vendored root, or the CLI-copy and tarball channels drift out of lockstep.                                                                                                                                                                  | SEC-7, CON-4                             | `greater doctor`, pin-lockstep check                                                                |
+| THR-8     | Disclosed-finding drift       | A known, unfixed upstream finding silently changes shape, or a new finding hides behind an old one.                                                                                                                                                                                                                        | SEC-2, SEC-7                             | exact-set assertion against the pinned disclosures                                                  |
+| THR-9     | Gate self-neutralization      | The change under review edits what the rubric trusts — a `package.json` script, the file a pinned command _executes_, a probe's assertions, the install manifest, a pin — so a control exits 0 without its property holding.                                                                                               | CON-3, CON-4, CON-5, COM-1, SEC-6, SEC-7 | content hashes and shapes asserted against the pinned repo contract                                 |
+| THR-10    | Tool-provenance substitution  | The tool that produces a control's evidence is not the pinned tool. `greater` is not on the npm registry, so a PATH binary — or an unpacked tree an editable installer replaced after the digest check — prints the pinned version, emits a plausible `doctor` document, and satisfies the control while auditing nothing. | SEC-7, MAI-4                             | the gate extracts and executes the digest-verified asset itself; unverifiable provenance is BLOCKED |
+| THR-11    | Install-artifact escape       | A build artifact is a symlink rather than a file. Every lexical containment check still passes, and `lesser client install` follows the link on upload, packaging a file from the build host into the installed app.                                                                                                       | CON-3, COM-1                             | real-path containment and a symlink walk of the artifact directories                                |
+| THR-12    | Event-payload execution in CI | Attacker-authored pull-request text reaches a shell or interpreter in a workflow or a reached composite action. Refusing `${{ github.event.* }}` inside `run:` closes only the direct spelling; the `env:` indirection it recommends is a second path when the value is consumed as program text rather than as data.      | SEC-3, MAI-4                             | event-expression scan, composite `env:` prohibition, executable-sink analysis                       |
 
 ## Accepted coverage and semantic limits
 
@@ -71,11 +72,14 @@ green report is read for what it is.
   the artifacts exist (COM-1). Running `pnpm test` alone against a clean checkout is not
   evidence.
 - **`greater doctor` availability.** The `greater` CLI is not published to the npm
-  registry. CI installs the pinned `greater-v0.11.9` release asset into
-  `gov-infra/.tools/` through `install-greater-cli.mjs`, which verifies its SHA-256
-  before unpacking. A PATH `greater` is not accepted at any version: its provenance is
-  whatever it says about itself. If the digest-verified install is absent, SEC-7 reports
-  BLOCKED — never PASS.
+  registry. CI fetches the pinned `greater-v0.11.9` release asset into `gov-infra/.tools/`
+  through `install-greater-cli.mjs`, which verifies its SHA-256 before unpacking. What
+  SEC-7 consumes from that step is the tarball, not the tree: at gate time it re-verifies
+  the asset, validates and extracts it into a quarantine of its own, and runs `--version`
+  and `doctor` from there. A PATH `greater` is not accepted at any version and neither is
+  the repo-local install — provenance by self-report is not provenance, and an editable
+  installer is a self-report one step removed. If the digest-verified asset is absent,
+  SEC-7 reports BLOCKED — never PASS.
 - **Disclosed upstream findings.** SEC-2 and SEC-7 assert an exact finding set, not an
   empty one. Two findings are currently disclosed and unfixed upstream: a high-severity
   `ws` advisory reached through the pinned adapters tarball, and the blog face's
@@ -135,12 +139,50 @@ green report is read for what it is.
   that edge; none currently does, and the closure output printed in `CON-5-output.log`
   lists exactly what is covered. The walk follows static relative specifiers, so a gate
   that resolved a module path at runtime would also be outside it.
-- **Tool provenance binds the tarball, not the unpacked tree.** SEC-7 re-verifies the
-  `greater` release asset against its pinned SHA-256 at gate time, so a substituted or
-  self-attested CLI cannot produce evidence. What that does not cover is a runner
-  modified between install and gate — replacing the unpacked binary while leaving the
-  verified tarball in place. That is a compromised runner rather than a pull-request
-  reachable bypass, and it is outside what a repository-side control can establish.
+- **Tool provenance now binds the executed code, not just the tarball.** The previous
+  form of this limit claimed that replacing the unpacked binary required a compromised
+  runner. It did not: `install-greater-cli.mjs` is an ordinary repository file, and a
+  pull request that appends a post-install write to it substitutes the executable while
+  the contract, the workflow sentinel and the retained tarball all stay untouched. That
+  is a bypass reachable without moving the pinned contract, so by the convergence rule
+  below it was a defect rather than a limit, and it is closed deterministically: SEC-7
+  validates the archive's members, extracts it into a fresh quarantine it creates and
+  removes, compares every extracted file against the member it came from, and runs
+  `--version` and `doctor` from that tree. Nothing under `gov-infra/.tools` is executed,
+  and its absence is not even checked.
+
+  Two residuals remain, both named rather than implied. The CLI's own runtime
+  dependencies are resolved by `npm` from the registry against the ranges declared inside
+  the verified archive; they are not repository artifacts and no pull request here can
+  substitute them, but they are third-party code reached at gate time — the ordinary
+  registry trust boundary, not something this control establishes. And a runner that
+  modifies the extracted quarantine between extraction and execution is still outside
+  repository-side control; unlike the case above, reaching it requires code execution on
+  the runner rather than a diff.
+
+- **The event-payload rule reaches the sink, and the analysis reads `run:` text.**
+  Refusing `${{ github.event.* }}` inside `run:` closed the direct spelling and left the
+  indirection it recommends open: `env:` puts the value in the shell's environment, and a
+  shell handed its own environment back as _program text_ is exactly as compromised as
+  one that had the text spliced in. So SEC-3 now also forbids an event expression in the
+  `env:` of any reached composite action, forbids splicing `${{ inputs.* }}` into a
+  composite's `run:` — the `with:` channel is allowed because the value arrives as data,
+  and interpolation makes it program text again — and rejects an event-derived or
+  caller-supplied env value that reaches an executable sink: `bash`/`sh -c`, `eval`,
+  `node -e`, `python -c` and their siblings, a command or process substitution, or the
+  command word of a segment. Taint follows shell assignment and same-line `$GITHUB_ENV`
+  writes to a fixpoint, so renaming a value does not launder it, and a substitution is
+  judged by these same rules rather than by the mere appearance of the name — `$(printf
+'%s' "$TITLE")` consumes data, `$(bash -c "$TITLE")` does not.
+
+  What it does not follow, because a `run:`-text scanner cannot: a value that reaches an
+  executor inside a script the workflow calls, a value carried across a pipe into an
+  interpreter in another segment, `${!VAR}` indirect expansion, and a heredoc written
+  into `$GITHUB_ENV`. Those are limits of static analysis over shell rather than
+  unguarded shapes: each would land as `run:` text in a `.github/` diff, which is the
+  review's subject, and none is expressible without it. They are recorded here under the
+  convergence rule below rather than implied to be covered.
+
 - **Composite evidence is separate evidence.** A run against another tree writes to its
   own directory under `gov-infra/evidence/`, so it neither deletes nor overwrites the
   logs belonging to this ref, and every `evidencePath` in a committed report resolves to
