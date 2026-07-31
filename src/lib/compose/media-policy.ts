@@ -27,7 +27,11 @@
  *     categories the contract names.
  *   - Nothing is dropped silently. `filesDroppedBeforeUpload` recovers what
  *     the vendored validator discarded — the files the picker took and
- *     `onUpload` never saw — so the UI can name them.
+ *     `onUpload` never saw — so the UI can name them, and
+ *     `wholeSelectionDroppedMessage` covers the case that recovery cannot
+ *     reach: when the validator discards EVERYTHING it returns before
+ *     `onUpload` runs, so there is no delta to compute and the selection
+ *     vanishes one branch earlier.
  *
  * WHAT CANNOT BE FIXED FROM HERE, and is an upstream `greater` issue rather
  * than a shim: `MediaComposer` uses ONE array for two jobs — the `accept`
@@ -125,4 +129,68 @@ export function droppedFilesMessage(dropped: readonly PickedFile[]): string | nu
 		'composer refusing rather than the instance. Converting to a common image, video, ' +
 		'or audio format usually works.'
 	);
+}
+
+/**
+ * What to say when the vendored validator will discard the WHOLE selection.
+ *
+ * `filesDroppedBeforeUpload` recovers the discarded files by comparing what was
+ * picked against what `onUpload` received — which works for every partial
+ * rejection and for none of the total ones, because `MediaComposer.uploadFiles`
+ * returns at `if (!validFiles.length) return;`
+ * (`src/lib/patterns/MediaComposer.svelte:246`) without calling `onUpload` at
+ * all. Pick four files the composer will not take and the delta never runs: the
+ * selection disappears into a `console.warn` and the poster watches nothing
+ * happen. Same silent discard, one branch earlier.
+ *
+ * That branch is predictable from outside the component, which is why this is a
+ * pure function and not an edit to vendored source: the inputs are the poster's
+ * selection and the config CONTENTUS ITSELF passed down. So the whole-selection
+ * case is named here, before the pattern gets a chance to swallow it, and the
+ * partial case stays with the delta that already handles it.
+ *
+ * PRECEDENCE MIRRORS THE VALIDATOR, deliberately. Its filter tests type first
+ * and returns false, so a file with an unusable type is dropped for its type
+ * whether or not the composer is also full; the cap only explains the files
+ * that got past the type test. Reporting one reason for the other would be its
+ * own kind of silence. Both are reported when both apply.
+ *
+ * NEITHER REASON IS LESSER'S. lesser decides every upload it is asked about;
+ * these are the files it is never asked about, and saying so is the whole
+ * point. The size limb of that same filter is not modelled here because
+ * `NO_CLIENT_SIZE_CEILING` puts it beyond reach — if that ceiling ever becomes
+ * a real number again, this function has to grow a third reason.
+ *
+ * SUNSET: shares `filesDroppedBeforeUpload`'s. Both go when the vendored
+ * pattern can report its own rejections or defer them to the server.
+ */
+export function wholeSelectionDroppedMessage(
+	selected: readonly PickedFile[],
+	composer: {
+		allowedTypes: readonly string[];
+		attachmentCount: number;
+		maxAttachments: number;
+	}
+): string | null {
+	if (selected.length === 0) return null;
+
+	const unusable = selected.filter((file) => !composer.allowedTypes.includes(file.type));
+	const survivors = selected.length - unusable.length;
+	const full = composer.attachmentCount >= composer.maxAttachments;
+
+	// Something will reach `onUpload`, so the delta reports what did not. Saying
+	// it here as well would report the same file twice.
+	if (survivors > 0 && !full) return null;
+
+	const parts: string[] = [];
+	const dropped = droppedFilesMessage(unusable);
+	if (dropped) parts.push(dropped);
+	if (survivors > 0) {
+		parts.push(
+			`Nothing was sent: this post already holds the ${composer.maxAttachments} attachments ` +
+				'this instance accepts. Remove one to attach another.'
+		);
+	}
+
+	return parts.join(' ');
 }

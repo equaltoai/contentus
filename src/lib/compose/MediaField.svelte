@@ -29,9 +29,11 @@ instance's configuration, and `cms/media.ts` is explicit that lesser's real
 limits are unadvertised and must not be guessed. So the size ceiling is set
 where the check can never trip it, the type list is widened to lesser's own
 `MediaCategory` vocabulary, and anything the vendored validator still discards
-is RECOVERED and named to the poster rather than swallowed. The reasoning, the
-residual limit, and the upstream `greater` issue it belongs to are in
-`$lib/compose/media-policy`.
+is RECOVERED and named to the poster rather than swallowed — including the
+selection it discards WHOLE, which returns before `onUpload` and so leaves no
+delta to recover, and is therefore predicted from the selection instead. The
+reasoning, the residual limit, and the upstream `greater` issue it belongs to
+are in `$lib/compose/media-policy`.
 -->
 
 <script lang="ts">
@@ -46,6 +48,7 @@ residual limit, and the upstream `greater` issue it belongs to are in
 		filesDroppedBeforeUpload,
 		NO_CLIENT_SIZE_CEILING,
 		PICKER_MEDIA_TYPES,
+		wholeSelectionDroppedMessage,
 	} from './media-policy';
 
 	interface Props {
@@ -76,7 +79,20 @@ residual limit, and the upstream `greater` issue it belongs to are in
 
 	function notePicked(files: FileList | null | undefined) {
 		picked = Array.from(files ?? []);
-		rejected = null;
+
+		// The delta in `onUpload` cannot speak for a selection `onUpload` never
+		// sees, and the vendored validator returns before calling it when it
+		// discards every file (`patterns/MediaComposer.svelte:246`). That case is
+		// decidable from here — the selection is in hand and the config is ours —
+		// so it is named now rather than left to a `console.warn`. Anything that
+		// does get through reaches `onUpload`, which overwrites this with the
+		// delta it can compute; `wholeSelectionDroppedMessage` returns null in
+		// exactly that case so the two never report the same file twice.
+		rejected = wholeSelectionDroppedMessage(picked, {
+			allowedTypes: PICKER_MEDIA_TYPES,
+			attachmentCount: extras.state.attachmentIds.length,
+			maxAttachments,
+		});
 	}
 
 	/**

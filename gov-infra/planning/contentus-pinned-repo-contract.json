@@ -82,7 +82,7 @@
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/render-routes.mjs": "0010b2ee8acc07b54c35899837a087e7135175b47e6a02c8fc16a112dd5c1983",
-      "tests/compose.test.mjs": "cf0c227a41e2ddfcb700a9cf3017595be7af6918627deccb5fdf9e2d7f26d254",
+      "tests/compose.test.mjs": "e662f6354073d9ba4fd8511309f19831202c93343d13566fa8277f6d865a4df5",
       "tests/mobile-chrome.test.mjs": "36ce46897047668ec9fa011430bc79012ef8d8a80543f9bf8136975698adcb0b",
       "tests/renderer-authority-audit.test.mjs": "0974bac7e58f48ab969ab2585fc98e4ce7326a2e445a58475a1d129e8e4b1d9b",
       "tests/renderer-authority.test.mjs": "034ca59fd865f2a204973ea36073958e1fb8834675266a05be4726781823de58",
