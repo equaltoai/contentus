@@ -10,6 +10,23 @@ src/lib/blog-types.ts
 src/lib/blog-share.ts
 src/lib/types.ts
 styles/greater/
+# The social face's shared modules land at the root of src/lib rather than in a
+# directory of their own: the registry spells their paths `lib/lib/<name>`, and
+# the components.json `lib` alias resolves that to `src/lib`. Same vendored
+# status as everything above, so the same rule — listed one by one because the
+# directory they share is contentus's own.
+src/lib/utils/
+src/lib/graphqlTimelineStore.ts
+src/lib/graphqlTimelineStore.svelte.ts
+src/lib/integration.ts
+src/lib/integration.svelte.ts
+src/lib/lesserTimelineStore.ts
+src/lib/lesserTimelineStore.svelte.ts
+src/lib/notificationStore.ts
+src/lib/notificationStore.svelte.ts
+src/lib/timelineStore.ts
+src/lib/timelineStore.svelte.ts
+src/lib/transport.ts
 
 # Theory Cloud brand pack — copied verbatim from the design pack
 colors_and_type.css
