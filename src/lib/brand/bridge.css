@@ -753,7 +753,9 @@ code {
 		position: fixed;
 		z-index: 31;
 		left: 50%;
-		bottom: calc(var(--contentus-tabbar-height) - var(--contentus-fab-size) / 2 + var(--contentus-safe-bottom));
+		bottom: calc(
+			var(--contentus-tabbar-height) - var(--contentus-fab-size) / 2 + var(--contentus-safe-bottom)
+		);
 		transform: translateX(-50%);
 		display: inline-flex;
 		align-items: center;

@@ -116,10 +116,7 @@ function buildUploadForm(file: File, options: UploadMediaOptions): FormData {
 	if (options.mediaType) input['mediaType'] = options.mediaType;
 
 	const form = new FormData();
-	form.append(
-		'operations',
-		JSON.stringify({ query: UPLOAD_MEDIA_MUTATION, variables: { input } })
-	);
+	form.append('operations', JSON.stringify({ query: UPLOAD_MEDIA_MUTATION, variables: { input } }));
 	form.append('map', JSON.stringify({ '0': ['variables.input.file'] }));
 	form.append('0', file, options.filename ?? file.name);
 	return form;
