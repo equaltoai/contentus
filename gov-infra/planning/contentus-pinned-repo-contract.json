@@ -87,7 +87,7 @@
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
       "tests/messaging-queries.test.mjs": "c4ef9c9187f681feb080fc25159aef0c3224f991e910e800020c744804fd2c9f",
-      "tests/messaging-races.test.mjs": "7ac8da01917364ea1488216e64ba65a39f6ad46fe81950e5fcac2f0a1ea97e50",
+      "tests/messaging-races.test.mjs": "9037063d71f335a712f639d2f2198d2dc36f7ce3d286a69cd38175be46c00fbc",
       "tests/messaging-realtime.test.mjs": "a62518325c801642357c02493398fa25fa1be5a213175cf7be2affd2768dd3fd",
       "tests/messaging-session.test.mjs": "93a82d5ba925b218d0ccd8140d991653f0db8ed69061a9f8459d7e4183aacc23",
       "tests/mobile-chrome.test.mjs": "8a7be1227af186f4cfdf574f99d07e8a0edefd31359e65b72c08f7e5db09700f",
