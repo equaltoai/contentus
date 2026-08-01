@@ -25,6 +25,28 @@ type SessionListener = (change: SessionChange) => void;
 
 const listeners = new Set<SessionListener>();
 
+/**
+ * How many session changes this page has seen.
+ *
+ * WHY A COUNTER AND NOT ANOTHER LISTENER. A listener tells a subscriber that the
+ * session ended; it cannot tell an ALREADY-DISPATCHED read that the session it
+ * was dispatched under ended before it landed. That read is a promise in flight
+ * with nobody watching it, and when it resolves it publishes into whatever
+ * session is there — the next reader's inbox count, the previous reader's badge.
+ * Stamping the read with this number at dispatch and checking it at completion
+ * is what makes the difference observable to the read itself; see
+ * `$lib/messaging/session-scope`.
+ *
+ * It advances on sign-IN as well as sign-out, because a sign-out and a sign-in
+ * with a read spanning both is exactly the case a sign-out-only counter misses.
+ */
+let generation = 0;
+
+/** The current session generation. Monotonic; never resets. */
+export function sessionGeneration(): number {
+	return generation;
+}
+
 /** Subscribe. The returned function unsubscribes and is safe to call twice. */
 export function onSessionChange(listener: SessionListener): () => void {
 	listeners.add(listener);
@@ -45,6 +67,12 @@ export function onSessionChange(listener: SessionListener): () => void {
  * one holding an open socket, which is the failure this module exists to end.
  */
 export function notifySessionChange(change: SessionChange): void {
+	// FIRST, before any listener runs. A listener that dispatches a read for the
+	// new session — the shell refreshing the badge on `signed-in` does exactly
+	// that — must stamp it with the generation this change created, or the read
+	// it just started would be invalidated by its own announcement.
+	generation += 1;
+
 	for (const listener of [...listeners]) {
 		try {
 			listener(change);

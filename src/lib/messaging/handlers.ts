@@ -58,6 +58,8 @@ import {
 	toParticipant,
 	type MessagePage,
 } from './contract.ts';
+import { createRereadQueue, REREAD_CONCURRENCY } from './reread-queue.ts';
+import { createSessionScope } from './session-scope.ts';
 
 /**
  * How many conversations a folder read asks for.
@@ -154,17 +156,88 @@ export interface MessagingBinding {
 	 * first leaves an authorized socket open with nothing left to read it. This
 	 * closes the socket synchronously and makes every callback inert, so an event
 	 * arriving after the reader signed out reaches nothing.
+	 *
+	 * AND IT IS NOT ONLY THE SOCKET. Closing the stream ends what is still
+	 * ARRIVING; every read already dispatched — the folder, the open thread, a
+	 * re-read, and the partial-answer notice any of them can raise — is a promise
+	 * still in flight, and it resolves under whatever session is there when it
+	 * lands. So teardown also ABORTS those requests and ends the session scope
+	 * they were stamped with, and an answer that outlives its session is dropped
+	 * rather than published into the next reader's chrome.
 	 */
 	teardown: () => void;
 }
 
 export function createMessagingBinding(config: MessagingBindingConfig): MessagingBinding {
+	/**
+	 * The session this binding's reads belong to.
+	 *
+	 * A binding is built per sign-in and torn down at sign-out, so its own
+	 * generation is the whole story and no external one is passed. What the scope
+	 * buys over the `torn` flag below is that it is stamped at DISPATCH: a read
+	 * that was already in flight can be recognised as belonging to the session
+	 * that has ended, which a flag read at completion cannot distinguish from a
+	 * read that started afterwards.
+	 */
+	const scope = createSessionScope();
+	/**
+	 * Cancels the reads still open when the reader signs out.
+	 *
+	 * Best-effort by nature — a response already parsed is not un-parsed — so the
+	 * stamps are what decide correctness. This is what stops the request.
+	 */
+	const requests = new AbortController();
+
+	/**
+	 * A callback the surface registered, silenced once the session ends.
+	 *
+	 * The partial-read notice is the one that mattered: a folder read that lands
+	 * after sign-out still carried lesser's errors, and `onPartial` wrote them
+	 * into the page's own state — so a torn-down surface put "part of this request
+	 * failed" back on screen for whoever was there next. Every sink the binding
+	 * publishes through goes past here; `teardown` calls the raw ones itself,
+	 * because the reset is the one announcement that has to survive it.
+	 */
+	function forSession<T>(sink: ((value: T) => void) | undefined): ((value: T) => void) | undefined {
+		if (!sink) return undefined;
+		const opened = scope.stamp();
+		return (value: T) => {
+			if (scope.holds(opened)) sink(value);
+		};
+	}
+
+	const reportPartial = forSession(config.onPartial);
+	const reportRealtime = forSession(config.onRealtimeState);
+	const reportCatchUp = forSession(config.onCatchUp);
+	const reportReread = forSession(config.onRereadState);
+
+	/**
+	 * A read whose answer this session still owns, or no answer at all.
+	 *
+	 * The stamp is taken BEFORE the request and checked after it, so an answer
+	 * that arrives for a session that has ended never reaches the caller — the
+	 * conversation list, the thread page and the folder re-read all publish into
+	 * shared state the moment they resolve, and none of them re-checks who asked.
+	 * Thrown rather than resolved with a placeholder: a caller that survived the
+	 * teardown deserves the same "this did not complete" it would get from any
+	 * other interrupted read, not an empty list it would render as an empty inbox.
+	 */
+	async function owned<T>(read: () => Promise<T>): Promise<T> {
+		const dispatched = scope.stamp();
+		const value = await read();
+		if (!scope.holds(dispatched)) {
+			throw new MessagingUnavailableError('This session ended before the answer arrived.');
+		}
+		return value;
+	}
+
 	const adapter = createMessagingAdapter({
 		accessToken: config.accessToken,
 		endpoint: config.endpoint ?? null,
 		subscriptionEndpoint: subscriptionEndpoint(config.origin ?? null),
-		...(config.onPartial ? { onPartial: config.onPartial } : {}),
-		...(config.onRealtimeState ? { onRealtimeState: config.onRealtimeState } : {}),
+		signal: requests.signal,
+		...(reportPartial ? { onPartial: reportPartial } : {}),
+		...(reportRealtime ? { onRealtimeState: reportRealtime } : {}),
 		...(config.socketFactory ? { socketFactory: config.socketFactory } : {}),
 	});
 
@@ -187,9 +260,36 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 	 */
 	let authRefused = false;
 
+	/**
+	 * The re-read the live subscription installed, or null when nothing is
+	 * subscribed. Held at BINDING level so the budget below is one budget: the
+	 * vendored context re-subscribes on every reconnect, and a queue built inside
+	 * each subscription would multiply the cap by however many times the socket
+	 * had dropped.
+	 */
+	let rereadConversation: ((id: string) => Promise<void>) | null = null;
+
+	/**
+	 * The global bound on realtime re-reads.
+	 *
+	 * Per-conversation collapse (inside the subscription) decides WHAT is worth
+	 * reading; this decides how many of those may be open at once. Without it a
+	 * hundred events naming a hundred DIFFERENT conversations pass every per-id
+	 * check and become a hundred concurrent authenticated reads — see
+	 * `./reread-queue` for why that shape is ordinary rather than hypothetical.
+	 */
+	const rereads = createRereadQueue({
+		limit: REREAD_CONCURRENCY,
+		run: async (id) => {
+			await rereadConversation?.(id);
+		},
+	});
+
 	const handlers: MessagesHandlers = {
 		onFetchConversations: async (folder: ConversationFolder = 'INBOX') => {
-			const conversations = await adapter.fetchConversations(folder, CONVERSATION_PAGE_SIZE);
+			const conversations = await owned(() =>
+				adapter.fetchConversations(folder, CONVERSATION_PAGE_SIZE)
+			);
 			// The folder is taken from the REQUEST rather than re-derived per
 			// conversation: lesser was asked for this folder and answered with its
 			// members, and re-deriving would let one conversation whose request state
@@ -198,14 +298,30 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 		},
 
 		onFetchMessages: async (conversationId: string, options) => {
-			const connection = await adapter.fetchMessages(
-				conversationId,
-				options?.limit ?? MESSAGE_PAGE_SIZE,
-				options?.cursor
+			const connection = await owned(() =>
+				adapter.fetchMessages(conversationId, options?.limit ?? MESSAGE_PAGE_SIZE, options?.cursor)
 			);
 			return toMessagePage(connection, conversationId).messages;
 		},
 
+		/**
+		 * Send, and stamp the answer with the conversation it was SENT TO.
+		 *
+		 * `conversationId` is the id the vendored context read off
+		 * `selectedConversation` when it dispatched, and it is captured here by
+		 * being a parameter — the one piece of this path that cannot drift while
+		 * the mutation is in flight. `toDirectMessage` stamps the confirmed message
+		 * with it rather than with anything read after the await, so the message
+		 * carries the evidence of where it belongs.
+		 *
+		 * That stamp is load-bearing, because the write that follows this return is
+		 * not keyed at all: `sendMessage` appends the message to `state.messages`
+		 * AND sets `lastMessage`/`updatedAt` on whichever conversation is selected
+		 * when the mutation returns — B's, if the reader moved while it was in
+		 * flight. Contentus does not edit that source, so the surface checks the
+		 * stamp before paint and puts the message back where it was sent
+		 * (`./selection`). Neither guard can run without the stamp being taken here.
+		 */
 		onSendMessage: async (conversationId: string, content: string, mediaIds?: string[]) => {
 			const { message } = await adapter.sendMessage(conversationId, content, mediaIds);
 			return toDirectMessage(message, conversationId);
@@ -268,7 +384,7 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 				// No socket is opened for a credential lesser has already rejected.
 				// The reader is told the one thing that fixes it, and nothing is
 				// retried until they do it.
-				config.onRealtimeState?.('requires-auth');
+				reportRealtime?.('requires-auth');
 				callbacks.onConnectionStatusChange?.('error', new MessagingAuthError().message);
 				return () => {};
 			}
@@ -277,68 +393,58 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 			const alive = () => !stopped && !torn;
 
 			/**
-			 * Re-reads in flight, and re-reads owed.
+			 * The re-read an event asks for, installed at BINDING level.
 			 *
-			 * ONE READ PER CONVERSATION AT A TIME, plus at most one trailing read
-			 * for events that arrived while it ran. A correspondent typing quickly
-			 * publishes an event per message; without this, ten events became ten
-			 * concurrent authenticated GraphQL reads whose completion order was the
-			 * network's to decide — so the LAST one to land, not the last one sent,
-			 * wrote `lastStatus`. Collapsing them is both bounded and correctly
-			 * ordered: the trailing read is issued after the current one finishes,
-			 * so the newest state is always read last.
+			 * TWO BOUNDS, AND THEY COMPOSE. Per conversation, an event whose read
+			 * is still open is owed exactly one trailing read, issued after it —
+			 * so the newest state is always read last and a correspondent typing
+			 * quickly collapses to two reads. Across conversations, every read
+			 * goes through `rereads`, the one global budget: a hundred events
+			 * naming a hundred DIFFERENT conversations pass every per-id check,
+			 * and without the queue they became a hundred concurrent
+			 * authenticated reads against an instance that had just said it was
+			 * busy. The queue lives on the binding rather than in this
+			 * subscription because the vendored context re-subscribes on every
+			 * reconnect, and a budget rebuilt per subscription would multiply the
+			 * cap by however many times the socket had dropped.
 			 */
-			const inFlight = new Set<string>();
-			const owed = new Set<string>();
-
-			const reread = (id: string) => {
+			const performReread = async (id: string) => {
 				if (!alive()) return;
-				if (inFlight.has(id)) {
-					owed.add(id);
-					return;
-				}
+				try {
+					const conversation = await owned(() => adapter.fetchConversation(id));
+					if (!alive()) return;
+					reportReread?.('idle');
+					// A conversation lesser no longer serves this reader is not an
+					// error and not an update; the list already shows what it last
+					// said, and inventing a removal here would be this client
+					// deciding something lesser is authoritative about.
+					if (!conversation) return;
 
-				inFlight.add(id);
-				void adapter
-					.fetchConversation(id)
-					.then((conversation) => {
-						if (!alive()) return;
-						config.onRereadState?.('idle');
-						// A conversation lesser no longer serves this reader is not an
-						// error and not an update; the list already shows what it last
-						// said, and inventing a removal here would be this client
-						// deciding something lesser is authoritative about.
-						if (!conversation) return;
-
-						const uiConversation = toConversation(conversation);
-						callbacks.onConversationUpdate({
-							conversation: uiConversation,
-							// The newly-arrived message, as far as lesser reports one. The
-							// context appends it to an OPEN thread and updates the list
-							// row; it never scrolls, so a reader mid-thread is not moved.
-							...(uiConversation.lastMessage ? { message: uiConversation.lastMessage } : {}),
-						});
-					})
-					.catch((error) => {
-						if (!alive()) return;
-						// NOT swallowed. The socket is open and reporting live, so a
-						// re-read that failed silently is the one shape of this failure a
-						// reader cannot see: the strip says live and the thread stops
-						// growing. An expired session is worse still — it never clears on
-						// its own, and the reader is the only one who can fix it.
-						if (classifyMessagingError(error) === 'auth-required') {
-							authRefused = true;
-							config.onRereadState?.('auth-required');
-							callbacks.onConnectionStatusChange?.('error', new MessagingAuthError().message);
-							return;
-						}
-						config.onRereadState?.('failed');
-					})
-					.finally(() => {
-						inFlight.delete(id);
-						if (owed.delete(id) && alive()) reread(id);
+					const uiConversation = toConversation(conversation);
+					callbacks.onConversationUpdate({
+						conversation: uiConversation,
+						// The newly-arrived message, as far as lesser reports one. The
+						// context appends it to an OPEN thread and updates the list
+						// row; it never scrolls, so a reader mid-thread is not moved.
+						...(uiConversation.lastMessage ? { message: uiConversation.lastMessage } : {}),
 					});
+				} catch (error) {
+					if (!alive()) return;
+					// NOT swallowed. The socket is open and reporting live, so a
+					// re-read that failed silently is the one shape of this failure a
+					// reader cannot see: the strip says live and the thread stops
+					// growing. An expired session is worse still — it never clears on
+					// its own, and the reader is the only one who can fix it.
+					if (classifyMessagingError(error) === 'auth-required') {
+						authRefused = true;
+						reportReread?.('auth-required');
+						callbacks.onConnectionStatusChange?.('error', new MessagingAuthError().message);
+						return;
+					}
+					reportReread?.('failed');
+				}
 			};
+			rereadConversation = performReread;
 
 			/**
 			 * A socket reporting live, answered honestly.
@@ -356,12 +462,12 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 
 				if (!hasBeenLive) {
 					hasBeenLive = true;
-					config.onCatchUp?.('idle');
+					reportCatchUp?.('idle');
 					callbacks.onConnectionStatusChange?.('connected');
 					return;
 				}
 
-				config.onCatchUp?.('catching-up');
+				reportCatchUp?.('catching-up');
 				// Deliberately NOT 'connected' yet. The vendored context clears its
 				// retry state on `connected` and the surface stops naming the gap, so
 				// reporting it here would be advertising a completeness that has not
@@ -371,7 +477,7 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 				if (!reconciler) {
 					// Nothing registered to re-read with. Saying so beats claiming a
 					// reconciliation that did not happen.
-					config.onCatchUp?.('failed');
+					reportCatchUp?.('failed');
 					callbacks.onConnectionStatusChange?.('connected');
 					return;
 				}
@@ -379,19 +485,23 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 				try {
 					await reconciler();
 					if (!alive()) return;
-					config.onCatchUp?.('idle');
+					reportCatchUp?.('idle');
 					callbacks.onConnectionStatusChange?.('connected');
 				} catch {
 					if (!alive()) return;
 					// The socket is live and the gap is not closed. Both halves are
 					// reported, because either one alone is a lie.
-					config.onCatchUp?.('failed');
+					reportCatchUp?.('failed');
 					callbacks.onConnectionStatusChange?.('connected');
 				}
 			};
 
 			const stop = adapter.subscribeToConversationUpdates({
-				onConversationId: reread,
+				onConversationId: (id) => {
+					// The queue, not the read: per-id collapse and the global cap
+					// both live there, and the trailing edge is owed either way.
+					if (alive()) rereads.enqueue(id);
+				},
 				onState: (state) => {
 					if (!alive()) return;
 
@@ -426,6 +536,9 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 
 			return () => {
 				stopped = true;
+				// Release the binding-level slot only if it is still THIS
+				// subscription's read; a reconnect may have installed its own.
+				if (rereadConversation === performReread) rereadConversation = null;
 				activeStops.delete(stop);
 				stop();
 			};
@@ -437,16 +550,14 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 		adapter,
 
 		loadMessagePage: async (conversationId, cursor) => {
-			const connection = await adapter.fetchMessages(
-				conversationId,
-				MESSAGE_PAGE_SIZE,
-				cursor ?? null
+			const connection = await owned(() =>
+				adapter.fetchMessages(conversationId, MESSAGE_PAGE_SIZE, cursor ?? null)
 			);
 			return toMessagePage(connection, conversationId);
 		},
 
 		loadConversation: async (conversationId) => {
-			const conversation = await adapter.fetchConversation(conversationId);
+			const conversation = await owned(() => adapter.fetchConversation(conversationId));
 			if (!conversation) return null;
 			return toConversation(conversation);
 		},
@@ -458,6 +569,15 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 		teardown: () => {
 			torn = true;
 			reconciler = null;
+			rereadConversation = null;
+			// BEFORE anything resolves again. Every read already dispatched is
+			// stamped with the scope this ends, so a completion landing after the
+			// session has gone is dropped rather than published into the next
+			// reader's chrome — and the requests behind those completions are
+			// cancelled where the transport allows it, which is the half that
+			// stops the bytes rather than the publication.
+			scope.end();
+			requests.abort();
 			for (const stop of activeStops) {
 				try {
 					stop();
@@ -467,7 +587,9 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 			}
 			activeStops.clear();
 			// Reported so a surface still mounted stops claiming a live stream it no
-			// longer has. Nothing else is announced: this binding is finished.
+			// longer has. These three go through the RAW sinks on purpose: the
+			// session-guarded ones are inert by now, and the reset is the one
+			// announcement that has to survive the teardown it reports.
 			config.onRealtimeState?.('idle');
 			config.onCatchUp?.('idle');
 			config.onRereadState?.('idle');

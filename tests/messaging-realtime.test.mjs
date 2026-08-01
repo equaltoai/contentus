@@ -10,11 +10,13 @@
  *      the moment the new socket acked. Everything published while the socket
  *      was down had not arrived and never would, and nothing on screen said so.
  *   2. **Every id-only event launched an unbounded re-read, and failures were
- *      swallowed.** One `fetchConversation` per event, with no per-id collapse
- *      and an empty `catch`: a correspondent typing quickly became a fan-out of
- *      concurrent authenticated reads whose completion order decided which one
- *      wrote `lastStatus`, and an expired session dropped on the floor while the
- *      socket went on reporting live.
+ *      swallowed.** One `fetchConversation` per event, with no per-id collapse,
+ *      no bound ACROSS conversations, and an empty `catch`: a correspondent
+ *      typing quickly became a fan-out of concurrent authenticated reads whose
+ *      completion order decided which one wrote `lastStatus`; a hundred events
+ *      naming a hundred DIFFERENT conversations passed every per-id check and
+ *      became a hundred concurrent reads; and an expired session dropped on the
+ *      floor while the socket went on reporting live.
  *
  * Everything below drives the REAL binding — the shipped `createMessagingBinding`
  * over the shipped adapter — with a fake socket and a stubbed `fetch`, and reads
@@ -27,6 +29,7 @@ import { test } from 'node:test';
 
 import { createMessagingBinding } from '../src/lib/messaging/handlers.ts';
 import { isLive, realtimeNotice } from '../src/lib/messaging/liveness.ts';
+import { createRereadQueue, REREAD_CONCURRENCY } from '../src/lib/messaging/reread-queue.ts';
 
 class FakeSocket {
 	static CONNECTING = 0;
@@ -363,6 +366,146 @@ test('events for different conversations are not collapsed into each other', asy
 			['conv-1', 'conv-2'],
 			'collapsing is per conversation; two correspondents are two reads'
 		);
+	} finally {
+		probe.restore();
+	}
+});
+
+/* ============================================================
+   The global bound: distinct ids share one budget
+   ============================================================ */
+
+test('the queue never exceeds its budget, drains in arrival order, and reads every id', async () => {
+	// Driven directly: the queue is plain data on purpose (see its header).
+	const gates = new Map();
+	const started = [];
+	let inFlight = 0;
+	let maxInFlight = 0;
+	const queue = createRereadQueue({
+		run: (id) => {
+			started.push(id);
+			inFlight += 1;
+			maxInFlight = Math.max(maxInFlight, inFlight);
+			return new Promise((resolve) =>
+				gates.set(id, () => {
+					inFlight -= 1;
+					resolve();
+				})
+			);
+		},
+	});
+
+	for (let index = 0; index < 20; index += 1) queue.enqueue(`conv-${index}`);
+
+	assert.equal(started.length, REREAD_CONCURRENCY, 'only the budget starts');
+	assert.equal(queue.inFlight(), REREAD_CONCURRENCY);
+	assert.equal(queue.waiting(), 20 - REREAD_CONCURRENCY);
+
+	while (gates.size > 0) {
+		const [[id, release]] = gates;
+		gates.delete(id);
+		release();
+		await settle(2);
+		assert.ok(inFlight <= REREAD_CONCURRENCY, `the budget was exceeded: ${inFlight} reads open`);
+	}
+	await settle();
+
+	assert.equal(started.length, 20, 'every conversation was eventually read');
+	assert.deepEqual(
+		started,
+		Array.from({ length: 20 }, (_, index) => `conv-${index}`),
+		'waiting reads run in the order they arrived, not newest-first'
+	);
+	assert.equal(maxInFlight, REREAD_CONCURRENCY);
+});
+
+test('an id asked for again while its read is open is owed exactly one trailing read', async () => {
+	const gates = [];
+	const ran = [];
+	const queue = createRereadQueue({
+		limit: 1,
+		run: (id) => {
+			ran.push(id);
+			return new Promise((resolve) => gates.push(resolve));
+		},
+	});
+
+	queue.enqueue('conv-1');
+	queue.enqueue('conv-1'); // running: owed a trailing read
+	queue.enqueue('conv-1'); // still owed exactly one
+	queue.enqueue('conv-2'); // queued
+	queue.enqueue('conv-2'); // a duplicate while WAITING collapses
+	await settle();
+
+	assert.deepEqual(ran, ['conv-1']);
+
+	gates[0]();
+	await settle();
+	assert.deepEqual(ran, ['conv-1', 'conv-2'], 'the waiting id gets the freed slot first');
+
+	gates[1]();
+	await settle();
+	assert.deepEqual(ran, ['conv-1', 'conv-2', 'conv-1'], 'the trailing read is still issued, once');
+
+	gates[2]();
+	await settle();
+	assert.equal(ran.length, 3, 'and nothing is re-issued beyond it');
+});
+
+test('a read that throws synchronously still gives its slot back', async () => {
+	const ran = [];
+	const queue = createRereadQueue({
+		limit: 1,
+		run: (id) => {
+			ran.push(id);
+			if (id === 'conv-bad') throw new Error('the runner failed before promising');
+			return Promise.resolve();
+		},
+	});
+
+	queue.enqueue('conv-bad');
+	queue.enqueue('conv-good');
+	await settle();
+
+	assert.deepEqual(ran, ['conv-bad', 'conv-good'], 'one bad read must not stop the queue draining');
+});
+
+test('a burst across many conversations is globally bounded through the real binding, and every one is read', async () => {
+	// The r2 shape, driven: a hundred events naming a hundred DIFFERENT
+	// conversations. Per-id collapse bounds none of it; the global budget is
+	// what stands between this and a hundred concurrent authenticated reads.
+	const gates = new Map();
+	const probe = startBinding({
+		respond: (request) => new Promise((resolve) => gates.set(request.variables.id, resolve)),
+	});
+
+	try {
+		const subscription = subscribe(probe.binding);
+		probe.sockets[0].live();
+
+		for (let index = 0; index < 100; index += 1) probe.sockets[0].publish(`conv-${index}`);
+		await settle();
+
+		assert.equal(
+			gates.size,
+			REREAD_CONCURRENCY,
+			'a hundred distinct conversations open only the budget, not a hundred reads'
+		);
+
+		while (gates.size > 0) {
+			const [[id, resolve]] = gates;
+			gates.delete(id);
+			resolve({ data: { conversation: conversation(id) } });
+			await settle(2);
+			assert.ok(
+				gates.size <= REREAD_CONCURRENCY,
+				`the budget was exceeded: ${gates.size} reads open`
+			);
+		}
+		await settle();
+
+		assert.equal(probe.requests.length, 100, 'every conversation was eventually read');
+		assert.equal(subscription.updates.length, 100, 'and every one reached the context');
 	} finally {
 		probe.restore();
 	}

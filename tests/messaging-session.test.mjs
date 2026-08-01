@@ -7,6 +7,15 @@
  * participants and the bodies on screen — and left the AUTHORIZED SOCKET open,
  * still delivering. On a shared device the next person met the last one's inbox.
  *
+ * AND THE SOCKET IS NOT THE WHOLE OF IT. Closing the stream is synchronous;
+ * every HTTP read already dispatched — the folder, the open thread, the badge's
+ * own count — resolves whenever it resolves, under whichever session is there
+ * when it lands. The badge is the sharpest case: its store outlives every
+ * binding it creates, so no teardown stands between one account's in-flight
+ * count and the next account's nav. Those completions are stamped at dispatch
+ * and dropped when the stamp names a dead session (`$lib/messaging/session-scope`,
+ * `$lib/auth/session-events`).
+ *
  * WHAT IS EVIDENCE HERE AND WHAT IS WIRING. The first two groups drive REAL
  * shipped modules: `$lib/auth/session-events` directly, and the REAL binding
  * with a fake socket and a stubbed `fetch`, so "the socket closed" and "no
@@ -28,8 +37,10 @@ import {
 	notifySessionChange,
 	onSessionChange,
 	sessionChangeListenerCount,
+	sessionGeneration,
 } from '../src/lib/auth/session-events.ts';
 import { createMessagingBinding } from '../src/lib/messaging/handlers.ts';
+import { createSessionScope } from '../src/lib/messaging/session-scope.ts';
 
 /* ============================================================
    The announcement
@@ -163,6 +174,7 @@ const settle = async (turns = 4) => {
 function startBinding({
 	respond = () => ({ data: { conversation: null } }),
 	token = 'token-1',
+	onPartial,
 } = {}) {
 	const sockets = [];
 	const requests = [];
@@ -176,6 +188,7 @@ function startBinding({
 				/(?:query|mutation|subscription)\s+([A-Za-z0-9_]+)/.exec(payload.query ?? '')?.[1] ?? '',
 			variables: payload.variables ?? {},
 			authorization: new Headers(init.headers).get('authorization'),
+			signal: init.signal ?? null,
 		};
 		requests.push(request);
 		const envelope = (await respond(request)) ?? { data: null };
@@ -189,6 +202,7 @@ function startBinding({
 		accessToken: () => token,
 		origin: 'https://contentus.test',
 		onRealtimeState: (state) => realtimeStates.push(state),
+		...(onPartial ? { onPartial } : {}),
 		socketFactory: (url, protocols) => {
 			const socket = new FakeSocket(url, protocols);
 			sockets.push(socket);
@@ -348,6 +362,128 @@ test('a torn-down binding opens no socket for a late subscribe', () => {
 	} finally {
 		probe.restore();
 	}
+});
+
+/* ============================================================
+   In-flight HTTP reads end with the session too
+   ============================================================ */
+
+test('an in-flight folder read from the old session publishes nothing after sign-out', async () => {
+	// H1's surviving half: the socket teardown is synchronous, but a LIST read
+	// already dispatched resolves whenever it resolves. Hold it, sign out,
+	// release it — the answer must not reach the state the next session renders.
+	const gates = [];
+	const partials = [];
+	const probe = startBinding({
+		respond: (request) => new Promise((resolve) => gates.push({ request, resolve })),
+		onPartial: (operation) => partials.push(operation),
+	});
+
+	try {
+		const outcome = probe.binding.handlers.onFetchConversations('INBOX').then(
+			() => 'resolved',
+			(error) =>
+				error instanceof Error && /session ended/i.test(error.message) ? 'dropped' : error
+		);
+		await settle();
+		assert.equal(gates.length, 1, 'the folder read is in flight');
+
+		probe.binding.teardown();
+
+		assert.equal(
+			probe.requests[0].signal?.aborted,
+			true,
+			'teardown cancels the request itself where the transport allows it'
+		);
+
+		// The answer lands anyway — with data AND an error, the partial shape —
+		// for a session that no longer exists.
+		gates[0].resolve({
+			data: { conversations: [conversation('conv-ada')] },
+			errors: [{ message: 'partial failure' }],
+		});
+		await settle();
+
+		assert.equal(
+			await outcome,
+			'dropped',
+			"a list read that resolves after sign-out must not resolve into the new session's state"
+		);
+		assert.deepEqual(partials, [], 'and its partial notice must not be published either');
+	} finally {
+		probe.restore();
+	}
+});
+
+test('an in-flight thread page from the old session delivers nothing after sign-out', async () => {
+	// Same race, one level down: the open thread's own read.
+	const gates = [];
+	const probe = startBinding({
+		respond: (request) => new Promise((resolve) => gates.push({ request, resolve })),
+	});
+
+	try {
+		const outcome = probe.binding.loadMessagePage('conv-1').then(
+			() => 'resolved',
+			(error) =>
+				error instanceof Error && /session ended/i.test(error.message) ? 'dropped' : error
+		);
+		await settle();
+		assert.equal(gates.length, 1);
+
+		probe.binding.teardown();
+		gates[0].resolve({
+			data: {
+				conversationMessages: {
+					edges: [],
+					pageInfo: { hasNextPage: false, endCursor: null },
+					totalCount: 0,
+				},
+			},
+		});
+		await settle();
+
+		assert.equal(await outcome, 'dropped');
+	} finally {
+		probe.restore();
+	}
+});
+
+test('a count read for a session that ended before it landed is dropped', async () => {
+	// The badge's race — the one no binding teardown can reach, because the
+	// store outlives every binding it creates. Driven through the REAL session
+	// announcement and the REAL scope shape `unread.svelte.ts` stamps with:
+	// hold A's refresh, sign out, sign in as B, release A — A's resolution
+	// names a dead generation, and only B's own read still holds.
+	const scope = createSessionScope(sessionGeneration);
+	const adaRefresh = scope.stamp();
+
+	notifySessionChange('signed-out');
+	assert.equal(scope.holds(adaRefresh), false, 'a read spanning the sign-out names a dead session');
+
+	notifySessionChange('signed-in');
+	const bobRefresh = scope.stamp();
+	assert.equal(scope.holds(adaRefresh), false, '…and the sign-in does not resurrect it');
+	assert.equal(
+		scope.holds(bobRefresh),
+		true,
+		"the new session's own read, stamped now, is the one that may publish"
+	);
+});
+
+test('the badge stamps its count read with the session generation', () => {
+	// STRUCTURAL. `unread.svelte.ts` imports `$lib/auth/session`, which imports
+	// `$app/environment` — unloadable here, so the wiring is asserted on the
+	// source, the same way `clearSession`'s announcement is below.
+	const source = readFileSync('src/lib/messaging/unread.svelte.ts', 'utf8');
+
+	assert.match(
+		source,
+		/createSessionScope\(sessionGeneration\)/,
+		'the badge must stamp its reads against the global session generation'
+	);
+	assert.match(source, /#scope\.stamp\(\)/, 'the stamp is taken at dispatch');
+	assert.match(source, /#scope\.holds\(/, 'and checked before anything publishes');
 });
 
 /* ============================================================

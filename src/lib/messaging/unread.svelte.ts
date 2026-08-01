@@ -25,9 +25,11 @@
  */
 
 import { accessTokenOrNull, isAuthenticated } from '../auth/session.ts';
+import { sessionGeneration } from '../auth/session-events.ts';
 import { resolveBrowserOrigin } from '../cms/origin.ts';
 import { unreadConversationCount } from './contract.ts';
 import { createMessagingBinding } from './handlers.ts';
+import { createSessionScope } from './session-scope.ts';
 import type { Conversation } from '../components/messaging/context.svelte.js';
 
 export type UnreadState =
@@ -45,6 +47,21 @@ class UnreadStore {
 
 	/** In-flight guard: the shell mounts once per navigation, lesser answers once. */
 	#loading = false;
+
+	/**
+	 * Which session an in-flight count belongs to.
+	 *
+	 * THE BADGE'S OWN RACE, and the one the binding's teardown cannot reach: this
+	 * store OUTLIVES every binding it creates — a refresh builds one, reads
+	 * through it, and drops it — so there is no teardown between sign-out and the
+	 * next sign-in to end the read's session. Hold account A's refresh, sign out
+	 * (the badge resets), sign in as B (the refresh B asks for returns early on
+	 * `#loading`), then release A: without a stamp, A's count publishes over B's
+	 * nav. The stamp is taken against the GLOBAL session generation — advanced by
+	 * every announced sign-in and sign-out — so a resolution that spans either
+	 * one names a dead session and publishes nothing.
+	 */
+	#scope = createSessionScope(sessionGeneration);
 
 	/**
 	 * Adopt a count the messages surface already has.
@@ -76,23 +93,40 @@ class UnreadStore {
 			return;
 		}
 
+		// Taken BEFORE the request, checked after it: the session this count was
+		// read under may not be the session on screen when it lands.
+		const dispatched = this.#scope.stamp();
 		this.#loading = true;
+		let stale = false;
 		try {
 			const { handlers } = createMessagingBinding({
 				accessToken: accessTokenOrNull,
 				origin: resolveBrowserOrigin(),
 			});
 			const conversations = await handlers.onFetchConversations?.('INBOX');
+			if (!this.#scope.holds(dispatched)) {
+				stale = true;
+				return;
+			}
 			this.state = conversations
 				? { status: 'known', conversations: unreadConversationCount(conversations) }
 				: { status: 'unavailable' };
 		} catch {
+			if (!this.#scope.holds(dispatched)) {
+				stale = true;
+				return;
+			}
 			// The badge is chrome. A failed count is worth remembering — so a retry
 			// can distinguish it from "not yet" — but never worth surfacing as an
 			// error over an article somebody is reading.
 			this.state = { status: 'unavailable' };
 		} finally {
 			this.#loading = false;
+			// A dropped stale resolution means a NEWER session asked for a count
+			// while this one held the flag and was turned away. Now that the flag
+			// is free, that session is owed its own read — otherwise the badge it
+			// is looking at stays `unknown` until the next navigation.
+			if (stale && isAuthenticated()) void this.refresh();
 		}
 	}
 }

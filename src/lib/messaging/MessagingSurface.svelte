@@ -24,16 +24,19 @@ them.
 SHARING THAT STATE MEANS RECONCILING IT. The vendored state machine keys nothing
 by conversation: `selectConversation` writes whichever `onFetchMessages`
 resolves last into one `messages` array, `sendMessage` appends its confirmed
-message to whatever is selected when the mutation returns, and
-`acceptMessageRequest` removes a request card whatever request state comes back.
-On a surface where the selection changes faster than a read completes, those are
-not display glitches — they are one correspondent's words under another's name,
-and a request that vanished from the tab that still holds it. Contentus cannot
-change that source, so three reconciliations live here, each against evidence
-rather than assumption: messages are kept only when they carry the selected
-`conversationId` (`./selection`), pages are merged only into the conversation
-they were requested for, and request cards render the state lesser RETURNED
-(`./requests`).
+message to whatever is selected when the mutation returns AND stamps that
+message onto the selected conversation's list card, and `acceptMessageRequest`
+removes a request card whatever request state comes back. On a surface where the
+selection changes faster than a read completes, those are not display glitches —
+they are one correspondent's words under another's name, and a request that
+vanished from the tab that still holds it. Contentus cannot change that source,
+so the reconciliations live here, each against evidence rather than assumption:
+messages are kept only when they carry the selected `conversationId`, pages are
+merged only into the conversation they were requested for, list cards and the
+selected summary are restored when a completion files a message under the wrong
+conversation, a deep link selects its result only while the reader has not
+chosen for themselves (`./selection`), and request cards render the state lesser
+RETURNED (`./requests`).
 
 TWO PANES, ONE URL. `/messages` is the list; `/messages/{conversationId}` is a
 conversation. On a wide viewport both routes show both panes, and selecting a
@@ -68,7 +71,14 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		withoutConversation,
 		type RequestResolution,
 	} from './requests';
-	import { mergeForConversation, retainSelectedMessages } from './selection';
+	import {
+		mergeForConversation,
+		retainOwnSummaries,
+		retainOwnSummary,
+		retainSelectedMessages,
+		selectionHeld,
+		type OwnSummary,
+	} from './selection';
 	import {
 		classifyMessagingError,
 		type MessagingBinding,
@@ -245,13 +255,27 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	 *
 	 * Prefers a conversation already in the loaded list — that object came through
 	 * the vendored mapper and costs nothing — and falls back to the by-id read.
+	 *
+	 * THE READER'S OWN CHOICE OUTRANKS THE LINK. The by-id read is asynchronous,
+	 * and a reader who picked a conversation from the list while it was in flight
+	 * has CHOSEN. Selecting the late arrival anyway would move them out of the
+	 * conversation they opened and into one they only linked to, after they had
+	 * started reading — so the selection is captured at dispatch and the late
+	 * result is applied only while nothing has changed it.
 	 */
 	async function resolveDeepLink(id: string) {
 		resolution = 'loading';
 		resolutionFailure = null;
+		const selectionAtDispatch = dm.selectedConversation?.id ?? null;
+		const readerHasChosen = () =>
+			!selectionHeld(selectionAtDispatch, dm.selectedConversation?.id ?? null);
 
 		const known = dm.conversations.find((conversation) => conversation.id === id);
 		if (known) {
+			if (readerHasChosen()) {
+				resolution = 'ready';
+				return;
+			}
 			await context.selectConversation(known);
 			resolution = 'ready';
 			return;
@@ -265,6 +289,12 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 				// holds for other people — because telling those apart would answer
 				// "does this conversation exist?" for anybody who can type a URL.
 				resolution = 'not-found';
+				return;
+			}
+			if (readerHasChosen()) {
+				// The resolution succeeded and selects nothing: the reader is already
+				// in a conversation they chose, and the link's answer changes nothing.
+				resolution = 'ready';
 				return;
 			}
 			await context.selectConversation(conversation);
@@ -294,6 +324,36 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		// when nothing is foreign, so this writes only on a real change and the
 		// effect settles instead of looping.
 		if (kept !== dm.messages) context.updateState({ messages: kept });
+	});
+
+	/**
+	 * Every summary stays with the conversation it belongs to.
+	 *
+	 * THE SEND COMPLETION THE THREAD FILTER CANNOT REACH. The vendored
+	 * `sendMessage` writes its confirmed message three times, and only one is into
+	 * `state.messages`: it also sets `lastMessage`/`updatedAt` on whichever
+	 * conversation is selected when the mutation RETURNS, in the list and on
+	 * `selectedConversation`. A send dispatched to A, resolving after the reader
+	 * opened B, therefore puts A's words and A's time on B's card — under B's
+	 * correspondent's name, in the list, where no message filter applies. The
+	 * confirmed message carries the id it was sent to (stamped at dispatch by the
+	 * binding's `onSendMessage`), so the misfiling is identifiable: B is restored
+	 * to the last summary that named B, and the message is filed under A, where
+	 * it was actually sent. See `./selection` for the two repairs.
+	 */
+	const ownSummaries = new Map<string, OwnSummary>();
+	$effect.pre(() => {
+		const repaired = retainOwnSummaries(dm.conversations, ownSummaries);
+		if (repaired !== dm.conversations) context.updateState({ conversations: repaired });
+
+		const onScreen = dm.selectedConversation;
+		if (onScreen) {
+			// The same misfiled summary lands on `selectedConversation`, and every
+			// later `{ ...selected }` spread carries it forward — so the selected
+			// copy is restored too, not only the list's.
+			const restored = retainOwnSummary(onScreen, ownSummaries);
+			if (restored !== onScreen) context.updateState({ selectedConversation: restored });
+		}
 	});
 
 	/**

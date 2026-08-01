@@ -9,10 +9,17 @@
  *      SEND time. On a wide viewport, where selecting is in-place, text typed
  *      for one person and left unsent is still in the box when the next
  *      conversation opens — and the next Send delivers it to them.
- *   2. **The thread is one unkeyed array.** `selectConversation` writes
- *      whichever `onFetchMessages` resolves last into `state.messages`, and
- *      `sendMessage` appends its confirmed message to whatever is selected when
- *      the mutation returns. A slow read for A renders under B's name.
+ *   2. **The thread is one unkeyed array — and the summary is not keyed
+ *      either.** `selectConversation` writes whichever `onFetchMessages`
+ *      resolves last into `state.messages`, `sendMessage` appends its confirmed
+ *      message to whatever is selected when the mutation returns, and the same
+ *      completion stamps that message onto the selected conversation's LIST
+ *      CARD (`lastMessage`/`updatedAt`). A slow read for A renders under B's
+ *      name, and a send dispatched to A resolves onto B's card — outside the
+ *      reach of any message filter. The deep link is the same shape in the
+ *      other direction: `/messages/{id}` resolves asynchronously and would
+ *      select its late answer over a conversation the reader chose while it
+ *      loaded.
  *
  * Neither is fixable in the vendored source, which contentus does not edit. So
  * the surface reconciles both, and this file drives the reconciliation.
@@ -34,11 +41,14 @@ import { test } from 'node:test';
 
 import { parse } from 'svelte/compiler';
 
-import { toDirectMessage, toMessagePage } from '../src/lib/messaging/contract.ts';
+import { toConversation, toDirectMessage, toMessagePage } from '../src/lib/messaging/contract.ts';
 import {
 	isForeignMessage,
 	mergeForConversation,
+	retainOwnSummaries,
+	retainOwnSummary,
 	retainSelectedMessages,
+	selectionHeld,
 } from '../src/lib/messaging/selection.ts';
 
 const actor = {
@@ -85,6 +95,47 @@ function page(conversationId, ids) {
 		},
 		conversationId
 	);
+}
+
+/** A conversation as `contract.toConversation` produces one — stamped summary included. */
+function conversation(id, lastMessageId, updatedAt = '2026-07-01T09:00:00Z') {
+	return toConversation({
+		id,
+		unread: false,
+		createdAt: '2026-07-01T08:00:00Z',
+		updatedAt,
+		accounts: [actor],
+		lastStatus: lastMessageId
+			? {
+					id: lastMessageId,
+					content: `<p>${lastMessageId}</p>`,
+					createdAt: updatedAt,
+					sensitive: false,
+					spoilerText: null,
+					actor,
+					attachments: [],
+				}
+			: null,
+		viewerMetadata: {
+			requestState: 'ACCEPTED',
+			requestedAt: null,
+			acceptedAt: null,
+			declinedAt: null,
+		},
+	});
+}
+
+/**
+ * The vendored `sendMessage` completion, reproduced exactly: the confirmed
+ * message is stamped onto whichever conversation is selected WHEN THE MUTATION
+ * RETURNS, and the list is re-sorted on that time. `selectedId` is B's when the
+ * reader moved on mid-flight — which is the whole defect.
+ */
+function vendoredSendCompletion(conversations, selectedId, confirmed) {
+	const updated = conversations.map((c) =>
+		c.id === selectedId ? { ...c, lastMessage: confirmed, updatedAt: confirmed.createdAt } : c
+	);
+	return [...updated].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 /* ============================================================
@@ -210,6 +261,105 @@ test('out-of-order completions leave the open thread correct whichever lands las
 });
 
 /* ============================================================
+   Summaries stay with the conversation they belong to
+   ============================================================ */
+
+test('a send confirmed after the reader moved on is re-filed under the conversation it was sent to', () => {
+	// The race, exactly as the vendored context writes it: composed in A, sent
+	// to A, resolved after the reader opened B — and B's card takes A's words,
+	// A's time, and the top of the list.
+	const own = new Map();
+	const list = [
+		conversation('conv-a', 'a-last', '2026-07-01T09:00:00Z'),
+		conversation('conv-b', 'b-last', '2026-07-01T09:30:00Z'),
+	];
+	// The reconciling effect records what each card legitimately carries BEFORE
+	// the completion lands; drive that pass first, as the surface does.
+	retainOwnSummaries(list, own);
+
+	const confirmed = message('a-sent', 'conv-a', '2026-07-01T10:00:00Z');
+	const misfiled = vendoredSendCompletion(list, 'conv-b', confirmed);
+	assert.equal(misfiled[0].id, 'conv-b', 'the vendored write puts B on top, on A’s time');
+	assert.equal(misfiled[0].lastMessage.id, 'a-sent', '…showing A’s message');
+
+	const repaired = retainOwnSummaries(misfiled, own);
+	const a = repaired.find((c) => c.id === 'conv-a');
+	const b = repaired.find((c) => c.id === 'conv-b');
+
+	assert.equal(b.lastMessage.id, 'b-last', "B's card shows B's own last message again");
+	assert.equal(
+		b.updatedAt,
+		'2026-07-01T09:30:00Z',
+		'and is not sorted by an event that did not happen to it'
+	);
+	assert.equal(a.lastMessage.id, 'a-sent', "the send did happen — to A, and A's card says so");
+	assert.equal(a.updatedAt, '2026-07-01T10:00:00Z');
+	assert.equal(repaired[0].id, 'conv-a', 'the order follows the corrected times');
+});
+
+test('the same misfiling on the selected conversation is restored too', () => {
+	// `sendMessage` writes the summary twice: onto the list row AND onto
+	// `selectedConversation`, which every later `{ ...selected }` spread carries
+	// forward. Both copies are repaired.
+	const own = new Map();
+	const list = [conversation('conv-b', 'b-last')];
+	retainOwnSummaries(list, own);
+
+	const confirmed = message('a-sent', 'conv-a', '2026-07-01T10:00:00Z');
+	const misfiledSelected = { ...list[0], lastMessage: confirmed, updatedAt: confirmed.createdAt };
+
+	const restored = retainOwnSummary(misfiledSelected, own);
+	assert.equal(restored.lastMessage.id, 'b-last');
+	assert.equal(restored.updatedAt, '2026-07-01T09:00:00Z');
+
+	// And a clean object keeps its identity, so the effect settles.
+	assert.equal(retainOwnSummary(list[0], own), list[0]);
+});
+
+test('a clean list keeps its identity, so the reconciler settles', () => {
+	// Load-bearing in the same way as the thread guard: the surface writes back
+	// only when this returns a DIFFERENT array.
+	const own = new Map();
+	const list = [conversation('conv-a', 'a-last'), conversation('conv-b', 'b-last')];
+	assert.equal(retainOwnSummaries(list, own), list);
+	// …and identity is stable across passes, once the map has recorded them.
+	assert.equal(retainOwnSummaries(list, own), list);
+});
+
+test('two summaries misfiled onto one conversation re-home only the newer', () => {
+	const own = new Map();
+	const list = [conversation('conv-a', 'a-last'), conversation('conv-b', 'b-last')];
+	retainOwnSummaries(list, own);
+
+	// Both cards somehow carry a message naming conv-a; the older one is not
+	// resurrected onto A's card over the newer.
+	const older = message('a-older', 'conv-a', '2026-07-01T10:00:00Z');
+	const newer = message('a-newer', 'conv-a', '2026-07-01T11:00:00Z');
+	const misfiled = [
+		{ ...list[0], lastMessage: older, updatedAt: older.createdAt },
+		{ ...list[1], lastMessage: newer, updatedAt: newer.createdAt },
+	];
+
+	const repaired = retainOwnSummaries(misfiled, own);
+	assert.equal(repaired.find((c) => c.id === 'conv-a').lastMessage.id, 'a-newer');
+});
+
+/* ============================================================
+   A deep link does not outrank the reader's own choice
+   ============================================================ */
+
+test('a deep link applies its late answer only while the reader has not chosen', () => {
+	// Dispatched with nothing selected — the normal cold link — the arrival may
+	// select while the selection is still what it was at dispatch.
+	assert.equal(selectionHeld(null, null), true);
+	// The reader picked B from the list while A's by-id read was in flight:
+	// they have chosen, and the link's answer must not move them.
+	assert.equal(selectionHeld(null, 'conv-b'), false);
+	assert.equal(selectionHeld('conv-a', 'conv-b'), false);
+	assert.equal(selectionHeld('conv-a', 'conv-a'), true);
+});
+
+/* ============================================================
    The structure that applies them
    ============================================================ */
 
@@ -274,6 +424,24 @@ test('the surface reconciles the thread through the real guards', () => {
 	assert.ok(
 		calls(surface.instance, 'mergeForConversation'),
 		'every page merge must be keyed to the conversation it was requested for'
+	);
+});
+
+test('the surface reconciles summaries and the deep link through the real guards', () => {
+	// STRUCTURAL, same caveat as above. The send completion writes the summary
+	// onto the list AND the selected copy, and the deep link resolves
+	// asynchronously; all three guards must actually be called.
+	assert.ok(
+		calls(surface.instance, 'retainOwnSummaries'),
+		'list cards must be restored to the conversation their summary names'
+	);
+	assert.ok(
+		calls(surface.instance, 'retainOwnSummary'),
+		'the selected conversation copy must be restored too'
+	);
+	assert.ok(
+		calls(surface.instance, 'selectionHeld'),
+		'a deep link must not select over a choice the reader made while it loaded'
 	);
 });
 

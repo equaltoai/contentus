@@ -93,6 +93,17 @@ export interface MessagingAdapterConfig {
 	accessToken: () => string | null;
 	/** Absolute endpoint for a server pass; null in the browser uses the relative path. */
 	endpoint?: string | null;
+	/**
+	 * Cancels every read this adapter has open.
+	 *
+	 * The sign-out path. Closing the socket stops what is still ARRIVING; this
+	 * stops what was already asked for, so a conversation list dispatched under
+	 * one session does not spend the next one being fetched. It is not by itself
+	 * the correctness guard — a response already parsed is not un-parsed by
+	 * aborting the fetch behind it — and the caller keeps a session stamp for
+	 * that. This is the half that stops the request.
+	 */
+	signal?: AbortSignal;
 	/** `wss://ws.<domain>` for this instance, or null when it cannot be derived. */
 	subscriptionEndpoint?: string | null;
 	/**
@@ -167,6 +178,7 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 			result = await graphqlRequest<T>(document, variables, {
 				endpoint: config.endpoint ?? null,
 				accessToken: config.accessToken(),
+				...(config.signal ? { signal: config.signal } : {}),
 			});
 		} catch (cause) {
 			// The instance was not reached at all. A different screen from a refusal,
