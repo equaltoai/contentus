@@ -15,6 +15,8 @@ export type AppPageKey =
 	| 'review-queue'
 	| 'review-workspace'
 	| 'timelines'
+	| 'messages'
+	| 'message-thread'
 	| 'profile'
 	| 'auth-callback'
 	| 'not-found';
@@ -190,6 +192,33 @@ export interface ProfileRouteData {
 	actorPartial: boolean;
 }
 
+/**
+ * Which folder `/messages` opens on, from `?folder=`.
+ *
+ * Requests is a first-class tab rather than a filter (product design §5), and
+ * it is in the URL for the reason the timeline tab is: a reader who has been
+ * sent a request needs to be able to link somebody to the surface that shows
+ * it, and a tab that lives only in component state cannot be linked to.
+ */
+export type MessageFolderTab = 'inbox' | 'requests';
+
+/**
+ * What `/messages` and `/messages/{conversationId}` carry from the server.
+ *
+ * NO CONVERSATION DATA, and the emptiness is the whole design — the same rule
+ * `/review` follows, one step stricter. Every conversation operation needs a
+ * bearer token, the session lives in `sessionStorage`, and these props are
+ * serialized verbatim into a PUBLIC hydration endpoint. A server-side
+ * conversation fetch would put one reader's PRIVATE correspondence behind a URL
+ * anyone could request. The server ships the address and the signed-out chrome;
+ * the messages arrive once the client has read the session.
+ */
+export interface MessagesRouteData {
+	folder: MessageFolderTab;
+	/** Conversation id from `/messages/{conversationId}`; null on the list route. */
+	conversationId: string | null;
+}
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
@@ -199,5 +228,6 @@ export interface RouteProps {
 	compose: ComposeData | null;
 	review: ReviewRouteData | null;
 	timelines: TimelinesRouteData | null;
+	messages: MessagesRouteData | null;
 	profile: ProfileRouteData | null;
 }

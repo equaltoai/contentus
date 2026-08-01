@@ -17,6 +17,15 @@ export interface NavEntry {
 	href: string | null;
 	/** Page key this entry marks as current, when it is live. */
 	pageKey: AppPageKey | null;
+	/**
+	 * Further page keys this entry also marks as current.
+	 *
+	 * A face can span more than one address: `/messages/{conversationId}` is its
+	 * own route with its own descriptor, but it is still the Messages
+	 * destination, and a nav that drops its current marker when a reader opens a
+	 * conversation tells them they have left the surface they are looking at.
+	 */
+	alsoCurrentFor?: AppPageKey[];
 	surface: SurfaceVariant;
 	/** Whether lesser requires an authenticated caller for this surface. */
 	requiresAuth: boolean;
@@ -57,11 +66,15 @@ export const NAV_ENTRIES: NavEntry[] = [
 	{
 		id: 'messages',
 		label: 'Messages',
-		href: null,
-		pageKey: null,
+		href: href('/messages'),
+		pageKey: 'messages',
+		alsoCurrentFor: ['message-thread'],
 		surface: 'mcp',
+		// The whole surface is auth-gated, unlike `/timelines`: lesser serves no
+		// part of `conversations` anonymously, so an anonymous reader is not shown
+		// a destination that would only refuse them.
 		requiresAuth: true,
-		upcoming: 'M5',
+		upcoming: null,
 	},
 	{
 		id: 'agents',
@@ -73,6 +86,17 @@ export const NAV_ENTRIES: NavEntry[] = [
 		upcoming: 'M6',
 	},
 ];
+
+/**
+ * Whether a nav entry is the surface the reader is on.
+ *
+ * One helper rather than an inline comparison in each nav, because there are
+ * two navs and they must not be able to disagree about what "here" means.
+ */
+export function isCurrentEntry(entry: NavEntry, pageKey: AppPageKey): boolean {
+	if (!entry.href) return false;
+	return entry.pageKey === pageKey || (entry.alsoCurrentFor?.includes(pageKey) ?? false);
+}
 
 /**
  * Nav entries visible to a given session.

@@ -49,6 +49,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stripComments } from './lib/strip-comments.mjs';
+
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 /**
@@ -102,6 +104,13 @@ const OWNED_SOURCE_DIRS = [
 	'src/lib/cms',
 	'src/lib/compose',
 	'src/lib/config',
+	// Face 5's contentus-owned messaging consumption (M5). Same rule as
+	// `src/lib/review` and `src/lib/timelines` below: added WITH the directory.
+	// The claim this audit is checking here is a sharp one — every message body
+	// on this surface is lesser's server-sanitized HTML, handed to the vendored
+	// component untouched, and nothing in this directory renders, transforms or
+	// re-sanitizes it. That is only worth stating if the audit is looking.
+	'src/lib/messaging',
 	// Face 2's contentus-owned review controls (M2d.3). Added WITH the directory
 	// rather than after it, which is the rule check 5 exists to enforce: the
 	// components here render lesser's rendered output and never produce HTML of
@@ -250,16 +259,23 @@ function checkImports() {
 	return problems;
 }
 
+/**
+ * Check 3's scanner lives in `./lib/strip-comments.mjs`, imported above.
+ *
+ * It is a module rather than a local function for one reason, and it is a
+ * governance one: the probe that proves this scan reads a nested delimiter the
+ * way a parser does has to drive THIS code, not a copy of it. Two copies stay
+ * identical right up until they do not, and the failure is silent in the
+ * dangerous direction — a green regression over a gate that has stopped seeing
+ * live sinks. See that module's header for what the scan does and why it is not
+ * a regex.
+ */
 function checkHtmlSinks() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
 			if (!file.endsWith('.svelte')) continue;
-			const content = readFileSync(file, 'utf8');
-			// Ignore the token inside comments: this file's own rationale mentions it.
-			const withoutComments = content
-				.replace(/<!--[\s\S]*?-->/g, '')
-				.replace(/\/\*[\s\S]*?\*\//g, '');
+			const withoutComments = stripComments(readFileSync(file, 'utf8'));
 			if (/\{@html\b/.test(withoutComments)) {
 				problems.push(
 					`${relative(repoRoot, file)} contains an {@html} sink — contentus-owned templates ` +

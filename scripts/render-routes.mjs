@@ -71,6 +71,29 @@ export const AUDIT_ROUTES = [
 	// `tests/ssr-timelines.test.mjs` asserts the document carries no timeline
 	// data and that the server made no authenticated fetch for it.
 	{ name: 'timelines-home', path: '/l/timelines?tab=home', expectStatus: 200 },
+	// Face 5. The strictest of the auth-gated set: lesser serves NO part of
+	// `conversations` anonymously, so unlike the timeline tabs there is no half
+	// of this surface a visitor can be shown. Still a 200, for the reason
+	// `/review` is — the route exists for everyone and server-renders its
+	// sign-in state — and `tests/ssr-messages.test.mjs` asserts the harder
+	// property: the anonymous document carries no conversation, no participant
+	// and no message, and the server makes NO fetch at all while rendering it.
+	{ name: 'messages-inbox', path: '/l/messages', expectStatus: 200 },
+	// Requests as an addressable tab. The folder is in the URL precisely so it
+	// can be linked, so it is rendered cold like any other address.
+	{ name: 'messages-requests', path: '/l/messages?folder=requests', expectStatus: 200 },
+	// A conversation deep-linked cold. The id is in the path and must NOT
+	// produce a server-side read: these props are serialized into the public
+	// hydration endpoint, so a server fetch here would put private
+	// correspondence behind a URL anyone could request.
+	{ name: 'message-thread', path: '/l/messages/conversation-123', expectStatus: 200 },
+	// `/messages/` with no id names no conversation, so it must not resolve to
+	// the thread surface and render an empty one — the rule `/review/drafts`
+	// and `/profiles` follow. Here the trailing slash normalizes away first, so
+	// it lands on the LIST rather than on not-found, which is the better of the
+	// two answers and is asserted as such in `tests/ssr-messages.test.mjs`
+	// rather than left to whichever branch happened to win.
+	{ name: 'messages-no-id', path: '/l/messages/', expectStatus: 200 },
 	{ name: 'profile', path: '/l/profiles/ada', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },
@@ -84,7 +107,14 @@ export const AUDIT_ROUTES = [
  * instance domain is baked into source.
  */
 const AUDIT_HOST = 'contentus-audit.invalid';
-const AUDIT_HEADERS = {
+
+/**
+ * Exported so a probe can EXTEND it — an inbound `Authorization` on an otherwise
+ * ordinary request — rather than hand-rolling a header bag and accidentally
+ * testing a request lesser's edge would never deliver. `renderRoute` REPLACES
+ * these when a route carries its own, so a probe that wants both has to spread.
+ */
+export const AUDIT_HEADERS = {
 	host: AUDIT_HOST,
 	'x-lesser-forwarded-host': AUDIT_HOST,
 	'x-lesser-forwarded-proto': 'https',

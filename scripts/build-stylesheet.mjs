@@ -189,6 +189,18 @@ function stylesheetLayers() {
 			label: 'contentus timelines theme — appearance for upstream class contract',
 			css: readRepoFile('src/lib/brand/timelines.css'),
 		},
+		{
+			// Interim for the same upstream cause a third time, plus face 5's own
+			// chrome: `greater add messaging` vendors the components with no
+			// stylesheet — the registry record has no `styles` entry — while every
+			// `.messages-*`, `.message*` and `.new-conversation*` class they emit
+			// lives only in the social face theme. The `.contentus-*` half of the
+			// file is not interim: it is face 5's two-pane layout, folder tabs and
+			// request cards. See the header of the file itself. The vendored half
+			// is deleted when the CLI emits per-module CSS.
+			label: 'contentus messaging theme — face 5 chrome + upstream class contract',
+			css: readRepoFile('src/lib/brand/messaging.css'),
+		},
 	];
 }
 

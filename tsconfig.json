@@ -32,6 +32,8 @@
     "src/lib/auth/**/*.ts",
     "src/lib/brand/**/*.ts",
     "src/lib/cms/**/*.ts",
+    "src/lib/messaging/**/*.ts",
+    "src/lib/messaging/**/*.svelte",
     "src/lib/review/**/*.ts",
     "src/lib/review/**/*.svelte",
     "src/lib/shell/**/*.ts",

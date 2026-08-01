@@ -28,7 +28,8 @@ server's.
 	import MessageSquareIcon from '$lib/greater/icons/icons/message-square.svelte';
 	import PlusIcon from '$lib/greater/icons/icons/plus.svelte';
 
-	import { COMPOSE_ACTION, visibleMobileTabs } from './nav';
+	import { COMPOSE_ACTION, isCurrentEntry, visibleMobileTabs } from './nav';
+	import { unreadBadgeLabel, unreadBadgeText, unreadStore } from '$lib/messaging/unread.svelte';
 	import type { AppPageDescriptor } from '../../facetheory/types';
 
 	interface Props {
@@ -47,6 +48,8 @@ server's.
 	} as const;
 
 	const tabs = $derived(visibleMobileTabs(authenticated));
+	const unreadText = $derived(unreadBadgeText(unreadStore.state));
+	const unreadLabel = $derived(unreadBadgeLabel(unreadStore.state));
 </script>
 
 <nav class="contentus-tabbar" aria-label="Primary (mobile)">
@@ -58,9 +61,19 @@ server's.
 					<a
 						class="contentus-tabbar__tab"
 						href={tab.href}
-						aria-current={tab.pageKey === page.key ? 'page' : undefined}
+						aria-current={isCurrentEntry(tab, page.key) ? 'page' : undefined}
 					>
-						<Icon size={22} aria-hidden="true" />
+						<span class="contentus-tabbar__icon">
+							<Icon size={22} aria-hidden="true" />
+							{#if tab.id === 'messages' && unreadText && unreadLabel}
+								<!-- Anchored to the icon rather than the tab so the badge cannot
+								     widen the target and push a neighbouring tab under the 44px
+								     minimum §4 sets. Counts CONVERSATIONS; the label says so. -->
+								<span class="contentus-tabbar__unread" aria-label={unreadLabel}>
+									{unreadText}
+								</span>
+							{/if}
+						</span>
 						<span class="contentus-tabbar__label">{tab.label}</span>
 					</a>
 				{:else}
