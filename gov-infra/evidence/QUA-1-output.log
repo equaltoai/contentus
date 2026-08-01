@@ -25,9 +25,9 @@ computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-Y0sAu2xR.css                25.06 kB │ gzip:   4.34 kB
-build/client/assets/entry-client-Dke_B2MK.js                624.69 kB │ gzip: 191.23 kB
+build/client/assets/entry-client-BRPfxqNa.js                625.13 kB │ gzip: 191.36 kB
 
-✓ built in 1.05s
+✓ built in 1.06s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -44,7 +44,7 @@ computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
 build/server/handler.mjs                 993.18 kB │ gzip: 245.91 kB
 
-✓ built in 921ms
+✓ built in 1.15s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
