@@ -74,7 +74,9 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	import {
 		deepLinkVerdict,
 		isNewConversationOpenIntent,
+		isNewConversationOpenKeyIntent,
 		mergeForConversation,
+		resolutionAfterReaderChoice,
 		retainOwnSummaries,
 		retainOwnSummary,
 		retainSelectedMessages,
@@ -521,6 +523,12 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		// conversation is the reader's act whether or not the id moves, and a
 		// deep link still loading must lose to it either way.
 		selectionRevisions.act();
+		// And a deep-link answer that already LANDED must lose to it too: the
+		// render branches check a terminal not-found/failed before the thread,
+		// so the conversation the reader just picked would stay hidden behind
+		// the link they abandoned. Only the terminal states clear — a link
+		// still loading is still its own, judged by the revision above.
+		resolution = resolutionAfterReaderChoice(resolution);
 		if (twoPane) {
 			void context.selectConversation(conversation);
 			return;
@@ -653,6 +661,14 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 				re-click. Vendored source is never edited; a supported open-intent
 				hook on `NewConversation` is the upstream ask
 				(docs/consumption/messaging-contract.md).
+
+				KEYDOWNS TOO, because the vendored button activates on Enter/Space
+				by calling its click handler DIRECTLY on a constructed MouseEvent
+				that is never dispatched — the keyboard open opens the modal without
+				ever traversing the click capture above. The keydown itself is a
+				real, dispatched event and does traverse, so the same gate judges
+				it, keyed to exactly the activation keys the vendored button honors;
+				every other key chooses nothing and stamps nothing.
 				-->
 				<div
 					class="contentus-messages__new-conversation"
@@ -661,8 +677,21 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 							selectionRevisions.act();
 						}
 					}}
+					onkeydowncapture={(event) => {
+						if (isNewConversationOpenKeyIntent(event.currentTarget, event.target, event.key)) {
+							selectionRevisions.act();
+						}
+					}}
 				>
-					<NewConversation />
+					<NewConversation
+						onConversationCreated={() => {
+							// The vendored component has already selected what it created.
+							// A not-found/failed answer LANDED for the abandoned link is
+							// checked before the thread in the render branches, so without
+							// this reset the new conversation stays hidden behind it.
+							resolution = resolutionAfterReaderChoice(resolution);
+						}}
+					/>
 				</div>
 			</header>
 

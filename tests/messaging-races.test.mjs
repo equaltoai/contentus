@@ -37,8 +37,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { parse } from 'svelte/compiler';
 
@@ -550,6 +553,296 @@ test('a canceled or no-change New Message modal does not stale the link — only
 });
 
 /* ============================================================
+   Keyboard activation of the New Message trigger
+   ============================================================ */
+
+// The vendored button constructs a `MouseEvent` for keyboard activation, and
+// Node ships `Event` but not `MouseEvent`. The probe supplies the one global
+// the real code needs — the harness, not the code under test — and each test
+// file runs in its own process, so nothing else sees it.
+if (typeof globalThis.MouseEvent === 'undefined') {
+	globalThis.MouseEvent = class MouseEvent extends Event {};
+}
+
+const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+/**
+ * The REAL vendored headless button, loaded byte-for-byte.
+ *
+ * The vendored file's runtime imports carry `.js` specifiers that only the
+ * app's alias resolves, so the test runner cannot load the module as it
+ * stands — and REPRODUCING the button in test code would agree with itself
+ * whatever the vendored file said. So the file is copied verbatim into a temp
+ * module with exactly the two runtime import specifiers re-pointed at the
+ * real util modules — the same extraction discipline as
+ * `tests/vendored-content-renderer.test.mjs` — and the rewrite anchors are
+ * asserted, so a vendored change that moves them fails loudly here instead of
+ * silently driving nothing.
+ */
+async function loadVendoredButton() {
+	const vendoredPath = join(repoRoot, 'src/lib/greater/headless/primitives/button.ts');
+	const vendored = readFileSync(vendoredPath, 'utf8');
+	const utils = join(repoRoot, 'src/lib/greater/headless/utils');
+	const href = (name) => JSON.stringify(pathToFileURL(join(utils, name)).href);
+
+	let rewritten = vendored;
+	for (const [specifier, module] of [
+		['../utils/id.js', 'id.ts'],
+		['../utils/keyboard.js', 'keyboard.ts'],
+	]) {
+		// Anchored, not assumed: a vendored change that moves either import must
+		// fail loudly here instead of silently driving something else. The anchor
+		// is BUILT UP from the specifier rather than written out, because a
+		// literal `from '...'` in this file would itself read as a static import
+		// to the CON-5 closure scan — and one that resolves to no file.
+		const anchor = `from '${specifier}'`;
+		assert.ok(
+			vendored.includes(anchor),
+			`the vendored button no longer imports ${specifier}, so this probe would load ` +
+				'something other than the real module. Re-anchor the rewrite; do not delete the probe.'
+		);
+		rewritten = rewritten.replace(anchor, `from ${href(module)}`);
+	}
+
+	const dir = mkdtempSync(join(tmpdir(), 'contentus-vendored-button-'));
+	try {
+		const file = join(dir, 'vendored-button.ts');
+		writeFileSync(file, rewritten, 'utf8');
+		return await import(pathToFileURL(file).href);
+	} finally {
+		// Evaluated and cached by now; nothing left behind for a stale pickup.
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+const vendoredButton = await loadVendoredButton();
+
+/** A keydown as the browser delivers one to the trigger — what the vendored handler reads. */
+function keydownEvent(key) {
+	return {
+		key,
+		defaultPrevented: false,
+		preventDefault() {
+			this.defaultPrevented = true;
+		},
+	};
+}
+
+/**
+ * The minimal button element the vendored action touches, with the listener
+ * registry the action itself populates — the same events through the same
+ * `addEventListener` calls the browser would mediate. `dispatchEvent` is
+ * recorded separately, because whether the keyboard activation is DISPATCHED
+ * at all is exactly what this group pins.
+ */
+function fakeButtonElement() {
+	const listeners = new Map();
+	return {
+		attrs: {},
+		id: '',
+		disabled: false,
+		dispatchedEvents: [],
+		setAttribute(name, value) {
+			this.attrs[name] = String(value);
+		},
+		removeAttribute(name) {
+			delete this.attrs[name];
+		},
+		addEventListener(type, fn) {
+			if (!listeners.has(type)) listeners.set(type, []);
+			listeners.get(type).push(fn);
+		},
+		removeEventListener(type, fn) {
+			listeners.set(
+				type,
+				(listeners.get(type) ?? []).filter((f) => f !== fn)
+			);
+		},
+		emit(type, event) {
+			for (const fn of listeners.get(type) ?? []) fn(event);
+		},
+		dispatchEvent(event) {
+			this.dispatchedEvents.push(event);
+			this.emit(event.type, event);
+			return true;
+		},
+	};
+}
+
+test('keyboard activation opens New Message through a path the click gate cannot hear — the keydown gate stamps it', () => {
+	// THE VENDORED BYPASS, driven through the real button: a keydown Enter on
+	// the focused trigger, delivered to the listeners the vendored action
+	// registered. The handler preventDefaults, constructs a MouseEvent, and
+	// invokes its click handler DIRECTLY — so the modal opens while no click
+	// event ever exists for the wrapper's capture listener to hear. A keyboard
+	// reader on a wide cold deep link then gets exactly the unstamped-open
+	// race: search while the by-id read is pending, and the late
+	// found/missing/failed completion stays admissible.
+	const activations = [];
+	const button = vendoredButton.createButton({ onClick: () => activations.push('open') });
+	const node = fakeButtonElement();
+	button.actions.button(node);
+
+	node.emit('keydown', keydownEvent('Enter'));
+
+	assert.deepEqual(activations, ['open'], 'the vendored button opened the modal on Enter');
+	assert.deepEqual(
+		node.dispatchedEvents,
+		[],
+		'the vendored keyboard activation dispatches NOTHING, so the click gate cannot hear it. ' +
+			'GOOD NEWS IF THIS FAILS: upstream now dispatches the activation and the click gate ' +
+			'covers the keyboard path — re-check whether the keydown gate is still needed.'
+	);
+
+	// The owned gate must therefore judge the open intent from the keydown
+	// itself. Optional on purpose: against a ref with no keydown gate this
+	// probe still reaches the verdict, and the verdict is the old code's real
+	// answer — the keyboard open stamps nothing and every completion family
+	// acts over it, which is the defect.
+	for (const outcome of ['found', 'missing', 'failed']) {
+		const revisions = trackSelectionRevisions(null);
+		const atDispatch = revisions.capture();
+		// Searching inside the open modal, presented to the observer as the
+		// same null: by itself this counts nothing, which is exactly the gap.
+		revisions.observe(null);
+		const wrapper = { querySelector: () => null };
+		const triggerKeydown = {
+			closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
+		};
+		if (selection.isNewConversationOpenKeyIntent?.(wrapper, triggerKeydown, 'Enter')) {
+			revisions.act();
+		}
+		assert.equal(
+			deepLinkVerdict(revisions, atDispatch, null, outcome),
+			'stale',
+			`a ${outcome} completion after the reader opened New Message from the keyboard must not act over the choice`
+		);
+	}
+});
+
+test('the keydown gate mirrors exactly the keys the real vendored button activates on', () => {
+	// The vendored button is the authority on what activates it, so drive
+	// every candidate key through BOTH: what the real button opens on, the
+	// gate must stamp; what it ignores, the gate must not. The mirror in
+	// `$lib/messaging/selection` exists because the vendored util does not
+	// resolve in this runner, and this is what keeps the mirror honest —
+	// including 'Spacebar', the legacy key the vendored set still honors.
+	for (const key of ['Enter', ' ', 'Spacebar', 'Tab', 'ArrowDown', 'a', 'Escape']) {
+		const activations = [];
+		const button = vendoredButton.createButton({ onClick: () => activations.push('open') });
+		const node = fakeButtonElement();
+		button.actions.button(node);
+		node.emit('keydown', keydownEvent(key));
+		const vendoredOpens = activations.length === 1;
+
+		const wrapper = { querySelector: () => null };
+		const triggerKeydown = {
+			closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
+		};
+		assert.equal(
+			selection.isNewConversationOpenKeyIntent?.(wrapper, triggerKeydown, key) ?? false,
+			vendoredOpens,
+			`the gate and the real vendored button disagree on ${JSON.stringify(key)}`
+		);
+	}
+});
+
+test('a no-op keydown stamps nothing — non-activation keys, keys inside the modal, a re-press while open', () => {
+	// The keyboard half of the no-op discipline: an act that chooses nothing
+	// must not take the pending link away from its answer. Tab past the
+	// trigger, Enter typed into the modal's search, Enter on the trigger with
+	// the modal already open — none of them open anything, so none of them
+	// stamp, and the link's own missing answer still earns its surface.
+	const modalOpen = {
+		querySelector: (selector) => (selector === '.new-conversation__modal' ? {} : null),
+	};
+	const wrapper = { querySelector: () => null };
+	const trigger = {
+		closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
+	};
+	const searchInput = { closest: () => null };
+
+	for (const [root, target, key, label] of [
+		[wrapper, trigger, 'Tab', 'Tab moving focus past the trigger'],
+		[modalOpen, searchInput, 'Enter', 'Enter inside the open modal'],
+		[modalOpen, trigger, 'Enter', 'a trigger re-press while the modal is open'],
+	]) {
+		// Strict equality, not truthiness: the gate must exist and answer false —
+		// an absent gate is the defect the first test of this group pins, not a
+		// pass here.
+		assert.equal(
+			selection.isNewConversationOpenKeyIntent?.(root, target, key),
+			false,
+			`${label} must not be judged an open intent`
+		);
+
+		const revisions = trackSelectionRevisions(null);
+		const atDispatch = revisions.capture();
+		if (selection.isNewConversationOpenKeyIntent?.(root, target, key)) revisions.act();
+		assert.equal(
+			deepLinkVerdict(revisions, atDispatch, null, 'missing'),
+			'not-found',
+			`${label} chooses nothing, so the link's own answer must still stand`
+		);
+	}
+});
+
+/* ============================================================
+   A landed deep-link answer does not outrank a later choice
+   ============================================================ */
+
+test('a list selection after a pre-landed not-found reveals the chosen thread', () => {
+	// THE LANDED-ANSWER ORDERING, exactly as it happens: the by-id read for
+	// the linked id resolved MISSING while the reader had not chosen, so the
+	// not-found surface landed legitimately — and THEN the reader picked a
+	// conversation from the list. The render branches check the resolution
+	// before the thread, so without a reset the chosen thread stays hidden
+	// behind the abandoned link's panel. The revision guard cannot help here:
+	// it judges completions still in flight, and this one already landed.
+	//
+	// The fallback IS the old code's real behavior: at a ref with no reset
+	// the landed resolution simply stands, and this probe records that answer
+	// rather than faulting on the absent export.
+	const reset = selection.resolutionAfterReaderChoice ?? ((landed) => landed);
+	assert.equal(
+		reset('not-found'),
+		'ready',
+		'the explicit list selection must clear the obsolete not-found, or the chosen thread never renders'
+	);
+});
+
+test('successful creation after a pre-landed not-found reveals the new thread', () => {
+	// The same landed answer, the other explicit act: the reader opened New
+	// Message and created a conversation, which the vendored component selects
+	// before it fires `onConversationCreated`. The selection is now the new
+	// thread — and the pre-landed not-found branch still outranks it on
+	// screen unless the successful creation clears the obsolete resolution.
+	const reset = selection.resolutionAfterReaderChoice ?? ((landed) => landed);
+	assert.equal(
+		reset('not-found'),
+		'ready',
+		'the successful creation must clear the obsolete not-found, or the new thread never renders'
+	);
+});
+
+test('the reset clears only the terminal answers — a link in flight and a shown thread are untouched', () => {
+	// The no-op discipline for the reset: 'failed' is the same landed-answer
+	// family (a panel about the abandoned link, checked before the thread),
+	// but 'loading' still belongs to the link — its completion is already
+	// judged against the revision it captured, and clearing the branch would
+	// answer nothing faster — and 'idle'/'ready' render the thread already.
+	const reset = selection.resolutionAfterReaderChoice ?? ((landed) => landed);
+	assert.equal(
+		reset('failed'),
+		'ready',
+		'a landed failure hides the chosen thread exactly as not-found does'
+	);
+	assert.equal(reset('loading'), 'loading', 'a link still in flight is still the link\u2019s');
+	assert.equal(reset('idle'), 'idle');
+	assert.equal(reset('ready'), 'ready');
+});
+
+/* ============================================================
    The structure that applies them
    ============================================================ */
 
@@ -682,6 +975,49 @@ test('the New Message open is stamped through the owned gate, not by editing the
 	assert.ok(
 		countCalls(surface, 'act') >= 3,
 		'folder switch, list select, AND the New Message open must stamp the reader act explicitly'
+	);
+});
+
+test('the surface gates the keyboard open through the owned keydown gate too', () => {
+	// STRUCTURAL, same caveat as above. The vendored button's keyboard
+	// activation never dispatches a click, so the wrapper must judge the
+	// keydown through the owned gate — a wrapper listening only for clicks
+	// leaves the keyboard reader exactly the unstamped-open race. Counted over
+	// the WHOLE tree: the delegation handler is inline in the markup.
+	assert.ok(
+		calls(surface, 'isNewConversationOpenKeyIntent'),
+		'the New Conversation wrapper must judge the keydown through the owned gate in $lib/messaging/selection'
+	);
+	assert.ok(
+		countCalls(surface, 'act') >= 4,
+		'folder switch, list select, the New Message click open, AND the New Message keyboard open must stamp'
+	);
+});
+
+test('the surface clears a landed terminal resolution on both explicit later acts', () => {
+	// STRUCTURAL, same caveat as above. A pre-landed not-found/failed outranks
+	// the thread in the render branches, and the revision guard only judges
+	// completions still in flight — so the list's own select AND the
+	// successful creation must each clear the obsolete resolution through the
+	// owned helper. Counted over the WHOLE tree: the creation callback is
+	// inline in the markup.
+	assert.ok(
+		countCalls(surface, 'resolutionAfterReaderChoice') >= 2,
+		'the list select AND the successful creation must clear the obsolete deep-link resolution'
+	);
+
+	// The creation act is only visible if the surface passes the callback the
+	// vendored component fires after selecting what it created.
+	const components = [...walk(surface.fragment)].filter(
+		(node) => node.type === 'Component' && node.name === 'NewConversation'
+	);
+	assert.equal(components.length, 1, 'expected exactly one NewConversation in the surface');
+	const hasCallback = components[0].attributes.some(
+		(attribute) => attribute.type === 'Attribute' && attribute.name === 'onConversationCreated'
+	);
+	assert.ok(
+		hasCallback,
+		'NewConversation must receive onConversationCreated, or the successful creation cannot clear the landed resolution'
 	);
 });
 

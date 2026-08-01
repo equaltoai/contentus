@@ -341,3 +341,64 @@ export function isNewConversationOpenIntent(
 	if (root?.querySelector?.('.new-conversation__modal')) return false;
 	return true;
 }
+
+/**
+ * Whether a KEYDOWN inside the New Conversation wrapper is the open intent.
+ *
+ * THE ACTIVATION THE CLICK NEVER CARRIES. The vendored button handles Enter and
+ * Space on `keydown`, calls `preventDefault()`, constructs a `MouseEvent`, and
+ * invokes its own click handler DIRECTLY — the synthetic event is never
+ * dispatched, so the keyboard open never traverses the wrapper's click capture
+ * even though the modal opens. A keyboard reader on a wide cold deep link then
+ * gets exactly the unstamped-competitor race: search while the by-id read is
+ * pending, and the late found/missing/failed completion stays admissible. The
+ * `keydown` itself IS a real, dispatched event and does traverse the wrapper,
+ * so the open intent is judged from it here — same gate, same no-op
+ * discipline, one more event family.
+ *
+ * The key set is mirrored from the vendored `isActivationKey` (Enter, Space,
+ * the legacy `Spacebar`) rather than imported: the vendored module resolves
+ * only through the app's alias, not the test runner's, and vendored source is
+ * never edited. A non-activation key on the trigger — Tab, an arrow, a letter
+ * reaching the search it would type into — chooses nothing and stamps
+ * nothing, the same discipline as a click inside the modal. If upstream
+ * changes the activation set this mirror must move with it; the durable fix
+ * remains a real `onOpen`/`onOpenChange` hook on `NewConversation`
+ * (`docs/consumption/messaging-contract.md`).
+ */
+export function isNewConversationOpenKeyIntent(
+	root: { querySelector?: (selector: string) => unknown } | null,
+	target: unknown,
+	key: string
+): boolean {
+	if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return false;
+	return isNewConversationOpenIntent(root, target);
+}
+
+/** The deep-link resolution states the surface tracks. */
+export type DeepLinkResolution = 'idle' | 'loading' | 'ready' | 'not-found' | 'failed';
+
+/**
+ * The resolution a reader's own later action leaves behind.
+ *
+ * A LANDED ANSWER OUTRANKING A LATER CHOICE is the same precedence defect as
+ * the late write, one beat later: the revision guard can only judge a
+ * completion still in flight, and once `not-found` or `failed` has landed the
+ * render branches check it BEFORE the thread — so a wide-pane list selection,
+ * or a conversation the reader just created, stays hidden behind a panel
+ * about an address nobody is looking at any more. The landed answer belongs
+ * to the link, and the link has been abandoned; the explicit later act — the
+ * list's own select, the successful creation — clears the obsolete terminal
+ * state back to `ready` so the thread the reader chose can render.
+ *
+ * ONLY THE TERMINAL STATES CLEAR. `loading` is still the link's — its
+ * completion is already judged against the revision it captured, and clearing
+ * the branch would not make the read answer any faster — and `idle`/`ready`
+ * render the thread already. Modal-internal clicks, cancel, and no-op
+ * re-presses never reach this function: they are not the explicit acts, and
+ * the same no-op discipline that keeps them from stamping the revision keeps
+ * them from clearing the resolution.
+ */
+export function resolutionAfterReaderChoice(current: DeepLinkResolution): DeepLinkResolution {
+	return current === 'not-found' || current === 'failed' ? 'ready' : current;
+}

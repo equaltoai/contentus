@@ -417,18 +417,25 @@ The server ships the route, its folder and the conversation id. Asserted in
     `packages/faces/social/src/theme.css`. `src/lib/brand/messaging.css` is
     contentus's interim appearance layer, with a stated sunset.
 
-12. **`Messages.NewConversation` has no open-intent hook.** Its `Props` are
-    `class`, `initialParticipants`, and `onConversationCreated` — and the last
+12. **`Messages.NewConversation` has no open-intent hook — and its keyboard
+    activation never dispatches a click.** Its `Props` are `class`,
+    `initialParticipants`, and `onConversationCreated` — and the last
     fires only AFTER the component has created and internally selected the
     conversation. Opening the modal, searching, and picking a recipient all
     happen with the selection untouched and no parent callback, so a client
     that counts reader choices (contentus's selection revision, which a pending
     `/messages/{id}` deep-link completion is judged against) cannot see the
-    intent that competes with that link. Contentus delegates the click at its
-    own wrapper, in the capture phase, and stamps only the trigger press with
-    the modal not already open — vendored source is never edited. Suggested
-    fix: an `onOpen`/`onOpenChange` callback (or a trigger snippet), so the
-    intent is the component's own event rather than a delegated DOM read.
+    intent that competes with that link. Keyboard activation is the sharper
+    half: the headless button handles Enter/Space on `keydown` and invokes its
+    own click handler DIRECTLY on a constructed `MouseEvent` that is never
+    dispatched, so even a delegated capture-phase click listener never sees a
+    keyboard open. Contentus delegates both event families at its own wrapper,
+    in the capture phase — click AND the keydown carrying exactly the
+    activation keys the vendored button honors — and stamps only the trigger
+    press with the modal not already open; vendored source is never edited.
+    Suggested fix: an `onOpen`/`onOpenChange` callback (or a trigger snippet),
+    so the intent is the component's own event rather than a delegated DOM
+    read, covering pointer and keyboard activation alike.
     **Pinned** by `tests/messaging-races.test.mjs`, inverted: it asserts the
     `Props` surface is still those three and fails the day a hook appears.
 
