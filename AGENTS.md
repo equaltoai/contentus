@@ -109,7 +109,8 @@ Notes:
   reports evidence; it never merges, force-pushes, deletes branches, deploys,
   signs, or mutates cloud/runtime state. `staging → main` is the operator's
   lane.
-- Commits: Conventional Commits, milestone-scoped.
+- Commits: Conventional Commits, milestone-scoped, and **signed off without
+  exception** — see [DCO sign-off](#dco-sign-off-every-commit-no-exceptions).
 - `run-rubric-gate` green at current HEAD before any push; gov-infra is CI-core
   and never retired. The repo-local spine is provisioned:
   - Verifier (single entrypoint): `bash gov-infra/verifiers/gov-verify-rubric.sh`
@@ -158,6 +159,62 @@ are the same tree, and the absolute rule above applies with no exception. It is
 not a precedent for any later branch.
 - Cross-client adversarial review applies to PRs per the fleet pattern; the
   implementing client never reviews its own change.
+
+## DCO sign-off (every commit, no exceptions)
+
+Every commit in this repository carries a `Signed-off-by` trailer naming the
+identity that **authors** it. No condition is attached to that sentence: not the
+branch, not whether the change is code or docs, not whether a gate is believed
+to be watching. Deciding per-branch whether sign-off is needed is the failure
+mode; the sign-off itself costs nothing.
+
+The **canonical rule is the bank skill `run-rubric-gate` (v2)**, assigned to the
+contentus steward. Read it there. This section points at it and deliberately
+does not restate it — what follows is only what a contributor to *this* repo
+needs at hand.
+
+- **Local git:** `git commit -s`. Check `user.name` / `user.email` first — the
+  trailer must carry the identity that will author the commit.
+- **Governed `github_commit_files` route:** the tool takes a message and has no
+  `-s`. Author the `Signed-off-by` trailer into the message yourself, as the
+  routed bot identity that will author the commit — never a human identity. On
+  that route the commit *is* the push, so get the trailer right on the first
+  commit and read it back before adding more.
+- **Every history operation re-authors commits.** After a rebase, cherry-pick,
+  squash, or amend, verify again.
+
+**Verify before every push, and paste the output into the PR or the report:**
+
+```bash
+git log --no-merges --format='%H %ae %(trailers:key=Signed-off-by,valueonly,separator=%x2C)' <base>..HEAD
+node scripts/dco-check.mjs <base-sha> <head-sha>
+```
+
+Every commit must show a trailer whose email matches its author. "All signed" is
+a claim; that output is the evidence — and the claim has been made in this repo
+and been false. Never report commits as signed without it.
+
+`scripts/dco-check.mjs`, the gate CI runs (`.github/workflows/dco.yml`), is
+**presence-only**: it accepts any well-formed `Signed-off-by: Name <email>` on
+every non-merge commit and does not compare the trailer against the commit's
+author. The rule stated above is stricter than that gate on purpose. Signing off
+as the authoring identity satisfies this repo's gate and the stricter ones
+elsewhere in the fleet at the same time, so there is never a reason to aim at
+the looser one.
+
+**Assume there is no remediation path.** This repo has no DCO
+remediation-commit mechanism: a later signed commit does not repair an earlier
+unsigned one, and the only repair is rewriting history. **If you find unsigned
+commits already pushed, stop and report.** The rewrite, and the force-push it
+requires, is operator-authorized — never a steward's own call. It also
+invalidates every SHA already cited in the PR body, evidence comments, and gov
+evidence commits, so the rubric must be re-run and every citation refreshed
+afterwards.
+
+Why this is written down: PR #57 produced **two** unsigned-commit incidents, and
+each one required an operator-authorized history rewrite to repair. Both began
+with an unexamined answer to "does this branch need sign-off?" — which is why
+the rule above leaves no condition to examine.
 
 ## Modes of work
 
