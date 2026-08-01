@@ -73,6 +73,7 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	} from './requests';
 	import {
 		deepLinkVerdict,
+		isNewConversationOpenIntent,
 		mergeForConversation,
 		retainOwnSummaries,
 		retainOwnSummary,
@@ -637,7 +638,32 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		<section class="contentus-messages__list" aria-label="Conversations">
 			<header class="contentus-messages__list-head">
 				<h2 class="contentus-messages__list-title">Messages</h2>
-				<NewConversation />
+				<!--
+				WRAPPED, because the open is a reader act the selection cannot show.
+				The vendored `NewConversation` owns its trigger and exposes no
+				callback until after it has created and selected a conversation, so
+				opening the modal — and searching or picking a recipient inside it —
+				leaves the selection at null with nothing for the observer to count,
+				while a cold deep link may still be pending. The click is delegated
+				here, in owned source and in the capture phase, and stamped only when
+				it is the real open intent: the trigger with the modal not already
+				open. Clicks inside the modal (search, a result, cancel) and a
+				no-op re-press of the trigger stamp nothing — a canceled modal must
+				not stale the link, the same discipline as the current-folder
+				re-click. Vendored source is never edited; a supported open-intent
+				hook on `NewConversation` is the upstream ask
+				(docs/consumption/messaging-contract.md).
+				-->
+				<div
+					class="contentus-messages__new-conversation"
+					onclickcapture={(event) => {
+						if (isNewConversationOpenIntent(event.currentTarget, event.target)) {
+							selectionRevisions.act();
+						}
+					}}
+				>
+					<NewConversation />
+				</div>
 			</header>
 
 			<MessagesFolderTabs

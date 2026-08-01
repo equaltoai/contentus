@@ -52,6 +52,10 @@ import {
 	retainSelectedMessages,
 	trackSelectionRevisions,
 } from '../src/lib/messaging/selection.ts';
+// Namespace import for the OPTIONAL probes: a bite must reach the verdict — and
+// record the old code's real answer — on a ref where the gate it exercises does
+// not exist yet, so the gate is called through the namespace, optional-chained.
+import * as selection from '../src/lib/messaging/selection.ts';
 
 const actor = {
 	id: '/users/ada',
@@ -469,6 +473,82 @@ test('a folder switch while the link loads is a reader act, even when the select
 	}
 });
 
+test('opening New Message while the link loads is a reader act, even though the selection never moves', () => {
+	// THE UNSTAMPED COMPETITOR. A cold deep link for C on a wide two-pane
+	// viewport: the vendored `NewConversation` trigger is usable while the
+	// by-id read is pending, and everything the reader does next — open the
+	// modal, search, pick a recipient — leaves `selectedConversation` at the
+	// null it already holds. The component exposes no callback until AFTER it
+	// has created and internally selected a conversation, so none of it
+	// reaches the observer, and an unstamped open leaves the pending link
+	// admissible: the late missing/failed answer writes a resolution the
+	// render branches never reset, and the thread the reader goes on to create
+	// stays hidden behind the link they had already abandoned — while a late
+	// found answer selects C behind the modal. The open is stamped at the
+	// surface's own wrapper, and every completion family then loses to it.
+	for (const outcome of ['found', 'missing', 'failed']) {
+		const revisions = trackSelectionRevisions(null);
+		const atDispatch = revisions.capture();
+		// Searching and picking a recipient, presented to the observer as the
+		// same null: by themselves they count nothing, which is exactly the gap.
+		revisions.observe(null);
+		// The trigger click with the modal not yet open, judged by the surface's
+		// owned gate. Optional on purpose: against a ref with no gate this probe
+		// still reaches the verdict, and the verdict is the old code's real
+		// answer — the completion acts over the reader's New Message intent,
+		// which is the defect.
+		const wrapper = { querySelector: () => null };
+		const triggerClick = {
+			closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
+		};
+		if (selection.isNewConversationOpenIntent?.(wrapper, triggerClick)) revisions.act();
+		assert.equal(
+			deepLinkVerdict(revisions, atDispatch, null, outcome),
+			'stale',
+			`a ${outcome} completion after the reader opened New Message must not act over the choice`
+		);
+	}
+});
+
+test('a canceled or no-change New Message modal does not stale the link — only the open stamps', () => {
+	// The no-op discipline, same as the current-folder re-click: an act that
+	// chooses nothing must not take the pending link away from its answer. A
+	// click INSIDE the modal — the search field, a result, the cancel button —
+	// is a continuation of the act the open already stamped (or, here, no act
+	// at all), and re-pressing the trigger while the modal is already open
+	// changes nothing. Neither stamps, so the link stays admissible and its
+	// missing answer still earns the not-found surface.
+	const modalOpen = {
+		querySelector: (selector) => (selector === '.new-conversation__modal' ? {} : null),
+	};
+	const modalClick = { closest: () => null };
+	const triggerClick = {
+		closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
+	};
+
+	for (const [click, label] of [
+		[modalClick, 'a click inside the modal'],
+		[triggerClick, 'a trigger re-press while the modal is open'],
+	]) {
+		// Strict equality, not truthiness: the gate must exist and answer false —
+		// an absent gate is the defect the previous test pins, not a pass here.
+		assert.equal(
+			selection.isNewConversationOpenIntent?.(modalOpen, click),
+			false,
+			`${label} must not be judged an open intent`
+		);
+
+		const revisions = trackSelectionRevisions(null);
+		const atDispatch = revisions.capture();
+		if (selection.isNewConversationOpenIntent?.(modalOpen, click)) revisions.act();
+		assert.equal(
+			deepLinkVerdict(revisions, atDispatch, null, 'missing'),
+			'not-found',
+			`${label} chooses nothing, so the link's own answer must still stand`
+		);
+	}
+});
+
 /* ============================================================
    The structure that applies them
    ============================================================ */
@@ -586,6 +666,39 @@ test('the surface stamps the reader intents a selected-id transition cannot show
 	assert.ok(
 		countCalls(surface, 'act') >= 2,
 		'the folder tab handler AND the list select must stamp the reader act explicitly — the selection cannot always show it'
+	);
+});
+
+test('the New Message open is stamped through the owned gate, not by editing the vendored trigger', () => {
+	// STRUCTURAL, same caveat as above. The vendored `NewConversation` owns its
+	// trigger and exposes no open callback, so the open intent — a reader act
+	// the selection never shows — is judged and stamped at the surface's own
+	// wrapper, in owned source. Counted over the WHOLE tree: the delegation
+	// handler is inline in the markup.
+	assert.ok(
+		calls(surface, 'isNewConversationOpenIntent'),
+		'the New Conversation wrapper must judge the click through the owned gate in $lib/messaging/selection'
+	);
+	assert.ok(
+		countCalls(surface, 'act') >= 3,
+		'folder switch, list select, AND the New Message open must stamp the reader act explicitly'
+	);
+});
+
+test('the vendored NewConversation still has no open-intent hook', () => {
+	// INVERTED, like the composer pin: it describes the upstream gap that makes
+	// the delegated wrapper necessary, and fails the day upstream ships an open
+	// hook — at which point the wrapper can stamp through the component's own
+	// callback instead of delegating the click.
+	const component = readFileSync('src/lib/components/messaging/NewConversation.svelte', 'utf8');
+	const props = component.match(/interface Props \{([\s\S]*?)\n\t\}/);
+	assert.ok(props, 'could not read the Props interface');
+
+	const names = [...props[1].matchAll(/^\s*(\w+)[?:]/gm)].map((match) => match[1]);
+	assert.deepEqual(
+		names.sort(),
+		['class', 'initialParticipants', 'onConversationCreated'],
+		'the NewConversation Props surface changed — check whether an open-intent hook appeared'
 	);
 });
 

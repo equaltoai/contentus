@@ -417,6 +417,21 @@ The server ships the route, its folder and the conversation id. Asserted in
     `packages/faces/social/src/theme.css`. `src/lib/brand/messaging.css` is
     contentus's interim appearance layer, with a stated sunset.
 
+12. **`Messages.NewConversation` has no open-intent hook.** Its `Props` are
+    `class`, `initialParticipants`, and `onConversationCreated` — and the last
+    fires only AFTER the component has created and internally selected the
+    conversation. Opening the modal, searching, and picking a recipient all
+    happen with the selection untouched and no parent callback, so a client
+    that counts reader choices (contentus's selection revision, which a pending
+    `/messages/{id}` deep-link completion is judged against) cannot see the
+    intent that competes with that link. Contentus delegates the click at its
+    own wrapper, in the capture phase, and stamps only the trigger press with
+    the modal not already open — vendored source is never edited. Suggested
+    fix: an `onOpen`/`onOpenChange` callback (or a trigger snippet), so the
+    intent is the component's own event rather than a delegated DOM read.
+    **Pinned** by `tests/messaging-races.test.mjs`, inverted: it asserts the
+    `Props` surface is still those three and fails the day a hook appears.
+
 ### To `equaltoai/lesser`
 
 1. **`conversations` accepts `after: Cursor` and returns no cursor.** The
