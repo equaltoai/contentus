@@ -27,6 +27,8 @@ Thumbs.db
 
 # Materialized agent trees (regenerated from the namespace, never tracked —
 # operator rule 2026-07-30: .agents is materialized space; matches fleet convention)
+# Fleet convention 2026-08-01: the namespace is the source of truth;
+# materialization is tracked only in progenitor's repo for bootstrapping.
 /.agents/
 /.claude/
 /.codex/
