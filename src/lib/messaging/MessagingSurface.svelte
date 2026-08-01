@@ -262,7 +262,8 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	});
 
 	/**
-	 * Every change of the selection is a revision.
+	 * Every change of the selection is a revision — and some reader intents are
+	 * revisions without one.
 	 *
 	 * THE READER'S OWN CHOICE OUTRANKS THE LINK — and a choice is a CHANGED
 	 * selection, not a different one. Opening B and then returning to the id the
@@ -271,6 +272,13 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	 * captured at dispatch before every completion. `$effect.pre`, so each change
 	 * is counted with the state write itself — including a change that reverts
 	 * before any completion lands, which only an observer of every flush can see.
+	 *
+	 * What this observer CANNOT see is an act that leaves the selected id where
+	 * it was: a folder switch on a cold deep link clears an already-null
+	 * selection back to null, which reads here as no change at all. Those
+	 * intents are stamped explicitly at the handlers the reader's action passes
+	 * through — the folder tabs and the list's own select — via
+	 * `selectionRevisions.act()`.
 	 */
 	$effect.pre(() => {
 		selectionRevisions.observe(dm.selectedConversation?.id ?? null);
@@ -283,7 +291,7 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	 * the vendored mapper and costs nothing — and falls back to the by-id read.
 	 *
 	 * The by-id read is asynchronous, and a reader who picked a conversation from
-	 * the list while it was in flight has CHOSEN. Acting on the late arrival
+	 * the list — or switched folder — while it was in flight has CHOSEN. Acting on the late arrival
 	 * anyway would move them out of the conversation they opened, or hide it
 	 * behind a not-found or failed surface for a link they no longer need — after
 	 * they had started reading. So the selection revision is captured at dispatch
@@ -508,6 +516,10 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	}
 
 	function onSelect(conversation: Conversation) {
+		// Stamped explicitly, not left to the id transition: picking a
+		// conversation is the reader's act whether or not the id moves, and a
+		// deep link still loading must lose to it either way.
+		selectionRevisions.act();
 		if (twoPane) {
 			void context.selectConversation(conversation);
 			return;
@@ -633,6 +645,14 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 				{requestCount}
 				onSelect={(next) => {
 					requestOutcome = null;
+					// A folder switch is a READER ACT the selected id cannot always
+					// show: on a cold deep link the selection is already null, and
+					// the vendored clear writes the same null back, so the observer
+					// has no transition to count. Stamped explicitly, or a late
+					// deep-link completion would open over the folder the reader
+					// chose. Only a real change stamps — re-pressing the active tab
+					// chooses nothing.
+					if (next !== dm.folder) selectionRevisions.act();
 					void context.fetchConversations(next);
 				}}
 			/>

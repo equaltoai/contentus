@@ -440,6 +440,35 @@ test('with no intervening choice, a missing answer is not-found and a failed one
 	}
 });
 
+test('a folder switch while the link loads is a reader act, even when the selection never changed', () => {
+	// THE NULL→NULL PATH. A cold deep link for C on a wide two-pane viewport:
+	// the selection is already null while the by-id read is pending, and the
+	// reader switches Inbox→Requests. The vendored `fetchConversations` clears
+	// the selection to the null it already holds, so the observer is presented
+	// the SAME null and there is no id transition to count — an intent
+	// transition-counting cannot see. The folder handler stamps it explicitly,
+	// and every completion family then loses to the choice: the found one that
+	// would open C over the reader's folder, and the missing/failed ones that
+	// would take the thread pane over on the same path.
+	for (const outcome of ['found', 'missing', 'failed']) {
+		const revisions = trackSelectionRevisions(null);
+		const atDispatch = revisions.capture();
+		// The vendored clear, presented to the observer as the same null: by
+		// itself this counts nothing, which is exactly the gap.
+		revisions.observe(null);
+		// The explicit stamp from the folder tab handler. Optional on purpose:
+		// against a ref whose tracker had no stamp this probe still reaches the
+		// verdict, and the verdict is the old guard's real answer — the
+		// completion acts over the reader's folder choice, which is the defect.
+		revisions.act?.();
+		assert.equal(
+			deepLinkVerdict(revisions, atDispatch, null, outcome),
+			'stale',
+			`a ${outcome} completion after the reader switched folder must not act over the choice`
+		);
+	}
+});
+
 /* ============================================================
    The structure that applies them
    ============================================================ */
@@ -544,6 +573,19 @@ test('the surface reconciles summaries and the deep link through the real guards
 	assert.ok(
 		countCalls(surface.instance, 'deepLinkVerdict') >= 3,
 		'every deep-link completion — success, null, AND error — must be judged against the dispatch revision'
+	);
+});
+
+test('the surface stamps the reader intents a selected-id transition cannot show', () => {
+	// STRUCTURAL, same caveat as above. A folder switch on a cold deep link
+	// clears an already-null selection back to null, so no transition exists
+	// for the observer to count: the intent must be stamped explicitly at the
+	// handlers the reader's action passes through — the folder tabs, and the
+	// list's own select. Counted over the WHOLE tree, not only the script: the
+	// folder tab handler is inline in the markup.
+	assert.ok(
+		countCalls(surface, 'act') >= 2,
+		'the folder tab handler AND the list select must stamp the reader act explicitly — the selection cannot always show it'
 	);
 });
 

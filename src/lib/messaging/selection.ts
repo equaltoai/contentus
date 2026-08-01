@@ -220,9 +220,19 @@ export function retainOwnSummary(
  * ones a completion never sees because they reverted before it landed.
  * `capture` stamps a dispatch; `held` answers whether nothing has been observed
  * since.
+ *
+ * NOT EVERY INTENT MOVES THE ID. Switching folder is a reader act too, and on a
+ * cold deep link it changes nothing the observer can see: the selection is
+ * already null while the by-id read is pending, and the vendored
+ * `fetchConversations` clears it to the same null, so the observer is presented
+ * the value it already holds and no transition exists to count. The revision
+ * would stay held although the reader acted. `act` stamps those intents
+ * explicitly, from the handler the reader's action passed through, so a choice
+ * the selection cannot show still lands in the count.
  */
 export interface SelectionRevisions {
 	observe(id: string | null): void;
+	act(): void;
 	capture(): number;
 	held(atDispatch: number): boolean;
 }
@@ -234,6 +244,9 @@ export function trackSelectionRevisions(initial: string | null = null): Selectio
 		observe(id) {
 			if (id === observed) return;
 			observed = id;
+			revision += 1;
+		},
+		act() {
 			revision += 1;
 		},
 		capture() {
