@@ -203,18 +203,82 @@ export function retainOwnSummary(
 }
 
 /**
- * Whether an answer that was requested for one selection may still act on it.
+ * The selection as a REVISION, not a value.
  *
- * The deep-link read is the case: `/messages/{id}` resolves asynchronously, and
- * a reader who picked a conversation from the list while it was in flight has
- * chosen. Selecting the late arrival anyway would move them out of the
- * conversation they opened, into one they only linked to — and would do it after
- * they had started reading.
+ * WHY ID-EQUALITY IS NOT THE GUARD. The check this replaces compared the
+ * selected id at dispatch with the selected id at completion, and equality
+ * cannot prove the reader made no intervening choice: dispatched with C
+ * selected, the reader can open B and then return to C, and the comparison sees
+ * exactly the state it captured although the reader has acted twice since. A
+ * revision counts the CHOICES instead — every change of the selected id,
+ * including a change back to an id it held before — so a path out and back
+ * still fails the check. The reader's two choices are the event, not the id
+ * they happened to end on.
  *
- * Compared against the selection AT DISPATCH rather than against the requested
- * id, because the deep link is normally dispatched with nothing selected: it is
- * the CHANGE that means the reader acted, not the value.
+ * `observe` records what the reader is looking at, and is called from an
+ * effect that tracks the selection, so every change is counted — including the
+ * ones a completion never sees because they reverted before it landed.
+ * `capture` stamps a dispatch; `held` answers whether nothing has been observed
+ * since.
  */
-export function selectionHeld(atDispatch: string | null, now: string | null): boolean {
-	return now === atDispatch;
+export interface SelectionRevisions {
+	observe(id: string | null): void;
+	capture(): number;
+	held(atDispatch: number): boolean;
+}
+
+export function trackSelectionRevisions(initial: string | null = null): SelectionRevisions {
+	let observed = initial;
+	let revision = 0;
+	return {
+		observe(id) {
+			if (id === observed) return;
+			observed = id;
+			revision += 1;
+		},
+		capture() {
+			return revision;
+		},
+		held(atDispatch) {
+			return revision === atDispatch;
+		},
+	};
+}
+
+/** What the deep-link read came back with. */
+export type DeepLinkOutcome = 'found' | 'missing' | 'failed';
+
+/**
+ * What the surface may do with it: select the found conversation, show the
+ * not-found or failed surface — or nothing at all, because the completion is
+ * stale.
+ */
+export type DeepLinkVerdict = 'select' | 'not-found' | 'failed' | 'stale';
+
+/**
+ * What a deep-link completion may do, judged against the revision its dispatch
+ * captured.
+ *
+ * Checked before EVERY completion, not only the successful one. The resolution
+ * states take precedence over the selected thread in the render branches, so a
+ * late answer that is allowed to write `not-found` or `failed` hides the
+ * conversation the reader chose while the link was loading exactly as surely as
+ * a late `selectConversation` would move them out of it. A stale completion
+ * changes nothing — not the selection, and not the surface it is shown on.
+ *
+ * `selectionNow` is observed into the tracker BEFORE the revision is judged.
+ * The reader's click writes the selection synchronously but the effect that
+ * observes it runs on the next flush, and a completion can land between the
+ * two; judging without this read would re-admit, through a timing gap, the
+ * race the revision exists to close.
+ */
+export function deepLinkVerdict(
+	revisions: SelectionRevisions,
+	atDispatch: number,
+	selectionNow: string | null,
+	outcome: DeepLinkOutcome
+): DeepLinkVerdict {
+	revisions.observe(selectionNow);
+	if (!revisions.held(atDispatch)) return 'stale';
+	return outcome === 'found' ? 'select' : outcome === 'missing' ? 'not-found' : 'failed';
 }

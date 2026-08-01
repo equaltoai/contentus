@@ -72,11 +72,12 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 		type RequestResolution,
 	} from './requests';
 	import {
+		deepLinkVerdict,
 		mergeForConversation,
 		retainOwnSummaries,
 		retainOwnSummary,
 		retainSelectedMessages,
-		selectionHeld,
+		trackSelectionRevisions,
 		type OwnSummary,
 	} from './selection';
 	import {
@@ -111,6 +112,16 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	// NOT named `state`: a local by that name shadows the `$state` rune and every
 	// rune declaration below silently reads as store access on it.
 	const dm = context.state;
+
+	/**
+	 * The selection counted as a revision, for the deep-link guard.
+	 *
+	 * Plain (non-reactive) tracker: it is written by the observing effect below
+	 * and read by `resolveDeepLink`, and neither wants a revision bump to
+	 * schedule work of its own. What must be reactive is the selection itself,
+	 * which already is.
+	 */
+	const selectionRevisions = trackSelectionRevisions(dm.selectedConversation?.id ?? null);
 
 	/**
 	 * The deep-linked conversation's own resolution, kept separate from
@@ -251,28 +262,50 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	});
 
 	/**
+	 * Every change of the selection is a revision.
+	 *
+	 * THE READER'S OWN CHOICE OUTRANKS THE LINK — and a choice is a CHANGED
+	 * selection, not a different one. Opening B and then returning to the id the
+	 * link was loading is still two choices, so the guard cannot compare ids: it
+	 * counts the changes instead, and `resolveDeepLink` checks the count it
+	 * captured at dispatch before every completion. `$effect.pre`, so each change
+	 * is counted with the state write itself — including a change that reverts
+	 * before any completion lands, which only an observer of every flush can see.
+	 */
+	$effect.pre(() => {
+		selectionRevisions.observe(dm.selectedConversation?.id ?? null);
+	});
+
+	/**
 	 * Resolve `/messages/{id}` into a selected conversation.
 	 *
 	 * Prefers a conversation already in the loaded list — that object came through
 	 * the vendored mapper and costs nothing — and falls back to the by-id read.
 	 *
-	 * THE READER'S OWN CHOICE OUTRANKS THE LINK. The by-id read is asynchronous,
-	 * and a reader who picked a conversation from the list while it was in flight
-	 * has CHOSEN. Selecting the late arrival anyway would move them out of the
-	 * conversation they opened and into one they only linked to, after they had
-	 * started reading — so the selection is captured at dispatch and the late
-	 * result is applied only while nothing has changed it.
+	 * The by-id read is asynchronous, and a reader who picked a conversation from
+	 * the list while it was in flight has CHOSEN. Acting on the late arrival
+	 * anyway would move them out of the conversation they opened, or hide it
+	 * behind a not-found or failed surface for a link they no longer need — after
+	 * they had started reading. So the selection revision is captured at dispatch
+	 * and checked before EVERY completion: the found one that would select, and
+	 * the missing and failed ones that would take over the thread pane. A stale
+	 * completion changes nothing.
 	 */
 	async function resolveDeepLink(id: string) {
 		resolution = 'loading';
 		resolutionFailure = null;
-		const selectionAtDispatch = dm.selectedConversation?.id ?? null;
-		const readerHasChosen = () =>
-			!selectionHeld(selectionAtDispatch, dm.selectedConversation?.id ?? null);
+		const revisionAtDispatch = selectionRevisions.capture();
 
 		const known = dm.conversations.find((conversation) => conversation.id === id);
 		if (known) {
-			if (readerHasChosen()) {
+			if (
+				deepLinkVerdict(
+					selectionRevisions,
+					revisionAtDispatch,
+					dm.selectedConversation?.id ?? null,
+					'found'
+				) === 'stale'
+			) {
 				resolution = 'ready';
 				return;
 			}
@@ -283,7 +316,20 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 
 		try {
 			const conversation = await binding.loadConversation(id);
-			if (!conversation) {
+			const verdict = deepLinkVerdict(
+				selectionRevisions,
+				revisionAtDispatch,
+				dm.selectedConversation?.id ?? null,
+				conversation ? 'found' : 'missing'
+			);
+			if (verdict === 'stale') {
+				// The reader chose while the link was loading, and the choice stands
+				// whichever way the read ended: their conversation stays, and the
+				// link's answer — found or missing — changes nothing on screen.
+				resolution = 'ready';
+				return;
+			}
+			if (verdict === 'not-found') {
 				// A conversation this reader cannot open. Deliberately ONE state for
 				// two server answers — an id lesser has never heard of, and one it
 				// holds for other people — because telling those apart would answer
@@ -291,15 +337,20 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 				resolution = 'not-found';
 				return;
 			}
-			if (readerHasChosen()) {
-				// The resolution succeeded and selects nothing: the reader is already
-				// in a conversation they chose, and the link's answer changes nothing.
-				resolution = 'ready';
-				return;
-			}
 			await context.selectConversation(conversation);
 			resolution = 'ready';
 		} catch (error) {
+			if (
+				deepLinkVerdict(
+					selectionRevisions,
+					revisionAtDispatch,
+					dm.selectedConversation?.id ?? null,
+					'failed'
+				) === 'stale'
+			) {
+				resolution = 'ready';
+				return;
+			}
 			resolutionFailure = classifyMessagingError(error);
 			resolution = 'failed';
 		}

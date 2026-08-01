@@ -17,9 +17,10 @@
  *      CARD (`lastMessage`/`updatedAt`). A slow read for A renders under B's
  *      name, and a send dispatched to A resolves onto B's card — outside the
  *      reach of any message filter. The deep link is the same shape in the
- *      other direction: `/messages/{id}` resolves asynchronously and would
- *      select its late answer over a conversation the reader chose while it
- *      loaded.
+ *      other direction: `/messages/{id}` resolves asynchronously and would act
+ *      on its late answer over a conversation the reader chose while it loaded
+ *      — selecting over their choice when it succeeds, and hiding their choice
+ *      behind a not-found or failed surface when it does not.
  *
  * Neither is fixable in the vendored source, which contentus does not edit. So
  * the surface reconciles both, and this file drives the reconciliation.
@@ -43,12 +44,13 @@ import { parse } from 'svelte/compiler';
 
 import { toConversation, toDirectMessage, toMessagePage } from '../src/lib/messaging/contract.ts';
 import {
+	deepLinkVerdict,
 	isForeignMessage,
 	mergeForConversation,
 	retainOwnSummaries,
 	retainOwnSummary,
 	retainSelectedMessages,
-	selectionHeld,
+	trackSelectionRevisions,
 } from '../src/lib/messaging/selection.ts';
 
 const actor = {
@@ -348,15 +350,94 @@ test('two summaries misfiled onto one conversation re-home only the newer', () =
    A deep link does not outrank the reader's own choice
    ============================================================ */
 
-test('a deep link applies its late answer only while the reader has not chosen', () => {
-	// Dispatched with nothing selected — the normal cold link — the arrival may
-	// select while the selection is still what it was at dispatch.
-	assert.equal(selectionHeld(null, null), true);
-	// The reader picked B from the list while A's by-id read was in flight:
+test('a late deep-link completion selects only while the revision its dispatch captured still holds', () => {
+	// Dispatched with nothing selected — the normal cold link — a found
+	// conversation is selected while nothing has changed the selection.
+	const quiet = trackSelectionRevisions(null);
+	const quietDispatch = quiet.capture();
+	assert.equal(deepLinkVerdict(quiet, quietDispatch, null, 'found'), 'select');
+
+	// The reader picked B from the list while the by-id read was in flight:
 	// they have chosen, and the link's answer must not move them.
-	assert.equal(selectionHeld(null, 'conv-b'), false);
-	assert.equal(selectionHeld('conv-a', 'conv-b'), false);
-	assert.equal(selectionHeld('conv-a', 'conv-a'), true);
+	const chosen = trackSelectionRevisions(null);
+	const chosenDispatch = chosen.capture();
+	chosen.observe('conv-b');
+	assert.equal(deepLinkVerdict(chosen, chosenDispatch, 'conv-b', 'found'), 'stale');
+});
+
+test('a missing answer after the reader chose does not take the screen over', () => {
+	// Cold-link C is loading; the reader chooses B from the list; C then
+	// resolves MISSING. The resolution states take precedence over the selected
+	// thread in the render branches, so a not-found written now would hide B.
+	const revisions = trackSelectionRevisions(null);
+	const atDispatch = revisions.capture();
+	revisions.observe('conv-b');
+
+	assert.equal(
+		deepLinkVerdict(revisions, atDispatch, 'conv-b', 'missing'),
+		'stale',
+		'a null completion after the reader chose must not become the not-found surface'
+	);
+});
+
+test('a failed answer after the reader chose does not take the screen over', () => {
+	// Same race, rejection instead of null: the failed surface is also a state
+	// that hides the thread the reader chose.
+	const revisions = trackSelectionRevisions(null);
+	const atDispatch = revisions.capture();
+	revisions.observe('conv-b');
+
+	assert.equal(
+		deepLinkVerdict(revisions, atDispatch, 'conv-b', 'failed'),
+		'stale',
+		'a rejection after the reader chose must not become the failed surface'
+	);
+});
+
+test('choosing away and back is still choosing: id-equality is not the guard', () => {
+	// THE ABA CASE. Dispatched with C selected; the reader opens B and then
+	// returns to C. The id at completion IS the id at dispatch, and the
+	// equality guard this replaced read that as "nothing happened". The
+	// revision counts the changes, and two happened — so the completion is
+	// stale against a state the reader no longer holds.
+	const revisions = trackSelectionRevisions('conv-c');
+	const atDispatch = revisions.capture();
+	revisions.observe('conv-b');
+	revisions.observe('conv-c');
+
+	assert.equal(
+		deepLinkVerdict(revisions, atDispatch, 'conv-c', 'found'),
+		'stale',
+		'a completion landing on the id the reader returned to must still be stale'
+	);
+});
+
+test('the verdict reads the selection as it is NOW, not as the last flush left it', () => {
+	// The reader's click writes the selection synchronously; the effect that
+	// observes it into the tracker runs on the next flush, and a completion can
+	// land between the two. The verdict observes the selection it is handed
+	// before it judges, so the gap re-admits nothing.
+	const revisions = trackSelectionRevisions(null);
+	const atDispatch = revisions.capture();
+	// Deliberately NO observe() call here — the click's effect has not flushed.
+	assert.equal(
+		deepLinkVerdict(revisions, atDispatch, 'conv-b', 'found'),
+		'stale',
+		'a completion landing before the observer flushes must still lose to the choice'
+	);
+});
+
+test('with no intervening choice, a missing answer is not-found and a failed one is failed', () => {
+	// The genuine states still render when the reader has NOT chosen: the link
+	// is the only thing on screen, and its answer is what the pane must say.
+	for (const [outcome, expected] of [
+		['missing', 'not-found'],
+		['failed', 'failed'],
+	]) {
+		const revisions = trackSelectionRevisions(null);
+		const atDispatch = revisions.capture();
+		assert.equal(deepLinkVerdict(revisions, atDispatch, null, outcome), expected);
+	}
 });
 
 /* ============================================================
@@ -388,6 +469,18 @@ function calls(ast, name) {
 		if (callee?.type === 'MemberExpression' && callee.property?.name === name) return true;
 	}
 	return false;
+}
+
+/** How many call sites of `name` appear in a Svelte/ESTree tree. */
+function countCalls(ast, name) {
+	let count = 0;
+	for (const node of walk(ast)) {
+		if (node.type !== 'CallExpression') continue;
+		const callee = node.callee;
+		if (callee?.type === 'Identifier' && callee.name === name) count += 1;
+		if (callee?.type === 'MemberExpression' && callee.property?.name === name) count += 1;
+	}
+	return count;
 }
 
 test('the composer is keyed by conversation, so a draft cannot outlive its recipient', () => {
@@ -440,8 +533,17 @@ test('the surface reconciles summaries and the deep link through the real guards
 		'the selected conversation copy must be restored too'
 	);
 	assert.ok(
-		calls(surface.instance, 'selectionHeld'),
-		'a deep link must not select over a choice the reader made while it loaded'
+		calls(surface.instance, 'trackSelectionRevisions'),
+		'the selection must be counted as a revision, so a choice away and back still counts'
+	);
+	// EVERY completion — the known one, the found-or-missing one, and the
+	// failed one — is judged against the revision captured at dispatch. Fewer
+	// than three call sites means some completion family acts unchecked, which
+	// is the hole that let a late not-found or failed surface hide the thread
+	// the reader chose.
+	assert.ok(
+		countCalls(surface.instance, 'deepLinkVerdict') >= 3,
+		'every deep-link completion — success, null, AND error — must be judged against the dispatch revision'
 	);
 });
 
