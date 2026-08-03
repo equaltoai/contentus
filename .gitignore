@@ -29,8 +29,11 @@ Thumbs.db
 # operator rule 2026-07-30: .agents is materialized space; matches fleet convention)
 /.agents/
 /.claude/
+/.codex/
 /.kimi-code/
 /.theorymcp/
+/GEMINI.md
+/.mcp.json
 
 # Vite
 vite.config.js.timestamp-*
