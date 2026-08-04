@@ -17,6 +17,19 @@ import {
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
+// THE GATE'S OWN SCANNER, imported rather than reproduced.
+//
+// This file used to carry its own comment-masking regex. Two things were wrong
+// with that, and they compound. It was a SECOND COPY of what
+// `scripts/audit-renderer-authority.mjs` runs, so it could go green against
+// itself while the gate scanned something else — the drift shape
+// `scripts/lib/strip-comments.mjs` exists to end. And the copy was a
+// `replace(/<!--…-->/g, '')`, which CodeQL flags as
+// `js/incomplete-multi-character-sanitization` (CWE-116) because a nested
+// delimiter lets it REINTRODUCE a comment around live template and erase a real
+// `{@html}` sink — reporting this face clean over a defect. The regression case
+// below drives the imported scanner over exactly that input.
+import { stripComments } from '../scripts/lib/strip-comments.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -208,19 +221,6 @@ test('the detail route imports the seam, not the panel behind it', () => {
 	);
 });
 
-/**
- * A Svelte source with its comments masked out.
- *
- * The components in this face DOCUMENT the renderer-authority rule in their own
- * headers, so a naive substring scan finds the rule's own statement of itself
- * and calls it a violation — which is exactly what happened when this check was
- * first written. `tests/vendored-runes.test.mjs` masks prose for the same
- * reason. Only executable markup counts.
- */
-function withoutComments(source) {
-	return source.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-}
-
 test('nothing in the agent face renders HTML it built', () => {
 	// Belt and braces over `scripts/audit-renderer-authority.mjs`, which scans
 	// this directory on every build. The panel handles URLs and JSON from lesser
@@ -234,7 +234,7 @@ test('nothing in the agent face renders HTML it built', () => {
 		'src/lib/agents/AgentCard.svelte',
 	]) {
 		assert.ok(
-			!/\{@html\s/.test(withoutComments(readFileSync(join(repoRoot, file), 'utf8'))),
+			!/\{@html\s/.test(stripComments(readFileSync(join(repoRoot, file), 'utf8'))),
 			`${file} must not carry an HTML sink`
 		);
 	}
@@ -243,8 +243,43 @@ test('nothing in the agent face renders HTML it built', () => {
 test('the HTML-sink check can still see a sink, and no longer sees one in prose', () => {
 	// Both halves of the distinction, so the guard above is known to be able to
 	// fail rather than merely observed to pass.
-	assert.ok(/\{@html\s/.test(withoutComments('<p>{@html body}</p>')));
-	assert.ok(!/\{@html\s/.test(withoutComments('<!-- never use {@html} here -->')));
+	assert.ok(/\{@html\s/.test(stripComments('<p>{@html body}</p>')));
+	assert.ok(!/\{@html\s/.test(stripComments('<!-- never use {@html} here -->')));
+});
+
+test('a nested comment delimiter cannot hide a live sink from this face’s check', () => {
+	// THE REGRESSION THAT DECIDED THE IMPORT ABOVE. This file used to carry its
+	// own `source.replace(/<!--[\s\S]*?-->/g, '')`, which is the shape CodeQL
+	// flags as `js/incomplete-multi-character-sanitization` (CWE-116) — and the
+	// rule is right about the consequence, not merely pedantic about the form:
+	//
+	//   <!<!-- -->-- {@html evil} -->
+	//
+	// A parser finds its first `<!--` at index 2, so the comment is `<!-- -->`
+	// and the sink after it is LIVE template. The single-pass replace removes the
+	// inner match and REINTRODUCES `<!-- … -->` around the sink; a second pass —
+	// the loop-until-stable fix the rule recommends — then deletes the sink with
+	// it, and this face's check reports a clean file over a live `{@html}`.
+	const nested = '<!<!-- -->-- {@html evil} -->';
+
+	assert.match(
+		stripComments(nested),
+		/\{@html evil\}/,
+		'a live sink must survive the strip, or this check cannot see it'
+	);
+
+	// The replace form is NOT reproduced here to demonstrate its failure: writing
+	// it back into this file is what the alert is about, and a probe that plants
+	// the defect it is testing for is not a probe. What the discarded form does to
+	// this exact string is pinned once, in `tests/vendored-messaging-render.test.mjs`,
+	// against the same scanner — and `scripts/lib/strip-comments.mjs` carries the
+	// reasoning in full.
+	assert.equal(
+		stripComments('<p>keep</p><!-- drop --><span>keep</span>'),
+		'<p>keep</p><span>keep</span>'
+	);
+	// An unterminated opener consumes the rest, which is what a parser does too.
+	assert.equal(stripComments('ok <!-- never closed {@html x}'), 'ok ');
 });
 
 /* -------------------------------------------------------------------------
