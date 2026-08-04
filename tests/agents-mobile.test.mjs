@@ -8,6 +8,7 @@ import { test } from 'node:test';
 
 import { compile } from 'svelte/compiler';
 
+import { DECLARED, SEAMS, SHARED, ownerOf } from '../scripts/lib/agent-seams.mjs';
 import {
 	AUDIT_ROUTES,
 	loadHandler,
@@ -163,48 +164,20 @@ test('the accordion marker respects reduced motion', () => {
  * ---------------------------------------------------------------------- */
 
 /**
- * Face 6's component graph, declared.
+ * Face 6's component graph is declared in `../scripts/lib/agent-seams.mjs`,
+ * imported above, and its header carries the reasoning for the three seams and
+ * for what `owns`, `nests` and `SHARED` mean.
  *
- * THREE SEAMS, NOT TWO. The docs said two — the roster and the MCP panel — and
- * the detail route imports neither: it imports `AgentDetail.svelte`, which
- * composes the identity header, the trust detail and the capability list, and
- * nests the MCP seam inside itself. That is a third replaceable boundary, and an
- * undeclared boundary is the one nobody checks. It is named here and in
- * `docs/consumption/agent-contract.md` rather than dissolved, because the detail
- * page genuinely has a component-shaped middle: greater M6a is expected to land
- * the roster and the MCP detail separately, and the page that arranges them is
- * contentus's until it does.
- *
- * `owns` is what a seam takes with it when it is replaced. `nests` is a seam
- * composed by another seam — the only cross-seam import that is not a defect,
- * because it is the one that keeps the MCP panel independently swappable.
- * `SHARED` is imported from more than one seam by design: `AgentTrustBadge` is
- * the one pill both the roster card and the detail header show, and greater's
- * `AgentStateBadge` replaces it on both at once.
+ * IT USED TO BE DECLARED HERE, and it moved for one reason: a second reader
+ * exists. `scripts/audit-seam-graph.mjs` asserts the same property from the
+ * edges the BUILD resolves rather than from the imports source reading can see,
+ * and two copies of a graph is how the second copy keeps passing after the first
+ * is corrected — the same argument that put the reading itself in
+ * `./helpers/module-imports.mjs` when this file and
+ * `tests/agents-roster.test.mjs` were carrying one regex each.
  */
-const SEAMS = {
-	'AgentRoster.svelte': {
-		owns: ['AgentCard.svelte', 'AgentRosterFilters.svelte', 'MyAgents.svelte'],
-		nests: [],
-	},
-	'AgentDetail.svelte': {
-		owns: ['AgentCapabilities.svelte', 'AgentTrustDetail.svelte'],
-		nests: ['AgentMcpPanel.svelte'],
-	},
-	'AgentMcpPanel.svelte': {
-		owns: ['Accordion.svelte', 'CopyBlock.svelte'],
-		nests: [],
-	},
-};
-const SHARED = ['AgentTrustBadge.svelte'];
 
 const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
-
-const DECLARED = new Set([
-	...Object.keys(SEAMS),
-	...Object.values(SEAMS).flatMap((seam) => seam.owns),
-	...SHARED,
-]);
 
 /**
  * The readings this file's walks are built on live in
@@ -271,7 +244,7 @@ const pointsIntoTheFace = (specifier) =>
 function faceFile(specifier, files) {
 	const tail = modulePath(specifier).replace(/\/+$/, '');
 	const name = tail.slice(tail.lastIndexOf('/') + 1);
-	if (name.endsWith('.svelte')) return DECLARED.has(name) ? { component: name } : null;
+	if (name.endsWith('.svelte')) return DECLARED.includes(name) ? { component: name } : null;
 	const candidates =
 		name === 'agents'
 			? ['index.ts', 'index.js']
@@ -322,14 +295,6 @@ function faceDependencies(file, files, seen = new Set()) {
 	}
 
 	return { targets, unresolved };
-}
-
-/** Which seam a component belongs to, or null if it is not behind one. */
-function ownerOf(name) {
-	for (const [seam, { owns }] of Object.entries(SEAMS)) {
-		if (owns.includes(name)) return seam;
-	}
-	return null;
 }
 
 /**
@@ -441,14 +406,8 @@ test('every component in the face sits behind exactly one declared seam', () => 
 		.filter((entry) => entry.endsWith('.svelte'))
 		.sort();
 
-	const declared = [
-		...Object.keys(SEAMS),
-		...Object.values(SEAMS).flatMap((s) => s.owns),
-		...SHARED,
-	];
-
-	assert.deepEqual(onDisk, [...declared].sort(), 'every component must be declared exactly once');
-	assert.equal(new Set(declared).size, declared.length, 'and named in only one place');
+	assert.deepEqual(onDisk, [...DECLARED].sort(), 'every component must be declared exactly once');
+	assert.equal(new Set(DECLARED).size, DECLARED.length, 'and named in only one place');
 });
 
 /** The whole face on disk — components AND plain modules, which is what a barrel would be. */
