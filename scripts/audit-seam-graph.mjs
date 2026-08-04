@@ -22,13 +22,27 @@
  *
  * So this gate does not read source at all. It runs the repository's own Vite
  * configuration, twice — the client pass and the server pass `pnpm build` runs —
- * and records the module graph the bundler finishes with. Every dependency form
- * is covered BY CONSTRUCTION: `.jsx`, `.tsx`, `require()` in a `.cjs`,
- * `import.meta.glob`, `?raw`, a dynamic `import()`, a `new URL(…,
- * import.meta.url)` asset reference, and the forms nobody has thought of,
- * because the question asked is not "what does this text say" but "what did the
- * build resolve". A form Vite does not support creates no dependency and is not
- * one; a form it supports creates a module, and every module is here.
+ * and asks what the bundler resolved rather than what the text says. `.jsx`,
+ * `.tsx`, `require()` in a `.cjs`, `import.meta.glob`, `?raw`, a dynamic
+ * `import()`, a `new URL(…, import.meta.url)` asset reference and a CSS `url()`
+ * are all covered because the build resolved them, not because they are on a
+ * list, and a form Vite does not support creates no dependency to cover.
+ *
+ * WHAT IT ACTUALLY READS, because "the build resolved it" is not one channel and
+ * an earlier version of this header claimed the module graph was all of them.
+ * Round 7 disproved that with a `url('./X')` in a component's `<style>`: a real
+ * dependency, the asset emitted, no module edge anywhere, the gate green. There
+ * are three channels, and the third exists because of that finding:
+ *
+ *   - THE MODULE GRAPH, at `buildEnd`. Static and dynamic imports, every form
+ *     that produces a module.
+ *   - ASSET REFERENCES IN MODULE CODE, at `buildEnd`. A `new URL(…,
+ *     import.meta.url)` leaves Vite's own marker where an edge would be; the
+ *     marker names an emitted file, and `generateBundle` names what it came from.
+ *   - ASSET REFERENCES IN STYLESHEETS, mid-pipeline. Same marker, same
+ *     resolution, but a CSS module's code is empty by `buildEnd` — the content
+ *     has left the module graph for the stylesheet being assembled — so it is
+ *     read in the one window where it exists. See `styleRecorder`.
  *
  * WHAT THIS GATE CANNOT SEE, stated plainly, because a mechanism that claims
  * everything is a mechanism nobody can check. Each one is either covered by
@@ -42,12 +56,7 @@
  *      STAY, and their headers say so. The two checks have different domains:
  *      this one reads every form on the modules the build loads, they read every
  *      tracked file in one form. Neither subsumes the other and both run.
- *   2. `@import` inside CSS, which Vite resolves through postcss rather than
- *      through the module graph. CSS cannot import a component, so it cannot
- *      cross a seam — and the containment check below turns any non-module file
- *      appearing in the face into a finding rather than a silence, so the day
- *      that assumption changes is the day this gate goes red.
- *   3. A WORKER's own modules. `new Worker(new URL(…))` is bundled by a separate
+ *   2. A WORKER's own modules. `new Worker(new URL(…))` is bundled by a separate
  *      Rolldown build whose plugin list is `config.worker.plugins` — the main
  *      pipeline is not in it, so a recorder in `plugins` never sees inside one.
  *      Supplying `worker.plugins` from here was tried and rejected: it REPLACES
@@ -57,16 +66,20 @@
  *      the importer — and reported as a channel this gate does not record. A
  *      worker is a red gate here until someone extends this, which is the honest
  *      order of events.
- *   4. `new URL('./X', import.meta.url)` in a module the SERVER pass loads and
- *      the client pass does not. Vite rewrites that form to an emitted asset in
- *      the client build, which this gate reads; in the server build it leaves it
- *      verbatim as a runtime URL and creates no dependency to record.
+ *   3. A reference the CLIENT pass turns into an emitted asset and the SERVER
+ *      pass does not. `new URL('./X', import.meta.url)` is left verbatim as a
+ *      runtime URL in the server build, and a CSS `url('./X')` resolves there
+ *      without emitting, so both are client-pass edges. A module only the server
+ *      pass loads takes those dependencies unrecorded.
  *
- * FAIL-CLOSED, in the three places it can matter: a build that throws is a red
- * gate rather than an empty edge set, a module whose final code the build's own
- * parser cannot read is a finding, and a dynamic `import()` whose target is not
- * a literal is a finding wherever it sits under `src/` — "the build cannot name
- * what this loads" and "this loads nothing behind a seam" are different facts.
+ * FAIL-CLOSED, in four places. A build that throws is a red gate rather than an
+ * empty edge set. A module whose final code the build's own parser cannot read is
+ * a finding. A dynamic `import()` whose target is not a literal is a finding
+ * wherever it sits under `src/` — "the build cannot name what this loads" and
+ * "this loads nothing behind a seam" are different facts. And every asset the
+ * build EMITS must be attributable to something that references it, which is the
+ * one that generalises: reading references is a channel, channels close, and a
+ * closed channel now costs this gate its green rather than its coverage.
  *
  * The build runs with `write: false`, so this never touches `build/` and can run
  * beside `pnpm build` without racing its output.
@@ -103,6 +116,11 @@ const ASSET_REFERENCE = /__VITE_ASSET__([\w$]+)__/g;
  * keys on the channel Vite actually opened and not on the spelling that opened
  * it — `new Worker`, `new SharedWorker`, `?worker`, `?worker&inline` and
  * whatever comes next all leave this behind.
+ *
+ * It is NOT an asset reference despite reading like one: Vite's worker plugin
+ * rewrites it from a map of its own rather than through the bundler's reference
+ * table, so `getFileName` cannot turn it into a file name. It is detected and
+ * counted; what it emits is handled where that matters, in `unattributedAssets`.
  */
 const WORKER_REFERENCE = /__VITE_WORKER_ASSET__[a-z\d]{8}__/;
 
@@ -160,18 +178,134 @@ function unreadableImports(ast, code) {
 }
 
 /**
+ * Vite's own test for a request whose content is a stylesheet.
+ *
+ * The svelte compiler addresses a component's styles as
+ * `X.svelte?svelte&type=style&lang.css`, so the extension this matches is
+ * frequently in the QUERY rather than on the file — which is why it is written
+ * the way Vite writes it rather than as a check on the path.
+ */
+const CSS_REQUEST = /\.(css|less|sass|scss|styl|stylus|pcss|postcss|sss)(?:$|\?)/;
+
+/**
+ * Every reference of one marker family a module's code carries, into
+ * `references`. Returns how many it found.
+ *
+ * The key is the pair, not the position: one marker seen in two windows is one
+ * dependency, and recording it twice would inflate the edge count without
+ * telling anyone anything.
+ */
+function collectReferences(references, importer, code, marker, channel) {
+	let found = 0;
+	for (const [, reference] of code.matchAll(marker)) {
+		found += 1;
+		const key = `${importer}\0${reference}`;
+		if (!references.has(key)) references.set(key, { importer, reference, channel });
+	}
+	return found;
+}
+
+/**
+ * The stylesheet observer, and the reason it is a plugin of its own.
+ *
+ * A CSS `url('./X')` is a dependency: Vite resolves it against the stylesheet,
+ * emits the file it names as an asset, and leaves a reference marker where the
+ * URL was. That marker is the same channel `new URL(…, import.meta.url)` uses —
+ * but it lives in the STYLESHEET's code, and by the time `buildEnd` runs a CSS
+ * module's `code` is empty, because the content has left the module graph for the
+ * stylesheet the bundler is assembling. The marker is not hidden at `buildEnd`;
+ * it is gone.
+ *
+ * The one window where it exists is between the plugin that resolves CSS URLs and
+ * the plugin that moves CSS out of the module graph, and that window is where a
+ * plugin with no `enforce` runs. So this observer has no `enforce` and the
+ * recorder keeps its `post` — the two want different positions and are therefore
+ * two plugins. It returns null from every hook, so it still cannot change the
+ * build it is measuring.
+ *
+ * A position in a plugin order is a weaker thing to rest on than "the build
+ * resolved it", which is what the rest of this gate rests on. It is not rested on
+ * alone: `generateBundle` below requires every emitted asset to be attributable
+ * to something that references it, so the day this window closes the assets it
+ * was attributing become unattributable and the gate goes RED rather than quiet.
+ */
+function styleRecorder(pass, root, references) {
+	return {
+		name: 'contentus:seam-graph-styles',
+
+		transform(code, id) {
+			if (typeof code === 'string')
+				collectReferences(
+					references,
+					repoPath(root, id),
+					code,
+					ASSET_REFERENCE,
+					`${pass}:${CSS_REQUEST.test(String(id)) ? 'css url()' : 'asset'}`
+				);
+			return null;
+		},
+	};
+}
+
+/**
+ * The emitted files nothing accounts for, as findings.
+ *
+ * WHY THIS IS THE BACKSTOP AND NOT A DETAIL. An emitted asset is the build saying
+ * "something needs this file at runtime". Reading the references that point at one
+ * is how this gate turns that into an edge — and every way of reading references
+ * is a channel that can close. Round 7's finding was exactly a closed channel: a
+ * CSS `url()` crossing a seam, the asset emitted, the edge recorded nowhere, the
+ * gate green. Asking the question from the emitted side as well means a channel
+ * closing costs the gate its GREEN rather than its coverage: the assets that
+ * channel was attributing go unaccounted for and land here.
+ *
+ * WHAT `workers` IS DOING HERE, because an exception in a fail-closed rule has to
+ * earn its place. A worker's bundle is emitted as an asset with no originating
+ * file — it is generated code, not a file the build was pointed at — and Vite
+ * rewrites the marker that names it from a map of its own, so this gate cannot
+ * turn that marker into a file name. It is therefore permanently unattributable,
+ * and reporting it would be a second sentence about a pass the worker tripwire
+ * has ALREADY made red, with a hashed file name in it. So a pass that builds a
+ * worker does not report its origin-less assets. An asset that names an
+ * originating file is still reported, worker or no worker: that is the case a
+ * seam can hide in.
+ *
+ * A separate function because the plumbing that feeds it — the bundle, the two
+ * reference windows — is only exercised by a real build, and a rule nobody has
+ * watched fail is a rule nobody should trust. This one can be handed an emitted
+ * file and an empty account and watched.
+ */
+export function unattributedAssets(pass, emitted, attributed, workers = false) {
+	return emitted
+		.filter(({ fileName }) => !attributed.has(fileName))
+		.filter(({ from }) => from.length > 0 || !workers)
+		.map(
+			({ fileName, from }) =>
+				`${fileName}: the ${pass} build emits this file and nothing this gate records ` +
+				`references it, so what depends on ${from.length > 0 ? from.join(', ') : 'it'} is unknown`
+		);
+}
+
+/**
  * The plugin that records the graph. It resolves nothing and rewrites nothing —
  * it reads what the bundler finished with, so its presence cannot change the
  * build it is measuring.
  *
  * `buildEnd` is where the module graph is complete. `generateBundle` is where an
  * emitted asset's originating file is known, which is the second channel: a
- * `new URL('./X', import.meta.url)` leaves a reference marker in the importer's
- * code instead of an edge, and the two hooks together turn that marker back into
- * an importer-to-file pair.
+ * `new URL('./X', import.meta.url)` and a CSS `url('./X')` both leave a reference
+ * marker where a dependency was, and the hooks together turn that marker back
+ * into an importer-to-file pair.
+ *
+ * `generateBundle` also asks the question the other way round, which is what
+ * keeps that channel honest: every asset the build EMITS must be attributable to
+ * something. An emitted file nothing accounts for is a dependency of something,
+ * and this gate not knowing of what is a finding rather than a silence.
  */
-function recorder(pass, root, sink) {
-	const references = [];
+function recorder(pass, root, sink, references) {
+	// Whether this pass built a worker, which `unattributedAssets` needs and the
+	// tripwire below is what learns.
+	let workers = false;
 
 	return {
 		name: 'contentus:seam-graph',
@@ -201,14 +335,15 @@ function recorder(pass, root, sink) {
 					});
 
 				if (typeof info.code !== 'string') continue;
-				for (const [, reference] of info.code.matchAll(ASSET_REFERENCE))
-					references.push([importer, reference]);
-				if (WORKER_REFERENCE.test(info.code))
+				collectReferences(references, importer, info.code, ASSET_REFERENCE, `${pass}:asset`);
+				if (WORKER_REFERENCE.test(info.code)) {
+					workers = true;
 					sink.findings.push(
 						`${importer} carries a worker reference, and a worker's own modules are bundled ` +
 							'by a separate build this gate does not record, so what that worker depends ' +
 							'on is unknown'
 					);
+				}
 				if (!importer.startsWith('src/')) continue;
 
 				let ast;
@@ -232,7 +367,11 @@ function recorder(pass, root, sink) {
 			const origins = new Map(
 				Object.entries(bundle).map(([name, output]) => [name, output.originalFileNames ?? []])
 			);
-			for (const [importer, reference] of references) {
+
+			// Every emitted file some recorded reference points at. What is left over
+			// after this is what nothing this gate can see accounts for.
+			const attributed = new Set();
+			for (const { importer, reference, channel } of references.values()) {
 				let name;
 				try {
 					name = this.getFileName(reference);
@@ -243,13 +382,39 @@ function recorder(pass, root, sink) {
 					);
 					continue;
 				}
+				attributed.add(name);
 				for (const origin of origins.get(name) ?? [])
 					sink.edges.push({
 						importer,
 						target: repoPath(root, resolve(root, origin)),
-						channel: `${pass}:new URL()`,
+						channel,
 					});
 			}
+
+			// A chunk's stylesheet is a file the build PRODUCED, not a file it was
+			// pointed at: the bundler assembled it out of modules that are all in the
+			// graph above, and nothing references it by name. Its own `url()`s are
+			// references and are recorded as such.
+			//
+			// `importedAssets` is deliberately NOT read here, and the reason is the
+			// whole point of the loop below. It is the set of assets a chunk's CSS
+			// refers to — CopyBlock, in round 7's finding — so treating it as
+			// attribution would account for exactly the files this gate is trying to
+			// account for, using the bundler's word rather than an importer's name.
+			for (const output of Object.values(bundle))
+				if (output.type === 'chunk')
+					for (const name of output.viteMetadata?.importedCss ?? []) attributed.add(name);
+
+			// FAIL CLOSED on the rest.
+			const emitted = Object.entries(bundle)
+				.filter(([, output]) => output.type === 'asset')
+				.map(([fileName, output]) => ({
+					fileName,
+					from: (output.originalFileNames ?? []).map((origin) =>
+						repoPath(root, resolve(root, origin))
+					),
+				}));
+			sink.findings.push(...unattributedAssets(pass, emitted, attributed, workers));
 		},
 	};
 }
@@ -295,8 +460,13 @@ function splitSpecifier(specifier) {
  *
  * The command-line path passes no overlay, so this plugin is not in the gate the
  * rubric runs at all.
+ *
+ * EXPORTED so the regression suite can build its own WITNESS on the same planted
+ * tree — a build that reads what was emitted rather than what this gate concluded
+ * about it. One planting mechanism, two readers; a second copy of it in the tests
+ * would be a second thing to keep true.
  */
-function overlayPlugin(root, overlay) {
+export function overlayPlugin(root, overlay) {
 	const files = new Map(Object.entries(overlay).map(([path, code]) => [resolve(root, path), code]));
 
 	return {
@@ -338,10 +508,17 @@ function overlayPlugin(root, overlay) {
 export async function seamGraph({ root = process.cwd(), overlay = {} } = {}) {
 	const sink = { edges: [], modules: new Set(), findings: [], passes: [] };
 	const planted = Object.keys(overlay).length > 0;
-	const stack = (pass) => [
-		...(planted ? [overlayPlugin(root, overlay)] : []),
-		recorder(pass, root, sink),
-	];
+	const stack = (pass) => {
+		// One reference table per pass, written by the observer in the middle of the
+		// pipeline and by the recorder at the end of it, read once when the bundle
+		// exists. A marker is a dependency wherever it was seen.
+		const references = new Map();
+		return [
+			...(planted ? [overlayPlugin(root, overlay)] : []),
+			styleRecorder(pass, root, references),
+			recorder(pass, root, sink, references),
+		];
+	};
 
 	for (const pass of PASSES) {
 		try {
