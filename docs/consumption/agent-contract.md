@@ -279,10 +279,15 @@ code for is loaded whether or not the watch saw it — so the day its position s
 seeing every load, the rule falls back to what it checked before rather than
 quietly covering less.
 
-The same fact is what keeps that exemption from becoming a hole: a module the build
-never loaded is not counted as **reached** either, so externalizing a tracked file
-in the face lands in the containment rule below — a file that pass cannot judge —
-instead of passing as a file it read.
+The same fact is what keeps that exemption from becoming a hole, and **reached is
+two facts rather than one**. **Resolved** is the pass having an edge to the module —
+it is in that pass's graph, so the pass takes whatever the module depends on.
+**Loaded** is the pass having gone and got it, which is the only way an edge _out_ of
+it is ever recorded. An externalized module is resolved and not loaded, so it is
+counted — the gate's own output prints the two numbers side by side and the
+difference between them is what it could not judge — and externalizing a tracked
+file in the face lands in the containment rule below as a file that pass cannot
+judge, instead of passing as a file it read.
 
 **Reached is a fact about a pass**, and round 11 is what that cost when it was not
 written down. The two passes recorded what they reached into one set, so a component
@@ -295,6 +300,26 @@ never had. Both sets are kept **per pass**: a tracked face file a pass **resolve
 and never **loads** is that pass's finding, whatever the other pass did with the same
 file, and a file no pass resolves at all is the older finding — the build never
 reached it, so nothing about it is unexamined in either pass.
+
+**And a file is not a module**, which is round 12 and the other half of the same
+sentence. One file produces as many modules as there are ways to ask for it:
+`CopyBlock.svelte` is the component, `CopyBlock.svelte?raw` is its text, and
+`CopyBlock.svelte?svelte&type=style&lang.css` is its stylesheet — three modules the
+bundler resolves and loads separately, and the text carries none of the component's
+dependencies. Both reach sets were keyed by the **file**, so the seam that owns
+`CopyBlock` importing its text put the file in `loaded`, and the client pass
+externalizing the executable module beside it was therefore contained: the
+component's client-pass edge went unrecorded and the gate printed `771 / 771` and no
+findings over a real cross-seam dependency. Reach is keyed by the **module** — the
+request whole, query and fragment included — and the containment rule asks its
+question of every module a tracked file produced. Edges stay keyed by the file,
+which is the same distinction from the other side: an import of
+`CopyBlock.svelte?raw` from outside the face is an import of the face component
+whatever piece of it the importer asked for. **No variant shares another's fate**,
+the style subrequest included — this build resolves and loads every one of them and
+the stylesheet window reads each on its own, so a subrequest passes by being
+examined rather than by inheriting an excuse, and a rule that let any module answer
+for any other would be this finding rewritten.
 
 Round 9 is why that is the rule rather than the one this section used to state.
 The residual used to be the emitted-asset rule on its own: every asset the build
@@ -359,6 +384,14 @@ server pass. Each asserts the unexternalized run as its differential, so a clean
 externalized run is the masking rather than a plant that never built, and the control
 is a module externalized in **both** passes carrying the same cross-seam reference —
 still silent, because a file no pass opens is a file no pass takes an edge from.
+
+Round 12's two directions are planted the same way, on a `?raw` import a consumer
+would really write — the seam that owns `CopyBlock` asking for its text. The text
+must not answer for the externalized component, and the component must not answer
+for an externalized text, because a fix for one mask is where the reverse one gets
+introduced. The plant is **asserted rather than assumed**: the case checks that the
+`?raw` module really is one the client pass resolved and loaded before it concludes
+anything from the silence around it.
 
 ### Why the composition is local today
 
