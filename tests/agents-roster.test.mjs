@@ -251,12 +251,14 @@ const INTERIM = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
  * prose-versus-code confusion `tests/vendored-runes.test.mjs` had to resolve.
  * What breaks the seam is a module depending on one, and that is an import.
  *
- * THE SCAN IS THE SHARED ONE (`./helpers/module-imports.mjs`) and that is the
- * point of this rewrite. This probe used to carry its own line-anchored regex,
- * which is the same scan `tests/agents-mobile.test.mjs` carried and the same one
- * round 3 of this pull request's review compiled four legal files past. Two
- * probes asserting one property with two copies of one defect is how the second
- * copy survives the fix to the first.
+ * THE READING IS THE SHARED ONE (`./helpers/module-imports.mjs`) and that is the
+ * point. This probe used to carry its own line-anchored regex, which is the same
+ * scan `tests/agents-mobile.test.mjs` carried and the same one round 3 of this
+ * pull request's review compiled four legal files past — and round 4 compiled
+ * two more past its replacement. Two probes asserting one property with two
+ * copies of one defect is how the second copy survives the fix to the first, so
+ * there is one reading, it is the Svelte and TypeScript compilers rather than a
+ * pattern, and both probes regress the same forms against it.
  */
 function interimImports(source, path) {
 	const live = liveScript(path, source);
@@ -295,11 +297,14 @@ test('nothing outside src/lib/agents imports the interim roster components', () 
 });
 
 test('the seam check can still see an import, in every form a comment can hide it', () => {
-	// The guard above is only worth anything if it would fail, and the forms it
-	// has to survive are the ones that compiled and returned nothing in round 3.
+	// The guard above is only worth anything if it would fail, and the forms it has
+	// to survive are the ones reviewers have actually compiled past it: round 3's
+	// comments-where-whitespace-was-expected, and round 4's two harder ones — a
+	// comment that MERGES `import` into the token beside it when it is stripped,
+	// and a markup comment carrying a fake `<script>` opener.
 	//
-	// The specifiers resolve from this file on purpose. An unresolvable relative
-	// import inside a scanned file is itself a rubric finding (CON-5), and a
+	// The specifiers resolve from this file on purpose. CON-5 reads every gate
+	// file's raw text and fails on a relative specifier resolving to no file, and a
 	// fixture that trips the gate it is testing beside is not a fixture.
 	const target = '../src/lib/agents/AgentCard.svelte';
 	const route = 'src/lib/routes/Agents.svelte';
@@ -311,11 +316,38 @@ test('the seam check can still see an import, in every form a comment can hide i
 		`export { default as AgentCard } from /* the card */ '${target}';`,
 		`const a = 1; import AgentCard from '${target}';`,
 		`import '${target}';`,
+		// Round 4: the comment is the only separator, so removing it joins two
+		// tokens into one word no pattern for `import` can match.
+		`import/* the card */AgentCard from '${target}';`,
+		`import AgentCard from/* the card */'${target}';`,
+		`import/* the card */'${target}';`,
+		`export/* the card */{ default as AgentCard } from '${target}';`,
+		`export { default as AgentCard } from/* the card */'${target}';`,
+		// And a type-only edge, which breaks on the swap exactly as a value does.
+		`import type { Props } from '${target}';`,
 	])
 		assert.deepEqual(
 			interimImports(`<script lang="ts">\n${body}\n</script>\n`, route),
 			[`${route} → ${target}`],
 			body
+		);
+
+	// Round 4's other half: markup shaped to steer a tag pattern away from the real
+	// script. None of these is a script block to the compiler that compiles them.
+	for (const disguise of [
+		(b) => `<!-- <script> /* -->\n${b}`,
+		(b) => `<!-- <script> -->\n${b}`,
+		(b) => `<div data-snippet="<script>"></div>\n${b}`,
+		(b) => `<!-- </script> -->\n${b}`,
+		(b) => `${b}\n<p>{'<script>'}</p>`,
+	])
+		assert.deepEqual(
+			interimImports(
+				disguise(`<script lang="ts">\nimport AgentCard from '${target}';\n</script>\n`),
+				route
+			),
+			[`${route} → ${target}`],
+			disguise('')
 		);
 
 	// A computed import names nothing, so it is reported as unreadable rather than

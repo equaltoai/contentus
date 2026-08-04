@@ -168,23 +168,45 @@ is nothing here" must not produce the same colour. Both bypasses and the
 fail-closed behaviour are asserted against planted graphs in
 `tests/agents-mobile.test.mjs`, in both directions.
 
-**It reads code, not text.** Naming the forms is not enough on its own: a review
-round compiled four legal files that took a cross-seam dependency and returned
-nothing, because a comment sat where the patterns expected whitespace — before
-the import, between `from` and the specifier, and the same two on a re-export.
-The scan now runs over the source the module system executes, with the comments
-of that source's own language removed (`tests/helpers/module-imports.mjs` over
-`scripts/lib/strip-comments.mjs`), so a comment can say anything and a comment
-can hide nothing. In a component that means the `<script>` blocks, because they
-are what Svelte runs.
+**It reads code, not text, and it reads it with a parser.** Naming the forms is
+not enough on its own. One review round compiled four legal files that took a
+cross-seam dependency and returned nothing, because a comment sat where the
+patterns expected whitespace — before the import, between `from` and the
+specifier, and the same two on a re-export. The next round compiled two more past
+the fix for those: a comment MERGING `import` into the binding beside it, since
+stripping the comment joins the two tokens into `importX` and no pattern for
+`import` matches it, and a markup comment carrying a fake `<script>` opener,
+which steered the block-extracting pattern from inside the comment through the
+real closing tag.
 
-The same round's fourth form was `const target = '…'; import(target)` from
-outside the face, which the walk had waved through because the expression did
-not contain the word `agents`. A computed import cannot be asked to describe
-its own target, so it is no longer asked: an `import()` this walk cannot resolve
-is a finding wherever it appears, inside the face or outside it, whatever its
-text says. The single exclusion is syntactic — a class member NAMED `import`,
-which vendored greater-components has, is a declaration and not a call.
+Three rounds of patching one scan is the evidence that the scan was the problem,
+so there is no scan. `tests/helpers/module-imports.mjs` asks the SVELTE COMPILER
+where a component's script is and the TYPESCRIPT COMPILER what an import is —
+both are already in this repository's dependency tree, and both are already what
+judges these files at build time. Comment placement is no longer a question the
+check answers, in any position, because a comment is trivia to a tokenizer and a
+`<script>` inside a comment is not a script block to a parser. A file either
+parses, in which case its imports are its imports, or it does not, in which case
+the check raises rather than reporting clean.
+
+The computed-import form is the one a parser still cannot resolve: `const target
+= '…'; import(target)` from outside the face was waved through when the walk
+asked whether the expression contained the word `agents`. A computed import
+cannot be asked to describe its own target, so it is no longer asked — an
+`import()` this walk cannot resolve is a finding wherever it appears, inside the
+face or outside it, whatever its text says. The exclusion that used to accompany
+this rule is gone: a class member NAMED `import`, which vendored
+greater-components has, is a declaration node rather than a call node, so no
+hand-written rule has to keep them apart.
+
+One thing the check does NOT rest on, because an earlier version of this section
+implied it did: CON-5 is not a compensating reader for what this check might
+miss. CON-5's own import reader is raw-text regex
+(`gov-infra/verifiers/check-package-scripts.mjs`), and a comment moved inside an
+import statement makes it miss the edge as well. It is a real gate against
+unresolvable relative specifiers in gate files — which is why the planted
+fixtures address the face in a form that resolves — and it is nothing more than
+that here.
 
 ### Why the composition is local today
 

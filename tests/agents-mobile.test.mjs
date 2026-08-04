@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
+import { compile } from 'svelte/compiler';
+
 import {
 	AUDIT_ROUTES,
 	loadHandler,
@@ -197,30 +199,39 @@ const DECLARED = new Set([
 ]);
 
 /**
- * The two readings this file's walks are built on live in
- * `./helpers/module-imports.mjs`, imported above, and their headers carry the
- * reasoning: `liveScript` is what the module system executes with the comments
- * gone, `moduleSpecifiers` and `computedImports` are what it depends on.
+ * The readings this file's walks are built on live in
+ * `./helpers/module-imports.mjs`, imported above, and its header carries the
+ * reasoning: `liveScript` is the script a file executes, `moduleSpecifiers` and
+ * `computedImports` are what that script depends on.
  *
- * WHAT MOVED AND WHY. Both lived here as line-anchored regexes over raw text,
- * and round 3 of this pull request's review compiled four legal files that took
- * a cross-seam dependency and returned nothing from them — a comment before the
- * import, a comment inside it, the same on a re-export, and an `import()` of a
- * variable. They are shared now because `tests/agents-roster.test.mjs` asserts
- * the same property over the same tree with its own copy of the same scan, and
- * one of the two copies being fixed is how a gate goes green while the hole it
- * names is still open.
+ * WHAT MOVED AND WHY. Both lived here as line-anchored regexes over raw text.
+ * Round 3 of this pull request's review compiled four legal files that took a
+ * cross-seam dependency and returned nothing from them; round 3's fix dropped
+ * the anchors and stripped comments first; round 4's review compiled two more
+ * past THAT — a comment that merges `import` into its binding when it is
+ * stripped, and a markup comment carrying a fake `<script>` opener. So the scan
+ * is no longer a scan: the Svelte compiler decides what a `<script>` block is
+ * and the TypeScript compiler decides what an import is. The forms below are the
+ * regression, and the class they belong to is closed by the parsers rather than
+ * by the list. They are shared with `tests/agents-roster.test.mjs` because it
+ * asserts the same property over the same tree, and one of two copies being
+ * fixed is how a gate goes green while the hole it names is still open.
  *
- * THE PROSE RULE IN THIS FILE IS NOT GONE, and it is worth saying why, because
- * the comment-aware reading looks like it should have dissolved it. It has not:
- * the walker that objects to `from '<a relative path>'` in a comment here is
- * CON-5, which walks every relative specifier in a GATE file — comments included
- * — and fails on one resolving to no file, and which is not this scan. Its
- * over-inclusion is deliberate and fail-closed: it binds the executable closure,
- * where reading less than the file contains is the failure mode. Narrowing it to
- * live code to buy prose convenience in a comment is a worse trade than writing
- * the prose in a form that resolves, so the planted fixtures below still address
- * the face as `../src/lib/agents/…`.
+ * THE PROSE RULE IN THIS FILE IS NOT GONE, and the reason is narrower than it
+ * used to be stated. The walker that objects to `from '<a relative path>'` in a
+ * comment here is CON-5, which reads every GATE file's raw text — comments
+ * included — and fails on a relative specifier resolving to no file. That is a
+ * real gate and a fixture must not trip it, so the planted fixtures below still
+ * address the face as `../src/lib/agents/…`.
+ *
+ * WHAT CON-5 IS NOT is a fail-closed backstop for THIS scan, and an earlier
+ * version of this comment implied it was. Its reader
+ * (`gov-infra/verifiers/check-package-scripts.mjs:251`) is itself a raw-text
+ * regex, and moving a comment INSIDE an import statement — `from /* … *\/ '…'` —
+ * makes it miss the edge entirely. It reads more than live code in one direction
+ * and less than the file executes in the other, so nothing here may lean on it
+ * to catch what this module misses. That gap is pre-existing verifier behaviour,
+ * outside this pull request's write scope, and reported for its own fix.
  */
 
 /**
@@ -368,10 +379,10 @@ function crossSeamImports(files) {
  * face" and "outside the face" were the same green, and they are different
  * facts.
  *
- * The one exclusion is in `computedImports` and is about syntax rather than
- * policy: a class member NAMED `import` is not a call. Vendored
- * greater-components has one, and this repository may not edit vendored source
- * to satisfy a probe.
+ * There is no exclusion list any more. A class member NAMED `import` is not a
+ * call — vendored greater-components has one, and this repository may not edit
+ * vendored source to satisfy a probe — and the rule that used to keep them apart
+ * by hand is now the difference between a declaration node and a call node.
  */
 function importsBehindASeam(outside, face) {
 	const behindASeam = [...Object.values(SEAMS).flatMap((seam) => seam.owns), ...SHARED];
@@ -435,6 +446,39 @@ const faceOnDisk = () =>
 			.map((entry) => [entry, readFileSync(join(agentsDir, entry), 'utf8')])
 	);
 
+/**
+ * A component the way a component is actually written, which every planted
+ * `.svelte` fixture below goes through.
+ *
+ * IT IS NOT DECORATION. Svelte executes `<script>` and nothing else, so a
+ * `.svelte` file holding a bare import statement is a file whose template
+ * happens to read like code — it compiles to a component that imports nothing.
+ * The reading these walks use is the compiler's, so it says so, and a fixture
+ * written as a bare line would be asserting the checker sees a dependency that
+ * does not exist. The earlier version of this file planted bare lines and was
+ * answered by a fallback that read markup as script; that fallback is gone with
+ * the patterns, and the fixtures are components instead.
+ */
+const component = (body) => `<script lang="ts">\n${body}\n</script>\n\n<div>face</div>\n`;
+
+test('a bare import line in markup is markup, because that is what Svelte compiles', () => {
+	// The claim the fixture shape rests on, PROVEN rather than asserted. The witness
+	// is the compiler's own output, read for the modules it actually imports —
+	// searching that output for the TEXT would prove nothing, because markup is
+	// emitted as text and the specifier would be found either way.
+	const target = '../src/lib/agents/CopyBlock.svelte';
+	const line = `import CopyBlock from '${target}';`;
+	const emittedSpecifiers = (source) =>
+		moduleSpecifiers(compile(source, { generate: 'server', filename: 'Fixture.svelte' }).js.code);
+
+	const asMarkup = `${line}\n<div>face</div>\n`;
+	assert.ok(!emittedSpecifiers(asMarkup).includes(target), 'markup must import nothing');
+	assert.deepEqual(moduleSpecifiers(liveScript('Fixture.svelte', asMarkup)), []);
+
+	assert.ok(emittedSpecifiers(component(line)).includes(target), 'a script must import it');
+	assert.deepEqual(moduleSpecifiers(liveScript('Fixture.svelte', component(line))), [target]);
+});
+
 test('no import inside face 6 crosses a seam', () => {
 	// The property the seams exist to hold, checked WHERE IT CAN BREAK. The old
 	// version of this walked `src/` with the agents directory skipped, so it could
@@ -453,15 +497,16 @@ test('the cross-seam check can still see a violation', () => {
 	//
 	// THE PLANTED SPECIFIERS RESOLVE FROM THIS FILE on purpose, which is why they
 	// read `../src/lib/agents/…` rather than the `./…` a component would write.
-	// CON-5 walks every relative import in a gate file and fails on one that
-	// resolves to nothing — an unresolvable import in a gate is an unscanned one —
-	// so a fixture written the way the component writes it would trip the rubric
-	// beside the check it is testing. `tests/agents-roster.test.mjs` learned the
-	// same thing. What the checker reads is the file name, so the two forms are
-	// the same input to it.
+	// CON-5 reads every gate file's raw text and fails on a relative specifier
+	// resolving to nothing, so a fixture written the way the component writes it
+	// would trip the rubric beside the check it is testing.
+	// `tests/agents-roster.test.mjs` learned the same thing. What the checker reads
+	// is the file name, so the two forms are the same input to it.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `import CopyBlock from '../src/lib/agents/CopyBlock.svelte';`,
+			'AgentRoster.svelte': component(
+				`import CopyBlock from '../src/lib/agents/CopyBlock.svelte';`
+			),
 		}),
 		[
 			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
@@ -471,13 +516,17 @@ test('the cross-seam check can still see a violation', () => {
 	// A seam composing another seam is a defect unless it is the declared nesting.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `import Panel from '../src/lib/agents/AgentMcpPanel.svelte';`,
+			'AgentRoster.svelte': component(
+				`import Panel from '../src/lib/agents/AgentMcpPanel.svelte';`
+			),
 		}),
 		['AgentRoster.svelte → AgentMcpPanel.svelte (an undeclared seam-to-seam import)']
 	);
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentDetail.svelte': `import Panel from '../src/lib/agents/AgentMcpPanel.svelte';`,
+			'AgentDetail.svelte': component(
+				`import Panel from '../src/lib/agents/AgentMcpPanel.svelte';`
+			),
 		}),
 		[]
 	);
@@ -497,7 +546,9 @@ test('a dynamic import cannot walk past the cross-seam check', () => {
 	// demonstrated in one direction is a bypass still open in the other.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `const block = await import('../src/lib/agents/CopyBlock.svelte');`,
+			'AgentRoster.svelte': component(
+				`const block = await import('../src/lib/agents/CopyBlock.svelte');`
+			),
 		}),
 		[
 			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
@@ -505,7 +556,9 @@ test('a dynamic import cannot walk past the cross-seam check', () => {
 	);
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `const panel = () => import('../src/lib/agents/AgentMcpPanel.svelte');`,
+			'AgentRoster.svelte': component(
+				`const panel = () => import('../src/lib/agents/AgentMcpPanel.svelte');`
+			),
 		}),
 		['AgentRoster.svelte → AgentMcpPanel.svelte (an undeclared seam-to-seam import)']
 	);
@@ -513,14 +566,40 @@ test('a dynamic import cannot walk past the cross-seam check', () => {
 	// The declared nesting is still the declared nesting, whatever form it takes.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentDetail.svelte': `const panel = () => import('../src/lib/agents/AgentMcpPanel.svelte');`,
+			'AgentDetail.svelte': component(
+				`const panel = () => import('../src/lib/agents/AgentMcpPanel.svelte');`
+			),
 		}),
 		[]
 	);
 
-	// A side-effect import is a dependency too, and read the same way.
+	// A side-effect import is a dependency too, and read the same way. So is a
+	// TYPE-only one: swapping the component behind a seam breaks a type that names
+	// it exactly as it breaks a value that names it.
 	assert.deepEqual(
-		crossSeamImports({ 'AgentRoster.svelte': `import '../src/lib/agents/CopyBlock.svelte';` }),
+		crossSeamImports({
+			'AgentRoster.svelte': component(`import '../src/lib/agents/CopyBlock.svelte';`),
+		}),
+		[
+			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+		]
+	);
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': component(
+				`import type { Props } from '../src/lib/agents/CopyBlock.svelte';`
+			),
+		}),
+		[
+			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+		]
+	);
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': component(
+				`type P = import('../src/lib/agents/CopyBlock.svelte').Props;`
+			),
+		}),
 		[
 			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
 		]
@@ -535,7 +614,7 @@ test('a barrel cannot launder a cross-seam import', () => {
 	// behind one is the laundering step itself.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `import { CopyBlock } from '../src/lib/agents/index.ts';`,
+			'AgentRoster.svelte': component(`import { CopyBlock } from '../src/lib/agents/index.ts';`),
 			'index.ts': `export { default as CopyBlock } from '../src/lib/agents/CopyBlock.svelte';`,
 		}),
 		[
@@ -549,7 +628,7 @@ test('a barrel cannot launder a cross-seam import', () => {
 	// something is wrong.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `import { McpPanel } from '../src/lib/agents/index.ts';`,
+			'AgentRoster.svelte': component(`import { McpPanel } from '../src/lib/agents/index.ts';`),
 			'index.ts': `export * from '../src/lib/agents/panels.ts';`,
 			'panels.ts': `export { default as McpPanel } from '../src/lib/agents/AgentMcpPanel.svelte';`,
 		}),
@@ -567,24 +646,25 @@ test('an import form the check cannot resolve fails rather than passing', () => 
 	// same green for both is a check that can be walked past by writing the import
 	// in a form nobody taught it.
 	assert.deepEqual(
-		crossSeamImports({ 'AgentRoster.svelte': `const c = await import(componentPath);` }),
+		crossSeamImports({ 'AgentRoster.svelte': component(`const c = await import(componentPath);`) }),
 		['AgentRoster.svelte → import(componentPath) (a dependency no static read can name)']
 	);
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `const c = await import(\`../src/lib/agents/\${name}.svelte\`);`,
+			'AgentRoster.svelte': component(
+				`const c = await import(\`../src/lib/agents/\${name}.svelte\`);`
+			),
 		}),
 		[
 			'AgentRoster.svelte → import(`../src/lib/agents/${name}.svelte`) (a dependency no static read can name)',
 		]
 	);
-
 	// And a specifier that points into the face but names nothing declared: either
 	// a component was added without being declared, or the graph moved under the
 	// check. Both are answers the next steward needs, and neither is silence.
 	assert.deepEqual(
 		crossSeamImports({
-			'AgentRoster.svelte': `import X from '../src/lib/agents/Undeclared.svelte';`,
+			'AgentRoster.svelte': component(`import X from '../src/lib/agents/Undeclared.svelte';`),
 		}),
 		[
 			'AgentRoster.svelte → ../src/lib/agents/Undeclared.svelte (points into the face and resolves to nothing declared)',
@@ -593,22 +673,26 @@ test('an import form the check cannot resolve fails rather than passing', () => 
 });
 
 /* -------------------------------------------------------------------------
- * The forms round 3 compiled and both scans walked past
+ * The forms rounds 3 and 4 compiled and the scans walked past
  * ---------------------------------------------------------------------- */
 
 /**
- * A component the way a component is actually written, so the fixtures exercise
- * the `<script>` reading rather than the bare-source fallback beside it.
- */
-const component = (body) => `<script lang="ts">\n${body}\n</script>\n\n<div>face</div>\n`;
-
-/**
- * The three comment shapes. Each is legal, each compiles, and each was invisible
- * to the line-anchored patterns these scans used to carry.
+ * Every comment shape a reviewer has compiled past one of these scans, plus the
+ * ones they imply. Each is legal, each compiles, and each returned nothing from
+ * the version of the reading that was current when it was written.
  *
- * The fourth form round 3 named — an `import()` of a variable — is not here
- * because it does not resolve to a specifier at all; it has its own test below,
- * and its expected finding is the fail-closed one rather than a named target.
+ * THE LAST FIVE ARE THE ROUND-4 CLASS and they are the reason the reading is a
+ * parser now. Round 3's fix stripped comments before matching, which is fine
+ * until the comment is the only thing SEPARATING two tokens: strip
+ * `import/* n *\/X` and the text reads `importX`, which is not an import
+ * statement to any pattern and is one to the module system. There is a form of
+ * that for every keyword-and-token pair an import declaration contains, and
+ * listing them is not what closes them — the tree is. They are here because a
+ * class closed by construction should still have its known members regressed.
+ *
+ * The computed-`import()` form rounds 3 and 4 named is not here because it does
+ * not resolve to a specifier at all; it has its own test below, and its expected
+ * finding is the fail-closed one rather than a named target.
  */
 const COMMENTED_FORMS = [
 	['a block comment before the import', (s) => `/* note */ import X from '${s}';`],
@@ -616,6 +700,17 @@ const COMMENTED_FORMS = [
 	['a comment before a re-export', (s) => `/* note */ export { default as X } from '${s}';`],
 	['a comment inside a re-export', (s) => `export { default as X } from /* note */ '${s}';`],
 	['a line comment above the import', (s) => `// note\nimport X from '${s}';`],
+	['a comment merging `import` into its binding', (s) => `import/* note */X from '${s}';`],
+	['a comment merging `from` into the specifier', (s) => `import X from/* note */'${s}';`],
+	['a comment merging `import` into a side-effect specifier', (s) => `import/* note */'${s}';`],
+	[
+		'a comment merging `export` into its clause',
+		(s) => `export/* note */{ default as X } from '${s}';`,
+	],
+	[
+		'a comment merging `from` into a re-exported specifier',
+		(s) => `export { default as X } from/* note */'${s}';`,
+	],
 ];
 
 test('a comment cannot hide a cross-seam import, on the real face map', () => {
@@ -653,6 +748,103 @@ test('a comment cannot hide a cross-seam import, on the real face map', () => {
 			}),
 			[]
 		);
+});
+
+/**
+ * Markup that steers a TAG-shaped pattern, which is the other half of the
+ * round-4 class and a different defect from the comment forms above.
+ *
+ * The extraction used to be `/<script\b[^>]*>([\s\S]*?)(?:<\/script>|$)/`, and a
+ * `<script>` written inside a markup comment is a substring that matches it. The
+ * first one steered the match from inside the comment THROUGH the real closing
+ * tag, so the text handed to the import scan was the markup between them; a `/*`
+ * left open in that markup then swallowed the rest, and a component with a live
+ * cross-seam import returned nothing. The others are the same trick from other
+ * positions — an attribute value, a script-shaped string, a closer in prose.
+ *
+ * None of them is a script block to the Svelte compiler, which is the point: the
+ * question "where does this component's script begin" belongs to the parser that
+ * compiles it, and asking a pattern was the mistake all four rounds shared.
+ */
+const MARKUP_DISGUISES = [
+	['a fake opener in a comment holding an open block comment', (b) => `<!-- <script> /* -->\n${b}`],
+	['a fake opener in a comment', (b) => `<!-- <script> -->\n${b}`],
+	['a fake opener in an attribute value', (b) => `<div data-snippet="<script>"></div>\n${b}`],
+	['a fake closer in a comment before the script', (b) => `<!-- </script> -->\n${b}`],
+	['a fake closer in a comment after the script', (b) => `${b}\n<!-- </script> -->`],
+	['a script-shaped string in the template', (b) => `${b}\n<p>{'<script>'}</p>`],
+];
+
+test('markup cannot hide the script, on the real face map', () => {
+	// ROUND 4's SECOND FORM, planted on the real graph like the comment forms. Each
+	// disguise wraps a component whose script holds a live cross-seam import, and
+	// each must leave that import visible in both offender directions.
+	const face = faceOnDisk();
+
+	for (const [label, disguise] of MARKUP_DISGUISES) {
+		const planted = (specifier) =>
+			crossSeamImports({
+				...face,
+				'AgentRoster.svelte': disguise(component(`import X from '${specifier}';`)),
+			});
+
+		assert.deepEqual(
+			planted('../src/lib/agents/CopyBlock.svelte'),
+			[
+				'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+			],
+			`${label} must not hide an import of a component behind another seam`
+		);
+		assert.deepEqual(
+			planted('../src/lib/agents/AgentMcpPanel.svelte'),
+			['AgentRoster.svelte → AgentMcpPanel.svelte (an undeclared seam-to-seam import)'],
+			`${label} must not hide a seam-to-seam import`
+		);
+
+		// And the same disguise over the declared nesting stays quiet.
+		assert.deepEqual(
+			crossSeamImports({
+				...face,
+				'AgentDetail.svelte': disguise(
+					component(`import X from '../src/lib/agents/AgentMcpPanel.svelte';`)
+				),
+			}),
+			[],
+			`${label} must not turn the declared nesting into a finding`
+		);
+	}
+});
+
+test('a `module` script is script too', () => {
+	// `<script module>` runs once per module rather than once per instance, and an
+	// import in it loads exactly what an import in the instance block loads. The
+	// compiler hands back both blocks, so both are read.
+	const face = faceOnDisk();
+	const source = `<script module>\nimport X from '../src/lib/agents/CopyBlock.svelte';\n</script>\n\n<div>face</div>\n`;
+
+	assert.deepEqual(crossSeamImports({ ...face, 'AgentRoster.svelte': source }), [
+		'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+	]);
+});
+
+test('a component the compiler cannot read is a red gate, not an empty scan', () => {
+	// FAIL CLOSED ON THE READING ITSELF. Returning nothing for a file that cannot be
+	// parsed makes "unreadable" and "clean" the same green, which is the hole this
+	// whole line of review has been about, one level further back.
+	// The specifier resolves for CON-5's sake even though this file never parses —
+	// CON-5 reads raw text, so it sees the specifier the Svelte compiler rejects.
+	assert.throws(
+		() =>
+			liveScript(
+				'Broken.svelte',
+				`<script>\nimport X from '../src/lib/agents/CopyBlock.svelte'\n<div>`
+			),
+		/cannot parse this component/
+	);
+	assert.throws(
+		() => moduleSpecifiers(`import X from ; const y = ((;`),
+		/does not parse as TypeScript/
+	);
 });
 
 test('a comment cannot launder a cross-seam import through a barrel', () => {
@@ -701,16 +893,19 @@ test('an import of a variable fails closed on both sides of the face', () => {
 });
 
 test('a class member named import is not a computed import', () => {
-	// The one exclusion the fail-closed rule carries, and it is about syntax.
-	// Vendored `greater/primitives/stores/preferences` declares a method called
+	// Vendored `greater/primitives/stores/preferences` declares a METHOD called
 	// `import`, and vendored source is CLI-managed: a probe that reported it would
-	// be a probe asking for a hand-edit this repository forbids. A parameter list
-	// is a top-level `:` with no top-level `?`, which no expression can be.
+	// be a probe asking for a hand-edit this repository forbids. The previous
+	// reading needed a hand-written rule to tell a parameter list from an argument;
+	// the tree tells them apart for free — one is a declaration, the other is a call
+	// on the `import` keyword — so the rule is gone and this is its regression.
 	assert.deepEqual(
 		computedImports(`class P { import(json: string): boolean { return true; } }`),
 		[]
 	);
 	assert.deepEqual(computedImports(`interface P { import(json: string): boolean; }`), []);
+	// `import.meta` is a third node again, and never a call.
+	assert.deepEqual(computedImports(`const url = import.meta.url;`), []);
 
 	// And the shapes that ARE calls, including the one that has a colon in it.
 	// The specifiers resolve from this file for CON-5's sake, as everywhere else here.
@@ -719,14 +914,25 @@ test('a class member named import is not a computed import', () => {
 	assert.deepEqual(computedImports(`import(target);`), ['target']);
 	assert.deepEqual(computedImports(`import(ok ? '${a}' : '${b}');`), [`ok ? '${a}' : '${b}'`]);
 	assert.deepEqual(computedImports(`import('${a}');`), []);
+	// An un-interpolated template names its module as plainly as a quoted string.
+	assert.deepEqual(computedImports('import(`' + a + '`);'), []);
+	assert.deepEqual(moduleSpecifiers('import(`' + a + '`);'), [a]);
+
+	// `import()` with no argument is not legal JavaScript, so it cannot reach here
+	// from a file the Svelte compiler accepts — but the reading answers for it
+	// anyway rather than falling through to a pass, because "the argument is
+	// missing" is the same unreadable as "the argument is a variable".
+	assert.deepEqual(computedImports(`import();`), ['']);
 });
 
 test('the reading cannot be made to swallow live code by a string', () => {
-	// The hazard the comment-aware reading INTRODUCES if it is written naively,
-	// and the reason `stripScriptSource` tracks literals. This repository's own
-	// `MediaUpload.svelte` carries `accept="image/*,video/*,audio/*"`; a scan that
-	// treated that as a block comment would strip to the end of the file, and
-	// every import after it would vanish from a gate that then reported clean.
+	// The hazard a comment-stripping reading INTRODUCES, kept as a regression now
+	// that the stripper is gone. This repository's own `MediaUpload.svelte` carries
+	// `accept="image/*,video/*,audio/*"`; the round-3 reading had to track string
+	// literals by hand so that `/*` would not open a block comment that never closes
+	// and swallow every import after it. A tokenizer has no such hazard to manage,
+	// which is the argument for using one — but the inputs that produced it are
+	// still the inputs a future reading would have to survive.
 	assert.deepEqual(
 		importsBehindASeam(
 			{
@@ -797,7 +1003,11 @@ test('the outside-the-face check can still see a violation', () => {
 	// this walk had never been shown to fail, and it read one import form.
 	assert.deepEqual(
 		importsBehindASeam(
-			{ 'src/lib/routes/Agents.svelte': `import Card from '$lib/agents/AgentCard.svelte';` },
+			{
+				'src/lib/routes/Agents.svelte': component(
+					`import Card from '$lib/agents/AgentCard.svelte';`
+				),
+			},
 			{}
 		),
 		['src/lib/routes/Agents.svelte → $lib/agents/AgentCard.svelte']
@@ -805,7 +1015,9 @@ test('the outside-the-face check can still see a violation', () => {
 	assert.deepEqual(
 		importsBehindASeam(
 			{
-				'src/lib/routes/Agents.svelte': `const card = () => import('$lib/agents/AgentCard.svelte');`,
+				'src/lib/routes/Agents.svelte': component(
+					`const card = () => import('$lib/agents/AgentCard.svelte');`
+				),
 			},
 			{}
 		),
@@ -816,7 +1028,7 @@ test('the outside-the-face check can still see a violation', () => {
 	// component — the form that made this walk's green meaningless.
 	assert.deepEqual(
 		importsBehindASeam(
-			{ 'src/lib/routes/Agents.svelte': `import { AgentCard } from '$lib/agents';` },
+			{ 'src/lib/routes/Agents.svelte': component(`import { AgentCard } from '$lib/agents';`) },
 			{ 'index.ts': `export { default as AgentCard } from '../src/lib/agents/AgentCard.svelte';` }
 		),
 		['src/lib/routes/Agents.svelte → $lib/agents (re-exported AgentCard.svelte through index.ts)']
@@ -828,7 +1040,9 @@ test('the outside-the-face check can still see a violation', () => {
 	// through.
 	assert.deepEqual(
 		importsBehindASeam(
-			{ 'src/lib/routes/Agents.svelte': `const c = await import('$lib/agents/' + name);` },
+			{
+				'src/lib/routes/Agents.svelte': component(`const c = await import('$lib/agents/' + name);`),
+			},
 			{}
 		),
 		[
@@ -840,7 +1054,11 @@ test('the outside-the-face check can still see a violation', () => {
 	// is the directory's own module rather than a component.
 	assert.deepEqual(
 		importsBehindASeam(
-			{ 'src/lib/routes/Agents.svelte': `import Roster from '$lib/agents/AgentRoster.svelte';` },
+			{
+				'src/lib/routes/Agents.svelte': component(
+					`import Roster from '$lib/agents/AgentRoster.svelte';`
+				),
+			},
 			{}
 		),
 		[]

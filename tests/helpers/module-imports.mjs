@@ -1,108 +1,204 @@
 /**
- * What a source file actually imports, read from the code the module system
- * runs rather than from the text a pattern happens to match. PROBE-ONLY.
+ * What a source file actually imports, read with the PARSERS THE TOOLCHAIN
+ * ALREADY RUNS rather than with a pattern over its text. PROBE-ONLY.
  *
- * WHY THIS IS A MODULE AND NOT A REGEX IN EACH PROBE. Two probes assert the
- * face-6 swap seams — `tests/agents-mobile.test.mjs` for the whole face and
- * `tests/agents-roster.test.mjs` for the interim roster pieces — and both used
- * to extract imports with their own line-anchored regex. Round 3 of this pull
- * request's adversarial review compiled four legal Svelte/ESM files that took a
- * cross-seam dependency and returned NOTHING from both scans:
+ * WHY A PARSER AND NOT A FIFTH PATTERN. Two probes assert the face-6 swap seams
+ * — `tests/agents-mobile.test.mjs` for the whole face and
+ * `tests/agents-roster.test.mjs` for the interim roster pieces — and this module
+ * is what both of them read with. It has now been rewritten three times. Round 3
+ * of this pull request's review compiled four legal files that took a cross-seam
+ * dependency and returned nothing from a line-anchored regex; round 3's fix
+ * dropped the anchors and stripped comments before matching; round 4's review
+ * then compiled two more:
  *
- *   1. a block comment before the import, on the same line as it
- *   2. a block comment between `from` and the specifier
- *   3. either of those two shapes on an `export … from` re-export
- *   4. `const target = '$lib/agents/CopyBlock.svelte'; import(target);`
+ *   1. `import/* a comment *\/X from '<a component behind another seam>';`
+ *      — legal ESM, because a comment separates two tokens exactly as a space
+ *      does. Removing it CONCATENATES them, the stripped text reads `importX`,
+ *      and `\bimport\b` no longer matches a statement the module system runs.
  *
- * The first three are one defect wearing three hats: an anchored pattern was
- * asked to answer a question about syntax, and a comment is exactly the thing
- * that sits where a pattern expects whitespace. The answer is not a fourth
- * pattern — it is to stop the walker seeing comments at all, which is what
- * `stripScriptSource` does and why that reading lives beside the template one in
- * `scripts/lib/strip-comments.mjs` rather than being retyped here.
+ *   2. a markup comment carrying a fake `<script>` opener, which steered the
+ *      block-extracting regex from inside the comment through the REAL closing
+ *      tag — so the text handed to the import scan was the markup between them
+ *      and never the script Svelte compiles.
  *
- * The fourth is a different defect and is handled by `computedImports`: an
- * import whose target no static read can name is a FINDING in every walked file,
- * inside the face and outside it. See its header.
+ * Both are the same defect as the first four, and so was every fix: a pattern
+ * was asked a question about SYNTAX. A comment is exactly what sits where a
+ * pattern expects whitespace, and `<script>` is a tag rather than a substring.
+ * There is no sixth pattern worth writing, because the class is unbounded — the
+ * next reviewer only has to find a seventh place a comment may legally sit.
  *
- * A FIFTH form the same round's fixtures imply, closed here too: the old anchor
- * was `^[ \t]*import`, and a `const` declaration followed on the same line by an
- * import declaration is a legal module line whose import is not at the start of
- * it. The patterns below carry no line anchor, so a statement that precedes an
- * import on its own line no longer hides it.
+ * So nothing here matches text any more. A component's script is extracted by
+ * the SVELTE COMPILER, which is the thing that decides what a `<script>` block
+ * is, and imports are extracted from the TYPESCRIPT COMPILER's syntax tree,
+ * which is the thing that decides what an import is. A fake opener inside a
+ * comment is not a script block to a parser that has already tokenized the
+ * comment; a comment between `import` and its binding is a trivia node between
+ * two tokens rather than a hole in a regex. Comment placement stops being a
+ * question this module answers, by construction, in every form and every
+ * position — which is the whole point of the change.
  *
- * OVER-MATCHING IS THE SAFE DIRECTION and these patterns take it deliberately.
- * A specifier is returned as a SET per file, so a pattern that matches the same
- * import twice, or that reads `"an excerpt from 'the doc'"` as an import of `the
- * doc`, costs a caller a specifier that resolves to nothing outside the face and
- * is discarded. A pattern that matches too little costs the caller a dependency
- * it never sees. Every choice here is made in the first direction.
+ * Both parsers are already in this repository's dependency tree and are already
+ * what judges these same files: `svelte` compiles every component the build
+ * emits, and `typescript` is what `pnpm run typecheck` and `svelte-check` run.
+ * This module adds no dependency; it stops reimplementing two that are present.
+ *
+ * WHAT IS STILL NOT READABLE, said plainly, because a parser is not omniscience.
+ * `import(someExpression)` names a module no static read can resolve, and that
+ * is a FINDING in every walked file, inside the face and outside it — see
+ * `computedImports`. A module reached by something that is not an import at all
+ * is outside any static reach and outside this module's claim.
+ *
+ * WHERE OVER-INCLUSION IS STILL DELIBERATE. A type-only import and an
+ * `import('…')` in type position are not runtime edges, and both are reported.
+ * Swapping a component behind a seam breaks a type that names it exactly as it
+ * breaks a value that names it, so for a SEAM check they are dependencies. That
+ * is the one place this module deliberately reports more than the module system
+ * loads; everywhere else it reports what the compilers see, no more and no less.
  */
-import { stripComments, stripScriptSource } from '../../scripts/lib/strip-comments.mjs';
+import { parse } from 'svelte/compiler';
+import ts from 'typescript';
 
 /**
- * The source a file's imports can live in, with the comments of that source's
- * own language removed.
+ * The script a file executes.
  *
- * Svelte executes `<script>` and nothing else, so in a component that is what is
- * read. Skipping the template is a statement about Svelte rather than a
- * convenience: markup holds no import declaration, `<style>`'s `@import` is a
- * CSS rule and not a module edge, and reading template prose as script would
- * mean apostrophes opening string literals.
+ * For a component that is its `<script>` blocks, both of them — instance and
+ * `module` — taken from the compiler's own parse rather than from a tag-shaped
+ * regex. The compiler is what decides where a script begins and ends, which is
+ * the entire content of the second bypass above: a `<script>` written inside a
+ * markup comment is a comment, and no amount of care with a pattern makes that
+ * distinction reliably, because the distinction is the parser's.
  *
- * A component with NO `<script>` is a template, and it gets the template reading
- * — the one `scripts/audit-renderer-authority.mjs` uses over the same files.
- * Nothing in that reading touches an import statement, so the seam probes'
- * planted one-liners are the same input to the caller either way, while an
- * import-shaped sentence inside `<!-- … -->` is the prose it looks like.
+ * A component with no script executes no import and yields the empty string.
+ * The template reading it used to fall back to is gone with the patterns: markup
+ * holds no import declaration, so there was never anything in it to find.
  *
- * An unterminated `<script>` runs to the end of the file, so a missing closing
- * tag scans more text rather than less.
+ * For anything else the file IS the script and is returned unchanged. Comments
+ * are not stripped anywhere here — the TypeScript parser tokenizes them as
+ * trivia, which is the correct handling and the one no stripper reproduced.
+ *
+ * A component the compiler cannot parse THROWS rather than scanning as empty.
+ * Silence would be the fail-open answer — an unreadable file and a file with no
+ * cross-seam import would return the same green — and a thrown error is a red
+ * gate, which is the direction a seam check should fail in. Nothing in this
+ * repository's tree trips it: all 1246 files the two walks touch parse.
  */
 export function liveScript(file, source) {
-	if (!/\.svelte$/i.test(file)) return stripScriptSource(source);
-	const blocks = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)(?:<\/script>|$)/gi)].map(
-		([, body]) => body
-	);
-	return blocks.length ? stripScriptSource(blocks.join('\n')) : stripComments(source);
+	if (!/\.svelte$/i.test(file)) return source;
+
+	let ast;
+	try {
+		ast = parse(source, { modern: true, filename: file });
+	} catch (error) {
+		throw new Error(
+			`${file}: the Svelte compiler cannot parse this component, so its imports cannot be read — ${error.message}`,
+			{ cause: error }
+		);
+	}
+
+	return [ast.module, ast.instance]
+		.filter(Boolean)
+		.map((block) => source.slice(block.content.start, block.content.end))
+		.join('\n');
 }
 
 /**
+ * The script parsed as TypeScript, which is a superset of every dialect this
+ * repository writes — `.ts` modules, `.mjs` probes, and `lang="ts"` or plain
+ * `<script>` component bodies alike.
+ *
+ * A source with parse errors THROWS, for the reason `liveScript` throws: a tree
+ * the parser recovered from by guessing is a tree that can silently omit a
+ * statement, and a gate must not read a broken file as a clean one. The check
+ * asserts the diagnostic array EXISTS as well as being empty, so a TypeScript
+ * release that moves this property turns the gate red instead of quietly
+ * removing the check.
+ */
+function parsed(source) {
+	const file = ts.createSourceFile(
+		'probe.ts',
+		source,
+		ts.ScriptTarget.Latest,
+		true,
+		ts.ScriptKind.TS
+	);
+	if (!Array.isArray(file.parseDiagnostics))
+		throw new Error(
+			'the TypeScript parser no longer reports parse diagnostics under `parseDiagnostics`; ' +
+				'this scan cannot tell a clean parse from a recovered one until that is re-bound'
+		);
+	if (file.parseDiagnostics.length)
+		throw new Error(
+			`this source does not parse as TypeScript, so its imports cannot be read — ${ts.flattenDiagnosticMessageText(file.parseDiagnostics[0].messageText, ' ')}`
+		);
+	return file;
+}
+
+/** Depth-first over every node, which is where an import may legally appear. */
+function eachNode(node, visit) {
+	visit(node);
+	ts.forEachChild(node, (child) => eachNode(child, visit));
+}
+
+/** The text of a specifier a static read can name, or null when it cannot. */
+function staticSpecifier(node) {
+	if (!node) return null;
+	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+	return null;
+}
+
+/**
+ * `import(…)` as a CALL, which is a question only the tree can answer.
+ *
+ * The text `import(` also spells a class member NAMED `import` — vendored
+ * greater-components has one in `primitives/stores/preferences` — and the
+ * previous scan needed a hand-written rule to tell a parameter list from an
+ * argument so it would not report source this repository may not edit. The rule
+ * is gone: a method declaration is a `MethodDeclaration`, an import call is a
+ * `CallExpression` whose callee is the `import` KEYWORD, and no exclusion list
+ * has to be maintained to keep them apart. `import.meta` is a third node again.
+ */
+const isImportCall = (node) =>
+	ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword;
+
+/**
  * Every module specifier a source depends on, in every form that reaches a file:
- * `import … from`, `export … from`, a side-effect `import '…'`, and a dynamic
- * `import('…')`.
+ * `import … from`, `export … from`, `export * from`, a side-effect `import '…'`,
+ * `import x = require('…')`, a dynamic `import('…')` with a readable argument,
+ * and `import('…')` in type position.
  *
- * The gap between the keyword and `from` may hold neither `;` nor a backtick, so
- * a multi-line named import spanning several lines — which is how
- * `AgentMcpPanel` imports the mcp module — still matches, while a terminated
- * statement cannot run on and attribute the NEXT statement's specifier to
- * itself. Attribution is per file rather than per statement, so even that would
- * only duplicate a specifier the caller already has.
- *
- * Pass the source through `liveScript` first. This function reads what it is
- * given; handing it raw text hands it comments.
+ * Pass a component's source through `liveScript` first. This function reads what
+ * it is given, and what it is given must be script.
  */
 export function moduleSpecifiers(source) {
 	const specifiers = new Set();
-	for (const pattern of [
-		/(?<![\w$.])(?:import|export)\b[^;`]*?\bfrom\s*['"]([^'"]+)['"]/g,
-		/(?<![\w$.])import\s*['"]([^'"]+)['"]/g,
-		/(?<![\w$.])import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-	])
-		for (const [, specifier] of source.matchAll(pattern)) specifiers.add(specifier);
+	const add = (node) => {
+		const specifier = staticSpecifier(node);
+		if (specifier) specifiers.add(specifier);
+	};
+
+	eachNode(parsed(source), (node) => {
+		if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+		else if (
+			ts.isImportEqualsDeclaration(node) &&
+			ts.isExternalModuleReference(node.moduleReference)
+		)
+			add(node.moduleReference.expression);
+		else if (ts.isImportTypeNode(node) && node.argument && ts.isLiteralTypeNode(node.argument))
+			add(node.argument.literal);
+		else if (isImportCall(node)) add(node.arguments[0]);
+	});
+
 	return [...specifiers];
 }
 
 /**
- * `import(<anything but a bare literal>)` — a dependency no static read can name.
+ * `import(<anything but a readable literal>)` — a dependency no static read can
+ * name, returned as the argument's source text so the finding names a place.
  *
- * Matched by taking EVERY `import(…)` call and subtracting the ones whose whole
- * argument is a string literal, rather than by pattern-matching the shapes a
- * computed specifier can take. `import('$lib/agents/' + name)` opens with a
- * quote and closes with an identifier, and a rule that looked at the first
- * character would have called it a literal and moved on. `import(target)` names
- * nothing at all, which is the round-3 bypass: a walker that only reads the
- * expression's TEXT for a directory name reads no directory name and passes.
+ * Taken by SUBTRACTION, as it was before: every import call that is not a plain
+ * string or an un-interpolated template is unreadable. `import('$lib/agents/' +
+ * name)` opens with a quote and is not a literal; `import(target)` names nothing
+ * at all. A call with no argument is unreadable too and reports as `import()`.
  *
  * The caller is expected to treat every return value as a finding. Resolving the
  * variable instead was considered and rejected: constant-folding one assignment
@@ -110,76 +206,16 @@ export function moduleSpecifiers(source) {
  * property worth holding is that the face's dependency graph is statically
  * readable — not that this walker is clever.
  */
-const IMPORT_CALL = /(?<![.\w$])import\s*\(/g;
-const isLiteralArgument = (expression) => /^\s*(['"])[^'"]*\1\s*$/.test(expression);
-
-/**
- * The call's argument, brackets balanced and quotes respected, so that
- * `import(resolve('x'))` is reported as what it is rather than truncated at the
- * first `)` into something the reader has to reconstruct. An unbalanced call is
- * not valid source; its first line is reported so the finding still names a
- * place.
- */
-function readCallArgument(source, openIndex) {
-	let depth = 0;
-	let quote = null;
-	for (let index = openIndex; index < source.length; index += 1) {
-		const char = source[index];
-		if (quote) {
-			if (char === '\\') index += 1;
-			else if (char === quote) quote = null;
-			continue;
-		}
-		if (char === "'" || char === '"' || char === '`') quote = char;
-		else if (char === '(' || char === '[' || char === '{') depth += 1;
-		else if (char === ')' || char === ']' || char === '}') {
-			depth -= 1;
-			if (depth === 0) return source.slice(openIndex + 1, index);
-		}
-	}
-	return null;
-}
-
-/**
- * `import(json: string): boolean` is a class member NAMED `import`, not a call —
- * vendored greater-components has one in `primitives/stores/preferences`, and
- * calling it a computed import would make the fail-closed rule above fire on
- * source this repository may not edit.
- *
- * The discriminator is the argument's own shape: a top-level `:` with no
- * top-level `?` is a parameter list and cannot be an expression. Every `:` a
- * real `import()` argument can contain is inside brackets (an object literal),
- * inside quotes (`'http://…'`), or paired with a `?` (a conditional) — so this
- * cannot be used the other way round to disguise a call as a declaration.
- */
-function isParameterList(expression) {
-	let depth = 0;
-	let quote = null;
-	let colon = false;
-	let question = false;
-	for (let index = 0; index < expression.length; index += 1) {
-		const char = expression[index];
-		if (quote) {
-			if (char === '\\') index += 1;
-			else if (char === quote) quote = null;
-			continue;
-		}
-		if (char === "'" || char === '"' || char === '`') quote = char;
-		else if (char === '[' || char === '{' || char === '(') depth += 1;
-		else if (char === ']' || char === '}' || char === ')') depth -= 1;
-		else if (depth === 0 && char === ':') colon = true;
-		else if (depth === 0 && char === '?') question = true;
-	}
-	return colon && !question;
-}
-
 export function computedImports(source) {
+	const file = parsed(source);
 	const computed = [];
-	for (const match of source.matchAll(IMPORT_CALL)) {
-		const open = match.index + match[0].length - 1;
-		const argument = readCallArgument(source, open) ?? source.slice(open + 1).split('\n')[0];
-		if (isLiteralArgument(argument) || isParameterList(argument)) continue;
-		computed.push(argument);
-	}
+
+	eachNode(file, (node) => {
+		if (!isImportCall(node)) return;
+		const [argument] = node.arguments;
+		if (staticSpecifier(argument) !== null) return;
+		computed.push(argument ? argument.getText(file) : '');
+	});
+
 	return computed;
 }
