@@ -18,9 +18,10 @@
     "build:server": "vite build --ssr src/facetheory/entry-server.ts",
     "build:assets": "node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs",
     "build": "pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate",
-    "validate": "pnpm run validate:renderer-authority && pnpm run validate:csp",
+    "validate": "pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph",
     "validate:csp": "node scripts/audit-csp.mjs",
     "validate:renderer-authority": "node scripts/audit-renderer-authority.mjs",
+    "validate:seam-graph": "node scripts/audit-seam-graph.mjs",
     "test": "node --test --experimental-strip-types 'tests/*.test.mjs' 'scripts/*.test.mjs'"
   },
   "dependencies": {
