@@ -1,0 +1,314 @@
+/*
+ * Face 6 — the agent roster and MCP detail (product design §5) · mcp surface.
+ *
+ * CONTENTUS-OWNED, and unlike the compose/timelines/messaging layers this file
+ * is not an interim stand-in for missing vendored CSS. Face 6's roster and MCP
+ * panel are composed here from `shell` (`Panel`, `StatCard`, `PageFrame`) plus
+ * contentus components, exactly as the roadmap prescribes for this milestone,
+ * so their appearance is ours to state. When greater M6a lands vendored roster
+ * and MCP components, the `.contentus-agent*` rules for whatever it replaces go
+ * with the components — the swap seam is `$lib/agents/AgentRoster.svelte`.
+ *
+ * The violet Signal accent is the mcp surface's, applied through `--tc-*` brand
+ * tokens rather than literals: this file carries no brand colour of its own.
+ */
+
+.contentus-agents__filters {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: var(--tc-space-3);
+	margin-bottom: var(--tc-space-5);
+	padding: var(--tc-space-4);
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-lg);
+}
+
+.contentus-agents__filter {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+	flex: 1 1 12rem;
+	min-width: 0;
+}
+
+.contentus-agents__filter-label {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-agents__filter-input {
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	color: var(--tc-fg);
+	background: var(--tc-bg);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+}
+
+.contentus-agents__filter-input:focus-visible {
+	outline: 2px solid var(--tc-accent);
+	outline-offset: 2px;
+}
+
+.contentus-agents__filter-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-3);
+	flex: 0 0 auto;
+}
+
+.contentus-agents__filter-submit {
+	min-height: 44px;
+	padding: 0 var(--tc-space-5);
+	color: var(--tc-fg-inverse);
+	background: var(--tc-accent);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-agents__filter-clear {
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
+	color: var(--tc-fg-muted);
+	text-decoration: none;
+}
+
+.contentus-agents__filter-clear:hover,
+.contentus-agents__filter-clear:focus-visible {
+	color: var(--tc-fg);
+	text-decoration: underline;
+}
+
+.contentus-agents__stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+	gap: var(--tc-space-3);
+	margin-bottom: var(--tc-space-5);
+}
+
+.contentus-agents__notice {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	line-height: 1.6;
+}
+
+.contentus-agents__grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+	gap: var(--tc-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-agents__grid-item {
+	display: flex;
+}
+
+/* --- card ------------------------------------------------------------- */
+
+.contentus-agent-card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	flex: 1;
+	padding: var(--tc-space-4);
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-lg);
+}
+
+.contentus-agent-card:focus-within {
+	border-color: var(--tc-accent);
+}
+
+.contentus-agent-card__head {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+}
+
+.contentus-agent-card__name {
+	margin: 0;
+	font-size: 1.0625rem;
+	line-height: 1.3;
+}
+
+.contentus-agent-card__link {
+	color: var(--tc-fg);
+	text-decoration: none;
+}
+
+/* The card-wide target: the heading link covers the whole card so a thumb gets
+   the full block, while the link's accessible name stays the agent's name. */
+.contentus-agent-card__link::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+}
+
+.contentus-agent-card__link:hover,
+.contentus-agent-card__link:focus-visible {
+	text-decoration: underline;
+}
+
+.contentus-agent-card__handle {
+	margin: 0;
+	font-family: var(--tc-font-mono);
+	font-size: 0.8125rem;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-agent-card__badges {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--tc-space-2);
+}
+
+.contentus-agent-card__bio {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: 0.9375rem;
+	line-height: 1.55;
+}
+
+.contentus-agent-card__meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-4);
+	margin: 0;
+	padding-top: var(--tc-space-3);
+	border-top: 1px solid var(--tc-outline);
+}
+
+.contentus-agent-card__meta-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.contentus-agent-card__meta dt {
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-agent-card__meta dd {
+	margin: 0;
+	font-size: 0.9375rem;
+	font-weight: 600;
+	color: var(--tc-fg);
+}
+
+/* --- pills ------------------------------------------------------------ */
+
+.contentus-agent-trust {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-2);
+}
+
+.contentus-agent-pill {
+	display: inline-flex;
+	align-items: center;
+	padding: 3px var(--tc-space-2);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-pill);
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+/* The type is a category, not a judgement, so it takes neutral linework and
+   leaves the accent to mean something. */
+.contentus-agent-pill--type {
+	color: var(--tc-fg);
+	border-color: var(--tc-outline-variant);
+	background: transparent;
+}
+
+/* Verified takes the surface accent (Violet Signal on `mcp`) because the brand
+   pack ships no success green — Core Blue, Violet and Phi Gold are the whole
+   accent vocabulary. Inventing a green here would put a colour in the product
+   that the design pack does not define, which is the same class of mistake as
+   inventing a token. */
+.contentus-agent-pill--success {
+	color: var(--tc-accent);
+	border-color: var(--tc-accent);
+}
+
+.contentus-agent-pill--warning {
+	color: var(--tc-phi-gold);
+	border-color: var(--tc-phi-gold);
+}
+
+.contentus-agent-pill--critical {
+	color: var(--tc-error);
+	border-color: var(--tc-error);
+}
+
+.contentus-agent-pill--neutral {
+	color: var(--tc-fg-muted);
+	border-color: var(--tc-outline);
+}
+
+/* --- paging ----------------------------------------------------------- */
+
+.contentus-agents__paging {
+	display: flex;
+	justify-content: center;
+	margin-top: var(--tc-space-5);
+}
+
+.contentus-agents__next {
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
+	padding: 0 var(--tc-space-5);
+	color: var(--tc-fg);
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	text-decoration: none;
+	font-weight: 600;
+}
+
+.contentus-agents__next:hover,
+.contentus-agents__next:focus-visible {
+	border-color: var(--tc-accent);
+	color: var(--tc-accent);
+}
+
+/* --- mobile ----------------------------------------------------------- */
+
+@media (max-width: 960px) {
+	.contentus-agents__grid {
+		/* Single column everywhere below 960px (product design §4). */
+		grid-template-columns: 1fr;
+	}
+
+	.contentus-agents__filters {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.contentus-agents__filter-actions {
+		justify-content: space-between;
+	}
+}

@@ -79,11 +79,14 @@ export const NAV_ENTRIES: NavEntry[] = [
 	{
 		id: 'agents',
 		label: 'Agents',
-		href: null,
-		pageKey: null,
+		href: href('/agents'),
+		pageKey: 'agents',
 		surface: 'mcp',
+		// Anonymous, like Timelines and unlike Messages: lesser serves `agents`
+		// and `agent` without a caller. The owned view on the same route says
+		// what it needs rather than gating the public roster.
 		requiresAuth: false,
-		upcoming: 'M6',
+		upcoming: null,
 	},
 ];
 

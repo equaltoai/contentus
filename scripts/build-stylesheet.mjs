@@ -201,6 +201,17 @@ function stylesheetLayers() {
 			label: 'contentus messaging theme — face 5 chrome + upstream class contract',
 			css: readRepoFile('src/lib/brand/messaging.css'),
 		},
+		{
+			// NOT interim, unlike the three layers above it. Face 6's roster and
+			// MCP panel are composed from vendored `shell` plus contentus-owned
+			// components — which is what the roadmap prescribes until greater M6a
+			// lands vendored roster/MCP components — so every class here belongs to
+			// a contentus component rather than standing in for an upstream
+			// stylesheet that was not emitted. It leaves with the components it
+			// styles when the swap seam is taken.
+			label: 'contentus agents theme — face 6 roster and MCP detail',
+			css: readRepoFile('src/lib/brand/agents.css'),
+		},
 	];
 }
 

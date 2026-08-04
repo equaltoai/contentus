@@ -130,6 +130,19 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'mcp',
 		requiresAuth: true,
 	},
+	agents: {
+		key: 'agents',
+		path: '/agents',
+		title: 'Agents',
+		eyebrow: 'Agents and MCP',
+		summary: 'Agents registered on this instance, and the MCP surface each publishes.',
+		surface: 'mcp',
+		// Anonymous, like `/timelines` and unlike `/messages`: lesser serves
+		// `agents` and `agent` without a caller. Only `myAgents` and the
+		// `ownerUsername` filter need a token, and the surfaces that use them say
+		// so themselves rather than gating the whole public roster.
+		requiresAuth: false,
+	},
 	profile: {
 		key: 'profile',
 		path: '/profiles',
@@ -171,6 +184,7 @@ export const ROUTE_PATTERNS = [
 	'/timelines',
 	'/messages',
 	'/messages/{conversationId}',
+	'/agents',
 	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
@@ -219,6 +233,7 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` and `/profiles` above.
 	if (segmentAfter(route, '/messages/')) return PAGE_DEFINITIONS['message-thread'];
+	if (route === '/agents') return PAGE_DEFINITIONS.agents;
 	// `/profiles` with no username names no actor, so it is not the profile
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` above.
@@ -385,6 +400,42 @@ export function conversationHref(conversationId: string): string {
  */
 export function profileHref(handle: string): string {
 	return href(`/profiles/${encodeURIComponent(handle)}`);
+}
+
+/**
+ * App-relative href for the agent roster, filters included.
+ *
+ * Lives here with the other href builders rather than beside the filter model,
+ * so `$lib/agents/filters` stays a pure module with no route dependency — the
+ * same split `$lib/timelines/tabs` and `timelinesHref` already use.
+ *
+ * `after` is a cursor, and a cursor is only meaningful within the query that
+ * produced it: a caller changing any facet must drop it, or lesser is asked to
+ * resume a list that no longer exists. The type makes that the caller's
+ * decision by taking the whole state at once.
+ */
+export function agentsHref(
+	filters: {
+		type?: string | null;
+		query?: string | null;
+		verified?: boolean | null;
+		after?: string | null;
+	} = {}
+): string {
+	const params = new URLSearchParams();
+	if (filters.type) params.set('type', filters.type);
+	if (filters.query) params.set('q', filters.query);
+	if (filters.verified === true) params.set('verified', 'true');
+	if (filters.verified === false) params.set('verified', 'false');
+	if (filters.after) params.set('after', filters.after);
+
+	const search = params.toString();
+	return search ? `${href('/agents')}?${search}` : href('/agents');
+}
+
+/** App-relative href for one agent's detail page. */
+export function agentHref(username: string): string {
+	return href(`/agents/${encodeURIComponent(username.trim().replace(/^@/, ''))}`);
 }
 
 /** Build an app-relative href, base path included. */

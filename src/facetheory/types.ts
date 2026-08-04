@@ -1,3 +1,5 @@
+import type { AgentRosterPage, AgentUnavailable } from '$lib/agents/contract';
+import type { AgentRosterFilterState } from '$lib/agents/filters';
 import type { ArticleBodyDecision } from '$lib/cms/articles';
 import type { SourceStatus } from '$lib/cms/compose';
 import type { ArticleSummary, ArticleDetail, CategorySummary, SeriesSummary } from '$lib/cms/types';
@@ -17,6 +19,7 @@ export type AppPageKey =
 	| 'timelines'
 	| 'messages'
 	| 'message-thread'
+	| 'agents'
 	| 'profile'
 	| 'auth-callback'
 	| 'not-found';
@@ -219,6 +222,20 @@ export interface MessagesRouteData {
 	conversationId: string | null;
 }
 
+/**
+ * The `/agents` roster.
+ *
+ * Anonymous by construction: every field here comes from a read lesser serves
+ * without a caller, because these props are serialized into the public
+ * hydration endpoint. The viewer's own agents (`myAgents`) are fetched in the
+ * browser and never travel through here.
+ */
+export interface AgentsRouteData {
+	page: AgentRosterPage | null;
+	failure: AgentUnavailable | null;
+	filters: AgentRosterFilterState;
+}
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
@@ -229,5 +246,6 @@ export interface RouteProps {
 	review: ReviewRouteData | null;
 	timelines: TimelinesRouteData | null;
 	messages: MessagesRouteData | null;
+	agents: AgentsRouteData | null;
 	profile: ProfileRouteData | null;
 }

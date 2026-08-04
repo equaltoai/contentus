@@ -18,6 +18,8 @@ import {
 	graphqlEndpointForOrigin,
 	resolveRequestOrigin,
 } from '$lib/cms/origin';
+import { fetchAgentRoster } from '$lib/agents/contract';
+import { resolveAgentFilters } from '$lib/agents/filters';
 import { loadSourceStatus } from '$lib/cms/compose';
 import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cms/loaders';
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
@@ -97,6 +99,7 @@ async function createRouteProps(
 		review: null,
 		timelines: null,
 		messages: null,
+		agents: null,
 		profile: null,
 	};
 
@@ -170,6 +173,31 @@ async function createRouteProps(
 					conversationId: resolveConversationId(path),
 				},
 			};
+		case 'agents': {
+			// Anonymous-safe, so the server paints a real roster. lesser resolves
+			// the viewer optionally for `agents` and requires a caller only for the
+			// `ownerUsername` argument, which this surface does not use — the
+			// viewer's own agents are a client-only read on the same route.
+			const filters = resolveAgentFilters(query);
+			const result = await fetchAgentRoster(
+				{ endpoint },
+				{
+					type: filters.type,
+					query: filters.query,
+					verified: filters.verified,
+					after: filters.after,
+				}
+			);
+
+			return {
+				...base,
+				agents: {
+					page: result.ok ? result.page : null,
+					failure: result.ok ? null : result.failure,
+					filters,
+				},
+			};
+		}
 		case 'profile': {
 			// Both halves are anonymous-safe, so the profile renders completely
 			// on the server. The actor is resolved first because its `id` is

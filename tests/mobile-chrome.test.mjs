@@ -127,34 +127,41 @@ test('no tab depends on hover to say what it is', async () => {
 	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/" aria-current="page"/);
 });
 
-test('an unshipped face is a disabled tab, never a link that would 404', async () => {
+test('every tab is either a link to a route that answers, or a disabled span', async () => {
+	// THE RULE, rather than a list of which faces have shipped. This used to
+	// enumerate the upcoming ones and shrink by one per milestone; M6 landed the
+	// last upcoming tab in the bar, so an enumeration would now assert an empty
+	// set and quietly stop checking anything. The invariant is what mattered all
+	// along: lesser has no SPA fallback under `/l/*`, so a tab href pointing at a
+	// route that does not exist is a hard error page, not a soft miss.
 	const rendered = await renderRoute(handler, { name: 'index', path: '/l/', expectStatus: 200 });
 
-	// lesser has no SPA fallback under /l/*, so an href to a route that does not
-	// exist is a hard error page rather than a soft miss.
-	assert.match(rendered.html, /<span class="contentus-tabbar__tab" aria-disabled="true">/);
-	// Agents (M6) is still upcoming. Timelines moved to the shipped assertion
-	// below when M4 landed its route; this list shrinks by one each milestone,
-	// and a face that shipped without moving would leave a dead link behind.
-	assert.doesNotMatch(rendered.html, /class="contentus-tabbar__tab" href="\/l\/agents"/);
-	assert.doesNotMatch(rendered.html, /class="contentus-tabbar__tab" href="\/l\/messages"/);
+	const tabs = [...rendered.html.matchAll(/<(a|span) class="contentus-tabbar__tab"([^>]*)>/g)];
+	assert.ok(tabs.length >= 3, 'the bar must render its tabs');
+
+	for (const [, element, attributes] of tabs) {
+		if (element === 'span') {
+			assert.match(attributes, /aria-disabled="true"/, 'an inert tab must say it is inert');
+			continue;
+		}
+
+		const path = /href="([^"]+)"/.exec(attributes)?.[1];
+		assert.ok(path, 'a link tab must carry an href');
+
+		const target = await renderRoute(handler, { name: `tab:${path}`, path, expectStatus: 200 });
+		assert.equal(target.status, 200, `${path} is linked from the tab bar and must answer`);
+	}
 });
 
 test('a SHIPPED face is a real link, so the tab bar tracks what exists', async () => {
 	const rendered = await renderRoute(handler, { name: 'index', path: '/l/', expectStatus: 200 });
 
 	// The other half of the rule above, and the half that catches the opposite
-	// mistake: a face whose route landed while its nav entry stayed `upcoming`
-	// is a surface nobody can reach from the chrome.
+	// mistake: a face whose route landed while its nav entry stayed `upcoming` is
+	// a surface nobody can reach from the chrome. Agents joined this assertion
+	// when M6 landed its route, the way Timelines did at M4.
 	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/timelines"/);
-
-	// And the route it points at must actually answer.
-	const timelines = await renderRoute(handler, {
-		name: 'timelines',
-		path: '/l/timelines',
-		expectStatus: 200,
-	});
-	assert.equal(timelines.status, 200);
+	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/agents"/);
 });
 
 test('the anonymous server render shows only anonymous tabs', async () => {

@@ -98,6 +98,13 @@ const FORBIDDEN_RENDERER_PACKAGES = [
  */
 const OWNED_SOURCE_DIRS = [
 	'src/facetheory',
+	// Face 6's contentus-owned agent roster and MCP detail (M6). Added WITH the
+	// directory, the rule check 5 enforces. The claim being made here is narrow
+	// but real: this surface renders agent METADATA — handles, types, capability
+	// flags, MCP URLs — and never article or status content, so nothing in it has
+	// any business owning a renderer. An `{@html}` or a Markdown import appearing
+	// in this directory would be a defect wherever it came from.
+	'src/lib/agents',
 	'src/lib/auth',
 	'src/lib/brand',
 	'src/lib/build',
