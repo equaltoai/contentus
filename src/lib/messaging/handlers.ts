@@ -59,7 +59,7 @@ import {
 	type MessagePage,
 } from './contract.ts';
 import { createRereadQueue, REREAD_CONCURRENCY } from './reread-queue.ts';
-import { createSessionScope } from './session-scope.ts';
+import { createSessionScope } from '../auth/session-scope.ts';
 
 /**
  * How many conversations a folder read asks for.

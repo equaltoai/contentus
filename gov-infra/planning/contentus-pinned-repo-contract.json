@@ -94,7 +94,7 @@
       "tests/messaging-queries.test.mjs": "c4ef9c9187f681feb080fc25159aef0c3224f991e910e800020c744804fd2c9f",
       "tests/messaging-races.test.mjs": "9037063d71f335a712f639d2f2198d2dc36f7ce3d286a69cd38175be46c00fbc",
       "tests/messaging-realtime.test.mjs": "a62518325c801642357c02493398fa25fa1be5a213175cf7be2affd2768dd3fd",
-      "tests/messaging-session.test.mjs": "93a82d5ba925b218d0ccd8140d991653f0db8ed69061a9f8459d7e4183aacc23",
+      "tests/messaging-session.test.mjs": "c66ab8245e34ca0b49875b70b27f38793c41d2254f079455ba013659a6f03881",
       "tests/mobile-chrome.test.mjs": "5194c79368253af8ad90a73ea067cd42cea8d4f2cb6bf61b22baceaf15a89d9a",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
       "tests/renderer-authority-audit.test.mjs": "cdf99e5f4d9a3053579069e5714e1825cf27d4707161c5c278e1268b7d0f980d",

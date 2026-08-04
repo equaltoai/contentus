@@ -13,7 +13,7 @@
  * when it lands. The badge is the sharpest case: its store outlives every
  * binding it creates, so no teardown stands between one account's in-flight
  * count and the next account's nav. Those completions are stamped at dispatch
- * and dropped when the stamp names a dead session (`$lib/messaging/session-scope`,
+ * and dropped when the stamp names a dead session (`$lib/auth/session-scope`,
  * `$lib/auth/session-events`).
  *
  * WHAT IS EVIDENCE HERE AND WHAT IS WIRING. The first two groups drive REAL
@@ -40,7 +40,7 @@ import {
 	sessionGeneration,
 } from '../src/lib/auth/session-events.ts';
 import { createMessagingBinding } from '../src/lib/messaging/handlers.ts';
-import { createSessionScope } from '../src/lib/messaging/session-scope.ts';
+import { createSessionScope } from '../src/lib/auth/session-scope.ts';
 
 /* ============================================================
    The announcement

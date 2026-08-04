@@ -2,13 +2,21 @@
  * Which session an in-flight answer belongs to.
  *
  * THE DEFECT THIS EXISTS FOR. Closing the socket on sign-out ends the stream,
- * and it ends nothing else. Every HTTP read this surface had already dispatched
- * — the conversation list, a thread page, a folder re-read, the badge's own
- * count — is a promise nobody can recall, and it RESOLVES after the session that
- * authorized it has gone. The answer then reaches a store that is still mounted
- * and still rendering, under whichever session is there when it lands: the next
- * reader's, or none. On a surface whose whole subject is private correspondence,
- * that is one account's data published into another account's chrome.
+ * and it ends nothing else. Every HTTP read a signed-in surface had already
+ * dispatched — the conversation list, a thread page, a folder re-read, the
+ * badge's own count, the owned-agent inventory — is a promise nobody can recall,
+ * and it RESOLVES after the session that authorized it has gone. The answer then
+ * reaches a component that is still mounted and still rendering, under whichever
+ * session is there when it lands: the next reader's, or none. On a surface whose
+ * subject is private correspondence, or one operator's agent inventory, that is
+ * one account's data published into another account's chrome.
+ *
+ * IT LIVES UNDER `auth/` BECAUSE THE SESSION IS THE SUBJECT. It was written for
+ * the messages face and sat under `messaging/` while that was its only caller.
+ * `$lib/agents/MyAgents.svelte` has the same race for the same reason — an
+ * authorized read in flight across a sign-out — and a second face reaching into
+ * the first one's directory for a guard about auth would have been the wrong
+ * dependency rather than a shared one.
  *
  * A cancelled request is the better fix where the transport allows one, and
  * `graphqlRequest` takes an `AbortSignal`, so the binding aborts too. But an
@@ -20,12 +28,13 @@
  * to invalidate: the thing that owns it was torn down (`end`), or the SESSION
  * changed underneath it — a sign-out and sign-in with no teardown in between,
  * which is exactly the badge's race, since its store outlives every binding it
- * creates. `sessionGeneration` supplies the second; `$lib/auth/session-events`
- * advances it on every announced change.
+ * creates. `sessionGeneration` supplies the second; `./session-events` advances
+ * it on every announced change.
  *
  * Plain functions over plain numbers on purpose: `tests/messaging-session.test.mjs`
- * drives this directly, which a guard living inside a `.svelte.ts` store — a
- * file `node --test` cannot load — could not be.
+ * and `tests/agents-trust.test.mjs` drive this directly, which a guard living
+ * inside a `.svelte.ts` store or a component — files `node --test` cannot load —
+ * could not be.
  */
 
 /** Taken at DISPATCH, checked at COMPLETION. Opaque to its holder. */
