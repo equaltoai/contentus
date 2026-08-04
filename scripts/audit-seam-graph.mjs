@@ -75,9 +75,10 @@
  * for is loaded whether or not the watch saw it, so the day that plugin's position
  * stops seeing every load, the rule falls back to what it checked before rather
  * than quietly covering less. And what the build never loaded it also cannot be
- * judged for — so an externalized module is not counted as reached, and a tracked
- * face file a consumer externalizes lands in the containment rule below as a file
- * this gate cannot judge rather than passing as one it read.
+ * judged for — so RESOLVED and LOADED are kept as two facts rather than folded into
+ * one, and a tracked face file a consumer externalizes is resolved and not loaded
+ * and lands in the containment rule below as a file this gate cannot judge rather
+ * than passing as one it read.
  *
  * REACHED IS A FACT ABOUT A PASS, NOT ABOUT THE REPOSITORY, and round 11 is what
  * that sentence cost when it was not written down. The two passes recorded what
@@ -95,6 +96,33 @@
  * LOADS is that pass's finding, whatever the other pass did with the same file. A
  * file no pass resolves at all is the older finding, unchanged — the build never
  * reached it, so there is nothing unexamined about it in either pass.
+ *
+ * A FILE IS NOT A MODULE, and round 12 is what THAT cost. One file produces as many
+ * modules as there are ways to ask for it: `CopyBlock.svelte` is the component,
+ * `CopyBlock.svelte?raw` is its text, `CopyBlock.svelte?svelte&type=style&lang.css`
+ * is its stylesheet, and the bundler resolves and loads each of them separately.
+ * Both reach sets were keyed by the FILE, so one module's loading answered for
+ * another module's unexamined state: `AgentMcpPanel` importing `./CopyBlock.svelte?raw`
+ * — a legal import of a component its own seam owns — put the FILE in `loaded`, and
+ * the client pass externalizing the executable `CopyBlock.svelte` beside it was
+ * therefore CONTAINED. The component's client-pass edge went unrecorded, the
+ * containment rule had nothing to say, and the gate printed `771 / 771` and no
+ * findings over a real cross-seam dependency.
+ *
+ * So reach is keyed by the MODULE — the request whole, query and fragment included —
+ * and the containment rule asks its question of EVERY module a tracked file
+ * produced. EDGES stay keyed by the file, which is the other half of the same
+ * distinction: a seam offence is about the file a swap replaces, and an import of
+ * `CopyBlock.svelte?raw` from outside the face is an import of the face component
+ * whatever piece of it the importer asked for.
+ *
+ * NO VARIANT SHARES ANOTHER'S FATE, including the style subrequest that reads most
+ * like a piece of its component rather than a module of its own. It does not need
+ * to: this build resolves and LOADS every one of them, and the style window reads
+ * each on its own, so a subrequest passes both rules by being examined rather than
+ * by inheriting an excuse. Sharing a fate is not a convenience here — it is the
+ * mechanism that masked, and a rule that let any module answer for any other would
+ * be this finding rewritten.
  *
  * WHAT THIS GATE CANNOT SEE, stated plainly, because a mechanism that claims
  * everything is a mechanism nobody can check. Each one is either covered by
@@ -198,12 +226,37 @@ const WORKER_REFERENCE = /__VITE_WORKER_ASSET__[a-z\d]{8}__/;
  * The query and fragment are removed, because `…/CopyBlock.svelte?raw` is the
  * same FILE a swap would replace — the reasoning `tests/helpers/module-imports.mjs`
  * carries for the reading probes, held here for the same reason.
+ *
+ * WHICH MAKES THIS THE ANSWER TO ONE OF TWO QUESTIONS, and round 12 is the other
+ * one. "Which file is this an edge to" is this; "which module did the build
+ * resolve, and did it load THAT one" is `repoModule` below, because a file's
+ * variants are separate modules with separate code and separate edges, and one
+ * being loaded says nothing about another. Reach used this and inherited its
+ * blindness: see the header.
  */
 function repoPath(root, id) {
 	const file = String(id).split('?')[0].split('#')[0];
 	if (!isAbsolute(file)) return file;
 	const path = relative(root, file).split(sep).join('/');
 	return path.startsWith('..') ? file : path;
+}
+
+/**
+ * A module id as a repository-relative REQUEST — the path with whatever query and
+ * fragment addressed it still on the end.
+ *
+ * What the bundler resolves and loads is this, not the file: `X.svelte?raw` is a
+ * module of its own with its own code and no edges out of it, and the executable
+ * `X.svelte` beside it is another. Recording either under the file's bare path
+ * lets the one the build opened answer for the one it never did, which is the
+ * whole of round 12.
+ *
+ * `splitSpecifier` is the one splitter, so this round-trips: the path and the tail
+ * concatenate back to the id the build used.
+ */
+function repoModule(root, id) {
+	const [file, tail] = splitSpecifier(String(id));
+	return `${repoPath(root, file)}${tail}`;
 }
 
 /**
@@ -495,8 +548,15 @@ function recorder(pass, root, sink, references, observed, loads, reach) {
 				// and got it, which is the only way an edge OUT of it gets recorded. The two
 				// differing is exactly an externalized module, and the containment rule below
 				// reads them per pass because a pass's edges are its own: see the header.
-				reach.resolved.add(importer);
-				if (loaded) reach.loaded.add(importer);
+				//
+				// Keyed by the MODULE and not by the file, which is round 12: the build
+				// resolves and loads `X.svelte`, `X.svelte?raw` and `X.svelte?svelte&type=…`
+				// separately, and keying both sets by `X.svelte` let the one it opened stand
+				// in for the one it never did. `importer` is still the file, because that is
+				// what an EDGE is about — see `repoPath` and `repoModule`.
+				const moduleId = repoModule(root, id);
+				reach.resolved.add(moduleId);
+				if (loaded) reach.loaded.add(moduleId);
 				for (const target of info.importedIds ?? [])
 					sink.edges.push({ importer, target: repoPath(root, target), channel: `${pass}:import` });
 				for (const target of info.dynamicallyImportedIds ?? [])
@@ -777,11 +837,11 @@ export function trackedFaceFiles(root = process.cwd()) {
  *
  *   - Did every pass run? A gate that recorded nothing must not read as clean.
  *   - Is the face DECLARED and CONTAINED? Every component named exactly once, and
- *     every tracked file in the face LOADED BY EVERY PASS THAT RESOLVES IT. A file
- *     a pass resolves and never loads is a file that pass cannot judge, whatever
- *     the other pass made of it, and a file no pass resolves at all is one this
- *     gate has nothing on. Saying either is the difference between a gap and a
- *     silence.
+ *     EVERY MODULE a tracked file produced LOADED BY EVERY PASS THAT RESOLVES IT.
+ *     A module a pass resolves and never loads is one that pass cannot judge —
+ *     whatever the other pass made of it, and whatever the other modules of the
+ *     same file did — and a file no pass resolves at all is one this gate has
+ *     nothing on. Saying either is the difference between a gap and a silence.
  *   - Does any edge cross a seam? `seamOffence` in `./lib/agent-seams.mjs` is the
  *     rule, shared with the reading probes so that one graph answers both.
  */
@@ -813,27 +873,48 @@ export function seamFindings(sink, tracked) {
 		if (DECLARED.filter((entry) => entry === name).length > 1)
 			findings.push(`${name} is named in more than one place in the seam declaration`);
 
-	// CONTAINMENT, ASKED OF EACH PASS ON ITS OWN. A pass that RESOLVES a file and
-	// never LOADS it has an edge to a module whose own edges it did not record, and
-	// what the OTHER pass loaded says nothing about that: the channels are not
-	// symmetric — a `new URL(…)` is a client-pass edge, an `import()` behind
-	// `import.meta.env.SSR` a server-pass one — so the other pass is not looking at
-	// the same graph. That is the whole of round 11; the header carries the argument.
+	// Every MODULE a pass resolved, indexed by the file it is a request for, so the
+	// rule below can ask its question of each of them. A file is not a module: see
+	// `repoModule` and the header's round 12.
+	const modulesOf = new Map(
+		PASSES.map(({ name }) => {
+			const index = new Map();
+			for (const moduleId of sink.reached.get(name)?.resolved ?? []) {
+				const [file, tail] = splitSpecifier(moduleId);
+				index.set(file, [...(index.get(file) ?? []), tail]);
+			}
+			return [name, index];
+		})
+	);
+
+	// CONTAINMENT, ASKED OF EACH PASS ON ITS OWN AND OF EACH MODULE THE FILE MADE.
+	// A pass that RESOLVES a module and never LOADS it has an edge to something whose
+	// own edges it did not record, and neither the other pass nor another module of
+	// the same file says anything about that. The other pass is not looking at the
+	// same graph — the channels are not symmetric, a `new URL(…)` being a client-pass
+	// edge and an `import()` behind `import.meta.env.SSR` a server-pass one, which is
+	// round 11. And another module of the same file is not the same module — the text
+	// of a component carries none of the component's dependencies, which is round 12.
+	// The header carries both arguments.
 	//
 	// A file no pass resolved at all is the older finding and a different one: the
 	// build never reached it, so nothing about it is unexamined in either pass, and
 	// what this gate has is nothing rather than half.
 	for (const path of tracked) {
+		let resolvedSomewhere = false;
 		for (const { name } of PASSES) {
 			const reach = sink.reached.get(name);
-			if (reach?.resolved.has(path) && !reach.loaded.has(path))
+			for (const tail of modulesOf.get(name)?.get(path) ?? []) {
+				resolvedSomewhere = true;
+				if (reach.loaded.has(`${path}${tail}`)) continue;
 				findings.push(
-					`${path} is tracked inside the face and the ${name} build resolves it and never ` +
-						'loads it, so the edges it takes in that pass are unrecorded and this gate ' +
-						'cannot judge it there'
+					`${path}${tail} is a module of a file tracked inside the face and the ${name} ` +
+						'build resolves it and never loads it, so the edges it takes in that pass are ' +
+						'unrecorded and this gate cannot judge it there'
 				);
+			}
 		}
-		if (![...sink.reached.values()].some((reach) => reach.resolved.has(path)))
+		if (!resolvedSomewhere)
 			findings.push(
 				`${path} is tracked inside the face and no build pass loads it, so no edge of ` +
 					'its own is recorded and this gate cannot judge it'

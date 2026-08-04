@@ -736,12 +736,12 @@ test('a face component the build externalizes is a file this gate cannot judge',
 	// pass externalizes in BOTH, so both passes report it — each for its own graph,
 	// which is round 11's rule and reads here as the same fact said twice.
 	assert.deepEqual(await audit({}, undefined, (id) => id.endsWith('CopyBlock.svelte')), [
-		'src/lib/agents/CopyBlock.svelte is tracked inside the face and the client build resolves ' +
-			'it and never loads it, so the edges it takes in that pass are unrecorded and this gate ' +
-			'cannot judge it there',
-		'src/lib/agents/CopyBlock.svelte is tracked inside the face and the server build resolves ' +
-			'it and never loads it, so the edges it takes in that pass are unrecorded and this gate ' +
-			'cannot judge it there',
+		'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
+			'client build resolves it and never loads it, so the edges it takes in that pass are ' +
+			'unrecorded and this gate cannot judge it there',
+		'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
+			'server build resolves it and never loads it, so the edges it takes in that pass are ' +
+			'unrecorded and this gate cannot judge it there',
 	]);
 });
 
@@ -778,9 +778,9 @@ test('the pass that loads a component does not excuse the pass that externalizes
 			(id, pass) => pass === 'client' && id.endsWith('CopyBlock.svelte')
 		),
 		[
-			'src/lib/agents/CopyBlock.svelte is tracked inside the face and the client build ' +
-				'resolves it and never loads it, so the edges it takes in that pass are unrecorded ' +
-				'and this gate cannot judge it there',
+			'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
+				'client build resolves it and never loads it, so the edges it takes in that pass ' +
+				'are unrecorded and this gate cannot judge it there',
 		]
 	);
 });
@@ -811,9 +811,9 @@ test('the same holds for the pass the other one cannot see into', async () => {
 			(id, pass) => pass === 'server' && id.endsWith('CopyBlock.svelte')
 		),
 		[
-			'src/lib/agents/CopyBlock.svelte is tracked inside the face and the server build ' +
-				'resolves it and never loads it, so the edges it takes in that pass are unrecorded ' +
-				'and this gate cannot judge it there',
+			'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
+				'server build resolves it and never loads it, so the edges it takes in that pass ' +
+				'are unrecorded and this gate cannot judge it there',
 		]
 	);
 });
