@@ -151,35 +151,189 @@ test('the accordion marker respects reduced motion', () => {
  * The swap seam, stated as a checkable property
  * ---------------------------------------------------------------------- */
 
-test('face 6 has exactly two seams, and nothing reaches past either', () => {
-	// Two rather than one because greater M6a is expected to land the roster and
-	// the MCP detail as separate components; a single seam would force them to be
-	// swapped together.
-	const behindASeam = [
-		'AgentCard',
-		'AgentTrustBadge',
-		'AgentRosterFilters',
-		'MyAgents',
-		'CopyBlock',
-		'Accordion',
-		'AgentCapabilities',
-		'AgentTrustDetail',
+/**
+ * Face 6's component graph, declared.
+ *
+ * THREE SEAMS, NOT TWO. The docs said two — the roster and the MCP panel — and
+ * the detail route imports neither: it imports `AgentDetail.svelte`, which
+ * composes the identity header, the trust detail and the capability list, and
+ * nests the MCP seam inside itself. That is a third replaceable boundary, and an
+ * undeclared boundary is the one nobody checks. It is named here and in
+ * `docs/consumption/agent-contract.md` rather than dissolved, because the detail
+ * page genuinely has a component-shaped middle: greater M6a is expected to land
+ * the roster and the MCP detail separately, and the page that arranges them is
+ * contentus's until it does.
+ *
+ * `owns` is what a seam takes with it when it is replaced. `nests` is a seam
+ * composed by another seam — the only cross-seam import that is not a defect,
+ * because it is the one that keeps the MCP panel independently swappable.
+ * `SHARED` is imported from more than one seam by design: `AgentTrustBadge` is
+ * the one pill both the roster card and the detail header show, and greater's
+ * `AgentStateBadge` replaces it on both at once.
+ */
+const SEAMS = {
+	'AgentRoster.svelte': {
+		owns: ['AgentCard.svelte', 'AgentRosterFilters.svelte', 'MyAgents.svelte'],
+		nests: [],
+	},
+	'AgentDetail.svelte': {
+		owns: ['AgentCapabilities.svelte', 'AgentTrustDetail.svelte'],
+		nests: ['AgentMcpPanel.svelte'],
+	},
+	'AgentMcpPanel.svelte': {
+		owns: ['Accordion.svelte', 'CopyBlock.svelte'],
+		nests: [],
+	},
+};
+const SHARED = ['AgentTrustBadge.svelte'];
+
+const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
+const importPattern = /^[ \t]*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm;
+
+/** The agent components a source file IMPORTS — not the ones it mentions. */
+function agentComponentImports(source) {
+	return [...source.matchAll(importPattern)]
+		.map((match) => match[1])
+		.filter((specifier) => specifier.endsWith('.svelte'))
+		.map((specifier) => specifier.slice(specifier.lastIndexOf('/') + 1))
+		.filter((name) => name in SEAMS || SHARED.includes(name) || ownerOf(name) !== null);
+}
+
+/** Which seam a component belongs to, or null if it is not behind one. */
+function ownerOf(name) {
+	for (const [seam, { owns }] of Object.entries(SEAMS)) {
+		if (owns.includes(name)) return seam;
+	}
+	return null;
+}
+
+/**
+ * Every import inside the face that crosses a seam it should not.
+ *
+ * Taken as a parameter so the check can be run over a planted graph as well as
+ * the real one — a seam check that has never been shown to fail is a seam check
+ * nobody should trust.
+ */
+function crossSeamImports(files) {
+	const offenders = [];
+
+	for (const [file, source] of Object.entries(files)) {
+		const importerSeam = file in SEAMS ? file : ownerOf(file);
+
+		for (const target of agentComponentImports(source)) {
+			if (SHARED.includes(target)) continue;
+			if (importerSeam && SEAMS[importerSeam]?.nests.includes(target)) continue;
+			if (target in SEAMS) {
+				offenders.push(`${file} → ${target} (an undeclared seam-to-seam import)`);
+				continue;
+			}
+			if (ownerOf(target) !== importerSeam) {
+				offenders.push(`${file} → ${target} (owned by ${ownerOf(target)}, imported from ${file})`);
+			}
+		}
+	}
+
+	return offenders;
+}
+
+test('every component in the face sits behind exactly one declared seam', () => {
+	// The check that would have caught `AgentDetail.svelte` being a boundary
+	// nothing named. A file that is neither a seam, nor owned by one, nor shared
+	// on purpose fails here — which forces the decision rather than letting a new
+	// component quietly become a fourth swap point.
+	const onDisk = readdirSync(agentsDir)
+		.filter((entry) => entry.endsWith('.svelte'))
+		.sort();
+
+	const declared = [
+		...Object.keys(SEAMS),
+		...Object.values(SEAMS).flatMap((s) => s.owns),
+		...SHARED,
 	];
-	const importPattern = /^[ \t]*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm;
+
+	assert.deepEqual(onDisk, [...declared].sort(), 'every component must be declared exactly once');
+	assert.equal(new Set(declared).size, declared.length, 'and named in only one place');
+});
+
+test('no import inside face 6 crosses a seam', () => {
+	// The property the seams exist to hold, checked WHERE IT CAN BREAK. The old
+	// version of this walked `src/` with the agents directory skipped, so it could
+	// only see a route reaching past a seam — never `AgentRoster` importing
+	// `CopyBlock`, which is what actually entangles two swaps.
+	const files = Object.fromEntries(
+		readdirSync(agentsDir)
+			.filter((entry) => entry.endsWith('.svelte'))
+			.map((entry) => [entry, readFileSync(join(agentsDir, entry), 'utf8')])
+	);
+
+	assert.deepEqual(crossSeamImports(files), []);
+});
+
+test('the cross-seam check can still see a violation', () => {
+	// Both directions, on planted sources, so the green above is a result rather
+	// than a property of a check that cannot fail.
+	//
+	// THE PLANTED SPECIFIERS RESOLVE FROM THIS FILE on purpose, which is why they
+	// read `../src/lib/agents/…` rather than the `./…` a component would write.
+	// CON-5 walks every relative import in a gate file and fails on one that
+	// resolves to nothing — an unresolvable import in a gate is an unscanned one —
+	// so a fixture written the way the component writes it would trip the rubric
+	// beside the check it is testing. `tests/agents-roster.test.mjs` learned the
+	// same thing. What the checker reads is the file name, so the two forms are
+	// the same input to it.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `import CopyBlock from '../src/lib/agents/CopyBlock.svelte';`,
+		}),
+		[
+			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+		]
+	);
+
+	// A seam composing another seam is a defect unless it is the declared nesting.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `import Panel from '../src/lib/agents/AgentMcpPanel.svelte';`,
+		}),
+		['AgentRoster.svelte → AgentMcpPanel.svelte (an undeclared seam-to-seam import)']
+	);
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentDetail.svelte': `import Panel from '../src/lib/agents/AgentMcpPanel.svelte';`,
+		}),
+		[]
+	);
+
+	// And a MENTION is not an import: pointing at where a component lives is
+	// useful documentation, and an earlier version of this check failed on it.
+	assert.deepEqual(
+		crossSeamImports({ 'AgentRoster.svelte': `<!-- see CopyBlock.svelte for the mono block -->` }),
+		[]
+	);
+});
+
+test('nothing outside the face imports anything behind a seam', () => {
+	// The other half: a swap must not leave orphaned imports in routes or in any
+	// other face. The list is DERIVED from the declaration above rather than
+	// retyped, so a component added behind a seam is covered the day it is
+	// declared.
+	const behindASeam = [...Object.values(SEAMS).flatMap((s) => s.owns), ...SHARED];
 	const offenders = [];
 
 	const walk = (dir) => {
 		for (const entry of readdirSync(dir)) {
 			const path = join(dir, entry);
 			if (statSync(path).isDirectory()) {
-				if (path === join(repoRoot, 'src', 'lib', 'agents')) continue;
+				// The face's own directory is checked by `crossSeamImports`, which is
+				// stricter than this walk rather than exempt from it.
+				if (path === agentsDir) continue;
 				walk(path);
 				continue;
 			}
 			if (!/\.(svelte|ts)$/.test(entry)) continue;
 			for (const match of readFileSync(path, 'utf8').matchAll(importPattern)) {
 				for (const name of behindASeam) {
-					if (match[1].endsWith(`/${name}.svelte`)) offenders.push(`${path} → ${match[1]}`);
+					if (match[1].endsWith(`/${name}`)) offenders.push(`${path} → ${match[1]}`);
 				}
 			}
 		}
@@ -209,7 +363,7 @@ test('the routes import only the seams', () => {
 			.filter((s) => s.endsWith('.svelte'));
 
 	// PageFrame is vendored shell, which is allowed; the only agent component
-	// each route may name is its seam.
+	// each route may name is a seam — and each names exactly one.
 	assert.deepEqual(
 		specifiers(roster).filter((s) => s.includes('/agents/')),
 		['$lib/agents/AgentRoster.svelte']
@@ -218,13 +372,29 @@ test('the routes import only the seams', () => {
 		specifiers(detail).filter((s) => s.includes('/agents/')),
 		['$lib/agents/AgentDetail.svelte']
 	);
+
+	// And what a route names is a seam, checked against the declaration rather
+	// than against these two literals — the detail route naming `AgentDetail` is
+	// exactly the boundary the docs used to leave out.
+	for (const specifier of [
+		...specifiers(roster).filter((s) => s.includes('/agents/')),
+		...specifiers(detail).filter((s) => s.includes('/agents/')),
+	]) {
+		assert.ok(
+			specifier.slice(specifier.lastIndexOf('/') + 1) in SEAMS,
+			`${specifier} is imported by a route but is not a declared seam`
+		);
+	}
 });
 
-test('the swap seam is documented where the next steward will look', () => {
+test('every seam is documented where the next steward will look', () => {
 	const doc = readFileSync(join(repoRoot, 'docs/consumption/agent-contract.md'), 'utf8');
 
-	assert.match(doc, /AgentRoster\.svelte/);
-	assert.match(doc, /AgentMcpPanel\.svelte/);
+	// All three, from the declaration: a seam the code has and the doc does not
+	// is how face 6 arrived at review claiming two boundaries and having three.
+	for (const seam of Object.keys(SEAMS)) {
+		assert.ok(doc.includes(seam), `${seam} is a seam and the contract doc does not name it`);
+	}
 	// And it records what must NOT change when the swap happens, which is the
 	// half a future reader actually needs.
 	assert.match(doc, /does \*\*not\*\* change/);

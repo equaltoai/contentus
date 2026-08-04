@@ -12,9 +12,14 @@ WHAT THE SWAP LOOKS LIKE. Replace this file's body with the vendored roster
 component, mapping `AgentSummary` onto its input shape. The route does not
 change, the URL grammar does not change, `filters.ts` does not change, and the
 loader does not change — because none of them import `AgentCard` or
-`AgentTrustBadge`. That is the property the seam exists to hold, and
-`tests/agents-roster.test.mjs` asserts it by checking that nothing outside
-`src/lib/agents/` imports the interim components.
+`AgentTrustBadge`. That is the property the seam exists to hold.
+
+It is checked in two places, and the second is the one that matters here.
+`tests/agents-roster.test.mjs` walks `src/` for anything OUTSIDE this directory
+reaching past the seam. `tests/agents-mobile.test.mjs` declares face 6's three
+seams as data and checks INSIDE the directory too, so this file importing
+`CopyBlock` — which belongs to the MCP seam and would tie the two swaps together
+— fails as loudly as a route reaching past it.
 
 WHY THE COMPOSITION IS INTERIM AND LOCAL RATHER THAN VENDORED TODAY. greater
 v0.13.0 does export `shared/agent` `AgentIdentityCard` and `AgentStateBadge`,

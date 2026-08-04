@@ -1,10 +1,14 @@
 <!--
 THE MCP SWAP SEAM (face 6, M6.2; product design §5).
 
-The second of face 6's two boundaries, and the same contract as
-`AgentRoster.svelte`: greater M6a's vendored MCP-detail component replaces this
-file's body, and the route above it does not change because the route imports
-this and nothing behind it.
+One of face 6's three boundaries, and the same contract as `AgentRoster.svelte`:
+greater M6a's vendored MCP-detail component replaces this file's body, and
+nothing above it changes because nothing above it imports what is behind it.
+
+It is NESTED inside `AgentDetail.svelte` rather than imported by the route —
+`AgentDetail` is the detail page's own seam, and the detail route imports that.
+The nesting is what keeps the MCP panel swappable on its own instead of only as
+part of the page that arranges it.
 
 PORTED FROM SIM'S `AgentMcpPanel`, MINUS THE LEASE PLUMBING. sim drives
 `initialize` / `tools/list` / `resources/read` over JSON-RPC using a bearer

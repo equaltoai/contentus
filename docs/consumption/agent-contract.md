@@ -120,22 +120,40 @@ no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
 ## The swap seams
 
 greater M6a will land vendored agent-roster and MCP-detail components. Face 6 is
-built so that lands at **two component boundaries** and nothing else moves.
+built so that lands at **three component boundaries** and nothing else moves.
 
-| Seam                                  | Replaces                                                         |
-| ------------------------------------- | ---------------------------------------------------------------- |
-| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentTrustBadge`, `AgentRosterFilters`, `MyAgents` |
-| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering                |
+| Seam                                  | Owns (replaced with it)                           | Imported by                      |
+| ------------------------------------- | ------------------------------------------------- | -------------------------------- |
+| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentRosterFilters`, `MyAgents`     | `routes/Agents.svelte`           |
+| `src/lib/agents/AgentDetail.svelte`   | `AgentTrustDetail`, `AgentCapabilities`           | `routes/AgentDetailRoute.svelte` |
+| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering | `AgentDetail.svelte`             |
 
-Two seams rather than one because the roster and the MCP detail are expected to
-land as separate upstream components, and a single seam would force them to be
-swapped together.
+`AgentTrustBadge` is **shared** on purpose: it is the one pill the roster card
+and the detail header both show, and greater's `AgentStateBadge` replaces it on
+both at once. It is the only component imported from more than one seam.
+
+**Three, and this was two in an earlier draft.** The detail route imports
+`AgentDetail.svelte`, so that file is a replaceable boundary whether or not it is
+listed as one — and an undeclared boundary is the one nobody checks. It stays a
+seam rather than being dissolved into the route, because the detail page has a
+component-shaped middle: the identity header, trust and capabilities arranged
+around a nested MCP panel. `AgentMcpPanel` sits INSIDE it and is still its own
+seam, which is what lets the MCP detail be swapped without the page around it.
 
 What does **not** change when the swap happens: the routes, the URL grammar
 (`?type=`, `?q=`, `?verified=`, `?after=`), `filters.ts`, `contract.ts`,
-`mcp.ts`, and the SSR loaders. None of them import anything behind a seam, and
-`tests/agents-roster.test.mjs` asserts that by walking every import under
-`src/`.
+`mcp.ts`, and the SSR loaders.
+
+How that is checked, and where it used to not be. `tests/agents-mobile.test.mjs`
+declares the table above as data and asserts three things against it: every
+`.svelte` file in `src/lib/agents` is a seam, owned by exactly one seam, or
+shared (a new file cannot quietly become a fourth boundary); no import INSIDE the
+face crosses a seam — `AgentRoster` importing `CopyBlock` fails, and only the
+declared `AgentDetail → AgentMcpPanel` nesting is allowed; and nothing outside
+the directory imports anything behind a seam. The earlier check walked `src/`
+with the agents directory skipped, so it could see a route reaching past a seam
+but never two seams entangling each other, which is the failure that actually
+makes a swap drag a second component with it.
 
 ### Why the composition is local today
 

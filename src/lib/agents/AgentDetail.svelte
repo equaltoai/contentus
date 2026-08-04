@@ -1,11 +1,17 @@
 <!--
 One agent, and the MCP surface it publishes (face 6, M6.2).
 
-THE IDENTITY SEAM. Like `AgentRoster.svelte`, this composes the interim pieces
-so the route above it imports one component. The MCP half is its own seam
-(`AgentMcpPanel.svelte`) because greater M6a is expected to land the roster and
-the MCP detail as separate components, and a single seam covering both would
-force them to be swapped together.
+THE IDENTITY SEAM — face 6's THIRD swap boundary, and for a while an unnamed
+one. The detail route imports this file and nothing behind it, which makes it
+replaceable whether or not anything says so; the contract doc listed two seams
+and this was the one it left out. It owns the identity header,
+`AgentTrustDetail` and `AgentCapabilities`.
+
+The MCP half is its own seam (`AgentMcpPanel.svelte`), NESTED inside this one:
+greater M6a is expected to land the roster and the MCP detail as separate
+components, and a single seam covering both would force them to be swapped
+together. That nesting is the one seam-to-seam import face 6 allows, and
+`tests/agents-mobile.test.mjs` declares it as such rather than tolerating it.
 -->
 
 <script lang="ts">
