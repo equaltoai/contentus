@@ -2,97 +2,97 @@ TAP version 13
 # Subtest: a spoofed forwarding header never becomes the server-side fetch target
 ok 1 - a spoofed forwarding header never becomes the server-side fetch target
   ---
-  duration_ms: 16.277942
+  duration_ms: 16.910883
   type: 'test'
   ...
 # Subtest: a spoofed forwarding header never reaches the advertised identity
 ok 2 - a spoofed forwarding header never reaches the advertised identity
   ---
-  duration_ms: 0.999233
+  duration_ms: 1.055776
   type: 'test'
   ...
 # Subtest: with no trusted host at all, no viewer-supplied host is substituted
 ok 3 - with no trusted host at all, no viewer-supplied host is substituted
   ---
-  duration_ms: 1.39561
+  duration_ms: 1.501806
   type: 'test'
   ...
 # Subtest: an ambient Host never becomes the server-side fetch target
 ok 4 - an ambient Host never becomes the server-side fetch target
   ---
-  duration_ms: 0.807512
+  duration_ms: 0.899953
   type: 'test'
   ...
 # Subtest: the trusted header still wins when an ambient Host disagrees with it
 ok 5 - the trusted header still wins when an ambient Host disagrees with it
   ---
-  duration_ms: 0.827319
+  duration_ms: 0.904762
   type: 'test'
   ...
 # Subtest: with no trusted host the page degrades on a real fetch, not just a stubbed one
 ok 6 - with no trusted host the page degrades on a real fetch, not just a stubbed one
   ---
-  duration_ms: 1.02943
+  duration_ms: 1.061006
   type: 'test'
   ...
 # Subtest: a loaded article renders rather than 500ing on its own canonical tag
 ok 7 - a loaded article renders rather than 500ing on its own canonical tag
   ---
-  duration_ms: 0.691843
+  duration_ms: 0.762364
   type: 'test'
   ...
 # Subtest: an HTML article renders its body through the vendored blog face
 ok 8 - an HTML article renders its body through the vendored blog face
   ---
-  duration_ms: 11.79244
+  duration_ms: 11.697826
   type: 'test'
   ...
 # Subtest: a withheld body is absent from the public hydration payload
 ok 9 - a withheld body is absent from the public hydration payload
   ---
-  duration_ms: 0.58343
+  duration_ms: 0.589189
   type: 'test'
   ...
 # Subtest: a withheld body is absent from the SSR document too
 ok 10 - a withheld body is absent from the SSR document too
   ---
-  duration_ms: 0.921116
+  duration_ms: 0.955167
   type: 'test'
   ...
 # Subtest: a displayable body still reaches hydration, since the page shows it
 ok 11 - a displayable body still reaches hydration, since the page shows it
   ---
-  duration_ms: 0.397759
+  duration_ms: 0.440258
   type: 'test'
   ...
 # Subtest: a missing article is a real 404, not a 200 that says "not found"
 ok 12 - a missing article is a real 404, not a 200 that says "not found"
   ---
-  duration_ms: 0.715509
+  duration_ms: 0.740243
   type: 'test'
   ...
 # Subtest: a missing series or category is a real 404 too
 ok 13 - a missing series or category is a real 404 too
   ---
-  duration_ms: 1.712597
+  duration_ms: 1.739232
   type: 'test'
   ...
 # Subtest: an instance with long-form off is a 200 product state, not a 404
 ok 14 - an instance with long-form off is a 200 product state, not a 404
   ---
-  duration_ms: 0.597876
+  duration_ms: 0.639122
   type: 'test'
   ...
 # Subtest: canonical identity is advertised in both forms lesser expects
 ok 15 - canonical identity is advertised in both forms lesser expects
   ---
-  duration_ms: 0.587547
+  duration_ms: 0.57925
   type: 'test'
   ...
 # Subtest: a cross-origin canonical is left to og:url rather than mis-stated
 ok 16 - a cross-origin canonical is left to og:url rather than mis-stated
   ---
-  duration_ms: 0.539056
+  duration_ms: 0.561928
   type: 'test'
   ...
 1..16
@@ -103,72 +103,72 @@ ok 16 - a cross-origin canonical is left to og:url rather than mis-stated
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 93.714586
+# duration_ms 92.897381
 TAP version 13
 # Subtest: origin derives from the edge-injected host
 ok 1 - origin derives from the edge-injected host
   ---
-  duration_ms: 0.507687
+  duration_ms: 0.539024
   type: 'test'
   ...
 # Subtest: an ambient Host header is not a trusted host
 ok 2 - an ambient Host header is not a trusted host
   ---
-  duration_ms: 0.072978
+  duration_ms: 0.072205
   type: 'test'
   ...
 # Subtest: the trusted host wins over every host a caller can set
 ok 3 - the trusted host wins over every host a caller can set
   ---
-  duration_ms: 0.090881
+  duration_ms: 0.090741
   type: 'test'
   ...
 # Subtest: scheme honours the edge-injected proto but defaults to https
 ok 4 - scheme honours the edge-injected proto but defaults to https
   ---
-  duration_ms: 0.068649
+  duration_ms: 0.06414
   type: 'test'
   ...
 # Subtest: a malformed or injected trusted host is rejected rather than guessed
 ok 5 - a malformed or injected trusted host is rejected rather than guessed
   ---
-  duration_ms: 0.078538
+  duration_ms: 0.077506
   type: 'test'
   ...
 # Subtest: a malformed trusted host fails closed rather than reaching for another
 ok 6 - a malformed trusted host fails closed rather than reaching for another
   ---
-  duration_ms: 0.045295
+  duration_ms: 0.043331
   type: 'test'
   ...
 # Subtest: a forwarded host list collapses to its first entry, lower-cased
 ok 7 - a forwarded host list collapses to its first entry, lower-cased
   ---
-  duration_ms: 0.041498
+  duration_ms: 0.042209
   type: 'test'
   ...
 # Subtest: a missing trusted host yields null rather than a fabricated origin
 ok 8 - a missing trusted host yields null rather than a fabricated origin
   ---
-  duration_ms: 0.055114
+  duration_ms: 0.062307
   type: 'test'
   ...
 # Subtest: canonical article identity follows lesser, not the contentus route
 ok 9 - canonical article identity follows lesser, not the contentus route
   ---
-  duration_ms: 0.057749
+  duration_ms: 0.060053
   type: 'test'
   ...
 # Subtest: a slug is encoded into the canonical URL
 ok 10 - a slug is encoded into the canonical URL
   ---
-  duration_ms: 0.082886
+  duration_ms: 0.088226
   type: 'test'
   ...
 # Subtest: the GraphQL endpoint is derived, never hard-coded
 ok 11 - the GraphQL endpoint is derived, never hard-coded
   ---
-  duration_ms: 0.064952
+  duration_ms: 0.049182
   type: 'test'
   ...
 1..11
@@ -179,7 +179,7 @@ ok 11 - the GraphQL endpoint is derived, never hard-coded
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 53.445818
+# duration_ms 58.906367
 
 SEC-6 inventory complete: 2 pinned probe file(s), all passing.
   = tests/ssr-probe.test.mjs: 16 passing test points (minimum 16), content 266cb3a605a3a190…
