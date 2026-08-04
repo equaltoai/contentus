@@ -50,6 +50,16 @@ import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/au
  * the DEDUP as its witness, and what closes it is not a better backstop: it is the
  * gate checking that every module the build loads was read by one of its windows.
  *
+ * ROUND 10 THEN CAME AT THAT RULE FROM THE OTHER SIDE, which every rule that can
+ * go red deserves. "Every module the build loads" was decided by asking whether the
+ * module id named a FILE — and an EXTERNAL module's id names a file too, because it
+ * is one; the build simply never opens it. So every module a consumer externalizes
+ * was reported as a module this gate had failed to read, and a legitimate build
+ * went red for being configured. The cases below plant a genuine external through
+ * the bundler's own mechanism and assert the silence, with the same plant LOADED as
+ * the differential — and, in the same run as the external, a module the build did
+ * load and nothing read, still named.
+ *
  * HOW A TREE IS PLANTED. Through the gate's own overlay: a map of
  * repository-relative path to source, handed to the build as a plugin rather than
  * written to disk. Nothing here touches the working tree, which matters twice —
@@ -98,9 +108,19 @@ const reaching = (specifier) => `import ${JSON.stringify(specifier)};\n${contrac
  * stylesheet observer does not look at, so a case can close ONE of the gate's
  * reading windows for ONE module and watch what the rest of it makes of that.
  * Round 9's finding is the case that needs it.
+ *
+ * `external` is the other one: a predicate on the resolved id that turns a match
+ * into a module the build resolves and then never loads, through the bundler's own
+ * external mechanism rather than a mock of it. Round 10's finding needs it, because
+ * nothing in this repository's configuration externalizes anything but `node:`
+ * builtins and a rule nobody has watched is a rule nobody should trust.
  */
-const audit = async (overlay, blind) =>
-	(await auditSeamGraph({ root: repoRoot, overlay, blind })).findings;
+const audit = async (overlay, blind, external) =>
+	(await auditSeamGraph({ root: repoRoot, overlay, blind, external })).findings;
+
+/** Close the stylesheet window for one component's own `<style>` and nothing else. */
+const stylesheetOf = (component) => (id) =>
+	id.includes(`${component}?`) && id.includes('type=style');
 
 /** A face component with a `<style>` block appended, which none of them has. */
 const styled = (name, ...rules) =>
@@ -601,13 +621,81 @@ test('a window that closes for one module is a finding, not a dedup', async () =
 	// exactly why the finding it does report is the honest one: this gate read no
 	// code at all for that stylesheet, so what it references is unknown. Red, naming
 	// the module, rather than a green built on another importer's attribution.
-	const stylesheetOf = (component) => (id) =>
-		id.includes(`${component}?`) && id.includes('type=style');
 	assert.deepEqual(await audit(overlay, stylesheetOf('AgentDetail.svelte')), [
 		'src/lib/agents/AgentDetail.svelte?svelte&type=style&lang.css: neither window this gate ' +
 			"reads holds the client build's code for this module, so what it references is unknown",
 		'src/lib/agents/AgentDetail.svelte?svelte&type=style&lang.css: neither window this gate ' +
 			"reads holds the server build's code for this module, so what it references is unknown",
+	]);
+});
+
+test('a module the build never loads is not a module this gate failed to read', async () => {
+	// ROUND 10's FINDING, planted the way the review demonstrated it. A module marked
+	// EXTERNAL is resolved and then deliberately skipped: the bundler lists it in the
+	// graph under the id it resolved TO, holds no code for it, and never calls a load
+	// or a transform hook for it. For an external FILE that id is an absolute path,
+	// spelled exactly like every module the build did open — so the rule that decided
+	// "the build went and got this" from the id's shape said yes, found no code in
+	// either reading window, and reported it unread. In both passes. Every module a
+	// consumer's configuration externalizes was a finding, which is this gate turning
+	// red at a build for doing something legitimate.
+	const helper = './seam-external.ts';
+	const overlay = {
+		'src/lib/agents/contract.ts': reaching(helper),
+		'src/lib/agents/seam-external.ts': `import CopyBlock from ${JSON.stringify(BEHIND_SEAM)};\nexport const use = () => CopyBlock;\n`,
+	};
+	const externalHelper = (id) => id.endsWith('seam-external.ts');
+
+	// LOADED, which is the differential the runs below are against. The same plant,
+	// the same position, nothing externalized: a real module taking a real cross-seam
+	// dependency, and the gate names it. Without this, a clean run below would be
+	// evidence that the plant never built.
+	assert.deepEqual(await audit(overlay), [
+		`src/lib/agents/seam-external.ts → src/lib/agents/CopyBlock.svelte (${OWNED_BY})`,
+	]);
+
+	// EXTERNALIZED, and therefore SILENT — the whole finding. There is no code for
+	// this module in any window because there is no code for it anywhere: the build
+	// resolved it and left it alone. Nothing here went unread. The cross-seam import
+	// it carries is gone too, and correctly so — a module the build does not load
+	// takes no dependency in this build.
+	assert.deepEqual(await audit(overlay, undefined, externalHelper), []);
+
+	// AND THE SAME RUN STILL FAILS CLOSED, which is what the silence above must not
+	// have cost. Round 9's two-importer plant rides along — `AgentMcpPanel` legally
+	// references `CopyBlock` from its own `<style>`, `AgentDetail` illegally does the
+	// same, one asset is emitted for the two of them — with the window closed for
+	// `AgentDetail` alone. One module the build never loaded is silent and one module
+	// the build loaded and nothing read is named, in one gate run, told apart by the
+	// build rather than by the shape of an id.
+	const url = (probe) => `:global(.${probe}) { background-image: url('${BEHIND_SEAM}'); }`;
+	const alsoBlinded = {
+		...overlay,
+		'src/lib/agents/AgentMcpPanel.svelte': styled('AgentMcpPanel.svelte', url('legal')),
+		'src/lib/agents/AgentDetail.svelte': styled('AgentDetail.svelte', url('illegal')),
+	};
+	assert.deepEqual(await audit(alsoBlinded, stylesheetOf('AgentDetail.svelte'), externalHelper), [
+		'src/lib/agents/AgentDetail.svelte?svelte&type=style&lang.css: neither window this gate ' +
+			"reads holds the client build's code for this module, so what it references is unknown",
+		'src/lib/agents/AgentDetail.svelte?svelte&type=style&lang.css: neither window this gate ' +
+			"reads holds the server build's code for this module, so what it references is unknown",
+	]);
+});
+
+test('a face component the build externalizes is a file this gate cannot judge', async () => {
+	// THE OTHER HALF OF ROUND 10, and the reason the silence above is not a hole.
+	// Excusing an external from the reading rule must not excuse it from the
+	// CONTAINMENT rule: a tracked file in the face that no pass loads is a file this
+	// gate has nothing to say about, and externalizing one is a way to arrange that
+	// from the outside. So a module the build never loaded is not counted as reached
+	// either, and the face's own rule reports it — rather than a green resting on a
+	// module the gate never saw the inside of.
+	//
+	// No overlay at all: the tree the repository carries, with one component
+	// externalized through the gate's own injection.
+	assert.deepEqual(await audit({}, undefined, (id) => id.endsWith('CopyBlock.svelte')), [
+		'src/lib/agents/CopyBlock.svelte is tracked inside the face and no build pass loads it, ' +
+			'so no edge of its own is recorded and this gate cannot judge it',
 	]);
 });
 

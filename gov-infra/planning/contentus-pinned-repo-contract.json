@@ -107,7 +107,7 @@
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",
       "tests/review.test.mjs": "5478670b85ea2e46badd6376a13d784043b99cae2c7d909eee9bead9c698d07b",
-      "tests/seam-graph.test.mjs": "dafe75ccb68bb97fdf81e381fa712203196e569ac487e36665398fcd877a48ff",
+      "tests/seam-graph.test.mjs": "db84cc3061b546d83ae04ef084d9e61889b431046921b39cfd19077725291cfb",
       "tests/ssr-messages.test.mjs": "46215833f4c74951839b9f500dec57dad3e709d5cc7601a9a10c2ab188c4b823",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
       "tests/ssr-routes.test.mjs": "6670a40d1ff2df197d85a6bb4d8ebccf10bcce7d3b6e3caa44815c308079b10c",
