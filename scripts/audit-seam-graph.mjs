@@ -255,6 +255,19 @@ function recorder(pass, root, sink) {
 }
 
 /**
+ * A specifier's file part and the query-and-fragment tail that follows it.
+ *
+ * The tail is what a plugin adds to address a PIECE of a file rather than the
+ * file: `?svelte&type=style&lang.css` is a component's stylesheet, `?raw` is its
+ * text, `?worker` is a build of its own. Splitting rather than stripping keeps
+ * "which file is this" and "which piece of it" as two answers.
+ */
+function splitSpecifier(specifier) {
+	const mark = specifier.search(/[?#]/);
+	return mark < 0 ? [specifier, ''] : [specifier.slice(0, mark), specifier.slice(mark)];
+}
+
+/**
  * A tree that is not the one on disk, for proving this gate FAILS.
  *
  * A seam check nobody has watched fail is a seam check nobody should trust, and
@@ -268,6 +281,18 @@ function recorder(pass, root, sink) {
  * `src/lib/compose`; a gate that planted real files would race it, and a gate
  * that planted them in the face would race `pnpm build`.
  *
+ * THE QUERY IS PART OF THE ID, and an earlier version of this dropped it. A
+ * planted component's own compiler asks for `…/X.svelte?svelte&type=style&lang.css`
+ * to get the stylesheet it just compiled; answering that with the id stripped
+ * back to `…/X.svelte` handed the request to the component again, and answering
+ * its `load` with the component's source handed the CSS pipeline a `<script>`
+ * tag. Either way a `<style>` block in a planted component reached the build as
+ * nothing at all — so a plant that lived in one was unfalsifiable HERE while
+ * being a real dependency in `pnpm build`. Round 7's review found exactly that
+ * plant. The tail now rides along, and a request carrying one is left to the
+ * pipeline that invented it: this overlay replaces a FILE, and a plugin's view
+ * of that file is the plugin's to produce.
+ *
  * The command-line path passes no overlay, so this plugin is not in the gate the
  * rubric runs at all.
  */
@@ -279,20 +304,22 @@ function overlayPlugin(root, overlay) {
 		enforce: 'pre',
 
 		async resolveId(source, importer, options) {
-			const direct = String(source).split('?')[0];
+			const [direct, tail] = splitSpecifier(String(source));
 			// An entry, or an id another plugin has already resolved to a full path.
-			if (isAbsolute(direct) && files.has(direct)) return direct;
+			if (isAbsolute(direct) && files.has(direct)) return direct + tail;
 			// Everything the real configuration can resolve resolves the real way.
 			const resolved = await this.resolve(source, importer, options);
 			if (resolved) return resolved;
 			if (!direct.startsWith('.')) return null;
-			const base = importer ? dirname(String(importer).split('?')[0]) : root;
+			const base = importer ? dirname(splitSpecifier(String(importer))[0]) : root;
 			const guess = resolve(base, direct);
-			return files.has(guess) ? guess : null;
+			return files.has(guess) ? guess + tail : null;
 		},
 
 		load(id) {
-			return files.get(String(id).split('?')[0]) ?? null;
+			const [file, tail] = splitSpecifier(String(id));
+			if (tail) return null;
+			return files.get(file) ?? null;
 		},
 	};
 }
