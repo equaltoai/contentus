@@ -208,6 +208,55 @@ unresolvable relative specifiers in gate files — which is why the planted
 fixtures address the face in a form that resolves — and it is nothing more than
 that here.
 
+### The second check: the edges the build itself resolves
+
+Reading source with a real parser closed the forms that had been found and did
+not close the CLASS. Round 6 produced four more at once — a `.jsx` helper and a
+`.tsx` helper, neither of which the walked file set included; a literal
+`require()` in a `.cjs`, which is a call to a function named `require` and not an
+import node to any syntax tree; and `import.meta.glob` in a `.ts`, which is a
+member call on `import.meta` and not an import at all. Every one built a real
+dependency the client build takes, and both probes stayed green.
+
+The class is not comments, or queries, or suffixes. It is **every way Vite can
+create a dependency** — a set defined by the bundler, extended by its plugins,
+and not enumerable by anyone reading source. So the mechanism changed rather than
+the list. `scripts/audit-seam-graph.mjs` (`pnpm run validate:seam-graph`, part of
+`pnpm run validate` and therefore of `pnpm run build`) runs this repository's own
+Vite configuration twice — the client pass and the server pass — and asserts the
+seam rules against **the module graph the bundler finishes with**. Nothing is
+matched; the question is not what the text says but what the build resolved. The
+four forms above are covered because Vite resolved them, and so is every form
+nobody has thought of yet.
+
+Two channels do not go through the module graph, and both are handled rather than
+assumed away. A `new URL('./X', import.meta.url)` is emitted as an asset; the
+gate reads Vite's own reference marker back into the file it came from, so a
+dependency that is not an import in any dialect is still an edge. A worker is
+bundled by a separate build whose plugin list the main pipeline is not in; the
+gate detects the reference and reports the worker's own dependencies as
+**unknown**, which is a red gate rather than a silence. Supplying
+`worker.plugins` from the gate was tried and rejected — it would replace whatever
+`vite.config.ts` sets, and a gate that measures a build other than the real one is
+worse than a gate with a stated boundary.
+
+**Both checks stay, and neither is redundant.** They have different domains, and
+the numbers say so: the build loads 540 of this repository's 1246 tracked
+modules, because most of the vendored greater tree is source nothing imports. The
+source-reading probes read every tracked file and see one class of import form;
+the resolver gate reads every dependency form and sees only the modules the build
+loads. A cross-seam import inside dead vendored source is caught by the first and
+invisible to the second; a `.jsx` helper wired into the live graph is caught by
+the second and invisible to the first. Retiring either would open the half the
+other covers.
+
+The resolver gate is itself proved to fail. `tests/seam-graph.test.mjs` plants
+each of round 6's four forms as a real dependency through the gate's own build
+overlay and asserts the gate names it, along with two forms invented for the
+purpose: a wildcard `import.meta.glob('./[A-Z]*.svelte')`, which names no
+component at all and resolves to ten cross-seam edges, and a `new URL(…)`
+reference, which contains no import for any reader to read.
+
 ### Why the composition is local today
 
 greater v0.13.0 does export `shared/agent` `AgentIdentityCard` and

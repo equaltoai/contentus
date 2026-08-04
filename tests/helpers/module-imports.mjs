@@ -54,6 +54,25 @@
  * breaks a value that names it, so for a SEAM check they are dependencies. That
  * is the one place this module deliberately reports more than the module system
  * loads; everywhere else it reports what the compilers see, no more and no less.
+ *
+ * WHAT THIS READING IS NOT, AFTER ROUND 6. A parser closed the forms that had
+ * been found and did not close the CLASS. Round 6 produced four more at once — a
+ * `.jsx` helper and a `.tsx` helper, neither in the walked file set; a literal
+ * `require` call in a `.cjs`, which is a call to a function and not an import
+ * node to any syntax tree; and `import.meta.glob`, which is a member call on
+ * `import.meta` and not an import either. Each built a real dependency the client
+ * build takes, and this reading returned nothing for all four. The class is every
+ * way Vite can create a dependency, and no reader of source enumerates it.
+ *
+ * So a second check exists and asks the question a different way.
+ * `scripts/audit-seam-graph.mjs` runs the repository's own Vite configuration and
+ * asserts the seam rules against the edges the BUILD resolves, which covers every
+ * form by construction. It does not replace this module, and the reason is a
+ * measurement rather than a preference: the build loads 540 of this repository's
+ * 1246 tracked modules, because most of the vendored greater tree is source
+ * nothing imports. This reading covers every tracked file in one class of form;
+ * that gate covers every form on the modules the build loads. A cross-seam import
+ * inside dead vendored source is visible here and invisible there. Both run.
  */
 import { parse } from 'svelte/compiler';
 import ts from 'typescript';

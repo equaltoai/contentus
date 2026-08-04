@@ -92,7 +92,7 @@
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
-      "tests/helpers/module-imports.mjs": "13b19507aef93dd20dc9c80cd62465b45ea31f94800c0fc649a5135a499a3f83",
+      "tests/helpers/module-imports.mjs": "48100905e578f95c5fd60e8be96f13e167585197120ec8c36a699a15b1a444a7",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "d93a22505cfa7d542fa866dc37de5bc7786bc6e123dc996e22152ba31971f757",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
