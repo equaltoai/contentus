@@ -1,32 +1,4 @@
-Recreating /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus/node_modules
 Lockfile is up to date, resolution step is skipped
-Progress: resolved 1, reused 0, downloaded 0, added 0
-Packages: +195
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-Progress: resolved 195, reused 195, downloaded 0, added 195, done
+Already up to date
 
-dependencies:
-+ @equaltoai/greater-components-adapters 0.13.0
-+ @equaltoai/greater-components-headless 0.13.0
-+ @equaltoai/greater-components-icons 0.13.0
-+ @equaltoai/greater-components-primitives 0.13.0
-+ @equaltoai/greater-components-tokens 0.13.0
-+ @equaltoai/greater-components-utils 0.13.0
-+ @tanstack/svelte-virtual 3.13.35
-+ @theory-cloud/facetheory 4.0.1
-+ hast-util-sanitize 5.0.2
-+ rehype-parse 9.0.1
-+ rehype-sanitize 6.0.0
-+ rehype-stringify 10.0.1
-+ svelte 5.56.8
-+ unified 11.0.5
-
-devDependencies:
-+ @sveltejs/vite-plugin-svelte 7.2.0
-+ @types/node 24.13.3
-+ prettier 3.9.6
-+ svelte-check 4.7.4
-+ typescript 5.9.3
-+ vite 8.2.0
-
-Done in 688ms using pnpm v10.22.0
+Done in 209ms using pnpm v10.22.0
