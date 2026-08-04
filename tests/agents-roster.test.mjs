@@ -20,7 +20,12 @@ import {
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
-import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
+import {
+	computedImports,
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+} from './helpers/module-imports.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -270,7 +275,8 @@ function interimImports(source, path) {
 	);
 	for (const specifier of moduleSpecifiers(live))
 		for (const name of INTERIM)
-			if (specifier.endsWith(`/${name}.svelte`)) offenders.push(`${path} → ${specifier}`);
+			if (modulePath(specifier).endsWith(`/${name}.svelte`))
+				offenders.push(`${path} → ${specifier}`);
 	return offenders;
 }
 
@@ -395,6 +401,49 @@ test('the seam check reads the markup, which is where round 5 hid a dependency',
 	// which has no compile witness because markup is emitted as text either way.
 	for (const prose of [`<p>{"import('${target}')"}</p>`, `<!-- import('${target}') -->`])
 		assert.deepEqual(interimImports(prose, route), [], prose);
+});
+
+test('a query on a specifier does not hide the interim piece it addresses', () => {
+	// `$lib/agents/AgentCard.svelte?raw` builds, and the match here was
+	// `endsWith('/AgentCard.svelte')` against a string that ends in `?raw`. A query
+	// crosses the seam: the bundler resolves the same path and reads the same file,
+	// and what it alters is what the importer receives rather than which file the
+	// swap replaces. `./helpers/module-imports.mjs` carries the reasoning.
+	//
+	// The fixtures address the face as `$lib/…` rather than the `../src/…` used
+	// above because CON-5 fails on a RELATIVE specifier resolving to no file, and a
+	// path with `?raw` on the end is one — the same defect, one gate over.
+	const route = 'src/lib/routes/Agents.svelte';
+
+	for (const query of ['?raw', '?url', '?raw&inline', '#anchor']) {
+		const specifier = `$lib/agents/AgentCard.svelte${query}`;
+		assert.deepEqual(
+			interimImports(
+				`<script lang="ts">\nimport AgentCard from '${specifier}';\n</script>\n`,
+				route
+			),
+			[`${route} → ${specifier}`],
+			query
+		);
+	}
+
+	// In markup as well, where both of round 5's other forms sit.
+	assert.deepEqual(
+		interimImports(
+			`<button onclick={() => import('$lib/agents/AgentCard.svelte?raw')}>load</button>`,
+			route
+		),
+		[`${route} → $lib/agents/AgentCard.svelte?raw`]
+	);
+
+	// A query on something that is not an interim piece is still not one.
+	assert.deepEqual(
+		interimImports(
+			`<script lang="ts">\nimport css from '$lib/brand/agents.css?url';\n</script>\n`,
+			route
+		),
+		[]
+	);
 });
 
 test('the route imports the seam and not the pieces behind it', () => {

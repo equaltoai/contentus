@@ -14,7 +14,12 @@ import {
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
-import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
+import {
+	computedImports,
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+} from './helpers/module-imports.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -245,9 +250,14 @@ const DECLARED = new Set([
  * `../src/lib/agents/X`), which is how a route — and how a planted fixture in
  * this file — writes it. `svelte`, `$lib/greater/…` and `../../facetheory/…` are
  * outside the face and none of this check's business.
+ *
+ * The QUESTION IS ASKED OF THE PATH, not of the specifier: `…/agents/X?raw`
+ * addresses the same file `…/agents/X` does — see `modulePath`, which carries the
+ * reasoning for counting a query as crossing the seam.
  */
-const namesTheFace = (specifier) => /(^|\/)agents(\/|$)/.test(specifier);
-const pointsIntoTheFace = (specifier) => namesTheFace(specifier) || /^\.\/[^/]+$/.test(specifier);
+const namesTheFace = (specifier) => /(^|\/)agents(\/|$)/.test(modulePath(specifier));
+const pointsIntoTheFace = (specifier) =>
+	namesTheFace(specifier) || /^\.\/[^/]+$/.test(modulePath(specifier));
 
 /**
  * The face file a specifier names: a declared component, one of the face's plain
@@ -256,10 +266,10 @@ const pointsIntoTheFace = (specifier) => namesTheFace(specifier) || /^\.\/[^/]+$
  * Null is a FINDING rather than a shrug — see `faceDependencies`. Names are the
  * unit because the planted graphs address the face the way THIS FILE resolves it
  * (`../src/lib/agents/X`) and a component addresses it the way a component does
- * (`./X`); the file at the end is the same either way.
+ * (`./X`); the file at the end is the same either way, and so is `…/X?raw`.
  */
 function faceFile(specifier, files) {
-	const tail = specifier.replace(/\/+$/, '');
+	const tail = modulePath(specifier).replace(/\/+$/, '');
 	const name = tail.slice(tail.lastIndexOf('/') + 1);
 	if (name.endsWith('.svelte')) return DECLARED.has(name) ? { component: name } : null;
 	const candidates =
@@ -401,7 +411,7 @@ function importsBehindASeam(outside, face) {
 			);
 
 		for (const specifier of moduleSpecifiers(source)) {
-			const named = behindASeam.find((name) => specifier.endsWith(`/${name}`));
+			const named = behindASeam.find((name) => modulePath(specifier).endsWith(`/${name}`));
 			if (named) {
 				offenders.push(`${path} → ${specifier}`);
 				continue;
@@ -687,6 +697,85 @@ test('an import in MARKUP cannot walk past either seam check', () => {
 	);
 	assert.deepEqual(
 		crossSeamImports({ 'AgentRoster.svelte': `<!-- import('${target}') -->\n<div>face</div>\n` }),
+		[]
+	);
+});
+
+test('a query on a specifier does not hide the file it addresses', () => {
+	// ROUND 5's THIRD FORM. `$lib/agents/CopyBlock.svelte?raw` builds, and every
+	// match in both walks was `endsWith('/CopyBlock.svelte')` against a string that
+	// ends in `?raw`. The specifier was read correctly and then compared whole.
+	//
+	// THE POSITION, because it is a judgement rather than a mechanic: a query
+	// CROSSES the seam. The bundler resolves the same path, reads the same file and
+	// rebuilds when it changes; what the query alters is what the importer receives
+	// — text, a URL, a component — not which file the swap would replace, and the
+	// file is the only thing a seam check is about. `modulePath` carries the rest.
+	//
+	// THESE FIXTURES ADDRESS THE FACE AS `$lib/…` rather than the `../src/…` the
+	// fixtures above use, for the same reason those use it: CON-5 reads this file's
+	// raw text and fails on a RELATIVE specifier resolving to no file, and
+	// `../src/lib/agents/CopyBlock.svelte?raw` is a path with no file at the end of
+	// it. That its reader stops at the query rather than at the path is this very
+	// defect one gate over — pre-existing verifier behaviour, outside this pull
+	// request's write scope, and reported for its own fix.
+	const offence =
+		'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)';
+
+	for (const query of ['?raw', '?url', '?raw&inline', '#anchor', '?url#anchor'])
+		assert.deepEqual(
+			crossSeamImports({
+				'AgentRoster.svelte': component(
+					`import block from '$lib/agents/CopyBlock.svelte${query}';`
+				),
+			}),
+			[offence],
+			query
+		);
+
+	// In markup as well, which is where round 5's first form and its third meet.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': markup(
+				`<button onclick={() => import('$lib/agents/CopyBlock.svelte?raw')}>load</button>`
+			),
+		}),
+		[offence]
+	);
+
+	// From outside the face, where the offender names the specifier AS WRITTEN. The
+	// query is not part of the path and it IS part of what the next reader has to
+	// find in the file, so it is matched away and then reported back.
+	assert.deepEqual(
+		importsBehindASeam(
+			{
+				'src/lib/routes/Agents.svelte': component(
+					`import raw from '$lib/agents/AgentCard.svelte?raw';`
+				),
+			},
+			{}
+		),
+		['src/lib/routes/Agents.svelte → $lib/agents/AgentCard.svelte?raw']
+	);
+
+	// And through a barrel carrying one, where the query sits on the directory.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/routes/Agents.svelte': component(`import { AgentCard } from '$lib/agents?url';`) },
+			{ 'index.ts': `export { default as AgentCard } from '../src/lib/agents/AgentCard.svelte';` }
+		),
+		[
+			'src/lib/routes/Agents.svelte → $lib/agents?url (re-exported AgentCard.svelte through index.ts)',
+		]
+	);
+
+	// A query on a file outside the face is still outside it: this widens what a
+	// specifier is matched against, not what the checks are about.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/routes/Agents.svelte': component(`import css from '$lib/brand/agents.css?url';`) },
+			{}
+		),
 		[]
 	);
 });

@@ -168,6 +168,29 @@ function markupImports(ast, source, file) {
 }
 
 /**
+ * A specifier with its Vite query and fragment removed — the PATH it addresses.
+ *
+ * Round 5 of this pull request's review compiled `$lib/agents/CopyBlock.svelte?raw`
+ * past both seam checks, which matched with `endsWith('/CopyBlock.svelte')` and
+ * were handed a string ending in `?raw`. The specifier is reported correctly by
+ * `moduleSpecifiers` — this is what the callers must MATCH on.
+ *
+ * THE POSITION THIS TAKES, stated because it is a judgement rather than a
+ * mechanic: `?raw`, `?url`, `?inline` and every other query COUNT as crossing the
+ * seam. The bundler resolves the same path, reads the same file, and rebuilds
+ * when it changes; what the query alters is what the importer RECEIVES — text, a
+ * URL, a component — not which file the swap would replace, and the file is the
+ * only thing a seam check is about. Reading a component's source as text is a
+ * stranger dependency on it than importing it, not a weaker one.
+ *
+ * The callers match on this and report the specifier AS WRITTEN, so an offender
+ * line names what is in the file rather than a normalised form of it.
+ */
+export function modulePath(specifier) {
+	return specifier.replace(/[?#][\s\S]*$/, '');
+}
+
+/**
  * The script parsed as TypeScript, which is a superset of every dialect this
  * repository writes — `.ts` modules, `.mjs` probes, and `lang="ts"` or plain
  * `<script>` component bodies alike.
