@@ -155,6 +155,19 @@ with the agents directory skipped, so it could see a route reaching past a seam
 but never two seams entangling each other, which is the failure that actually
 makes a swap drag a second component with it.
 
+**What counts as an import, and what happens to the forms that cannot be read.**
+The check reads `import … from`, side-effect `import '…'`, `export … from`, and
+dynamic `import('…')`, and it FOLLOWS the face's own modules — so a barrel
+re-exporting `CopyBlock` does not turn a cross-seam dependency into a bare name
+nothing objects to. `import … from` alone was all an earlier version read, which
+left `await import('./CopyBlock.svelte')` and a re-export as two ways to take the
+dependency and keep the check green. Everything it still cannot resolve — a
+computed `import(expr)`, or a specifier into the directory naming nothing
+declared — is a FINDING rather than a skip: "this could not be read" and "there
+is nothing here" must not produce the same colour. Both bypasses and the
+fail-closed behaviour are asserted against planted graphs in
+`tests/agents-mobile.test.mjs`, in both directions.
+
 ### Why the composition is local today
 
 greater v0.13.0 does export `shared/agent` `AgentIdentityCard` and

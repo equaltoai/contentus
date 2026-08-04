@@ -188,15 +188,134 @@ const SEAMS = {
 const SHARED = ['AgentTrustBadge.svelte'];
 
 const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
-const importPattern = /^[ \t]*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm;
 
-/** The agent components a source file IMPORTS — not the ones it mentions. */
-function agentComponentImports(source) {
-	return [...source.matchAll(importPattern)]
-		.map((match) => match[1])
-		.filter((specifier) => specifier.endsWith('.svelte'))
-		.map((specifier) => specifier.slice(specifier.lastIndexOf('/') + 1))
-		.filter((name) => name in SEAMS || SHARED.includes(name) || ownerOf(name) !== null);
+const DECLARED = new Set([
+	...Object.keys(SEAMS),
+	...Object.values(SEAMS).flatMap((seam) => seam.owns),
+	...SHARED,
+]);
+
+/**
+ * Every module specifier a source depends on, in every form that reaches a file.
+ *
+ * THE FIRST VERSION READ `import … from` AND NOTHING ELSE, and three other forms
+ * reach the same module: a side-effect import, a re-export, and a dynamic
+ * `import()`. A seam check with documented ways around it reports the absence of
+ * the careless violations rather than the absence of violations, so every form
+ * that resolves to a module is read here.
+ *
+ * The gap between the keyword and `from` may hold neither `;` nor a backtick, so
+ * a multi-line named import spanning several lines — which is how `AgentMcpPanel`
+ * imports the mcp module — still matches, while an `export` statement's body
+ * cannot run on and swallow a later line's specifier.
+ *
+ * The specifiers in the prose here are deliberately not written in `from '…'` or
+ * `import('…')` form: CON-5 walks EVERY relative specifier in a gate file,
+ * comments included, and fails on one that resolves to no file. The planted
+ * fixtures below say the same thing in a form that resolves.
+ */
+function moduleSpecifiers(source) {
+	const specifiers = new Set();
+	for (const pattern of [
+		/^[ \t]*(?:import|export)\b[^;`]*?\bfrom\s*['"]([^'"]+)['"]/gm,
+		/^[ \t]*import\s*['"]([^'"]+)['"]/gm,
+		/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+	])
+		for (const [, specifier] of source.matchAll(pattern)) specifiers.add(specifier);
+	return [...specifiers];
+}
+
+/**
+ * `import(<anything but a bare literal>)` — a dependency no static read can name.
+ *
+ * Matched by taking EVERY `import(…)` call and subtracting the ones whose whole
+ * argument is a string literal, rather than by pattern-matching the shapes a
+ * computed specifier can take. `import('$lib/agents/' + name)` opens with a
+ * quote and closes with an identifier, and a rule that looked at the first
+ * character would have called it a literal and moved on.
+ */
+const importCallPattern = /(?<![.\w$])import\s*\(([^)]*)\)/g;
+const isLiteralArgument = (expression) => /^\s*(['"])[^'"]*\1\s*$/.test(expression);
+const computedImports = (source) =>
+	[...source.matchAll(importCallPattern)]
+		.map(([, expression]) => expression)
+		.filter((expression) => !isLiteralArgument(expression));
+
+/**
+ * Whether a specifier addresses a file inside face 6.
+ *
+ * Two forms reach it and both are here: `./X`, which is how a component in the
+ * directory writes it, and the directory named outright (`$lib/agents/X`,
+ * `../src/lib/agents/X`), which is how a route — and how a planted fixture in
+ * this file — writes it. `svelte`, `$lib/greater/…` and `../../facetheory/…` are
+ * outside the face and none of this check's business.
+ */
+const namesTheFace = (specifier) => /(^|\/)agents(\/|$)/.test(specifier);
+const pointsIntoTheFace = (specifier) => namesTheFace(specifier) || /^\.\/[^/]+$/.test(specifier);
+
+/**
+ * The face file a specifier names: a declared component, one of the face's plain
+ * modules, or null when nothing in the declared graph answers to it.
+ *
+ * Null is a FINDING rather than a shrug — see `faceDependencies`. Names are the
+ * unit because the planted graphs address the face the way THIS FILE resolves it
+ * (`../src/lib/agents/X`) and a component addresses it the way a component does
+ * (`./X`); the file at the end is the same either way.
+ */
+function faceFile(specifier, files) {
+	const tail = specifier.replace(/\/+$/, '');
+	const name = tail.slice(tail.lastIndexOf('/') + 1);
+	if (name.endsWith('.svelte')) return DECLARED.has(name) ? { component: name } : null;
+	const candidates =
+		name === 'agents'
+			? ['index.ts', 'index.js']
+			: [name, `${name}.ts`, `${name}.js`, `${name}.mjs`];
+	const module = candidates.find((candidate) => candidate in files);
+	return module ? { module } : null;
+}
+
+/**
+ * The components a file depends on, FOLLOWING the face's own modules so that a
+ * barrel cannot launder a cross-seam import, plus the forms this cannot resolve.
+ *
+ * Both halves matter. Without the following, an `index.ts` re-exporting
+ * `CopyBlock.svelte` turns every cross-seam import into a bare-name import the
+ * checker sees nothing wrong with. Without the unresolved list, "the checker
+ * could not name this" and "there is nothing there" produce the same green,
+ * which is the same hole one level further back.
+ */
+function faceDependencies(file, files, seen = new Set()) {
+	const targets = [];
+	const unresolved = [];
+	if (seen.has(file)) return { targets, unresolved };
+	seen.add(file);
+
+	const source = files[file] ?? '';
+	for (const expression of computedImports(source))
+		unresolved.push(
+			`${file} → import(${expression.trim()}) (a dependency no static read can name)`
+		);
+
+	for (const specifier of moduleSpecifiers(source)) {
+		if (!pointsIntoTheFace(specifier)) continue;
+		const resolved = faceFile(specifier, files);
+		if (!resolved) {
+			unresolved.push(
+				`${file} → ${specifier} (points into the face and resolves to nothing declared)`
+			);
+			continue;
+		}
+		if (resolved.component) {
+			targets.push({ name: resolved.component, via: [] });
+			continue;
+		}
+		const nested = faceDependencies(resolved.module, files, seen);
+		unresolved.push(...nested.unresolved);
+		for (const target of nested.targets)
+			targets.push({ name: target.name, via: [resolved.module, ...target.via] });
+	}
+
+	return { targets, unresolved };
 }
 
 /** Which seam a component belongs to, or null if it is not behind one. */
@@ -213,23 +332,77 @@ function ownerOf(name) {
  * Taken as a parameter so the check can be run over a planted graph as well as
  * the real one — a seam check that has never been shown to fail is a seam check
  * nobody should trust.
+ *
+ * The face's plain modules are importers here too, not just its components: a
+ * module behind no seam that reaches a component behind one is exactly the
+ * laundering step a barrel performs, and it is a finding on its own line.
  */
 function crossSeamImports(files) {
 	const offenders = [];
 
-	for (const [file, source] of Object.entries(files)) {
+	for (const file of Object.keys(files)) {
 		const importerSeam = file in SEAMS ? file : ownerOf(file);
+		const { targets, unresolved } = faceDependencies(file, files);
+		offenders.push(...unresolved);
 
-		for (const target of agentComponentImports(source)) {
+		for (const { name: target, via } of targets) {
 			if (SHARED.includes(target)) continue;
 			if (importerSeam && SEAMS[importerSeam]?.nests.includes(target)) continue;
+			const through = via.length ? ` through ${via.join(' → ')}` : '';
 			if (target in SEAMS) {
-				offenders.push(`${file} → ${target} (an undeclared seam-to-seam import)`);
+				offenders.push(
+					importerSeam
+						? `${file} → ${target}${through} (an undeclared seam-to-seam import)`
+						: `${file} → ${target}${through} (a seam imported from behind no seam)`
+				);
 				continue;
 			}
 			if (ownerOf(target) !== importerSeam) {
-				offenders.push(`${file} → ${target} (owned by ${ownerOf(target)}, imported from ${file})`);
+				offenders.push(
+					`${file} → ${target}${through} (owned by ${ownerOf(target)}, imported from ${file})`
+				);
 			}
+		}
+	}
+
+	return offenders;
+}
+
+/**
+ * Imports of something behind a seam from OUTSIDE the face.
+ *
+ * Three ways in, and the walk has to see all three: naming the file
+ * (`$lib/agents/CopyBlock.svelte`) in any import form, going through one of the
+ * face's own modules (`$lib/agents` re-exporting it), and a computed
+ * `import()` whose expression reaches into the directory. The last one cannot be
+ * resolved at all, so it is reported rather than skipped — an unresolvable
+ * import into the face is an unchecked one.
+ */
+function importsBehindASeam(outside, face) {
+	const behindASeam = [...Object.values(SEAMS).flatMap((seam) => seam.owns), ...SHARED];
+	const offenders = [];
+
+	for (const [path, source] of Object.entries(outside)) {
+		for (const expression of computedImports(source))
+			if (/\bagents\b/.test(expression))
+				offenders.push(`${path} → import(${expression.trim()}) (a computed import into the face)`);
+
+		for (const specifier of moduleSpecifiers(source)) {
+			const named = behindASeam.find((name) => specifier.endsWith(`/${name}`));
+			if (named) {
+				offenders.push(`${path} → ${specifier}`);
+				continue;
+			}
+			// Only the directory named outright: a bare `./index.ts` from some other
+			// directory is that directory's own barrel, not this face's.
+			if (!namesTheFace(specifier)) continue;
+			const resolved = faceFile(specifier, face);
+			if (!resolved?.module) continue;
+			for (const { name, via } of faceDependencies(resolved.module, face).targets)
+				if (behindASeam.includes(name))
+					offenders.push(
+						`${path} → ${specifier} (re-exported ${name} through ${[resolved.module, ...via].join(' → ')})`
+					);
 		}
 	}
 
@@ -255,18 +428,24 @@ test('every component in the face sits behind exactly one declared seam', () => 
 	assert.equal(new Set(declared).size, declared.length, 'and named in only one place');
 });
 
+/** The whole face on disk — components AND plain modules, which is what a barrel would be. */
+const faceOnDisk = () =>
+	Object.fromEntries(
+		readdirSync(agentsDir)
+			.filter((entry) => statSync(join(agentsDir, entry)).isFile())
+			.map((entry) => [entry, readFileSync(join(agentsDir, entry), 'utf8')])
+	);
+
 test('no import inside face 6 crosses a seam', () => {
 	// The property the seams exist to hold, checked WHERE IT CAN BREAK. The old
 	// version of this walked `src/` with the agents directory skipped, so it could
 	// only see a route reaching past a seam — never `AgentRoster` importing
 	// `CopyBlock`, which is what actually entangles two swaps.
-	const files = Object.fromEntries(
-		readdirSync(agentsDir)
-			.filter((entry) => entry.endsWith('.svelte'))
-			.map((entry) => [entry, readFileSync(join(agentsDir, entry), 'utf8')])
-	);
-
-	assert.deepEqual(crossSeamImports(files), []);
+	//
+	// The map carries `contract.ts`, `filters.ts` and `mcp.ts` as well, because a
+	// module is where a re-export would sit and because an import of one has to
+	// RESOLVE for the check to stay fail-closed on the ones that do not.
+	assert.deepEqual(crossSeamImports(faceOnDisk()), []);
 });
 
 test('the cross-seam check can still see a violation', () => {
@@ -312,13 +491,114 @@ test('the cross-seam check can still see a violation', () => {
 	);
 });
 
+test('a dynamic import cannot walk past the cross-seam check', () => {
+	// `import … from` was the ONLY form the first version of this read, so an
+	// `await import()` of `CopyBlock.svelte` took the dependency and left the
+	// check green. Both offender directions are planted, because a bypass
+	// demonstrated in one direction is a bypass still open in the other.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `const block = await import('../src/lib/agents/CopyBlock.svelte');`,
+		}),
+		[
+			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+		]
+	);
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `const panel = () => import('../src/lib/agents/AgentMcpPanel.svelte');`,
+		}),
+		['AgentRoster.svelte → AgentMcpPanel.svelte (an undeclared seam-to-seam import)']
+	);
+
+	// The declared nesting is still the declared nesting, whatever form it takes.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentDetail.svelte': `const panel = () => import('../src/lib/agents/AgentMcpPanel.svelte');`,
+		}),
+		[]
+	);
+
+	// A side-effect import is a dependency too, and read the same way.
+	assert.deepEqual(
+		crossSeamImports({ 'AgentRoster.svelte': `import '../src/lib/agents/CopyBlock.svelte';` }),
+		[
+			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+		]
+	);
+});
+
+test('a barrel cannot launder a cross-seam import', () => {
+	// The second bypass: route the import through a re-export and the importer's
+	// own specifier names no component at all. The check follows the face's own
+	// modules, so the target is found — and the barrel is reported on its own
+	// line, because a module behind no seam holding a reference to a component
+	// behind one is the laundering step itself.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `import { CopyBlock } from '../src/lib/agents/index.ts';`,
+			'index.ts': `export { default as CopyBlock } from '../src/lib/agents/CopyBlock.svelte';`,
+		}),
+		[
+			'AgentRoster.svelte → CopyBlock.svelte through index.ts (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
+			'index.ts → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from index.ts)',
+		]
+	);
+
+	// Seam-to-seam through the same barrel, and through two of them: the chain is
+	// reported so the next reader is told where to cut rather than only that
+	// something is wrong.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `import { McpPanel } from '../src/lib/agents/index.ts';`,
+			'index.ts': `export * from '../src/lib/agents/panels.ts';`,
+			'panels.ts': `export { default as McpPanel } from '../src/lib/agents/AgentMcpPanel.svelte';`,
+		}),
+		[
+			'AgentRoster.svelte → AgentMcpPanel.svelte through index.ts → panels.ts (an undeclared seam-to-seam import)',
+			'index.ts → AgentMcpPanel.svelte through panels.ts (a seam imported from behind no seam)',
+			'panels.ts → AgentMcpPanel.svelte (a seam imported from behind no seam)',
+		]
+	);
+});
+
+test('an import form the check cannot resolve fails rather than passing', () => {
+	// FAIL CLOSED. "The checker could not name what this loads" and "this loads
+	// nothing behind a seam" are different facts, and a check that returns the
+	// same green for both is a check that can be walked past by writing the import
+	// in a form nobody taught it.
+	assert.deepEqual(
+		crossSeamImports({ 'AgentRoster.svelte': `const c = await import(componentPath);` }),
+		['AgentRoster.svelte → import(componentPath) (a dependency no static read can name)']
+	);
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `const c = await import(\`../src/lib/agents/\${name}.svelte\`);`,
+		}),
+		[
+			'AgentRoster.svelte → import(`../src/lib/agents/${name}.svelte`) (a dependency no static read can name)',
+		]
+	);
+
+	// And a specifier that points into the face but names nothing declared: either
+	// a component was added without being declared, or the graph moved under the
+	// check. Both are answers the next steward needs, and neither is silence.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': `import X from '../src/lib/agents/Undeclared.svelte';`,
+		}),
+		[
+			'AgentRoster.svelte → ../src/lib/agents/Undeclared.svelte (points into the face and resolves to nothing declared)',
+		]
+	);
+});
+
 test('nothing outside the face imports anything behind a seam', () => {
 	// The other half: a swap must not leave orphaned imports in routes or in any
 	// other face. The list is DERIVED from the declaration above rather than
 	// retyped, so a component added behind a seam is covered the day it is
 	// declared.
-	const behindASeam = [...Object.values(SEAMS).flatMap((s) => s.owns), ...SHARED];
-	const offenders = [];
+	const outside = {};
 
 	const walk = (dir) => {
 		for (const entry of readdirSync(dir)) {
@@ -331,16 +611,67 @@ test('nothing outside the face imports anything behind a seam', () => {
 				continue;
 			}
 			if (!/\.(svelte|ts)$/.test(entry)) continue;
-			for (const match of readFileSync(path, 'utf8').matchAll(importPattern)) {
-				for (const name of behindASeam) {
-					if (match[1].endsWith(`/${name}`)) offenders.push(`${path} → ${match[1]}`);
-				}
-			}
+			outside[path] = readFileSync(path, 'utf8');
 		}
 	};
 
 	walk(join(repoRoot, 'src'));
-	assert.deepEqual(offenders, []);
+	assert.deepEqual(importsBehindASeam(outside, faceOnDisk()), []);
+});
+
+test('the outside-the-face check can still see a violation', () => {
+	// Planted the same way the cross-seam fixtures are, and for the same reason:
+	// this walk had never been shown to fail, and it read one import form.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/routes/Agents.svelte': `import Card from '$lib/agents/AgentCard.svelte';` },
+			{}
+		),
+		['src/lib/routes/Agents.svelte → $lib/agents/AgentCard.svelte']
+	);
+	assert.deepEqual(
+		importsBehindASeam(
+			{
+				'src/lib/routes/Agents.svelte': `const card = () => import('$lib/agents/AgentCard.svelte');`,
+			},
+			{}
+		),
+		['src/lib/routes/Agents.svelte → $lib/agents/AgentCard.svelte']
+	);
+
+	// Through a barrel inside the face, where the route's own specifier names no
+	// component — the form that made this walk's green meaningless.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/routes/Agents.svelte': `import { AgentCard } from '$lib/agents';` },
+			{ 'index.ts': `export { default as AgentCard } from '../src/lib/agents/AgentCard.svelte';` }
+		),
+		['src/lib/routes/Agents.svelte → $lib/agents (re-exported AgentCard.svelte through index.ts)']
+	);
+
+	// And a computed import naming the directory, which resolves to nothing and is
+	// therefore reported rather than skipped. It opens with a string literal and
+	// is still not one, which is the case a first-character rule would have waved
+	// through.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/routes/Agents.svelte': `const c = await import('$lib/agents/' + name);` },
+			{}
+		),
+		[
+			"src/lib/routes/Agents.svelte → import('$lib/agents/' + name) (a computed import into the face)",
+		]
+	);
+
+	// A route naming a SEAM is the allowed shape and stays quiet, including when it
+	// is the directory's own module rather than a component.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/routes/Agents.svelte': `import Roster from '$lib/agents/AgentRoster.svelte';` },
+			{}
+		),
+		[]
+	);
 });
 
 test('the contract modules are free of the components, so a swap cannot reach them', () => {
