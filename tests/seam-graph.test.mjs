@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-import { auditSeamGraph } from '../scripts/audit-seam-graph.mjs';
+import { build } from 'vite';
+
+import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/audit-seam-graph.mjs';
 
 /**
  * The regression matrix for `scripts/audit-seam-graph.mjs`.
@@ -26,6 +28,18 @@ import { auditSeamGraph } from '../scripts/audit-seam-graph.mjs';
  * invented, and the wildcard glob is the interesting one — it names no component
  * at all, so there is nothing in the source for any reader, however good, to
  * match. The gate reports the ten components the pattern actually resolved to.
+ *
+ * ROUND 7 THEN FOUND ONE, which is why "by construction" was too strong a phrase
+ * for what this file used to prove. `url('./CopyBlock.svelte')` in a component's
+ * `<style>` is a dependency the client build takes — it emits the component as an
+ * asset and writes its name into the generated stylesheet — and it left this
+ * whole matrix green, because a CSS module's code is empty by the time the
+ * recorder reads it. "The build resolved it" turned out to be several channels
+ * rather than one, and a channel the gate was not reading is a channel it was not
+ * covering. The url() cases below plant that form and the ones around it, with
+ * the BUNDLE as their witness rather than the gate's own conclusion, and the
+ * emitted-asset rule is what turns the next closed channel into a red gate
+ * instead of another round.
  *
  * HOW A TREE IS PLANTED. Through the gate's own overlay: a map of
  * repository-relative path to source, handed to the build as a plugin rather than
@@ -51,6 +65,12 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const BEHIND_SEAM = './CopyBlock.svelte';
 const OWNED_BY = 'owned by AgentMcpPanel.svelte, imported from behind no seam';
 
+/** A second component behind the same seam, for plants that need two targets. */
+const ALSO_BEHIND_SEAM = './Accordion.svelte';
+
+/** The same offence taken by the seam that is allowed to compose the MCP panel. */
+const OWNED_BY_FROM_DETAIL = 'owned by AgentMcpPanel.svelte, imported from AgentDetail.svelte';
+
 /**
  * A face module the build already loads, with one import prepended.
  *
@@ -64,6 +84,49 @@ const reaching = (specifier) => `import ${JSON.stringify(specifier)};\n${contrac
 
 /** Plant a tree, run the real gate over it, and return what it found. */
 const audit = async (overlay) => (await auditSeamGraph({ root: repoRoot, overlay })).findings;
+
+/** A face component with a `<style>` block appended, which none of them has. */
+const styled = (name, ...rules) =>
+	`${readFileSync(join(repoRoot, `src/lib/agents/${name}`), 'utf8')}\n` +
+	`<style>\n\t${rules.join('\n\t')}\n</style>\n`;
+
+/**
+ * What the CLIENT BUILD emitted for a planted tree, read from the bundle.
+ *
+ * THE WITNESS, and separate from the gate on purpose. A regression that asserts
+ * only "the gate reports this" proves the gate consistent with itself; the r6
+ * matrix answered that by reading the COMPILER's output for every planted form,
+ * so each was a proven dependency before it was a caught one. A CSS `url()` has
+ * no compiler output to read — the dependency exists because the BUNDLER emitted
+ * a file and pointed the stylesheet at it — so this reads that instead: the same
+ * planting mechanism the gate uses, a build of its own, and nothing of the gate's
+ * judgement in between.
+ */
+async function emittedByClientBuild(overlay) {
+	const assets = [];
+	await build({
+		root: repoRoot,
+		logLevel: 'error',
+		build: { write: false, minify: false, sourcemap: false },
+		plugins: [
+			overlayPlugin(repoRoot, overlay),
+			{
+				name: 'contentus:seam-graph-witness',
+				enforce: 'post',
+				generateBundle(_options, bundle) {
+					for (const [fileName, output] of Object.entries(bundle))
+						if (output.type === 'asset')
+							assets.push({
+								fileName,
+								from: output.originalFileNames ?? [],
+								text: typeof output.source === 'string' ? output.source : '',
+							});
+				},
+			},
+		],
+	});
+	return assets;
+}
 
 test('the tree the repository carries has no cross-seam edge', async () => {
 	// The baseline every case below is a differential against. Without it a green
@@ -257,6 +320,218 @@ test('a face file the build never loads is a finding, not a silence', async () =
 		'src/lib/agents/AgentMcpPanel.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 		'src/lib/agents/AgentTrustDetail.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 		'src/lib/agents/CopyBlock.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
+	]);
+});
+
+test("a url() in a component's own <style> is a dependency the build takes", async () => {
+	// ROUND 7's FINDING, planted the way it was found. `AgentDetail` composes the
+	// MCP seam and may not reach past it; a stylesheet in `AgentDetail` that points
+	// at `CopyBlock` does exactly that, and every check in this repository said
+	// nothing. The gate ran the real build, the real build EMITTED the component as
+	// an asset, and the edge existed in no channel the gate was reading: a CSS
+	// module's code is empty by `buildEnd`, so the marker naming that asset was not
+	// hidden from the recorder, it was gone before the recorder looked.
+	const overlay = {
+		'src/lib/agents/AgentDetail.svelte': styled(
+			'AgentDetail.svelte',
+			`:global(.contentus-agent-detail__probe) { background-image: url('${BEHIND_SEAM}'); }`
+		),
+	};
+
+	// THE WITNESS, before the gate is asked anything. The client build emits
+	// `CopyBlock.svelte` as a file of its own and writes that file's name into the
+	// stylesheet it generates — which is the dependency, in the bundler's own
+	// output, whatever any check makes of it.
+	const assets = await emittedByClientBuild(overlay);
+	const emitted = assets.find(({ from }) => from.includes('src/lib/agents/CopyBlock.svelte'));
+	assert.ok(emitted, 'the client build must emit the component the stylesheet points at');
+	assert.ok(
+		assets.some(
+			({ fileName, text }) => fileName.endsWith('.css') && text.includes(emitted.fileName)
+		),
+		'the generated stylesheet must carry the emitted file name'
+	);
+
+	assert.deepEqual(await audit(overlay), [
+		`src/lib/agents/AgentDetail.svelte → src/lib/agents/CopyBlock.svelte (${OWNED_BY_FROM_DETAIL})`,
+	]);
+});
+
+/**
+ * The url() forms, each planted in a HOST of its own so one build proves them all.
+ *
+ * A separate gate run per form would be a separate pair of Vite builds per form.
+ * Planting each in a different component instead makes every finding name its own
+ * importer, so a form that stopped resolving loses its own line rather than
+ * hiding behind another form's. Two targets per host — both behind the MCP seam —
+ * because that doubles the hosts available without making two forms produce the
+ * same sentence.
+ *
+ * `:global(…)` throughout: an unused scoped selector is pruned by the Svelte
+ * compiler before Vite ever sees the URL, and what is under test is the URL.
+ */
+const URL_FORMS = [
+	{
+		host: 'AgentRoster.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'CopyBlock.svelte',
+		form: 'double quotes',
+		rule: `:global(.p1) { background-image: url("${BEHIND_SEAM}"); }`,
+	},
+	{
+		host: 'AgentRoster.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'Accordion.svelte',
+		form: 'no quotes at all',
+		rule: `:global(.p2) { background-image: url(${ALSO_BEHIND_SEAM}); }`,
+	},
+	{
+		host: 'AgentCard.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'CopyBlock.svelte',
+		form: 'a sibling named without ./',
+		rule: `:global(.p3) { background-image: url('${BEHIND_SEAM.slice(2)}'); }`,
+	},
+	{
+		host: 'AgentCard.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'Accordion.svelte',
+		form: 'through the $lib alias',
+		rule: `:global(.p4) { background-image: url('$lib/agents/Accordion.svelte'); }`,
+	},
+	{
+		host: 'AgentRosterFilters.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'CopyBlock.svelte',
+		form: 'a query on the URL',
+		rule: `:global(.p5) { background-image: url('${BEHIND_SEAM}?variant'); }`,
+	},
+	{
+		host: 'AgentRosterFilters.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'Accordion.svelte',
+		form: 'a root-absolute path that names a real file',
+		rule: `:global(.p6) { background-image: url('/src/lib/agents/Accordion.svelte'); }`,
+	},
+	{
+		host: 'MyAgents.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'CopyBlock.svelte',
+		form: 'nested inside image-set()',
+		rule: `:global(.p7) { background-image: image-set(url('${BEHIND_SEAM}') 1x); }`,
+	},
+	{
+		host: 'MyAgents.svelte',
+		seam: 'AgentRoster.svelte',
+		target: 'Accordion.svelte',
+		form: 'an @font-face source rather than a rule',
+		rule: `@font-face { font-family: probe; src: url('${ALSO_BEHIND_SEAM}'); }`,
+	},
+	{
+		host: 'AgentCapabilities.svelte',
+		seam: 'AgentDetail.svelte',
+		target: 'CopyBlock.svelte',
+		form: 'inside @media',
+		rule: `@media (min-width: 1px) { :global(.p9) { background-image: url('${BEHIND_SEAM}'); } }`,
+	},
+	{
+		host: 'AgentCapabilities.svelte',
+		seam: 'AgentDetail.svelte',
+		target: 'Accordion.svelte',
+		form: 'inside @supports',
+		rule: `@supports (display: grid) { :global(.pa) { background-image: url('${ALSO_BEHIND_SEAM}'); } }`,
+	},
+];
+
+/**
+ * The url() forms that are NOT dependencies, planted together in one host.
+ *
+ * Each names something a build cannot resolve to a file: a `data:` URL carries
+ * its own bytes, a remote origin and a protocol-relative one are fetched at
+ * runtime, and a root-absolute path with no file behind it is left as written for
+ * a server to answer. None emits an asset, so none is an edge — and the rule is
+ * "did the build resolve it", not "how was it spelled", which is why the
+ * root-absolute form appears on BOTH lists: the one above names a real file and
+ * is a dependency, this one does not and is not.
+ */
+const INERT_HOST = 'AgentTrustDetail.svelte';
+const INERT_URLS = [
+	`background-image: url('data:image/gif;base64,R0lGODlhAQABAAAAACw=');`,
+	`border-image: url('https://example.invalid/src/lib/agents/CopyBlock.svelte');`,
+	`list-style-image: url('//example.invalid/src/lib/agents/Accordion.svelte');`,
+	`mask-image: url('/src/lib/agents/NoSuchComponentIsHere.svelte');`,
+];
+
+test('every url() the build resolves is an edge, and nothing else is', async () => {
+	const hosts = new Map();
+	for (const { host, rule } of URL_FORMS) hosts.set(host, [...(hosts.get(host) ?? []), rule]);
+	hosts.set(INERT_HOST, [`:global(.inert) {\n\t\t${INERT_URLS.join('\n\t\t')}\n\t}`]);
+
+	const overlay = Object.fromEntries(
+		[...hosts].map(([host, rules]) => [`src/lib/agents/${host}`, styled(host, ...rules)])
+	);
+
+	// One line per resolving form. A form that stopped resolving would drop its own
+	// line; an inert URL that started resolving would add one nothing expects.
+	assert.deepEqual(
+		await audit(overlay),
+		URL_FORMS.map(
+			({ host, seam, target }) =>
+				`src/lib/agents/${host} → src/lib/agents/${target} ` +
+				`(owned by AgentMcpPanel.svelte, imported from ${seam})`
+		).sort()
+	);
+});
+
+test('an emitted asset nothing accounts for is a finding, not a pass', () => {
+	// THE BACKSTOP, watched failing. Reading references is how this gate turns an
+	// emitted asset into an edge, and round 7 is the proof that a reference channel
+	// can be closed without anyone noticing. So the question is asked from the other
+	// end as well: everything the build emits must be accounted for.
+	//
+	// It is exercised here rather than through a planted tree because no tree this
+	// overlay can plant produces an unaccounted asset — every asset in this build
+	// carries a reference marker somewhere. What CAN be done is to close the channel
+	// and watch: with `styleRecorder`'s transform disabled, the round-7 plant above
+	// stops being a seam finding and becomes
+	//
+	//   assets/CopyBlock-DCUnZRxx.svelte: the client build emits this file and
+	//   nothing this gate records references it, so what depends on
+	//   src/lib/agents/CopyBlock.svelte is unknown
+	//
+	// which is the whole point: a closed channel costs this gate its green, not its
+	// coverage. That demonstration is a one-line edit and a run, recorded here
+	// rather than committed as a test that would have to break the gate to pass.
+	const emitted = [
+		{ fileName: 'assets/CopyBlock-hash.svelte', from: ['src/lib/agents/CopyBlock.svelte'] },
+		{ fileName: 'assets/entry-client-hash.css', from: ['src/facetheory/entry-client.ts'] },
+	];
+	assert.deepEqual(
+		unattributedAssets('client', emitted, new Set(['assets/entry-client-hash.css'])),
+		[
+			'assets/CopyBlock-hash.svelte: the client build emits this file and nothing this gate ' +
+				'records references it, so what depends on src/lib/agents/CopyBlock.svelte is unknown',
+		]
+	);
+
+	// The worker exception, which is an exception to the ORIGIN-LESS half only. A
+	// worker's bundle is generated code named by a marker Vite rewrites from a map
+	// of its own, so it can never be attributed — and the worker tripwire has
+	// already made that pass red, in a sentence that says what is actually unknown.
+	const workerBundle = [{ fileName: 'assets/mcp-hash.js', from: [] }];
+	assert.deepEqual(unattributedAssets('client', workerBundle, new Set(), true), []);
+	assert.deepEqual(unattributedAssets('client', workerBundle, new Set(), false), [
+		'assets/mcp-hash.js: the client build emits this file and nothing this gate records ' +
+			'references it, so what depends on it is unknown',
+	]);
+
+	// A file with an origin is reported whether or not the pass builds a worker,
+	// because that is the case a seam can hide in.
+	assert.deepEqual(unattributedAssets('server', emitted, new Set(), true), [
+		'assets/CopyBlock-hash.svelte: the server build emits this file and nothing this gate ' +
+			'records references it, so what depends on src/lib/agents/CopyBlock.svelte is unknown',
+		'assets/entry-client-hash.css: the server build emits this file and nothing this gate ' +
+			'records references it, so what depends on src/facetheory/entry-client.ts is unknown',
 	]);
 });
 
