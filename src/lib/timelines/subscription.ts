@@ -12,10 +12,11 @@
  * WHY THIS IS NOT A NEW TRANSPORT. `graphql-transport-ws` is a published wire
  * protocol, and the six frames below are its whole surface for one subscription.
  * lesser's own example uses the `graphql-ws` npm package, and declaring that
- * package was the first thing tried — it hoists a second copy of `ws` and moves
- * the SEC-2 advisory path pinned in
- * `gov-infra/planning/contentus-disclosed-upstream-findings.json`, which is a
- * real cost paid for a client contentus needs a few hundred bytes of. So this
+ * package was the first thing tried — a whole client, and a second copy of `ws`,
+ * for a protocol contentus needs a few hundred bytes of. (At M4 it also moved a
+ * pinned SEC-2 advisory path; that advisory retired at the greater-v0.13.0 bump
+ * and the disclosed set is now empty, so the reason that remains is the size of
+ * the surface rather than the shape of a disclosure.) So this
  * speaks the documented framing over the browser's native WebSocket, the same
  * call `cms/graphql.ts` already makes against Apollo for queries and for the
  * same stated reason. The endpoint, the subprotocol and the auth placement are

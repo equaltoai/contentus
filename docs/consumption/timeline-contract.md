@@ -7,7 +7,10 @@ Verified against lesser at `graph/core.graphql`,
 `graph/query_resolvers_notes.go`, `graph/subscription_resolvers_timelines.go`,
 `graph/object_viewer_interactions_resolvers.go`,
 `graph/query_resolvers_instance_parity.go` and `docs/api-reference.md`; against
-greater-components at `greater-v0.12.0` (`c9825f8f`).
+greater-components at `greater-v0.12.0` (`c9825f8f`), which was the vendored pin
+when face 4 was written. The vendored tree has since moved to **greater-v0.13.0**
+(`ce8f3d9d`) at the M6 bump; this record is what was read at v0.12.0, not a claim
+about the current pin.
 
 ## Contract facts that changed the UI
 
@@ -131,13 +134,19 @@ not use it.
 ### `graphql-ws` was tried and rejected
 
 lesser's own example names the `graphql-ws` npm package, so declaring it looked
-like the contract-following move. It is not: declaring it hoists a second copy
-of `ws` and **moves the SEC-2 advisory path** pinned in
+like the contract-following move. It is not, and the reason that still holds is
+the small one: contentus needs a few hundred bytes of the protocol, not a client
+library, and a smaller surface is a smaller thing to get wrong.
+
+_Historical, and no longer a reason:_ at M4 declaring it also hoisted a second
+copy of `ws` and **moved the SEC-2 advisory path** then pinned in
 `gov-infra/planning/contentus-disclosed-upstream-findings.json` from
 `.>@equaltoai/greater-components-adapters>graphql-ws>ws` to
-`.>@equaltoai/greater-components-adapters>viem>ws`. Perturbing an open
-high-severity advisory's disclosed shape to add a client for a protocol
-contentus needs a few hundred bytes of is a bad trade.
+`.>@equaltoai/greater-components-adapters>viem>ws` — perturbing an open
+high-severity advisory's disclosed shape to add a client nothing needed. That
+advisory (GHSA-96hv-2xvq-fx4p) was **retired at the greater-v0.13.0 pin bump**,
+whose adapters resolve `ws@8.21.0`, and the SEC-2 disclosed set is now empty.
+The decision stands on its own merits rather than on an advisory that is gone.
 
 `src/lib/timelines/subscription.ts` speaks the documented framing over the
 browser's native WebSocket instead — the same call `cms/graphql.ts` already

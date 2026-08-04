@@ -1,7 +1,10 @@
 # Shared-draft review — what contentus consumes, and the gaps it routed
 
 Status: recorded at M2d (2026-07-31), verified against lesser release
-**v1.5.32** and the greater-components **greater-v0.12.0** release.
+**v1.5.32** and the greater-components **greater-v0.12.0** release. The vendored
+review chrome moved to **greater-v0.13.0** (`ce8f3d9d`) at the M6 pin bump, and
+both open asks below were re-read there: both still reproduce, so each names the
+release it reproduces at rather than the one it was first seen at.
 
 A thin consumption note, not a redefinition of anyone's contract. It records
 what contentus observed while wiring Face 2, what it decided, and what it did
@@ -183,7 +186,8 @@ refusal, feature-gate refusal, and not-found/forbidden.
 ### D. `Review.VerdictActions` sizes its controls below the touch floor
 
 **Where:** `equaltoai/greater-components`, `review` registry entry,
-`Review/VerdictActions.svelte` (greater-v0.12.0).
+`Review/VerdictActions.svelte` (first seen at greater-v0.12.0; still present at
+the current **greater-v0.13.0** pin, where every control is `size="sm"`).
 
 Every control the component renders is `size="sm"` — both verdict buttons, both
 dialog buttons, and the dialog's close control — and the vendored primitives
@@ -206,7 +210,8 @@ against the selectors the component actually emits.
 ### E. `resolveReviewState` renders an absent projection as a decided absence
 
 **Where:** `equaltoai/greater-components`, `review` registry entry,
-`Review/state.ts` (greater-v0.12.0).
+`Review/state.ts` (first seen at greater-v0.12.0; still present at the current
+**greater-v0.13.0** pin).
 
 With no `reviewStatus` and an empty `verdicts`, `resolveReviewState` returns the
 definite label `"No review activity recorded"` with `source: 'none'`. That is

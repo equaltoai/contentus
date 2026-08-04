@@ -81,11 +81,14 @@ green report is read for what it is.
   installer is a self-report one step removed. If the digest-verified asset is absent,
   SEC-7 reports BLOCKED — never PASS.
 - **Disclosed upstream findings.** SEC-2 and SEC-7 assert an exact finding set, not an
-  empty one. Two findings are currently disclosed and unfixed upstream: a high-severity
-  `ws` advisory reached through the pinned adapters tarball, and the blog face's
-  unused-Markdown-chain dependency requirement. Neither gate proves the absence of the
-  disclosed problem; each proves the problem has not changed and nothing new hides behind
-  it. See `contentus-disclosed-upstream-findings.json`.
+  empty one. ONE finding is currently disclosed and unfixed upstream: the blog face's
+  unused-Markdown-chain dependency requirement, under SEC-7. SEC-2's disclosed advisory
+  set is EMPTY as of the greater-v0.13.0 pin bump — the high-severity `ws` advisory that
+  was reached through the pinned adapters tarball (GHSA-96hv-2xvq-fx4p) retired there,
+  at the exact sunset its entry named. Neither gate proves the absence of the disclosed
+  problem; each proves the problem has not changed and nothing new hides behind it, and
+  an empty SEC-2 set means a new advisory now fails it immediately. See
+  `contentus-disclosed-upstream-findings.json`.
 - **CodeQL.** The PR-only posture intentionally leaves no default-branch analysis, and
   fork PRs cannot upload `security-events`.
 - **DCO.** The check proves a `Signed-off-by` trailer exists; it does not bind that
