@@ -45,9 +45,20 @@ const SERIES_FIELDS = `
  * Index card fields. The article BODY is deliberately absent: an index that
  * never fetches `content` cannot leak unrendered source into a listing, and it
  * keeps the payload proportional to what the grid shows.
+ *
+ * TOMBSTONES. `deletedAt` is selected on every article read because lesser
+ * v1.6.0 surfaces article tombstones where earlier versions returned nothing:
+ * `article(id)`, `articleBySlug(slug)`, and the legacy `/objects/<uuid>` path
+ * all fall back to a synthesized Article carrying `deletedAt` when the live
+ * article is gone (lesser `graph/query_resolvers_cms.go`, `deletedCMSArticle`).
+ * That Article has no title and no body, so a client that does not ask for
+ * `deletedAt` cannot tell a deletion from a live article lesser returned
+ * empty — it can only guess from the missing title. Selecting the field makes
+ * the distinction lesser's to state rather than ours to infer.
  */
 const ARTICLE_SUMMARY_FIELDS = `
 	id
+	deletedAt
 	slug
 	title
 	subtitle

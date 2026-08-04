@@ -24,12 +24,12 @@
     "test": "node --test --experimental-strip-types 'tests/*.test.mjs' 'scripts/*.test.mjs'"
   },
   "dependencies": {
-    "@equaltoai/greater-components-adapters": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz",
-    "@equaltoai/greater-components-headless": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz",
-    "@equaltoai/greater-components-icons": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz",
-    "@equaltoai/greater-components-primitives": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz",
-    "@equaltoai/greater-components-tokens": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz",
-    "@equaltoai/greater-components-utils": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz",
+    "@equaltoai/greater-components-adapters": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz",
+    "@equaltoai/greater-components-headless": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz",
+    "@equaltoai/greater-components-icons": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz",
+    "@equaltoai/greater-components-primitives": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz",
+    "@equaltoai/greater-components-tokens": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz",
+    "@equaltoai/greater-components-utils": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz",
     "@tanstack/svelte-virtual": "^3.13.13",
     "@theory-cloud/facetheory": "https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.1/theory-cloud-facetheory-4.0.1.tgz",
     "hast-util-sanitize": "^5.0.2",
@@ -49,14 +49,14 @@
   },
   "pnpm": {
     "overrides": {
-      "@equaltoai/greater-components-adapters": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz",
-      "@equaltoai/greater-components-headless": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz",
-      "@equaltoai/greater-components-icons": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz",
-      "@equaltoai/greater-components-primitives": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz",
-      "@equaltoai/greater-components-social": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-social-0.12.0.tgz",
-      "@equaltoai/greater-components-testing": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-testing-0.12.0.tgz",
-      "@equaltoai/greater-components-tokens": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz",
-      "@equaltoai/greater-components-utils": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz"
+      "@equaltoai/greater-components-adapters": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz",
+      "@equaltoai/greater-components-headless": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz",
+      "@equaltoai/greater-components-icons": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz",
+      "@equaltoai/greater-components-primitives": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz",
+      "@equaltoai/greater-components-social": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-social-0.13.0.tgz",
+      "@equaltoai/greater-components-testing": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-testing-0.13.0.tgz",
+      "@equaltoai/greater-components-tokens": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz",
+      "@equaltoai/greater-components-utils": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz"
     }
   },
   "comments": {

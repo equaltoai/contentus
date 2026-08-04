@@ -5,37 +5,37 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@equaltoai/greater-components-adapters': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz
-  '@equaltoai/greater-components-headless': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz
-  '@equaltoai/greater-components-icons': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz
-  '@equaltoai/greater-components-primitives': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz
-  '@equaltoai/greater-components-social': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-social-0.12.0.tgz
-  '@equaltoai/greater-components-testing': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-testing-0.12.0.tgz
-  '@equaltoai/greater-components-tokens': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz
-  '@equaltoai/greater-components-utils': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz
+  '@equaltoai/greater-components-adapters': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz
+  '@equaltoai/greater-components-headless': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz
+  '@equaltoai/greater-components-icons': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz
+  '@equaltoai/greater-components-primitives': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz
+  '@equaltoai/greater-components-social': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-social-0.13.0.tgz
+  '@equaltoai/greater-components-testing': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-testing-0.13.0.tgz
+  '@equaltoai/greater-components-tokens': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz
+  '@equaltoai/greater-components-utils': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz
 
 importers:
 
   .:
     dependencies:
       '@equaltoai/greater-components-adapters':
-        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz
-        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)(svelte@5.56.8)(typescript@5.9.3)(ws@8.20.1)
+        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz
+        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)(svelte@5.56.8)(typescript@5.9.3)(ws@8.21.0)
       '@equaltoai/greater-components-headless':
-        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz
-        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz(svelte@5.56.8)
+        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz
+        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz(svelte@5.56.8)
       '@equaltoai/greater-components-icons':
-        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz
-        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz(svelte@5.56.8)
+        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz
+        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz(svelte@5.56.8)
       '@equaltoai/greater-components-primitives':
-        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz
-        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz(@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz)(svelte@5.56.8)
+        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz
+        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz(@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz)(svelte@5.56.8)
       '@equaltoai/greater-components-tokens':
-        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz
-        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz
+        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz
+        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz
       '@equaltoai/greater-components-utils':
-        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz
-        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz(svelte@5.56.8)
+        specifier: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz
+        version: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz(svelte@5.56.8)
       '@tanstack/svelte-virtual':
         specifier: ^3.13.13
         version: 3.13.35(svelte@5.56.8)
@@ -122,38 +122,38 @@ packages:
   '@emnapi/wasi-threads@2.0.1':
     resolution: {integrity: sha512-9DsSk+o5NBX0CCJT8s0EROGSGxjR/tKu6aBTaVyq+SjAEQH4XcdcRxPBRzsBLizTTJ49MJjF+jgu3qnO9GLQcQ==}
 
-  '@equaltoai/greater-components-adapters@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz':
-    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz}
-    version: 0.12.0
+  '@equaltoai/greater-components-adapters@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz':
+    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz}
+    version: 0.13.0
     peerDependencies:
       svelte: ^5.43.6
 
-  '@equaltoai/greater-components-headless@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz':
-    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz}
-    version: 0.12.0
+  '@equaltoai/greater-components-headless@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz':
+    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz}
+    version: 0.13.0
     peerDependencies:
       svelte: ^5.43.6
 
-  '@equaltoai/greater-components-icons@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz':
-    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz}
-    version: 0.12.0
+  '@equaltoai/greater-components-icons@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz':
+    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz}
+    version: 0.13.0
     peerDependencies:
       svelte: ^5.43.6
 
-  '@equaltoai/greater-components-primitives@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz':
-    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz}
-    version: 0.12.0
+  '@equaltoai/greater-components-primitives@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz':
+    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz}
+    version: 0.13.0
     peerDependencies:
-      '@equaltoai/greater-components-tokens': 0.12.0
+      '@equaltoai/greater-components-tokens': 0.13.0
       svelte: ^5.43.6
 
-  '@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz':
-    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz}
-    version: 0.12.0
+  '@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz':
+    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz}
+    version: 0.13.0
 
-  '@equaltoai/greater-components-utils@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz':
-    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz}
-    version: 0.12.0
+  '@equaltoai/greater-components-utils@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz':
+    resolution: {tarball: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz}
+    version: 0.13.0
     peerDependencies:
       svelte: ^5.43.6
 
@@ -820,8 +820,8 @@ packages:
   optimism@0.18.1:
     resolution: {integrity: sha512-mLXNwWPa9dgFyDqkNi54sjDyNJ9/fTI6WGBLgnXku1vdKY/jovHfZT5r+aiVeFFLOz+foPNOm5YJ4mqgld2GBQ==}
 
-  ox@0.14.25:
-    resolution: {integrity: sha512-8DoibKtxE8yw63Y2jjMhlbjaURev6WCx4QR4MWLusl2/qIaeTzMJMBIYIDl1KOF45+8H1Ur6eLTdPlUoO8PlRw==}
+  ox@0.14.33:
+    resolution: {integrity: sha512-rooA/4o7bBof4Ge2VH/eovfNPb/AEEYyrNj03wggc55g5HZD8Pjs/OeWhttgjic3dDcqn0r29bDuvQEdTiUemQ==}
     peerDependencies:
       typescript: '>=5.4.0'
     peerDependenciesMeta:
@@ -969,8 +969,8 @@ packages:
   vfile@6.0.3:
     resolution: {integrity: sha512-KzIbH/9tXat2u30jf+smMwFCsno4wHVdNmzFyL+T/L3UGqqk6JKfVqOFOZEpZSHADH1k40ab6NUIXZq422ov3Q==}
 
-  viem@2.51.3:
-    resolution: {integrity: sha512-DA4EbrsvatzzLo6MwcWWiv6kI6dIr3I9HH9B6qsJaClN/s0AjIDUz5RIxl+VmGrovIUCcIvG8744yuGH7d37zw==}
+  viem@2.55.10:
+    resolution: {integrity: sha512-Q9Ba+/ma81U2M5o5P2AQ7Ux8rTIwmCZvUcr8rKdQ22bV0IBFHllM2m5gWDP8hFaUN2nH2oW3QG44amRazflYNQ==}
     peerDependencies:
       typescript: '>=5.0.4'
     peerDependenciesMeta:
@@ -1031,8 +1031,8 @@ packages:
   web-namespaces@2.0.1:
     resolution: {integrity: sha512-bKr1DkiNa2krS7qxNtdrtHAmzuYGFQLiQ13TsorsdT6ULTkPLKuu5+GsFpDlg6JFjUTwX2DyhMPG2be8uPrqsQ==}
 
-  ws@8.20.1:
-    resolution: {integrity: sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==}
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -1053,9 +1053,9 @@ snapshots:
 
   '@adraffy/ens-normalize@1.11.1': {}
 
-  '@apollo/client-react-streaming@0.14.5(@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.20.1))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2))(@types/react@19.2.17)(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
+  '@apollo/client-react-streaming@0.14.5(@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2))(@types/react@19.2.17)(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
     dependencies:
-      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.20.1))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@types/react-dom': 19.2.3(@types/react@19.2.17)
       '@wry/equality': 0.5.7
       graphql: 16.14.2
@@ -1065,7 +1065,7 @@ snapshots:
     transitivePeerDependencies:
       - '@types/react'
 
-  '@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.20.1))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
+  '@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
     dependencies:
       '@graphql-typed-document-node/core': 3.2.0(graphql@16.14.2)
       '@wry/caches': 1.0.1
@@ -1077,7 +1077,7 @@ snapshots:
       rxjs: 7.8.2
       tslib: 2.8.1
     optionalDependencies:
-      graphql-ws: 6.2.0(graphql@16.14.2)(ws@8.20.1)
+      graphql-ws: 6.2.0(graphql@16.14.2)(ws@8.21.0)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
@@ -1097,15 +1097,15 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@equaltoai/greater-components-adapters@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-adapters-0.12.0.tgz(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)(svelte@5.56.8)(typescript@5.9.3)(ws@8.20.1)':
+  '@equaltoai/greater-components-adapters@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)(svelte@5.56.8)(typescript@5.9.3)(ws@8.21.0)':
     dependencies:
-      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.20.1))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
-      '@apollo/client-react-streaming': 0.14.5(@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.20.1))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2))(@types/react@19.2.17)(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@apollo/client-react-streaming': 0.14.5(@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2))(@types/react@19.2.17)(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@graphql-typed-document-node/core': 3.2.0(graphql@16.14.2)
       graphql: 16.14.2
-      graphql-ws: 6.2.0(graphql@16.14.2)(ws@8.20.1)
+      graphql-ws: 6.2.0(graphql@16.14.2)(ws@8.21.0)
       svelte: 5.56.8
-      viem: 2.51.3(typescript@5.9.3)
+      viem: 2.55.10(typescript@5.9.3)
     transitivePeerDependencies:
       - '@fastify/websocket'
       - '@types/react'
@@ -1120,28 +1120,28 @@ snapshots:
       - ws
       - zod
 
-  '@equaltoai/greater-components-headless@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-headless-0.12.0.tgz(svelte@5.56.8)':
+  '@equaltoai/greater-components-headless@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-headless-0.13.0.tgz(svelte@5.56.8)':
     dependencies:
       focus-trap: 8.2.2
       svelte: 5.56.8
       tabbable: 6.5.0
 
-  '@equaltoai/greater-components-icons@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz(svelte@5.56.8)':
+  '@equaltoai/greater-components-icons@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz(svelte@5.56.8)':
     dependencies:
       svelte: 5.56.8
 
-  '@equaltoai/greater-components-primitives@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-primitives-0.12.0.tgz(@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz)(svelte@5.56.8)':
+  '@equaltoai/greater-components-primitives@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-primitives-0.13.0.tgz(@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz)(svelte@5.56.8)':
     dependencies:
-      '@equaltoai/greater-components-icons': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-icons-0.12.0.tgz(svelte@5.56.8)
-      '@equaltoai/greater-components-tokens': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz
-      '@equaltoai/greater-components-utils': https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz(svelte@5.56.8)
+      '@equaltoai/greater-components-icons': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-icons-0.13.0.tgz(svelte@5.56.8)
+      '@equaltoai/greater-components-tokens': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz
+      '@equaltoai/greater-components-utils': https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz(svelte@5.56.8)
       svelte: 5.56.8
     transitivePeerDependencies:
       - supports-color
 
-  '@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-tokens-0.12.0.tgz': {}
+  '@equaltoai/greater-components-tokens@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-tokens-0.13.0.tgz': {}
 
-  '@equaltoai/greater-components-utils@https://github.com/equaltoai/greater-components/releases/download/greater-v0.12.0/equaltoai-greater-components-utils-0.12.0.tgz(svelte@5.56.8)':
+  '@equaltoai/greater-components-utils@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-utils-0.13.0.tgz(svelte@5.56.8)':
     dependencies:
       hast-util-to-mdast: 10.1.2
       mdast-util-gfm: 3.1.0
@@ -1422,11 +1422,11 @@ snapshots:
       graphql: 16.14.2
       tslib: 2.8.1
 
-  graphql-ws@6.2.0(graphql@16.14.2)(ws@8.20.1):
+  graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0):
     dependencies:
       graphql: 16.14.2
     optionalDependencies:
-      ws: 8.20.1
+      ws: 8.21.0
 
   graphql@16.14.2: {}
 
@@ -1551,9 +1551,9 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
-  isows@1.0.7(ws@8.20.1):
+  isows@1.0.7(ws@8.21.0):
     dependencies:
-      ws: 8.20.1
+      ws: 8.21.0
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -1876,7 +1876,7 @@ snapshots:
       '@wry/trie': 0.5.0
       tslib: 2.8.1
 
-  ox@0.14.25(typescript@5.9.3):
+  ox@0.14.33(typescript@5.9.3):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
       '@noble/ciphers': 1.3.0
@@ -2086,16 +2086,16 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  viem@2.51.3(typescript@5.9.3):
+  viem@2.55.10(typescript@5.9.3):
     dependencies:
       '@noble/curves': 1.9.1
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
       abitype: 1.2.3(typescript@5.9.3)
-      isows: 1.0.7(ws@8.20.1)
-      ox: 0.14.25(typescript@5.9.3)
-      ws: 8.20.1
+      isows: 1.0.7(ws@8.21.0)
+      ox: 0.14.33(typescript@5.9.3)
+      ws: 8.21.0
     optionalDependencies:
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -2120,7 +2120,7 @@ snapshots:
 
   web-namespaces@2.0.1: {}
 
-  ws@8.20.1: {}
+  ws@8.21.0: {}
 
   zimmerframe@1.1.4: {}
 

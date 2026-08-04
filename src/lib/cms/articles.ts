@@ -105,9 +105,31 @@ function toContentFormat(raw: unknown): ContentFormat {
 	return String(raw).toUpperCase() === 'HTML' ? 'HTML' : 'MARKDOWN';
 }
 
+/**
+ * Has lesser reported this article as deleted?
+ *
+ * `Article.deletedAt` is lesser's tombstone signal, non-null only on the
+ * synthesized Article its single-article reads return once the live article is
+ * gone. This is a RAW-node predicate on purpose: it has to be answerable before
+ * normalization, because a tombstone carries no title and would otherwise be
+ * dropped by the summary guard below — indistinguishable from an address that
+ * never existed. Keying on the contract field instead of on the missing title
+ * keeps the deletion lesser's statement rather than our inference.
+ */
+export function isArticleTombstone(raw: unknown): boolean {
+	return str(record(raw)?.deletedAt) !== null;
+}
+
+/**
+ * A tombstone is never an `ArticleSummary`. Rejecting it here — rather than at
+ * each call site — is what lets every consumer of these types treat an
+ * `ArticleSummary` as a live article, so no surface can render a deleted one by
+ * forgetting a check.
+ */
 export function toArticleSummary(raw: unknown): ArticleSummary | null {
 	const node = record(raw);
 	if (!node) return null;
+	if (isArticleTombstone(node)) return null;
 	const id = str(node.id);
 	const slug = str(node.slug);
 	const title = str(node.title);
@@ -150,7 +172,17 @@ export function toArticleDetail(raw: unknown): ArticleDetail | null {
 	};
 }
 
-/** Extract the article list and page info from an `ArticleConnection`. */
+/**
+ * Extract the article list and page info from an `ArticleConnection`.
+ *
+ * Tombstones are dropped here as a consequence of `toArticleSummary` rejecting
+ * them, not by a separate check. lesser's `articles` connection reads the live
+ * article store and its converter never sets `deletedAt`, so this filter is
+ * defensive rather than load-bearing today — but the guarantee a listing needs
+ * is "no deleted article renders as a card", and that has to hold whether or
+ * not the list resolver ever starts emitting what the single-article reads
+ * already do.
+ */
 export function toArticleConnection(raw: unknown): {
 	articles: ArticleSummary[];
 	endCursor: string | null;

@@ -54,25 +54,29 @@ export interface PollParamsInput {
 /**
  * lesser `AgentPostAttributionInput`.
  *
- * The full input shape, because that is what the schema declares. Only
- * `triggerType`, `triggerDetails`, and `memoryCitations` are ever READ by
- * `buildAgentPostAttribution` (lesser `graph/mutation_resolvers_notes.go`);
- * the rest — `delegatedBy`, `scopes`, `constraints`, `schemaVersion`,
- * `modelId` — are derived from the caller's token claims and the agent's own
- * account, and an input value for any of them is silently discarded. The
- * composer therefore offers controls for none of those; see
+ * The full input shape, because that is what the schema declares — and as of
+ * lesser v1.6.0 the schema declares exactly these three fields.
+ *
+ * This type used to carry six more (`delegatedBy`, `delegatedByDid`, `scopes`,
+ * `constraints`, `schemaVersion`, `modelId`) on the reasoning that mirroring
+ * the whole declared input was the contract-faithful thing to do, with a note
+ * that lesser silently discarded values for them. v1.6.0 removed them from the
+ * input type outright: they are server-derived from the caller's token claims
+ * and the agent's own account, so accepting them as input was offering callers
+ * a lever attached to nothing. They are still present on the OUTPUT type
+ * `AgentPostAttribution`, which is where they were always actually populated.
+ *
+ * Dropping them here is a contract sync, not a feature removal: nothing in
+ * contentus ever populated one, so no composer behavior changes. What changes
+ * is that the type can no longer describe a mutation lesser would now reject —
+ * sending a removed field is a GraphQL validation error, not a silent discard.
+ * The composer offers controls for none of these; see
  * `$lib/compose/AgentAttributionField`.
  */
 export interface AgentPostAttributionInput {
 	triggerType?: string;
 	triggerDetails?: string;
 	memoryCitations?: string[];
-	delegatedBy?: string;
-	delegatedByDid?: string;
-	scopes?: string[];
-	constraints?: string[];
-	schemaVersion?: string;
-	modelId?: string;
 }
 
 /**

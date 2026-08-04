@@ -428,13 +428,19 @@ export function reviewDraftHref(draftId: string, panel?: ReviewPanel): string {
  * rendered, not a missing resource. `transport` is contentus reporting that the
  * instance did not answer, which is a page that rendered exactly as designed.
  *
- * lesser's CMS contract has no Tombstone on the article read path, so a deleted
- * article and one that never existed are indistinguishable here and both get
- * 404. A speculative 410 would be a guess about deletion state.
+ * `tombstoned` is 410, and it is a separate status from 404 because lesser now
+ * makes it a separate FACT. Under v1.6.0 the article reads fall back to a
+ * tombstone Article carrying `deletedAt`, so "this address held an article that
+ * was deleted" is something the instance states rather than something contentus
+ * would be guessing at. 410 is the honest rendering of that statement: it tells
+ * a crawler to drop the URL rather than keep retrying it, which 404 does not.
+ * The distinction is only ever drawn from `deletedAt` — never from a missing
+ * title or an empty body, which is what inferring it would look like.
  */
 export function statusForRoute(props: RouteProps): number {
 	if (props.page.key === 'not-found') return 404;
 
 	const unavailable = props.reader?.unavailable ?? props.index?.unavailable ?? null;
+	if (unavailable?.reason === 'tombstoned') return 410;
 	return unavailable?.reason === 'not-found' ? 404 : 200;
 }
