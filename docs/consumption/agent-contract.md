@@ -281,8 +281,20 @@ quietly covering less.
 
 The same fact is what keeps that exemption from becoming a hole: a module the build
 never loaded is not counted as **reached** either, so externalizing a tracked file
-in the face lands in the containment rule below — a file no pass loads, which this
-gate cannot judge — instead of passing as a file it read.
+in the face lands in the containment rule below — a file that pass cannot judge —
+instead of passing as a file it read.
+
+**Reached is a fact about a pass**, and round 11 is what that cost when it was not
+written down. The two passes recorded what they reached into one set, so a component
+the client pass externalized was contained because the _server_ pass had loaded it,
+and the client pass's own edges out of that component went unrecorded and unremarked.
+The channels are asymmetric — a `new URL(…, import.meta.url)` is a client-pass edge,
+an `import()` behind `import.meta.env.SSR` is a server-pass one, each invisible to
+the other pass — so a union hands one pass the other's reading for a graph the other
+never had. Both sets are kept **per pass**: a tracked face file a pass **resolves**
+and never **loads** is that pass's finding, whatever the other pass did with the same
+file, and a file no pass resolves at all is the older finding — the build never
+reached it, so nothing about it is unexamined in either pass.
 
 Round 9 is why that is the rule rather than the one this section used to state.
 The residual used to be the emitted-asset rule on its own: every asset the build
@@ -338,7 +350,15 @@ externalizes a planted module through the bundler's own mechanism and asserts th
 gate says nothing about it, with the same plant **loaded** as the differential —
 and, in the same run, a module the build did load and nothing read, still named.
 Externalizing a tracked face component is a case of its own, and reports the
-containment finding rather than a green.
+containment finding for each pass that did it rather than a green.
+
+Round 11's two halves are planted the same way, one per pass: a client-pass-only
+`new URL(…)` reference with the component externalized in the client pass, and a
+server-pass-only `import()` behind `import.meta.env.SSR` with it externalized in the
+server pass. Each asserts the unexternalized run as its differential, so a clean
+externalized run is the masking rather than a plant that never built, and the control
+is a module externalized in **both** passes carrying the same cross-seam reference —
+still silent, because a file no pass opens is a file no pass takes an edge from.
 
 ### Why the composition is local today
 
