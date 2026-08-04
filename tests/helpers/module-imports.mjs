@@ -69,8 +69,21 @@ import ts from 'typescript';
  * distinction reliably, because the distinction is the parser's.
  *
  * A component with no script executes no import and yields the empty string.
- * The template reading it used to fall back to is gone with the patterns: markup
- * holds no import declaration, so there was never anything in it to find.
+ *
+ * THE MARKUP IS PART OF THE SCRIPT, and round 5's version of this said it was
+ * not. Markup holds no import DECLARATION — that much was true and is why the
+ * old text-reading fallback had to go — but it holds import CALLS, and
+ * `<button onclick={async () => (await import('…/CopyBlock.svelte')).default}>`
+ * is a dependency the client build takes. Round 5's review compiled exactly that
+ * and both seam checks stayed green, because this function returned two script
+ * blocks and nothing else. So `markupImports` walks the rest of the component's
+ * tree and appends every `import(…)` it finds, as source text, to be read by the
+ * same TypeScript pass that reads the script blocks: one extraction, one set of
+ * semantics, whichever region the call sits in.
+ *
+ * The server build DROPS event handlers, so `generate: 'server'` output is not a
+ * witness for this class — the regression in `tests/agents-mobile.test.mjs`
+ * compiles for the client, where the import is emitted.
  *
  * For anything else the file IS the script and is returned unchanged. Comments
  * are not stripped anywhere here — the TypeScript parser tokenizes them as
@@ -95,10 +108,63 @@ export function liveScript(file, source) {
 		);
 	}
 
-	return [ast.module, ast.instance]
+	const scripts = [ast.module, ast.instance]
 		.filter(Boolean)
-		.map((block) => source.slice(block.content.start, block.content.end))
-		.join('\n');
+		.map((block) => source.slice(block.content.start, block.content.end));
+
+	return [...scripts, ...markupImports(ast, source, file)].join('\n');
+}
+
+/**
+ * Every `import(…)` the component's markup runs, as source text ready to be read
+ * as a statement.
+ *
+ * WHERE IT LOOKS. Everywhere in the component's tree except the two script
+ * blocks — which the caller has already taken, and skipping them is what keeps a
+ * script import from being counted twice. That covers an event handler, an
+ * attribute, `{@const …}`, `{#await import(…)}`, `{#if}`, a snippet body and
+ * every position a future Svelte release adds, because the walk is over the
+ * tree's shape rather than over a list of the node types that may carry an
+ * expression. Such a list is the enumeration this module exists to stop writing.
+ *
+ * WHAT IT LOOKS FOR is one node type, `ImportExpression`, which is what Svelte's
+ * own expression parser emits for `import(…)`. A static `import … from` cannot
+ * appear in markup at all — it is a declaration, and markup holds no
+ * declarations — so a dynamic call is the whole class.
+ *
+ * The node's SOURCE TEXT is what comes back, not its parse: handing the text to
+ * the TypeScript pass that reads the scripts is what makes a markup import and a
+ * script import the same fact to every caller, including the fail-closed
+ * treatment of `import(<something unreadable>)`. Nesting needs no special case
+ * for the same reason — the outer call's text contains the inner one, and the
+ * TypeScript walk finds both, so the walk here stops descending at the first.
+ *
+ * A node whose position the compiler will not report THROWS, for the reason
+ * `liveScript` throws on a component it cannot parse: a dependency this cannot
+ * quote is not a dependency it may drop.
+ */
+function markupImports(ast, source, file) {
+	const scripts = new Set([ast.module, ast.instance].filter(Boolean));
+	const calls = [];
+
+	const visit = (node) => {
+		if (Array.isArray(node)) return node.forEach(visit);
+		if (!node || typeof node !== 'object' || scripts.has(node)) return;
+
+		if (node.type !== 'ImportExpression') {
+			for (const key of Object.keys(node)) visit(node[key]);
+			return;
+		}
+		if (typeof node.start !== 'number' || typeof node.end !== 'number')
+			throw new Error(
+				`${file}: the Svelte compiler no longer reports where a markup import() sits, so its ` +
+					'target cannot be read; this scan cannot see markup dependencies until that is re-bound'
+			);
+		calls.push(`${source.slice(node.start, node.end)};`);
+	};
+
+	visit(ast);
+	return calls;
 }
 
 /**

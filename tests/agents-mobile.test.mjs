@@ -464,6 +464,18 @@ const faceOnDisk = () =>
  */
 const component = (body) => `<script lang="ts">\n${body}\n</script>\n\n<div>face</div>\n`;
 
+/**
+ * A component whose dependency is in its MARKUP, which is the other half of the
+ * sentence above and the one round 5's review had to write.
+ *
+ * Markup holds no import DECLARATION — that is why the fixtures above are
+ * scripts — but it holds import CALLS, and the build takes them. A `<script>`
+ * block declaring nothing beside a handler that loads a component behind a seam
+ * is a component with a cross-seam dependency and an empty-looking script.
+ */
+const markup = (body) =>
+	`<script lang="ts">\n\tlet ready = $state(false);\n\tlet block = $state(null);\n</script>\n\n${body}\n`;
+
 test('a bare import line in markup is markup, because that is what Svelte compiles', () => {
 	// The claim the fixture shape rests on, PROVEN rather than asserted. The witness
 	// is the compiler's own output, read for the modules it actually imports —
@@ -606,6 +618,76 @@ test('a dynamic import cannot walk past the cross-seam check', () => {
 		[
 			'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)',
 		]
+	);
+});
+
+test('an import in MARKUP cannot walk past either seam check', () => {
+	// ROUND 5's FIRST FORM. The reading returned a component's two `<script>`
+	// blocks and nothing else, so a handler that loads a component behind a seam
+	// took the dependency in front of a check that could not see the region it sat
+	// in. Every form below is planted with its own WITNESS — the compiler's output,
+	// read for the specifier — so each is a proven dependency before it is a caught
+	// one, and the position list cannot drift into forms that never compiled.
+	const target = '../src/lib/agents/CopyBlock.svelte';
+	const offence =
+		'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)';
+
+	for (const body of [
+		`<button onclick={async () => { block = (await import('${target}')).default; }}>load</button>`,
+		`<button onclick={() => import('${target}')}>load</button>`,
+		`{#await import('${target}') then Block}<Block />{/await}`,
+		`{#if ready}{@const block = import('${target}')}<p>{block}</p>{/if}`,
+		`{#snippet load()}<button onclick={() => import('${target}')}>load</button>{/snippet}`,
+	]) {
+		const source = markup(body);
+		assert.ok(
+			compile(source, { generate: 'client', filename: 'Fixture.svelte' }).js.code.includes(target),
+			`the build must take this dependency: ${body}`
+		);
+		assert.deepEqual(crossSeamImports({ 'AgentRoster.svelte': source }), [offence], body);
+	}
+
+	// WHY THE WITNESS IS THE CLIENT BUILD. The server build drops event handlers,
+	// so its output agrees with the bug: it reports no dependency for a file that
+	// really has one. A check calibrated against it would have stayed green here.
+	const handler = markup(`<button onclick={() => import('${target}')}>load</button>`);
+	assert.ok(
+		!compile(handler, { generate: 'server', filename: 'Fixture.svelte' }).js.code.includes(target),
+		'the server build drops the handler, which is why it is not the witness'
+	);
+
+	// Both directions, because a bypass shown in one is a bypass open in the other.
+	assert.deepEqual(
+		importsBehindASeam(
+			{
+				'src/lib/routes/Agents.svelte': markup(
+					`<button onclick={() => import('$lib/agents/AgentCard.svelte')}>load</button>`
+				),
+			},
+			{}
+		),
+		['src/lib/routes/Agents.svelte → $lib/agents/AgentCard.svelte']
+	);
+
+	// And the fail-closed rule reaches the markup as well: a computed import there
+	// is as unreadable as a computed import in a script, and reported the same way.
+	assert.deepEqual(
+		crossSeamImports({
+			'AgentRoster.svelte': markup(`<button onclick={() => import(componentPath)}>load</button>`),
+		}),
+		['AgentRoster.svelte → import(componentPath) (a dependency no static read can name)']
+	);
+
+	// Prose in markup is still prose. There is no compile witness for THIS half —
+	// markup is emitted as text, so the specifier appears in the output either way,
+	// which is the same reason the fixture-shape test reads the emitted MODULES.
+	assert.deepEqual(
+		crossSeamImports({ 'AgentRoster.svelte': `<p>{"import('${target}')"}</p>` }),
+		[]
+	);
+	assert.deepEqual(
+		crossSeamImports({ 'AgentRoster.svelte': `<!-- import('${target}') -->\n<div>face</div>\n` }),
+		[]
 	);
 });
 

@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
+import { compile } from 'svelte/compiler';
+
 import {
 	AGENTS_ROSTER_QUERY,
 	agentUnavailableFromErrors,
@@ -356,6 +358,42 @@ test('the seam check can still see an import, in every form a comment can hide i
 		`<script>/* import AgentCard from '${target}'; */</script>`,
 		`<!-- import AgentCard from '${target}'; -->\n<p>see \`AgentCard.svelte\`</p>`,
 	])
+		assert.deepEqual(interimImports(prose, route), [], prose);
+});
+
+test('the seam check reads the markup, which is where round 5 hid a dependency', () => {
+	// The reading returned a component's two `<script>` blocks and nothing else, so
+	// a handler loading an interim piece was a dependency sitting in a region
+	// neither seam check looked at. Each form is planted with the compiler's own
+	// output as its witness, so it is a proven dependency before it is a caught one.
+	//
+	// THE WITNESS IS THE CLIENT BUILD. The server build drops event handlers and
+	// would report no dependency for a file that has one — it agrees with the bug.
+	const target = '../src/lib/agents/AgentCard.svelte';
+	const route = 'src/lib/routes/Agents.svelte';
+
+	for (const body of [
+		`<button onclick={async () => { card = (await import('${target}')).default; }}>load</button>`,
+		`<button onclick={() => import('${target}')}>load</button>`,
+		`{#await import('${target}') then Card}<Card />{/await}`,
+		`{#if ready}{@const card = import('${target}')}<p>{card}</p>{/if}`,
+	]) {
+		const source = `<script lang="ts">\n\tlet ready = $state(false);\n\tlet card = $state(null);\n</script>\n\n${body}\n`;
+		assert.ok(
+			compile(source, { generate: 'client', filename: 'Fixture.svelte' }).js.code.includes(target),
+			`the build must take this dependency: ${body}`
+		);
+		assert.deepEqual(interimImports(source, route), [`${route} → ${target}`], body);
+	}
+
+	// A computed import in markup is as unreadable as one in a script, and reported.
+	assert.deepEqual(interimImports(`<button onclick={() => import(where)}>load</button>`, route), [
+		`${route} → import(where) (a dependency no static read can name)`,
+	]);
+
+	// And prose in markup is still prose — including an import CALL written as text,
+	// which has no compile witness because markup is emitted as text either way.
+	for (const prose of [`<p>{"import('${target}')"}</p>`, `<!-- import('${target}') -->`])
 		assert.deepEqual(interimImports(prose, route), [], prose);
 });
 
