@@ -254,19 +254,34 @@ source, or a root-absolute path naming a real file. A `data:` URL, a remote or
 protocol-relative origin, and an absolute path with no file behind it resolve to
 nothing and are not dependencies.
 
-**The residual rule, because a list of channels is a list and channels close.**
-Every asset the build **emits** must be attributable to something that references
-it; one that is not is a **finding**, not a silence. That is what makes the next
-closed channel cost the gate its green rather than its coverage — with the
-stylesheet window shut, round 7's plant becomes an unaccounted-for asset instead
-of a pass. The single exception is a worker's own bundle, which is generated code
-named by a marker Vite rewrites from a map of its own and therefore can never be
-attributed; a worker is bundled by a separate build whose plugin list the main
-pipeline is not in, and the gate reports that worker's dependencies as
-**unknown** — a red gate in its own right. Supplying `worker.plugins` from the
-gate was tried and rejected: it would replace whatever `vite.config.ts` sets, and
-a gate that measures a build other than the real one is worse than a gate with a
-stated boundary.
+**The rule that holds the channels honest, because a list of channels is a list
+and channels close.** Every module the build **loads** must have its code held by
+one of the windows above — read at `buildEnd`, or read mid-pipeline for a
+stylesheet whose content has already left the module graph by then. A module
+neither window holds is a **finding** naming that module: this gate read nothing
+for it, so what it references is unknown. A window that closes, for every module
+or for one, costs the gate its green there.
+
+Round 9 is why that is the rule rather than the one this section used to state.
+The residual used to be the emitted-asset rule on its own: every asset the build
+**emits** must be attributable to something that references it, one that is not
+being a **finding** rather than a silence. That rule still runs and still catches a
+channel closing from the other end — with the stylesheet window shut, round 7's
+plant becomes an unaccounted-for asset instead of a pass. But attribution is by
+emitted **file name**, and the build emits one file however many importers point at
+it: two components with a `url()` at the same file get one asset, so a window that
+closed for one of them stayed accounted for by the other's reference, and a real
+cross-seam edge was green. A file name cannot tell two importers apart, and the
+per-module rule above does not have to.
+
+The single exception to the emitted-asset rule is a worker's own bundle, which is
+generated code named by a marker Vite rewrites from a map of its own and
+therefore can never be attributed; a worker is bundled by a separate build whose
+plugin list the main pipeline is not in, and the gate reports that worker's
+dependencies as **unknown** — a red gate in its own right. Supplying
+`worker.plugins` from the gate was tried and rejected: it would replace whatever
+`vite.config.ts` sets, and a gate that measures a build other than the real one
+is worse than a gate with a stated boundary.
 
 Two boundaries remain stated rather than closed. A file the build never loads has
 no edges here at all — that is the source-reading probes' half, below. And a
