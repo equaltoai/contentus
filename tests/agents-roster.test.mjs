@@ -18,6 +18,7 @@ import {
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
+import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -238,20 +239,42 @@ test('the next-page link carries the filters as well as the cursor', async () =>
  * The swap seam
  * ---------------------------------------------------------------------- */
 
+/** The interim pieces `AgentRoster.svelte` composes and greater M6a takes away. */
+const INTERIM = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
+
+/**
+ * Everything outside the face that depends on an interim piece.
+ *
+ * IMPORTS, not mentions. A route is free to REFER to the interim pieces in a
+ * comment — pointing at where the form lives is useful documentation — and an
+ * earlier version of this check failed on exactly that, which is the same
+ * prose-versus-code confusion `tests/vendored-runes.test.mjs` had to resolve.
+ * What breaks the seam is a module depending on one, and that is an import.
+ *
+ * THE SCAN IS THE SHARED ONE (`./helpers/module-imports.mjs`) and that is the
+ * point of this rewrite. This probe used to carry its own line-anchored regex,
+ * which is the same scan `tests/agents-mobile.test.mjs` carried and the same one
+ * round 3 of this pull request's review compiled four legal files past. Two
+ * probes asserting one property with two copies of one defect is how the second
+ * copy survives the fix to the first.
+ */
+function interimImports(source, path) {
+	const live = liveScript(path, source);
+	const offenders = computedImports(live).map(
+		(expression) => `${path} → import(${expression.trim()}) (a dependency no static read can name)`
+	);
+	for (const specifier of moduleSpecifiers(live))
+		for (const name of INTERIM)
+			if (specifier.endsWith(`/${name}.svelte`)) offenders.push(`${path} → ${specifier}`);
+	return offenders;
+}
+
 test('nothing outside src/lib/agents imports the interim roster components', () => {
 	// THE SEAM. greater M6a replaces `AgentRoster.svelte`'s body wholesale. That
 	// is only a single-boundary swap while the interim pieces it composes are
 	// reachable from nowhere else — otherwise the replacement leaves orphaned
 	// imports in routes and the route has to change too.
-	const interim = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
 	const offenders = [];
-
-	// IMPORTS, not mentions. A route is free to REFER to the interim pieces in a
-	// comment — pointing at where the form lives is useful documentation — and an
-	// earlier version of this check failed on exactly that, which is the same
-	// prose-versus-code confusion `tests/vendored-runes.test.mjs` had to resolve.
-	// What breaks the seam is a module depending on one, and that is an import.
-	const importPattern = /^[ \t]*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm;
 
 	const walk = (dir) => {
 		for (const entry of readdirSync(dir)) {
@@ -263,13 +286,7 @@ test('nothing outside src/lib/agents imports the interim roster components', () 
 				continue;
 			}
 			if (!/\.(svelte|ts)$/.test(entry)) continue;
-
-			for (const match of readFileSync(path, 'utf8').matchAll(importPattern)) {
-				const specifier = match[1];
-				for (const name of interim) {
-					if (specifier.endsWith(`/${name}.svelte`)) offenders.push(`${path} → ${specifier}`);
-				}
-			}
+			offenders.push(...interimImports(readFileSync(path, 'utf8'), path));
 		}
 	};
 
@@ -277,21 +294,43 @@ test('nothing outside src/lib/agents imports the interim roster components', () 
 	assert.deepEqual(offenders, []);
 });
 
-test('the seam check can still see an import, and no longer sees one in prose', () => {
-	// The guard above is only worth anything if it would fail. Both halves of the
-	// distinction it draws are asserted here rather than assumed.
-	const importPattern = /^[ \t]*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm;
-
-	// The specifier resolves from this file on purpose. An unresolvable relative
+test('the seam check can still see an import, in every form a comment can hide it', () => {
+	// The guard above is only worth anything if it would fail, and the forms it
+	// has to survive are the ones that compiled and returned nothing in round 3.
+	//
+	// The specifiers resolve from this file on purpose. An unresolvable relative
 	// import inside a scanned file is itself a rubric finding (CON-5), and a
 	// fixture that trips the gate it is testing beside is not a fixture.
-	const sample = `import AgentCard from '../src/lib/agents/AgentCard.svelte';`;
-	const fromImport = [...sample.matchAll(importPattern)];
-	assert.equal(fromImport.length, 1);
-	assert.ok(fromImport[0][1].endsWith('/AgentCard.svelte'));
+	const target = '../src/lib/agents/AgentCard.svelte';
+	const route = 'src/lib/routes/Agents.svelte';
+	for (const body of [
+		`import AgentCard from '${target}';`,
+		`/* the card */ import AgentCard from '${target}';`,
+		`import AgentCard from /* the card */ '${target}';`,
+		`/* the card */ export { default as AgentCard } from '${target}';`,
+		`export { default as AgentCard } from /* the card */ '${target}';`,
+		`const a = 1; import AgentCard from '${target}';`,
+		`import '${target}';`,
+	])
+		assert.deepEqual(
+			interimImports(`<script lang="ts">\n${body}\n</script>\n`, route),
+			[`${route} → ${target}`],
+			body
+		);
 
-	const fromProse = [...`see \`AgentCard.svelte\` for the card`.matchAll(importPattern)];
-	assert.deepEqual(fromProse, []);
+	// A computed import names nothing, so it is reported as unreadable rather than
+	// waved through — the same fail-closed rule the whole-face check applies.
+	assert.deepEqual(interimImports(`<script>const c = await import(where);</script>`, route), [
+		`${route} → import(where) (a dependency no static read can name)`,
+	]);
+
+	// And prose is still prose, in either comment syntax and in markup.
+	for (const prose of [
+		`<script>// see ${target} for the card\n</script>`,
+		`<script>/* import AgentCard from '${target}'; */</script>`,
+		`<!-- import AgentCard from '${target}'; -->\n<p>see \`AgentCard.svelte\`</p>`,
+	])
+		assert.deepEqual(interimImports(prose, route), [], prose);
 });
 
 test('the route imports the seam and not the pieces behind it', () => {

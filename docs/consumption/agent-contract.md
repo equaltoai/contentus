@@ -168,6 +168,24 @@ is nothing here" must not produce the same colour. Both bypasses and the
 fail-closed behaviour are asserted against planted graphs in
 `tests/agents-mobile.test.mjs`, in both directions.
 
+**It reads code, not text.** Naming the forms is not enough on its own: a review
+round compiled four legal files that took a cross-seam dependency and returned
+nothing, because a comment sat where the patterns expected whitespace — before
+the import, between `from` and the specifier, and the same two on a re-export.
+The scan now runs over the source the module system executes, with the comments
+of that source's own language removed (`tests/helpers/module-imports.mjs` over
+`scripts/lib/strip-comments.mjs`), so a comment can say anything and a comment
+can hide nothing. In a component that means the `<script>` blocks, because they
+are what Svelte runs.
+
+The same round's fourth form was `const target = '…'; import(target)` from
+outside the face, which the walk had waved through because the expression did
+not contain the word `agents`. A computed import cannot be asked to describe
+its own target, so it is no longer asked: an `import()` this walk cannot resolve
+is a finding wherever it appears, inside the face or outside it, whatever its
+text says. The single exclusion is syntactic — a class member NAMED `import`,
+which vendored greater-components has, is a declaration and not a call.
+
 ### Why the composition is local today
 
 greater v0.13.0 does export `shared/agent` `AgentIdentityCard` and
