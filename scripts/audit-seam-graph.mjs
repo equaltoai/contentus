@@ -79,6 +79,23 @@
  * face file a consumer externalizes lands in the containment rule below as a file
  * this gate cannot judge rather than passing as one it read.
  *
+ * REACHED IS A FACT ABOUT A PASS, NOT ABOUT THE REPOSITORY, and round 11 is what
+ * that sentence cost when it was not written down. The two passes recorded what
+ * they reached into ONE set, so a component the client pass externalized was
+ * CONTAINED because the server pass had loaded it — and the client pass's own
+ * edges out of that component went unrecorded and unremarked. Two probes proved
+ * it: a `new URL('./X', import.meta.url)` in a component, which only the client
+ * pass turns into an edge, went green under client-only externalization; an
+ * `import()` behind `import.meta.env.SSR`, which only the server pass keeps, went
+ * green under server-only externalization. The channels ARE asymmetric — that is
+ * boundary 3 below, stated long before this — so a union hands each pass the other
+ * pass's reading and excuses it for a file the other pass never had the same edge
+ * to. Both sets are therefore kept PER PASS, and the containment rule asks its
+ * question of each pass on its own: a tracked face file a pass RESOLVES and never
+ * LOADS is that pass's finding, whatever the other pass did with the same file. A
+ * file no pass resolves at all is the older finding, unchanged — the build never
+ * reached it, so there is nothing unexamined about it in either pass.
+ *
  * WHAT THIS GATE CANNOT SEE, stated plainly, because a mechanism that claims
  * everything is a mechanism nobody can check. Each one is either covered by
  * another check that stays, or turned into a TRIPWIRE — a red gate the day the
@@ -93,8 +110,8 @@
  *      tracked file in one form. Neither subsumes the other and both run. A module
  *      the build EXTERNALIZES is the same boundary reached from the other side —
  *      the configuration saying this file is not part of this build — and inside
- *      the face it is a red gate, because a tracked face file no pass loads is
- *      already a finding of its own.
+ *      the face it is a red gate IN THE PASS THAT DID IT, because a tracked face
+ *      file a pass resolves and never loads is that pass's own finding.
  *   2. A WORKER's own modules. `new Worker(new URL(…))` is bundled by a separate
  *      Rolldown build whose plugin list is `config.worker.plugins` — the main
  *      pipeline is not in it, so a recorder in `plugins` never sees inside one.
@@ -109,7 +126,10 @@
  *      pass does not. `new URL('./X', import.meta.url)` is left verbatim as a
  *      runtime URL in the server build, and a CSS `url('./X')` resolves there
  *      without emitting, so both are client-pass edges. A module only the server
- *      pass loads takes those dependencies unrecorded.
+ *      pass loads takes those dependencies unrecorded. The asymmetry runs the
+ *      other way too — an `import()` behind `import.meta.env.SSR` is a server-pass
+ *      edge the client pass eliminates before the graph records it — which is why
+ *      no rule here may excuse one pass with what the other pass read.
  *
  * FAIL-CLOSED, in five places. A build that throws is a red gate rather than an
  * empty edge set. A module whose final code the build's own parser cannot read is
@@ -340,8 +360,13 @@ function loadWatcher(loads) {
  * own configuration externalizes anything but `node:` builtins, and a rule that
  * only ever runs against ids that happen to be bare would be a rule nobody has
  * watched. So the case is INJECTED, the way `blind` injects a closed window: a
- * predicate on the resolved id, and a match becomes a genuine external through the
- * bundler's own mechanism rather than a mock of one.
+ * predicate on the resolved id AND THE PASS, and a match becomes a genuine external
+ * through the bundler's own mechanism rather than a mock of one.
+ *
+ * The pass is an argument because a consumer's configuration can externalize in one
+ * pass and not the other — `ssr.external` is the usual way — and round 11's finding
+ * is exactly what a gate that could not express that failed to notice. A predicate
+ * that ignores it externalizes in both, which is round 10's case unchanged.
  *
  * `enforce: 'pre'` and ahead of the overlay, because this asks the rest of the
  * pipeline to resolve first and then marks what came back — so a planted file is
@@ -350,14 +375,14 @@ function loadWatcher(loads) {
  * The command-line path passes no predicate and this plugin is not in the stack at
  * all, so the gate the rubric runs resolves exactly what it resolved before.
  */
-function externalizer(external) {
+function externalizer(external, pass) {
 	return {
 		name: 'contentus:seam-graph-external',
 		enforce: 'pre',
 
 		async resolveId(source, importer, options) {
 			const resolved = await this.resolve(source, importer, options);
-			if (!resolved || !external(String(resolved.id))) return null;
+			if (!resolved || !external(String(resolved.id), pass)) return null;
 			return { id: resolved.id, external: true };
 		},
 	};
@@ -425,7 +450,7 @@ export function unattributedAssets(pass, emitted, attributed, workers = false) {
  * something. An emitted file nothing accounts for is a dependency of something,
  * and this gate not knowing of what is a finding rather than a silence.
  */
-function recorder(pass, root, sink, references, observed, loads) {
+function recorder(pass, root, sink, references, observed, loads, reach) {
 	// Whether this pass built a worker, which `unattributedAssets` needs and the
 	// tripwire below is what learns.
 	let workers = false;
@@ -457,12 +482,21 @@ function recorder(pass, root, sink, references, observed, loads) {
 				// empty or not.
 				const loaded = loads.has(String(id)) || typeof info.code === 'string';
 
-				// REACHED, and therefore judgeable. A module the build never loaded takes no
-				// dependency it could record, so counting it as reached would tell the
-				// containment rule that a tracked face file had been examined when nothing
-				// examined it. Externalizing a component in the face is a red gate for that
-				// reason, in the sentence that says what is actually unknown.
-				if (loaded) sink.modules.add(importer);
+				// REACHED, and therefore judgeable — IN THIS PASS AND NOWHERE ELSE. A module
+				// the build never loaded takes no dependency it could record, so counting it
+				// as reached would tell the containment rule that a tracked face file had
+				// been examined when nothing examined it. Externalizing a component in the
+				// face is a red gate for that reason, in the sentence that says what is
+				// actually unknown.
+				//
+				// Both facts are recorded, and they are not the same fact. RESOLVED is this
+				// pass having an edge to the module — it is in this pass's graph, so this
+				// pass takes whatever the module depends on. LOADED is this pass having gone
+				// and got it, which is the only way an edge OUT of it gets recorded. The two
+				// differing is exactly an externalized module, and the containment rule below
+				// reads them per pass because a pass's edges are its own: see the header.
+				reach.resolved.add(importer);
+				if (loaded) reach.loaded.add(importer);
 				for (const target of info.importedIds ?? [])
 					sink.edges.push({ importer, target: repoPath(root, target), channel: `${pass}:import` });
 				for (const target of info.dynamicallyImportedIds ?? [])
@@ -677,7 +711,7 @@ export async function seamGraph({
 	blind = () => false,
 	external,
 } = {}) {
-	const sink = { edges: [], modules: new Set(), findings: [], passes: [] };
+	const sink = { edges: [], reached: new Map(), findings: [], passes: [] };
 	const planted = Object.keys(overlay).length > 0;
 	const stack = (pass) => {
 		// One reference table per pass, written by the observer in the middle of the
@@ -690,12 +724,18 @@ export async function seamGraph({
 		// Which module ids the build LOADED, so the recorder can tell that module from
 		// one the build resolved and deliberately never opened.
 		const loads = new Set();
+		// What THIS PASS reached, as repository-relative paths: the files its graph
+		// resolved, and the subset of those it went and loaded. Per pass because a
+		// pass's edges are its own — a union lets one pass's reading excuse the other's
+		// blind spot, which is the header's round 11.
+		const reach = { resolved: new Set(), loaded: new Set() };
+		sink.reached.set(pass, reach);
 		return [
 			loadWatcher(loads),
-			...(external ? [externalizer(external)] : []),
+			...(external ? [externalizer(external, pass)] : []),
 			...(planted ? [overlayPlugin(root, overlay)] : []),
 			styleRecorder(pass, root, references, observed, blind),
-			recorder(pass, root, sink, references, observed, loads),
+			recorder(pass, root, sink, references, observed, loads, reach),
 		];
 	};
 
@@ -737,9 +777,11 @@ export function trackedFaceFiles(root = process.cwd()) {
  *
  *   - Did every pass run? A gate that recorded nothing must not read as clean.
  *   - Is the face DECLARED and CONTAINED? Every component named exactly once, and
- *     every tracked file in the face reached by the build. A file the build never
- *     loads is a file this gate cannot judge, and saying so is the difference
- *     between a gap and a silence.
+ *     every tracked file in the face LOADED BY EVERY PASS THAT RESOLVES IT. A file
+ *     a pass resolves and never loads is a file that pass cannot judge, whatever
+ *     the other pass made of it, and a file no pass resolves at all is one this
+ *     gate has nothing on. Saying either is the difference between a gap and a
+ *     silence.
  *   - Does any edge cross a seam? `seamOffence` in `./lib/agent-seams.mjs` is the
  *     rule, shared with the reading probes so that one graph answers both.
  */
@@ -771,12 +813,32 @@ export function seamFindings(sink, tracked) {
 		if (DECLARED.filter((entry) => entry === name).length > 1)
 			findings.push(`${name} is named in more than one place in the seam declaration`);
 
-	for (const path of tracked)
-		if (!sink.modules.has(path))
+	// CONTAINMENT, ASKED OF EACH PASS ON ITS OWN. A pass that RESOLVES a file and
+	// never LOADS it has an edge to a module whose own edges it did not record, and
+	// what the OTHER pass loaded says nothing about that: the channels are not
+	// symmetric — a `new URL(…)` is a client-pass edge, an `import()` behind
+	// `import.meta.env.SSR` a server-pass one — so the other pass is not looking at
+	// the same graph. That is the whole of round 11; the header carries the argument.
+	//
+	// A file no pass resolved at all is the older finding and a different one: the
+	// build never reached it, so nothing about it is unexamined in either pass, and
+	// what this gate has is nothing rather than half.
+	for (const path of tracked) {
+		for (const { name } of PASSES) {
+			const reach = sink.reached.get(name);
+			if (reach?.resolved.has(path) && !reach.loaded.has(path))
+				findings.push(
+					`${path} is tracked inside the face and the ${name} build resolves it and never ` +
+						'loads it, so the edges it takes in that pass are unrecorded and this gate ' +
+						'cannot judge it there'
+				);
+		}
+		if (![...sink.reached.values()].some((reach) => reach.resolved.has(path)))
 			findings.push(
 				`${path} is tracked inside the face and no build pass loads it, so no edge of ` +
 					'its own is recorded and this gate cannot judge it'
 			);
+	}
 
 	const seen = new Set();
 	for (const { importer, target } of sink.edges) {
@@ -809,7 +871,15 @@ async function main() {
 
 	console.log('# Seam graph audit — face 6 (%s)\n', FACE_DIR);
 	console.log(`- Build passes recorded: ${sink.passes.join(', ') || 'none'}`);
-	console.log(`- Modules the build loaded: ${sink.modules.size}`);
+	// Per pass, and resolved beside loaded, because the difference between the two
+	// numbers is what this gate cannot judge in that pass.
+	for (const { name } of PASSES) {
+		const reach = sink.reached.get(name);
+		console.log(
+			`- Modules the ${name} build resolved / loaded: ${reach?.resolved.size ?? 0} / ` +
+				`${reach?.loaded.size ?? 0}`
+		);
+	}
 	console.log(`- Dependency edges recorded: ${sink.edges.length}`);
 	console.log(`- Distinct edges into the face: ${intoTheFace.size}`);
 	console.log(`- Findings: ${findings.length}\n`);
