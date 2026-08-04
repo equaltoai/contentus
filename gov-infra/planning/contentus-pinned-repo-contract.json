@@ -83,7 +83,7 @@
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/lib/strip-comments.mjs": "65c380841496db3a0138dd45c751c39b2bab21a56d039e43f9a4e802b85255af",
       "scripts/render-routes.mjs": "332823b287f559249b9e831bd42406deae2cddff55d5884dd0659a897fd0432f",
-      "tests/agents-mcp.test.mjs": "5ad82cfa9174b059b9dda7ad7bbf5842d8d4355852dce2b9f23bbe70bda27f87",
+      "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
       "tests/agents-mobile.test.mjs": "d62b18cce2b7a817462ce95f6edc1684d9b42936108790b8c9dca167fbb62f6c",
       "tests/agents-roster.test.mjs": "3c6986abc6017f13f97a2e49bef1051c78f7ee93378163589461e931590fcbb2",
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",

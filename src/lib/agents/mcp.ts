@@ -279,21 +279,48 @@ export interface McpClientConfig {
 }
 
 /**
+ * The half of `mcpAccess` that is addresses rather than probe targets.
+ *
+ * Taken as the bundle rather than as loose strings so a value cannot be
+ * substituted for another that happens to be the same type — which is exactly
+ * how `authorization_server` came to be filled with the protected-resource URL.
+ */
+export interface McpAccessBundle {
+	authorizationServerURL: string | null;
+	registrationURL: string | null;
+	scopes: string[];
+}
+
+/**
  * Copy-paste configurations for connecting a client to this agent's MCP server.
  *
- * Every value comes from lesser: the endpoint is `mcpAccess.mcpURL` and the
- * scopes are `mcpAccess.scopes`. No token is embedded and none is invented —
- * the snippets carry a placeholder, because a token is minted through the OAuth
- * flow the discovery documents describe, and a config that looked ready to run
- * would be advertising a credential contentus never had.
+ * EVERY VALUE COMES FROM LESSER, AND EACH FROM THE RIGHT FIELD. `mcpAccess`
+ * names four URLs and they are four different things: `mcpURL` is the MCP server
+ * and the RFC 8707 `resource`; `protectedResourceURL` is the RFC 9728 metadata
+ * ABOUT that resource; `authorizationServerURL` is the authorization server's
+ * own metadata; `registrationURL` is RFC 7591 dynamic registration. lesser
+ * canonicalises the first two onto `api.<domain>` and leaves the last two on the
+ * apex, so they are not even the same host — and a config that pointed a client
+ * at the protected-resource document as its authorization server would send it
+ * to fetch metadata that cannot answer `/authorize`.
+ *
+ * A field lesser did not publish is named as unpublished, not defaulted. The
+ * protected-resource document's `authorization_servers` array is where a client
+ * discovers the server in that case, and saying so is more use than a URL
+ * contentus guessed.
+ *
+ * No token is embedded and none is invented — the snippets carry a placeholder,
+ * because a token is minted through the OAuth flow the discovery documents
+ * describe, and a config that looked ready to run would be advertising a
+ * credential contentus never had.
  */
 export function mcpClientConfigs(
 	agentUsername: string,
 	targets: McpProbeTargets,
-	scopes: string[]
+	access: McpAccessBundle
 ): McpClientConfig[] {
 	const serverKey = `lesser-${agentUsername}`;
-	const scopeList = scopes.length ? scopes : ['read'];
+	const scopeList = access.scopes.length ? access.scopes : ['read'];
 
 	return [
 		{
@@ -326,8 +353,12 @@ export function mcpClientConfigs(
 					// says so, and it is repeated here rather than restated in prose so
 					// the value can be copied without transcription.
 					resource: targets.endpoint,
-					authorization_server: targets.protectedResourceUrl,
-					registration_endpoint: '<from the authorization server document>',
+					protected_resource_metadata: targets.protectedResourceUrl,
+					authorization_server:
+						access.authorizationServerURL ??
+						'<from the protected-resource document’s authorization_servers>',
+					registration_endpoint:
+						access.registrationURL ?? '<from the authorization server document>',
 					scope: scopeList.join(' '),
 				},
 				null,

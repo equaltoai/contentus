@@ -182,7 +182,7 @@ test('the protected-resource document is read with its RFC 9728 field names', ()
 
 test('client configs carry lesser’s values and never a credential', () => {
 	const targets = resolveMcpProbeTargets(ACCESS);
-	const configs = mcpClientConfigs('weatherbot', targets, ACCESS.scopes);
+	const configs = mcpClientConfigs('weatherbot', targets, ACCESS);
 
 	const claude = configs.find((c) => c.id === 'claude-code');
 	const parsed = JSON.parse(claude.body);
@@ -204,6 +204,59 @@ test('client configs carry lesser’s values and never a credential', () => {
 			`${config.id} must not contain anything shaped like a real token`
 		);
 	}
+});
+
+test('the OAuth snippet names each of lesser’s four URLs as the thing it is', () => {
+	// THE FIXTURE IS DELIBERATELY UN-SUBSTITUTABLE. All four URLs differ, and the
+	// OAuth pair sits on the APEX while the MCP pair sits on `api.` — which is
+	// how `BuildPublicMCPAccessBundle` actually returns them. An earlier version
+	// filled `authorization_server` with the protected-resource URL and the
+	// assertions could not tell, because the fixture let one stand for another.
+	const targets = resolveMcpProbeTargets(ACCESS);
+	const oauth = JSON.parse(
+		mcpClientConfigs('weatherbot', targets, ACCESS).find((c) => c.id === 'oauth').body
+	);
+
+	assert.equal(oauth.authorization_server, ACCESS.authorizationServerURL);
+	assert.equal(oauth.registration_endpoint, ACCESS.registrationURL);
+	assert.equal(oauth.protected_resource_metadata, ACCESS.protectedResourceURL);
+	assert.equal(oauth.resource, ACCESS.mcpURL);
+
+	// Each of the other three explicitly, because "not the protected-resource
+	// URL" is the specific substitution that happened.
+	assert.notEqual(oauth.authorization_server, ACCESS.protectedResourceURL);
+	assert.notEqual(oauth.authorization_server, ACCESS.mcpURL);
+	assert.notEqual(oauth.registration_endpoint, ACCESS.authorizationServerURL);
+
+	// And the whole snippet stays on the hosts lesser named for each half.
+	assert.match(oauth.authorization_server, /^https:\/\/example\.invalid\//);
+	assert.match(oauth.protected_resource_metadata, /^https:\/\/api\.example\.invalid\//);
+});
+
+test('a URL lesser did not publish is named as unpublished, not guessed at', () => {
+	// `BuildPublicMCPAccessBundle` can return a bundle whose OAuth URLs are empty.
+	// Filling them with something plausible would send a client to an address the
+	// instance never claimed; the protected-resource document's
+	// `authorization_servers` array is where it should look instead, and saying so
+	// is the honest answer.
+	const targets = resolveMcpProbeTargets(ACCESS);
+	const oauth = JSON.parse(
+		mcpClientConfigs('weatherbot', targets, {
+			authorizationServerURL: null,
+			registrationURL: null,
+			scopes: [],
+		}).find((c) => c.id === 'oauth').body
+	);
+
+	assert.match(oauth.authorization_server, /authorization_servers/);
+	assert.match(oauth.registration_endpoint, /authorization server document/);
+	// Never the protected-resource URL standing in for the authorization server.
+	assert.ok(!oauth.authorization_server.startsWith('http'));
+	// The addresses lesser DID publish are unaffected, and an empty scope set
+	// falls back to the read scope rather than to an empty `scope=`.
+	assert.equal(oauth.resource, ACCESS.mcpURL);
+	assert.equal(oauth.protected_resource_metadata, ACCESS.protectedResourceURL);
+	assert.equal(oauth.scope, 'read');
 });
 
 /* -------------------------------------------------------------------------

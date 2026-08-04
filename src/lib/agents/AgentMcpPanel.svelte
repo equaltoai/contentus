@@ -56,8 +56,11 @@ single most misleading thing this panel could do.
 	let { agent }: Props = $props();
 
 	const targets = $derived(agent.mcpAccess ? resolveMcpProbeTargets(agent.mcpAccess) : null);
+	// The whole bundle, not the scopes alone: the OAuth snippet names lesser's
+	// authorization server and registration endpoint, and those are separate
+	// fields on separate hosts from the two URLs `targets` carries.
 	const configs = $derived(
-		targets ? mcpClientConfigs(agent.username, targets, agent.mcpAccess?.scopes ?? []) : []
+		targets && agent.mcpAccess ? mcpClientConfigs(agent.username, targets, agent.mcpAccess) : []
 	);
 
 	let discovery = $state<ProbeState<McpDiscoveryDocument>>({ status: 'idle' });
