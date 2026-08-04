@@ -44,6 +44,19 @@
  *     has left the module graph for the stylesheet being assembled — so it is
  *     read in the one window where it exists. See `styleRecorder`.
  *
+ * A CHANNEL IS A WINDOW, AND A WINDOW CAN CLOSE FOR ONE MODULE. Round 8 left the
+ * emitted-asset rule below as the thing that made a closed window red. Round 9
+ * showed that is not enough by itself: two components pointing at one file get ONE
+ * emitted asset, so a window that closed for one of them was still accounted for by
+ * the other's reference, and a real cross-seam edge was green. Attribution is by
+ * emitted FILE NAME, and a file name cannot tell two importers apart.
+ *
+ * So the windows are checked directly rather than through what they attribute:
+ * every module the build LOADS has its code held either by `buildEnd` or by the
+ * observer's window, and a module neither one holds is a finding naming that
+ * module. A window that closes — for every module or for one — costs this gate its
+ * green there, whoever else references the same file.
+ *
  * WHAT THIS GATE CANNOT SEE, stated plainly, because a mechanism that claims
  * everything is a mechanism nobody can check. Each one is either covered by
  * another check that stays, or turned into a TRIPWIRE — a red gate the day the
@@ -72,14 +85,17 @@
  *      without emitting, so both are client-pass edges. A module only the server
  *      pass loads takes those dependencies unrecorded.
  *
- * FAIL-CLOSED, in four places. A build that throws is a red gate rather than an
+ * FAIL-CLOSED, in five places. A build that throws is a red gate rather than an
  * empty edge set. A module whose final code the build's own parser cannot read is
  * a finding. A dynamic `import()` whose target is not a literal is a finding
  * wherever it sits under `src/` — "the build cannot name what this loads" and
- * "this loads nothing behind a seam" are different facts. And every asset the
- * build EMITS must be attributable to something that references it, which is the
- * one that generalises: reading references is a channel, channels close, and a
- * closed channel now costs this gate its green rather than its coverage.
+ * "this loads nothing behind a seam" are different facts. Every module the build
+ * loads must have its code held by one of the windows above, which is the one that
+ * generalises: reading references is a channel, channels close, and a channel that
+ * closes on one module now costs this gate its green rather than its coverage. And
+ * every asset the build EMITS must be attributable to something that references it,
+ * which asks the same question from the other end for the assets no other importer
+ * accounts for.
  *
  * The build runs with `write: false`, so this never touches `build/` and can run
  * beside `pnpm build` without racing its output.
@@ -224,24 +240,38 @@ function collectReferences(references, importer, code, marker, channel) {
  * build it is measuring.
  *
  * A position in a plugin order is a weaker thing to rest on than "the build
- * resolved it", which is what the rest of this gate rests on. It is not rested on
- * alone: `generateBundle` below requires every emitted asset to be attributable
- * to something that references it, so the day this window closes the assets it
- * was attributing become unattributable and the gate goes RED rather than quiet.
+ * resolved it", which is what the rest of this gate rests on. So the position is
+ * CHECKED rather than assumed: every module this transform reads goes into
+ * `observed`, and `recorder` requires every module the build loaded to be held by
+ * this window or by `buildEnd`. The day this window moves, the stylesheets it was
+ * reading become modules nothing read, and the gate names them.
+ *
+ * That replaces an argument round 9 disproved. This block used to rest on the
+ * emitted-asset rule instead — the day the window closes, the assets it was
+ * attributing become unattributable — which holds only while no OTHER importer
+ * references the same file. Two components pointing at one file get one emitted
+ * asset, and one surviving reference accounts for it on behalf of both.
+ *
+ * `blind` is fault injection, and the reason this window can be watched failing at
+ * all: a predicate on the module id that this observer does not look at, so the
+ * regression suite can close the window for one module — which is exactly the shape
+ * round 9 found — and watch THIS gate go red rather than a copy of it. The
+ * command-line path passes none, so it is never in the gate the rubric runs.
  */
-function styleRecorder(pass, root, references) {
+function styleRecorder(pass, root, references, observed, blind) {
 	return {
 		name: 'contentus:seam-graph-styles',
 
 		transform(code, id) {
-			if (typeof code === 'string')
-				collectReferences(
-					references,
-					repoPath(root, id),
-					code,
-					ASSET_REFERENCE,
-					`${pass}:${CSS_REQUEST.test(String(id)) ? 'css url()' : 'asset'}`
-				);
+			if (blind(String(id)) || typeof code !== 'string') return null;
+			observed.add(String(id));
+			collectReferences(
+				references,
+				repoPath(root, id),
+				code,
+				ASSET_REFERENCE,
+				`${pass}:${CSS_REQUEST.test(String(id)) ? 'css url()' : 'asset'}`
+			);
 			return null;
 		},
 	};
@@ -255,9 +285,16 @@ function styleRecorder(pass, root, references) {
  * is how this gate turns that into an edge — and every way of reading references
  * is a channel that can close. Round 7's finding was exactly a closed channel: a
  * CSS `url()` crossing a seam, the asset emitted, the edge recorded nowhere, the
- * gate green. Asking the question from the emitted side as well means a channel
- * closing costs the gate its GREEN rather than its coverage: the assets that
- * channel was attributing go unaccounted for and land here.
+ * gate green. Asking the question from the emitted side as well means the assets a
+ * closed channel was attributing go unaccounted for and land here.
+ *
+ * WHAT IT DOES NOT CATCH, which is why it is a backstop and not the guarantee.
+ * Attribution is by emitted FILE NAME, and the build emits one file however many
+ * importers reference it — so an importer this gate stopped seeing is covered here
+ * by any other importer that still references the same file, and this rule stays
+ * quiet while a real edge goes unrecorded. Round 9 found exactly that. It is caught
+ * where it actually lives, in `recorder`: a module neither reading window holds is
+ * a finding of its own, whatever anyone else references.
  *
  * WHAT `workers` IS DOING HERE, because an exception in a fail-closed rule has to
  * earn its place. A worker's bundle is emitted as an asset with no originating
@@ -302,7 +339,7 @@ export function unattributedAssets(pass, emitted, attributed, workers = false) {
  * something. An emitted file nothing accounts for is a dependency of something,
  * and this gate not knowing of what is a finding rather than a silence.
  */
-function recorder(pass, root, sink, references) {
+function recorder(pass, root, sink, references, observed) {
 	// Whether this pass built a worker, which `unattributedAssets` needs and the
 	// tripwire below is what learns.
 	let workers = false;
@@ -333,6 +370,34 @@ function recorder(pass, root, sink, references) {
 						target: repoPath(root, target),
 						channel: `${pass}:import()`,
 					});
+
+				// THE WINDOWS MUST COVER THIS MODULE, asked here because this is where every
+				// module the build loaded is enumerated. A module whose code is a non-empty
+				// string is read RIGHT HERE. A module whose code is EMPTY has been emptied —
+				// a stylesheet's content leaves the module graph for the sheet being
+				// assembled — and the only place it existed is the observer's window, so the
+				// observer must have been there. Neither, and this gate read nothing at all
+				// for this module: it cannot say what the module references, and saying so is
+				// the difference between a gap and a silence.
+				//
+				// WHAT IS EXCLUDED AND WHY. An id that names no file AND for which the build
+				// produced no code is a module the build never LOADED — a bare `node:…` the
+				// server pass resolves and leaves alone. There is no code for it in any
+				// window, so there is nothing this gate failed to read. An id that names a
+				// file is NOT excluded when its code is missing: the build went and got that
+				// file, and code that has gone missing since is the shape this rule is for.
+				//
+				// The request is reported whole — `X.svelte?svelte&type=style&lang.css` rather
+				// than `X.svelte` — because WHICH PIECE of a file went unread is the first
+				// thing the next reader needs.
+				const [file, tail] = splitSpecifier(String(id));
+				const readable = typeof info.code === 'string' && info.code !== '';
+				const loaded = isAbsolute(file) || typeof info.code === 'string';
+				if (loaded && !readable && !observed.has(String(id)))
+					sink.findings.push(
+						`${importer}${tail}: neither window this gate reads holds the ${pass} build's ` +
+							'code for this module, so what it references is unknown'
+					);
 
 				if (typeof info.code !== 'string') continue;
 				collectReferences(references, importer, info.code, ASSET_REFERENCE, `${pass}:asset`);
@@ -505,7 +570,7 @@ export function overlayPlugin(root, overlay) {
  * client build still reports what the server build resolved instead of reporting
  * nothing at all. Either way the gate is red.
  */
-export async function seamGraph({ root = process.cwd(), overlay = {} } = {}) {
+export async function seamGraph({ root = process.cwd(), overlay = {}, blind = () => false } = {}) {
 	const sink = { edges: [], modules: new Set(), findings: [], passes: [] };
 	const planted = Object.keys(overlay).length > 0;
 	const stack = (pass) => {
@@ -513,10 +578,13 @@ export async function seamGraph({ root = process.cwd(), overlay = {} } = {}) {
 		// pipeline and by the recorder at the end of it, read once when the bundle
 		// exists. A marker is a dependency wherever it was seen.
 		const references = new Map();
+		// Which module ids the observer actually read, so the recorder can tell a
+		// module with nothing to read from one it never looked at.
+		const observed = new Set();
 		return [
 			...(planted ? [overlayPlugin(root, overlay)] : []),
-			styleRecorder(pass, root, references),
-			recorder(pass, root, sink, references),
+			styleRecorder(pass, root, references, observed, blind),
+			recorder(pass, root, sink, references, observed),
 		];
 	};
 
@@ -612,8 +680,8 @@ export function seamFindings(sink, tracked) {
 }
 
 /** Run the gate as `pnpm run validate:seam-graph` runs it. */
-export async function auditSeamGraph({ root = process.cwd(), overlay = {} } = {}) {
-	const sink = await seamGraph({ root, overlay });
+export async function auditSeamGraph({ root = process.cwd(), overlay = {}, blind } = {}) {
+	const sink = await seamGraph({ root, overlay, blind });
 	return { sink, findings: seamFindings(sink, trackedFaceFiles(root)) };
 }
 
