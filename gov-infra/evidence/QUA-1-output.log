@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785860058137 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785860058143 COMPLETED 859 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785860114222 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785860114224 COMPLETED 859 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -42,7 +42,7 @@ computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
 build/server/handler.mjs                 1,068.06 kB │ gzip: 263.14 kB
 
-✓ built in 946ms
+✓ built in 973ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
