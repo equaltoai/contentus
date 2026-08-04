@@ -18,6 +18,21 @@ lesser permits that argument only for the caller's own username (unless they are
 an admin), so as a filter it is `myAgents` with extra ways to be refused — and
 it would have to travel through the roster's URL grammar, where a shared link
 carrying `?ownerUsername=` would promise a view the recipient cannot have.
+
+IT ENDS WITH THE SESSION, and reading the session once at mount is what makes
+that untrue. `clearSession()` empties `sessionStorage` and announces it; it does
+nothing to a component that already read it. Without the subscription below,
+this panel went on showing one operator's agent inventory — `agentOwner` and
+`delegatedScopes` included, the fields lesser redacts from everyone else — after
+the reader signed out, on whatever device they walked away from. That is the
+same defect `$lib/messaging/MessagesPage.svelte` fixes for the inbox, in a
+smaller surface with the same private subject.
+
+THE ABORT IS NOT THE GUARD. A response already parsed is not un-parsed by
+aborting the fetch behind it, so a read dispatched under the old session can
+still land after the sign-out. `$lib/auth/session-scope` is what decides:
+stamped at dispatch, checked before anything is published. Cancel for the
+bandwidth, check the stamp for the correctness.
 -->
 
 <script lang="ts">
@@ -25,6 +40,8 @@ carrying `?ownerUsername=` would promise a view the recipient cannot have.
 
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 	import { accessTokenOrNull, isAuthenticated } from '$lib/auth/session';
+	import { onSessionChange, sessionGeneration } from '$lib/auth/session-events';
+	import { createSessionScope } from '$lib/auth/session-scope';
 
 	import AgentCard from './AgentCard.svelte';
 	import { fetchMyAgents, type AgentSummary, type AgentUnavailable } from './contract';
@@ -39,15 +56,28 @@ carrying `?ownerUsername=` would promise a view the recipient cannot have.
 	let agents = $state<AgentSummary[]>([]);
 	let failure = $state<AgentUnavailable | null>(null);
 
-	onMount(() => {
+	const scope = createSessionScope(sessionGeneration);
+	let controller: AbortController | null = null;
+
+	/** Read the inventory for whatever session is current, stamped with it. */
+	function openSession() {
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
 		if (session !== 'authenticated') return;
 
-		const controller = new AbortController();
+		controller?.abort();
+		controller = new AbortController();
+		// Taken here, at DISPATCH. `notifySessionChange` advances the generation
+		// BEFORE its listeners run, so a read started in response to `signed-in`
+		// stamps the session it is actually reading for.
+		const stamp = scope.stamp();
 		loading = true;
 
 		void fetchMyAgents({ accessToken: accessTokenOrNull(), signal: controller.signal })
 			.then((result) => {
+				// The answer is for the session that asked. If that session has ended —
+				// or been replaced by the next reader's — it publishes nothing at all,
+				// not even its failure message.
+				if (!scope.holds(stamp)) return;
 				if (result.ok) {
 					agents = result.agents;
 					failure = null;
@@ -56,10 +86,44 @@ carrying `?ownerUsername=` would promise a view the recipient cannot have.
 				}
 			})
 			.finally(() => {
-				loading = false;
+				if (scope.holds(stamp)) loading = false;
 			});
+	}
 
-		return () => controller.abort();
+	/**
+	 * End the panel with the session.
+	 *
+	 * ORDER MATTERS, the same way it does on the messages face: the request is
+	 * cancelled first, then the stamps it was taken under stop being held, then
+	 * the screen is emptied. Nothing is left holding the old session's inventory
+	 * for the next reader to find, and nothing in flight can repaint it.
+	 */
+	function closeSession() {
+		controller?.abort();
+		controller = null;
+		scope.end();
+		session = 'anonymous';
+		loading = false;
+		agents = [];
+		failure = null;
+	}
+
+	onMount(() => {
+		openSession();
+
+		const unsubscribe = onSessionChange((change) => {
+			if (change === 'signed-out') closeSession();
+			else openSession();
+		});
+
+		return () => {
+			unsubscribe();
+			controller?.abort();
+			// Leaving the roster ends the scope too: an answer that lands after this
+			// component is gone has nothing left to publish into, and saying so here
+			// costs nothing.
+			scope.end();
+		};
 	});
 </script>
 

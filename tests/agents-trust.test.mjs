@@ -4,7 +4,11 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-import { MY_AGENTS_QUERY } from '../src/lib/agents/contract.ts';
+import { parse } from 'svelte/compiler';
+
+import { fetchMyAgents, MY_AGENTS_QUERY } from '../src/lib/agents/contract.ts';
+import { notifySessionChange, sessionGeneration } from '../src/lib/auth/session-events.ts';
+import { createSessionScope } from '../src/lib/auth/session-scope.ts';
 import {
 	AUDIT_ROUTES,
 	loadHandler,
@@ -215,4 +219,184 @@ test('the owned view is gated on a session, not on the roster failing', () => {
 	assert.match(source, /isAuthenticated\(\)/);
 	assert.match(source, /onMount/);
 	assert.match(source, /session === 'authenticated'/);
+});
+
+/* -------------------------------------------------------------------------
+ * The inventory ends with the session
+ * ---------------------------------------------------------------------- */
+
+/**
+ * `fetchMyAgents` against a stubbed `fetch`, with the response held open.
+ *
+ * The same shape `tests/messaging-session.test.mjs` uses on the inbox: the real
+ * transport, the real contract module, and a gate the probe releases by hand —
+ * which is what makes an answer that arrives AFTER a sign-out reproducible
+ * rather than described.
+ */
+function heldRead({ token = 'token-ada' } = {}) {
+	const requests = [];
+	const gates = [];
+	const originalFetch = globalThis.fetch;
+
+	globalThis.fetch = async (input, init = {}) => {
+		const payload = init.body ? JSON.parse(init.body) : {};
+		requests.push({
+			operation: /(?:query|mutation)\s+([A-Za-z0-9_]+)/.exec(payload.query ?? '')?.[1] ?? '',
+			authorization: new Headers(init.headers).get('authorization'),
+			signal: init.signal ?? null,
+		});
+		const body = await new Promise((resolve) => gates.push(resolve));
+		return new Response(JSON.stringify(body), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	};
+
+	return {
+		requests,
+		gates,
+		token,
+		restore: () => {
+			globalThis.fetch = originalFetch;
+		},
+	};
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** One owned agent, in the shape `myAgents` answers for its owner. */
+const OWNED = {
+	id: 'https://example.invalid/users/weatherbot',
+	username: 'weatherbot',
+	displayName: 'Weather Bot',
+	agentType: 'CURATOR',
+	verified: true,
+	quarantineActive: false,
+	activityCount: 3,
+	agentOwner: 'https://example.invalid/users/ada',
+	delegatedScopes: ['read', 'write'],
+};
+
+test('an owned-agent read that lands after sign-out publishes nothing', async () => {
+	// THE DEFECT THIS CLOSES. `myAgents` is answered AS THE OWNER, so its nodes
+	// carry `agentOwner` and `delegatedScopes` — the fields lesser redacts from
+	// everyone else. A read dispatched under Ada's session and resolved after she
+	// signed out would paint her inventory into whatever session is on screen.
+	//
+	// Driven through the REAL scope the component holds and the REAL sign-out
+	// announcement, because the abort alone does not close this: a response
+	// already parsed is not un-parsed by aborting the fetch behind it.
+	const probe = heldRead();
+	const scope = createSessionScope(sessionGeneration);
+	const published = [];
+
+	try {
+		const controller = new AbortController();
+		const stamp = scope.stamp();
+		const inFlight = fetchMyAgents({
+			accessToken: probe.token,
+			signal: controller.signal,
+		}).then((result) => {
+			// Exactly the predicate `MyAgents.svelte` applies before it assigns.
+			if (!scope.holds(stamp)) return 'dropped';
+			published.push(result);
+			return 'published';
+		});
+
+		await settle();
+		assert.equal(probe.requests.length, 1, 'the owned read is in flight');
+		assert.equal(probe.requests[0].operation, 'ContentusMyAgents');
+		assert.equal(probe.requests[0].authorization, `Bearer ${probe.token}`);
+
+		// The reader signs out mid-flight. The component cancels and ends its scope;
+		// `clearSession` announces it, which is what advances the generation.
+		controller.abort();
+		scope.end();
+		notifySessionChange('signed-out');
+
+		assert.equal(probe.requests[0].signal?.aborted, true, 'the request itself is cancelled');
+
+		// …and the answer arrives anyway, which is the whole point.
+		probe.gates[0]({ data: { myAgents: [OWNED] } });
+
+		assert.equal(await inFlight, 'dropped');
+		assert.deepEqual(published, [], 'no owner-only field reaches the screen after the sign-out');
+	} finally {
+		probe.restore();
+	}
+});
+
+test('a sign-in after the sign-out does not resurrect the previous reader’s stamp', async () => {
+	// The other half of the race: Ada signs out, Bob signs in, and Ada's read
+	// finally lands. Only Bob's own read, stamped after his sign-in, may publish.
+	const scope = createSessionScope(sessionGeneration);
+	const ada = scope.stamp();
+
+	notifySessionChange('signed-out');
+	scope.end();
+	notifySessionChange('signed-in');
+	const bob = scope.stamp();
+
+	assert.equal(scope.holds(ada), false, 'the previous reader’s read is dead in both generations');
+	assert.equal(scope.holds(bob), true, 'and the new reader’s own read is the one that may paint');
+});
+
+/** Every node in a Svelte/ESTree tree, depth first. */
+function* walkAst(node) {
+	if (!node || typeof node !== 'object') return;
+	if (Array.isArray(node)) {
+		for (const item of node) yield* walkAst(item);
+		return;
+	}
+	yield node;
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'parent' || key === 'loc') continue;
+		yield* walkAst(value);
+	}
+}
+
+/** Whether the parsed program calls `name(...)` anywhere. */
+function callsFn(ast, name) {
+	for (const node of walkAst(ast)) {
+		if (node.type !== 'CallExpression') continue;
+		const callee = node.callee;
+		if (callee?.type === 'Identifier' && callee.name === name) return true;
+		if (callee?.type === 'MemberExpression' && callee.property?.name === name) return true;
+	}
+	return false;
+}
+
+test('the owned view tracks the session rather than snapshotting it at mount', () => {
+	// STRUCTURAL, and labelled as one: the repo has no DOM harness, so this reads
+	// the component's parsed instance script rather than mounting it. What the
+	// probes above prove about the guard, this proves is actually wired into the
+	// component that needs it.
+	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8'), {
+		modern: true,
+	});
+
+	assert.ok(
+		callsFn(ast.instance, 'onSessionChange'),
+		'MyAgents must hear the sign-out; emptying sessionStorage does nothing to a mounted panel'
+	);
+	assert.ok(callsFn(ast.instance, 'createSessionScope'), 'and stamp its reads against the session');
+	assert.ok(callsFn(ast.instance, 'stamp'), 'stamped at dispatch');
+	assert.ok(callsFn(ast.instance, 'holds'), 'and checked before anything is published');
+	assert.ok(callsFn(ast.instance, 'abort'), 'the in-flight read is cancelled, not merely ignored');
+	assert.ok(callsFn(ast.instance, 'end'), 'and the scope ends with the session');
+});
+
+test('the sign-out path empties the panel rather than only hiding it', () => {
+	const source = readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8');
+	const close = source.slice(source.indexOf('function closeSession'));
+	const body = close.slice(0, close.indexOf('\n\t}'));
+
+	// Hiding it behind `session === 'anonymous'` while the array stays populated
+	// would leave one operator's inventory one sign-in away from the next
+	// reader's screen. Each of these is asserted because each is a field the
+	// panel would otherwise still be holding.
+	assert.match(body, /session = 'anonymous'/);
+	assert.match(body, /agents = \[\]/);
+	assert.match(body, /failure = null/);
+	assert.match(body, /loading = false/);
 });

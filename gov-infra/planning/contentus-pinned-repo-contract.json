@@ -86,7 +86,7 @@
       "tests/agents-mcp.test.mjs": "94611fefaa5ae1029c068a1382a3176b1167d92c0f047c54bdc9d32cb6a7ee36",
       "tests/agents-mobile.test.mjs": "d62b18cce2b7a817462ce95f6edc1684d9b42936108790b8c9dca167fbb62f6c",
       "tests/agents-roster.test.mjs": "3c6986abc6017f13f97a2e49bef1051c78f7ee93378163589461e931590fcbb2",
-      "tests/agents-trust.test.mjs": "5dcc8dd2eabd482ea667bf81947fc78284c6103a1d1c7f5e67954ae28846531a",
+      "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
