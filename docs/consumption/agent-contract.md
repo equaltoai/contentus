@@ -262,6 +262,28 @@ neither window holds is a **finding** naming that module: this gate read nothing
 for it, so what it references is unknown. A window that closes, for every module
 or for one, costs the gate its green there.
 
+Which modules the build loads is asked of the **build**, not of the module id, and
+round 10 is why that clause is in the rule. A module the configuration
+**externalizes** is resolved and then deliberately never opened, and the bundler
+lists it under the id it resolved to — for an external file, an absolute path
+spelled exactly like every loaded module's. Reading "the build went and got this
+file" off that spelling made every module a consumer externalizes a module the gate
+had failed to read, so a legitimate build went red for being configured. Rolldown's
+`ModuleInfo` cannot be asked either — it has no `isExternal`, and its `code` is
+`null` for _external or not yet available_, which are the two cases this rule tells
+apart. So the gate watches the **load pipeline**: a plugin that reads nothing and
+returns nothing records every id the build enters it for, and a module the build
+never loaded is outside the rule because there is no code for it in any window to
+have missed. That watch only widens what must be covered — a module the build holds
+code for is loaded whether or not the watch saw it — so the day its position stops
+seeing every load, the rule falls back to what it checked before rather than
+quietly covering less.
+
+The same fact is what keeps that exemption from becoming a hole: a module the build
+never loaded is not counted as **reached** either, so externalizing a tracked file
+in the face lands in the containment rule below — a file no pass loads, which this
+gate cannot judge — instead of passing as a file it read.
+
 Round 9 is why that is the rule rather than the one this section used to state.
 The residual used to be the emitted-asset rule on its own: every asset the build
 **emits** must be attributable to something that references it, one that is not
@@ -310,6 +332,13 @@ conclusion — the client build must emit the component and name it in the
 generated CSS before the gate is asked anything — and ten url() spellings are
 planted alongside four that resolve to nothing, each in a host of its own so a
 form that stopped resolving loses its own line.
+
+It is also proved not to fire, which a gate that can go red owes. Round 10's case
+externalizes a planted module through the bundler's own mechanism and asserts the
+gate says nothing about it, with the same plant **loaded** as the differential —
+and, in the same run, a module the build did load and nothing read, still named.
+Externalizing a tracked face component is a case of its own, and reports the
+containment finding rather than a green.
 
 ### Why the composition is local today
 
