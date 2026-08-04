@@ -41,6 +41,15 @@ import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/au
  * emitted-asset rule is what turns the next closed channel into a red gate
  * instead of another round.
  *
+ * ROUND 9 THEN FOUND THE LIMIT OF THAT SENTENCE, which is what a claim about the
+ * next round deserves. The emitted-asset rule turns a closed channel red only while
+ * nothing ELSE accounts for the assets that channel was attributing — and the build
+ * emits ONE file however many importers point at it. A window that closed for one
+ * module was covered by another module's reference to the same file, and the gate
+ * went green over a real cross-seam edge. The case below plants exactly that, with
+ * the DEDUP as its witness, and what closes it is not a better backstop: it is the
+ * gate checking that every module the build loads was read by one of its windows.
+ *
  * HOW A TREE IS PLANTED. Through the gate's own overlay: a map of
  * repository-relative path to source, handed to the build as a plugin rather than
  * written to disk. Nothing here touches the working tree, which matters twice —
@@ -82,8 +91,16 @@ const OWNED_BY_FROM_DETAIL = 'owned by AgentMcpPanel.svelte, imported from Agent
 const contract = readFileSync(join(repoRoot, 'src/lib/agents/contract.ts'), 'utf8');
 const reaching = (specifier) => `import ${JSON.stringify(specifier)};\n${contract}`;
 
-/** Plant a tree, run the real gate over it, and return what it found. */
-const audit = async (overlay) => (await auditSeamGraph({ root: repoRoot, overlay })).findings;
+/**
+ * Plant a tree, run the real gate over it, and return what it found.
+ *
+ * `blind` is the gate's fault injection: a predicate on the module id the
+ * stylesheet observer does not look at, so a case can close ONE of the gate's
+ * reading windows for ONE module and watch what the rest of it makes of that.
+ * Round 9's finding is the case that needs it.
+ */
+const audit = async (overlay, blind) =>
+	(await auditSeamGraph({ root: repoRoot, overlay, blind })).findings;
 
 /** A face component with a `<style>` block appended, which none of them has. */
 const styled = (name, ...rules) =>
@@ -532,6 +549,65 @@ test('an emitted asset nothing accounts for is a finding, not a pass', () => {
 			'records references it, so what depends on src/lib/agents/CopyBlock.svelte is unknown',
 		'assets/entry-client-hash.css: the server build emits this file and nothing this gate ' +
 			'records references it, so what depends on src/facetheory/entry-client.ts is unknown',
+	]);
+});
+
+test('a window that closes for one module is a finding, not a dedup', async () => {
+	// ROUND 9's FINDING, planted step for step the way the review demonstrated it.
+	// Two components point a `url()` at the SAME file: `AgentMcpPanel`, which owns
+	// `CopyBlock` and may reference it, and `AgentDetail`, which nests that seam and
+	// may not reach past it. The build emits ONE asset for the two of them.
+	//
+	// Close the stylesheet window for `AgentDetail` alone — a plugin-order or
+	// compiler change that alters handling for a SUBSET of modules — and every rule
+	// that reads references still holds: the legal reference is recorded, the one
+	// emitted file is attributed by it, and the emitted-asset backstop has nothing
+	// left to report. The illegal edge disappears into the other importer's
+	// attribution, and the gate was GREEN. Attribution is by emitted file name, and
+	// a file name cannot tell two importers apart.
+	const url = (probe) => `:global(.${probe}) { background-image: url('${BEHIND_SEAM}'); }`;
+	const overlay = {
+		'src/lib/agents/AgentMcpPanel.svelte': styled('AgentMcpPanel.svelte', url('legal')),
+		'src/lib/agents/AgentDetail.svelte': styled('AgentDetail.svelte', url('illegal')),
+	};
+
+	// THE WITNESS, and here it is the DEDUP that has to be witnessed rather than the
+	// dependency: one emitted file, named twice in one generated stylesheet. Without
+	// that the case would prove nothing — two emitted files would give each importer
+	// a name of its own and there would be no concealment to close.
+	const assets = await emittedByClientBuild(overlay);
+	const emitted = assets.filter(({ from }) => from.includes('src/lib/agents/CopyBlock.svelte'));
+	assert.equal(emitted.length, 1, 'the two references must resolve to ONE emitted file');
+	const sheet = assets.find(
+		({ fileName, text }) => fileName.endsWith('.css') && text.includes(emitted[0].fileName)
+	);
+	assert.ok(sheet, 'the generated stylesheet must carry the emitted file name');
+	assert.equal(
+		sheet.text.split(emitted[0].fileName).length - 1,
+		2,
+		'both rules must point at that one file'
+	);
+
+	// BOTH WINDOWS OPEN, which is the control. The legal reference is silent because
+	// the seam that owns `CopyBlock` is allowed to reference it; the illegal one is
+	// the finding. A case that only asserted the blinded run would pass just as well
+	// against a gate that reported this offence for no reason at all.
+	assert.deepEqual(await audit(overlay), [
+		`src/lib/agents/AgentDetail.svelte → src/lib/agents/CopyBlock.svelte (${OWNED_BY_FROM_DETAIL})`,
+	]);
+
+	// ONE WINDOW CLOSED, on one module, in both passes. The gate no longer records
+	// the edge — it cannot; nothing read the module that carries it — and that is
+	// exactly why the finding it does report is the honest one: this gate read no
+	// code at all for that stylesheet, so what it references is unknown. Red, naming
+	// the module, rather than a green built on another importer's attribution.
+	const stylesheetOf = (component) => (id) =>
+		id.includes(`${component}?`) && id.includes('type=style');
+	assert.deepEqual(await audit(overlay, stylesheetOf('AgentDetail.svelte')), [
+		'src/lib/agents/AgentDetail.svelte?svelte&type=style&lang.css: neither window this gate ' +
+			"reads holds the client build's code for this module, so what it references is unknown",
+		'src/lib/agents/AgentDetail.svelte?svelte&type=style&lang.css: neither window this gate ' +
+			"reads holds the server build's code for this module, so what it references is unknown",
 	]);
 });
 
