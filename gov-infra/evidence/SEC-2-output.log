@@ -1,5 +1,3 @@
-Audit advisory set matches the pinned disclosed set (1 disclosed).
-  = GHSA-96hv-2xvq-fx4p | high | ws | >=8.0.0 <8.21.0 | .>@equaltoai/greater-components-adapters>graphql-ws>ws
+Audit advisory set matches the pinned disclosed set (0 disclosed).
 
 PASS here means "unchanged", not "clean". Disclosed, unfixed, upstream-owned:
-  GHSA-96hv-2xvq-fx4p (ws) — owner equaltoai/greater-components, issue: equaltoai/greater-components#922

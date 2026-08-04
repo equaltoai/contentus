@@ -15,7 +15,7 @@ import type {
 	QuoteType,
 	UploadMediaInput,
 	MediaCategory,
-} from 'src/lib/greater/adapters';
+} from '../../greater/adapters';
 import type { PostVisibility } from './context.js';
 import type { MediaFile } from './MediaUploadHandler.js';
 import type { AutocompleteSuggestion } from './Autocomplete.js';

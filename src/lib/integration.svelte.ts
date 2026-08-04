@@ -7,7 +7,7 @@ import type { Status } from './types';
 import { TimelineStore, type TimelineConfig } from './timelineStore';
 import { NotificationStore, type NotificationConfig } from './notificationStore';
 import { TransportManager, type TransportConfig } from './transport';
-import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+import type { LesserGraphQLAdapter } from './greater/adapters';
 import { GraphQLTimelineStore, type GraphQLTimelineView } from './graphqlTimelineStore';
 import { SvelteSet } from 'svelte/reactivity';
 

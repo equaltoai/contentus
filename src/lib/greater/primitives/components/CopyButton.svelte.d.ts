@@ -1,4 +1,4 @@
-import { type CopyResult } from 'src/lib/greater/utils';
+import { type CopyResult } from '../../utils';
 import type { HTMLButtonAttributes } from 'svelte/elements';
 type ButtonPassthroughProps = Omit<HTMLButtonAttributes, 'type'> & {
 	type?: 'button' | 'submit' | 'reset';

@@ -2,7 +2,7 @@
   Search.NoteResult - Note/Post Search Result Item
 -->
 <script lang="ts">
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { sanitizeHtml } from '../../greater/utils';
 	import { getSearchContext, formatCount, highlightQuery } from './context.svelte.js';
 	import type { SearchNote } from './context.svelte.js';
 

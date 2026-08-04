@@ -7,7 +7,7 @@ Upload images, videos, and audio with drag & drop, progress tracking, and valida
 @example
 ```svelte
 <script>
-  import { Compose } from 'src/lib/components/compose';
+  import { Compose } from './';
   
   async function handleUpload(file) {
     const formData = new FormData();
@@ -28,7 +28,7 @@ Upload images, videos, and audio with drag & drop, progress tracking, and valida
 -->
 
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import {
 		processFiles,
 		validateFiles,

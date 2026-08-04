@@ -15,7 +15,7 @@ being silently dropped: "not recorded" is itself information a reviewer needs.
 -->
 
 <script lang="ts">
-	import { DefinitionList, DefinitionItem } from 'src/lib/greater/primitives';
+	import { DefinitionList, DefinitionItem } from '../../../../primitives';
 	import type { DraftReviewData, ReviewApprovalRequirement } from '../../types.js';
 	import {
 		REVIEW_STATE_QUALIFIER,

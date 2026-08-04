@@ -2,8 +2,8 @@
   Search.ActorResult - Actor Search Result Item
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { createButton } from '../../greater/headless/button';
+	import { sanitizeHtml } from '../../greater/utils';
 	import { getSearchContext, formatCount } from './context.svelte.js';
 	import type { SearchActor } from './context.svelte.js';
 

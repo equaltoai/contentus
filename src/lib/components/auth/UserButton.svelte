@@ -8,8 +8,8 @@
   @example Dropdown variant (default)
   ```svelte
   <script>
-    import { UserButton } from 'src/lib/components/auth';
-    import { SettingsIcon, UserIcon } from 'src/lib/greater/icons';
+    import { UserButton } from './';
+    import { SettingsIcon, UserIcon } from '../../greater/icons';
     
     const user = {
       name: 'Jane Doe',
@@ -45,8 +45,8 @@
 -->
 <script lang="ts">
 	import type { UserButtonProps, UserMenuItem } from './types.js';
-	import { Avatar, Text, Spinner, Menu } from 'src/lib/greater/primitives';
-	import { LogOutIcon } from 'src/lib/greater/icons';
+	import { Avatar, Text, Spinner, Menu } from '../../greater/primitives';
+	import { LogOutIcon } from '../../greater/icons';
 
 	let {
 		user,

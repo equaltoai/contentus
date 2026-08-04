@@ -11,13 +11,13 @@ import {
 	unifiedStatusToTimelineItem,
 	convertGraphQLObjectToLesser,
 	mapLesserObject,
-} from 'src/lib/greater/adapters';
+} from './greater/adapters';
 import type {
 	LesserGraphQLAdapter,
 	LesserTimelineConnection,
 	TimelineVariables,
 	UnifiedStatus,
-} from 'src/lib/greater/adapters';
+} from './greater/adapters';
 import type {
 	ActivityPubActor,
 	ActivityPubImage,

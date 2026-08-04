@@ -282,7 +282,11 @@ test('the seam check can still see an import, and no longer sees one in prose', 
 	// distinction it draws are asserted here rather than assumed.
 	const importPattern = /^[ \t]*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm;
 
-	const fromImport = [...`import AgentCard from './AgentCard.svelte';`.matchAll(importPattern)];
+	// The specifier resolves from this file on purpose. An unresolvable relative
+	// import inside a scanned file is itself a rubric finding (CON-5), and a
+	// fixture that trips the gate it is testing beside is not a fixture.
+	const sample = `import AgentCard from '../src/lib/agents/AgentCard.svelte';`;
+	const fromImport = [...sample.matchAll(importPattern)];
 	assert.equal(fromImport.length, 1);
 	assert.ok(fromImport[0][1].endsWith('/AgentCard.svelte'));
 

@@ -2,8 +2,8 @@
   Messages.Thread - Message Thread Display
 -->
 <script lang="ts">
-	import { Menu } from 'src/lib/greater/primitives';
-	import { MoreVerticalIcon, TrashIcon } from 'src/lib/greater/icons';
+	import { Menu } from '../../greater/primitives';
+	import { MoreVerticalIcon, TrashIcon } from '../../greater/icons';
 	import { getMessagesContext } from './context.svelte.js';
 	import ConversationWorkflowSummary from './ConversationWorkflowSummary.svelte';
 	import Message from './Message.svelte';

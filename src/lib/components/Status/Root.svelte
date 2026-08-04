@@ -21,7 +21,7 @@ Provides context for child components and handles root-level interactions.
 	import { setContext } from 'svelte';
 	import { STATUS_CONTEXT_KEY } from './context.js';
 	import type { StatusConfig, StatusActionHandlers, StatusContext } from './context.js';
-	import { formatDateTime } from 'src/lib/greater/utils';
+	import { formatDateTime } from '../../greater/utils';
 
 	interface Props {
 		/**

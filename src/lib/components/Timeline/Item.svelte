@@ -25,7 +25,7 @@ Can be used with Status compound component or custom content.
 	import type { Snippet } from 'svelte';
 	import type { GenericTimelineItem } from '../../generics/index.js';
 	import { getTimelineContext } from './context.js';
-	import { formatDateTime } from 'src/lib/greater/utils';
+	import { formatDateTime } from '../../greater/utils';
 
 	interface Props {
 		/**

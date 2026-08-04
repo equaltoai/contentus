@@ -15,7 +15,7 @@ Displays a single notification with type-specific rendering.
 -->
 
 <script lang="ts">
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { sanitizeHtml } from '../../greater/utils';
 	import type { Snippet } from 'svelte';
 	import WorkflowNotificationItem from './WorkflowNotificationItem.svelte';
 	import type { Notification, NotificationType, WorkflowEventNotification } from './types.js';

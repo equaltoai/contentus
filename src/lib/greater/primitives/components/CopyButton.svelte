@@ -15,12 +15,12 @@ CopyButton component - A button that copies text to the clipboard with visual fe
 -->
 <script lang="ts">
 	import Button from './Button.svelte';
-	import { CopyIcon, CheckIcon } from 'src/lib/greater/icons';
+	import { CopyIcon, CheckIcon } from '../../icons';
 	import {
 		copyToClipboard,
 		copyElementText,
 		type CopyResult,
-	} from 'src/lib/greater/utils';
+	} from '../../utils';
 	import type { HTMLButtonAttributes } from 'svelte/elements';
 
 	type ButtonPassthroughProps = Omit<HTMLButtonAttributes, 'type'> & {

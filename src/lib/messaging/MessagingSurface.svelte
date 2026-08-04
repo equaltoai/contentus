@@ -850,22 +850,32 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	<!--
 	ALWAYS RENDERED, never conditional on a state that might not be reached.
 
-	The vendored `Messages.Message` renders `{message.content}` — Svelte's
-	ESCAPING interpolation — and lesser's `content` is server-sanitized HTML. So
-	every message body displays its own markup as literal text. Same family of
-	defect as the `ContentRenderer` gap M4 pinned, in a different component, and
-	contentus cannot repair it: vendored source is never hand-edited, an
-	`{@html}` in owned source is what check 3 of `audit-renderer-authority.mjs`
-	forbids, and the component exposes no prop that changes the sink.
+	NARROWED AT greater-v0.13.0, not withdrawn. The gap this disclosed was that
+	the vendored `Messages.Message` rendered `{message.content}` through Svelte's
+	ESCAPING interpolation while lesser's `content` is server-sanitized HTML, so
+	every message body showed its own markup as literal text. `Message.svelte`
+	now sanitizes and renders declaratively, so message bodies in the THREAD are
+	fixed.
 
-	Disclosed here rather than left for a reader to puzzle over, and pinned by
-	`tests/vendored-messaging-render.test.mjs`, which drives the real component
-	and fails the day upstream fixes it.
+	The conversation LIST preview still takes the escaping sink — `Conversations`
+	interpolates the body the old way — so the gap survives where a reader meets
+	it first. Withdrawing the whole notice because the larger half was fixed
+	would leave the remaining half undisclosed, which is worse than the original
+	state: a reader who has been told the problem is gone stops attributing it to
+	the client. So the claim shrinks to exactly what is still true.
+
+	Contentus still cannot repair it: vendored source is never hand-edited, an
+	`{@html}` in owned source is what check 3 of `audit-renderer-authority.mjs`
+	forbids, and the component exposes no prop that changes the sink. Pinned by
+	`tests/vendored-messaging-render.test.mjs`, which drives the real components
+	and fails the day upstream fixes the remaining half too.
 	-->
 	<p class="contentus-messages__gap">
-		Message bodies are shown as plain text on this build, so any formatting this instance applied
-		appears as markup. The text itself is complete and unaltered. This is an upstream gap in the
-		vendored message component, not a change contentus makes to what was sent.
+		Message previews in the conversation list are shown as plain text on this build, so any
+		formatting this instance applied appears as markup there. Opening a conversation shows the
+		message properly. The text itself is complete and unaltered either way. This is an upstream
+		gap in the vendored conversation-list component, not a change contentus makes to what was
+		sent.
 	</p>
 
 	{#if notice}

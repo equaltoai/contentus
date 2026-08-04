@@ -5,9 +5,9 @@ Article.Content - Renders article body content with proper typography
 -->
 
 <script lang="ts">
-	import { getArticleContext, updateHeadings } from './context.js';
+	import { getArticleContext, updateHeadings } from './context.svelte.js';
 	import { onMount } from 'svelte';
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { sanitizeHtml } from '../../greater/utils/sanitizeHtml';
 	import type { HeadingData } from '../../blog-types.js';
 
 	const context = getArticleContext();

@@ -16,7 +16,7 @@
   ```
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { getAuthContext, isValidEmail } from './context.js';
 	import type { LoginCredentials } from './context.js';
 

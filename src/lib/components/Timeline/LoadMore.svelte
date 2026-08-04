@@ -19,7 +19,7 @@ Automatically triggered with infinite scroll or manually by user.
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { getTimelineContext } from './context.js';
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 
 	interface Props {
 		/**

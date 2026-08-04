@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button } from 'src/lib/greater/primitives';
+	import { Button } from '../greater/primitives';
 	import {
 		ReplyIcon as Reply,
 		RepeatIcon as Boost,
@@ -7,8 +7,8 @@
 		ShareIcon as Share,
 		RepeatIcon as Unboost,
 		UnfavoriteIcon as Unfavorite,
-	} from 'src/lib/greater/icons';
-	import { copyToClipboard } from 'src/lib/greater/utils';
+	} from '../greater/icons';
+	import { copyToClipboard } from '../greater/utils';
 	import type { Snippet } from 'svelte';
 
 	interface ActionCounts {

@@ -2,7 +2,7 @@
   Configure which notification types to receive
 -->
 <script lang="ts">
-	import { SettingsSection, SettingsToggle } from 'src/lib/greater/primitives';
+	import { SettingsSection, SettingsToggle } from '../../greater/primitives';
 
 	interface NotificationFilters {
 		mentions: boolean;

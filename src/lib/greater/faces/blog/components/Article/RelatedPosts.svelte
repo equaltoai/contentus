@@ -6,7 +6,7 @@ Article.RelatedPosts - Related content suggestions
 
 <script lang="ts">
 	import type { ArticleData } from '../../types.js';
-	import { Card, Heading, Text } from 'src/lib/greater/primitives';
+	import { Card, Heading, Text } from '../../../../primitives';
 
 	interface Props {
 		/**

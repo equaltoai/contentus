@@ -4,8 +4,8 @@
   Interface for creating a new direct message conversation with one or more recipients.
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
-	import { createModal } from 'src/lib/greater/headless/modal';
+	import { createButton } from '../../greater/headless/button';
+	import { createModal } from '../../greater/headless/modal';
 	import { untrack } from 'svelte';
 	import { getMessagesContext, type MessageParticipant } from './context.svelte.js';
 

@@ -6,7 +6,7 @@
  */
 
 import type { Status, Account, MediaAttachment, Card } from './types';
-import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+import type { LesserGraphQLAdapter } from './greater/adapters';
 import { SvelteDate } from 'svelte/reactivity';
 type UnknownRecord = Record<string, unknown>;
 

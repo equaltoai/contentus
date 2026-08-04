@@ -15,7 +15,7 @@
   ```
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { getProfileContext } from './context.js';
 	import type { ProfileEditData, ProfileField } from './context.js';
 

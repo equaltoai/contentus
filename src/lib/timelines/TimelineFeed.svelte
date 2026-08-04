@@ -311,45 +311,22 @@ write face's job, not a stub's.
 
 <div class="contentus-feed" bind:this={scrollRoot}>
 	<!--
-	TWO PINNED UPSTREAM GAPS IN ONE COMPONENT, said out loud rather than left to
-	be discovered. Both are `ContentRenderer`'s, and the first disclosure here
-	covered only one of them.
+	THE TWO PINNED `ContentRenderer` GAPS DISCLOSED HERE ARE CLOSED, and the
+	disclosure left with them at greater-v0.13.0.
 
-	1. NOTHING SERVER-RENDERS. `ContentRenderer` writes its sanitized output
-	   through a Svelte ACTION (`use:setHtml` → `node.innerHTML`), and actions do
-	   not run during SSR — so the server emits an empty body container and the
-	   post text appears at hydration.
+	They were: nothing server-rendered, because the component wrote its output
+	through a Svelte action that does not run during SSR; and what hydration
+	filled in was CORRUPTED for ordinary posts, because already-sanitized markup
+	was passed to a plain-text linkifier that escaped it. Both are fixed upstream
+	— the component now renders `{@html processedContent}` declaratively and
+	linkifies with an HTML-aware pass — so post text is in the server's paint and
+	arrives as markup rather than as literal `<p>`.
 
-	2. WHAT HYDRATION FILLS IN IS CORRUPTED. `processContent` sanitizes the
-	   server's HTML and then, when the status carries no mentions and no tags,
-	   passes the RESULT to `linkifyMentions` — which runs `escapeHtml` over it
-	   before linkifying. Already-sanitized markup is escaped and then written to
-	   `innerHTML`, so `<p>Hello <strong>world</strong></p>` reaches the reader as
-	   the literal text `<p>Hello <strong>world</strong></p>`. Statuses that DO
-	   carry mentions or tags take the other branch and render correctly, which is
-	   why this is easy to miss and why the disclosure below names both.
-
-	Contentus cannot repair either here. Vendored source is never hand-edited; an
-	`{@html}` in contentus-owned source is precisely what check 3 of the
-	renderer-authority audit forbids; and there is no supported prop that turns
-	the linkify step off — supplying fabricated `mentions` to dodge the branch
-	would be inventing content to route around a rendering bug. So both gaps are
-	reported upstream, pinned by `tests/ssr-timelines.test.mjs` and
-	`tests/vendored-content-renderer.test.mjs`, and disclosed here to the readers
-	they actually reach. Delete this block when those probes go red.
+	Nothing replaces this block, deliberately. A disclosure that outlives the
+	fault it discloses teaches readers to ignore disclosures. What guards the
+	repair now is `tests/ssr-timelines.test.mjs`, which asserts a status body IS
+	in the server's paint and is NOT escaped — the same two probes, inverted.
 	-->
-	<p class="contentus-feed__gap" role="status">
-		Post text on this instance is filled in after the page loads, and some posts currently show
-		their formatting as literal text (like <code>&lt;p&gt;</code>) instead of applying it. Both are
-		faults in the shared component this client renders posts with, reported upstream. Authors,
-		timestamps, links and everything else on each post are unaffected.
-	</p>
-	<noscript>
-		<p class="contentus-feed__noscript">
-			Post text needs JavaScript on this instance. Authors, timestamps and links are shown above
-			without it; the text of each post is not.
-		</p>
-	</noscript>
 
 	{#if realtimeMode !== 'unsupported'}
 		<!-- The live strip is never a blank: every state says something, which is

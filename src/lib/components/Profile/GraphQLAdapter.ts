@@ -7,7 +7,7 @@ import type {
 	ProfileField,
 	PrivacySettings,
 } from './context.js';
-import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+import type { LesserGraphQLAdapter } from '../../greater/adapters';
 import { PreferencesGraphQLController } from './PreferencesController.js';
 
 interface ProfileGraphQLAdapterOptions {

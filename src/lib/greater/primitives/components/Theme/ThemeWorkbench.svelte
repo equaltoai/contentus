@@ -10,7 +10,7 @@
 		generateTheme,
 		type ThemeTokens,
 		type ColorHarmony,
-	} from 'src/lib/greater/utils';
+	} from '../../../utils';
 	import Button from '../Button.svelte';
 	import Card from '../Card.svelte';
 	import SettingsSection from '../Settings/SettingsSection.svelte';
@@ -144,7 +144,7 @@
 		width: 40px;
 		height: 40px;
 		padding: 0;
-		border: 1px solid var(--gr-color-border);
+		border: 1px solid var(--gr-semantic-border-default);
 		border-radius: 4px;
 		cursor: pointer;
 	}
@@ -152,7 +152,7 @@
 	.gr-theme-workbench__hex-input {
 		flex: 1;
 		padding: 0.5rem;
-		border: 1px solid var(--gr-color-border);
+		border: 1px solid var(--gr-semantic-border-default);
 		border-radius: 4px;
 		font-family: monospace;
 	}

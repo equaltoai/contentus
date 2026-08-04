@@ -24,8 +24,8 @@
 	 * </Auth.Root>
 	 */
 
-	import { createButton } from 'src/lib/greater/headless/button';
-	import { createModal } from 'src/lib/greater/headless/modal';
+	import { createButton } from '../../greater/headless/button';
+	import { createModal } from '../../greater/headless/modal';
 	import type { AuthHandlers } from './context.js';
 
 	interface Props {

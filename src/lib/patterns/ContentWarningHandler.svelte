@@ -16,7 +16,7 @@
 -->
 <script lang="ts">
 	import { type Snippet, untrack } from 'svelte';
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { sanitizeHtml } from '../greater/utils';
 
 	interface ContentWarningConfig {
 		/**

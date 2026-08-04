@@ -61,29 +61,29 @@ const CONVERSATIONS = 'src/lib/components/messaging/Conversations.svelte';
 /** A body in the shape lesser's sanitizer actually emits. */
 const SANITIZED = '<p>Hello <strong>world</strong></p>';
 
-test('the vendored message body is emitted through the escaping sink', () => {
+test('the message body is no longer escaped — the half upstream fixed', () => {
+	// THIS PROBE USED TO ASSERT THE OPPOSITE, and its failure message said that
+	// failing meant upstream had fixed it. greater-v0.13.0 did: `Message.svelte`
+	// sanitizes through its own `sanitize.ts` and renders `{@html}`, so the body
+	// reaches the reader as markup.
+	//
+	// Inverted rather than deleted. The compiler's own output is still what is
+	// read — `{expr}` compiles to `$.escape(expr)` and `{@html expr}` to a raw
+	// push — so a regression to the escaping sink fails here rather than
+	// reaching readers as literal `<p>`.
 	const code = compileServer(MESSAGE);
 
-	// The compiler's own output, not a reading of the template. `{expr}` compiles
-	// to `$.escape(expr)`; `{@html expr}` compiles to a raw push. Finding the
-	// former around `message.content` IS the defect.
-	const contentDiv = code.match(/message__content"[^`]*?\$\.escape\(([^)]*)\)/);
-	assert.ok(
-		contentDiv,
-		'the message body is no longer emitted through $.escape — upstream may have fixed this; ' +
-			'delete the disclosure in MessagingSurface.svelte and this file'
+	const escapedBody = code.match(
+		/message__content"[^`]*?\$\.escape\(([^)]*message\.content[^)]*)\)/
 	);
-	assert.match(
-		contentDiv[1],
-		/message\.content/,
-		'the escaped expression next to message__content is not the body'
-	);
+	assert.equal(escapedBody, null, 'the body must not be emitted through the escaping sink');
 
-	// And the other half of the claim: there is no raw sink anywhere in the
-	// component, so no branch renders the body correctly.
-	assert.ok(
-		!/\$\.html\(/.test(code),
-		'the component now has a raw HTML sink — check whether the body path uses it'
+	const source = readFileSync(MESSAGE, 'utf8');
+	assert.match(source, /\{@html sanitizedMessageContent\}/, 'it is rendered declaratively');
+	assert.match(
+		source,
+		/sanitizeMessageHtml\(message\.content\)/,
+		'through the component’s own sanitizer, which is what earns the raw sink'
 	);
 });
 

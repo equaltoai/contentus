@@ -4,30 +4,33 @@
 
 # CSP Audit — contentus SSR output
 
-- Routes rendered from build/server/handler.mjs: 18
-- Documents scanned: 17
+- Routes rendered from build/server/handler.mjs: 21
+- Documents scanned: 20
 - Ship-blocking findings: 0
 - Off-origin script/style references: 0
 - Route status mismatches: 0
 
 ## Per-route
-- articles-index   200    5364 bytes  findings=0
-- article-reader   200    5076 bytes  findings=0
-- series           200    5277 bytes  findings=0
-- category         200    5291 bytes  findings=0
-- compose          200    6220 bytes  findings=0
-- review-queue     200    5651 bytes  findings=0
-- review-workspace 200    5655 bytes  findings=0
-- timelines-instance 200    7077 bytes  findings=0
-- timelines-federated 200    7134 bytes  findings=0
-- timelines-home   200    5827 bytes  findings=0
-- messages-inbox   200    5325 bytes  findings=0
-- messages-requests 200    5354 bytes  findings=0
-- message-thread   200    5316 bytes  findings=0
-- messages-no-id   200    5328 bytes  findings=0
-- profile          200    5296 bytes  findings=0
-- auth-callback    200    5099 bytes  findings=0
-- not-found        404    5099 bytes  findings=0
-- hydration-data   200     524 bytes  findings=0
+- articles-index   200    5328 bytes  findings=0
+- article-reader   200    5040 bytes  findings=0
+- series           200    5241 bytes  findings=0
+- category         200    5255 bytes  findings=0
+- compose          200    6184 bytes  findings=0
+- review-queue     200    5615 bytes  findings=0
+- review-workspace 200    5619 bytes  findings=0
+- timelines-instance 200    6446 bytes  findings=0
+- timelines-federated 200    6503 bytes  findings=0
+- timelines-home   200    5791 bytes  findings=0
+- messages-inbox   200    5289 bytes  findings=0
+- messages-requests 200    5318 bytes  findings=0
+- message-thread   200    5280 bytes  findings=0
+- messages-no-id   200    5292 bytes  findings=0
+- agents           200    5550 bytes  findings=0
+- agents-filtered  200    5608 bytes  findings=0
+- agent-detail     200    5630 bytes  findings=0
+- profile          200    5260 bytes  findings=0
+- auth-callback    200    5064 bytes  findings=0
+- not-found        404    5064 bytes  findings=0
+- hydration-data   200     557 bytes  findings=0
 
 CSP audit: clean.
