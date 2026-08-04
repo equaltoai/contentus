@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -13,6 +15,7 @@ import {
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
 import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
+import { trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -977,25 +980,55 @@ test('nothing outside the face imports anything behind a seam', () => {
 	// other face. The list is DERIVED from the declaration above rather than
 	// retyped, so a component added behind a seam is covered the day it is
 	// declared.
-	const outside = {};
+	//
+	// TRACKED source, not a directory listing — see `./helpers/tracked-source.mjs`.
+	// Another test plants malformed fixtures inside `src/lib/compose` and removes
+	// them, and a listing walk reads whatever is on disk when it happens to run.
+	const outside = Object.fromEntries(
+		trackedSource(repoRoot, 'src', /\.(svelte|ts)$/)
+			// The face's own directory is checked by `crossSeamImports`, which is
+			// stricter than this walk rather than exempt from it.
+			.filter((path) => !path.startsWith(`${agentsDir}/`))
+			.map((path) => [path, readFileSync(path, 'utf8')])
+	);
 
-	const walk = (dir) => {
-		for (const entry of readdirSync(dir)) {
-			const path = join(dir, entry);
-			if (statSync(path).isDirectory()) {
-				// The face's own directory is checked by `crossSeamImports`, which is
-				// stricter than this walk rather than exempt from it.
-				if (path === agentsDir) continue;
-				walk(path);
-				continue;
-			}
-			if (!/\.(svelte|ts)$/.test(entry)) continue;
-			outside[path] = readFileSync(path, 'utf8');
-		}
-	};
-
-	walk(join(repoRoot, 'src'));
 	assert.deepEqual(importsBehindASeam(outside, faceOnDisk()), []);
+
+	// The walk must actually cover the tree, not merely return without complaint —
+	// a file set narrowed to nothing would pass this test silently.
+	assert.ok(Object.keys(outside).length > 100, 'the walk must still read the tree');
+	assert.ok(
+		Object.keys(outside).some((path) => path.endsWith('src/lib/routes/Agents.svelte')),
+		'the routes that import the face must be in the walked set'
+	);
+});
+
+test('the walked set is what the repository carries, not what is on the disk', () => {
+	// WHY TRACKED FILES. `tests/renderer-authority-audit.test.mjs` plants malformed
+	// `.svelte` fixtures inside `src/lib/compose` and removes them in a `finally`,
+	// and `node --test` runs test files concurrently — so a walk that lists the
+	// directory can read another test's fixture mid-flight. The lenient reading hid
+	// that; a reading that fails closed on an unparseable component surfaced it.
+	//
+	// The property is asserted in a scratch repository rather than by planting a
+	// file in this one, because planting a file to test the fix for planted files
+	// is the same race again.
+	const scratch = mkdtempSync(join(tmpdir(), 'contentus-tracked-'));
+
+	try {
+		execFileSync('git', ['-C', scratch, 'init', '-q']);
+		writeFileSync(join(scratch, 'tracked.ts'), 'export const a = 1;\n');
+		writeFileSync(join(scratch, 'untracked.ts'), 'export const b = 2;\n');
+		execFileSync('git', ['-C', scratch, 'add', 'tracked.ts']);
+
+		assert.deepEqual(
+			trackedSource(scratch, '.', /\.ts$/),
+			[join(scratch, 'tracked.ts')],
+			'an untracked file is not source this repository carries'
+		);
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
 });
 
 test('the outside-the-face check can still see a violation', () => {

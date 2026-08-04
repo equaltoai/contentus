@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -19,6 +19,7 @@ import {
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
 import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
+import { trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -276,23 +277,16 @@ test('nothing outside src/lib/agents imports the interim roster components', () 
 	// is only a single-boundary swap while the interim pieces it composes are
 	// reachable from nowhere else — otherwise the replacement leaves orphaned
 	// imports in routes and the route has to change too.
-	const offenders = [];
+	//
+	// TRACKED source, not a directory listing — see `./helpers/tracked-source.mjs`.
+	// Another test plants malformed fixtures inside `src/lib/compose` and removes
+	// them, and a listing walk reads whatever is on disk when it happens to run.
+	const seam = join(repoRoot, 'src', 'lib', 'agents');
+	const offenders = trackedSource(repoRoot, 'src', /\.(svelte|ts)$/)
+		// The seam's own directory is where these are allowed to be used.
+		.filter((path) => !path.startsWith(`${seam}/`))
+		.flatMap((path) => interimImports(readFileSync(path, 'utf8'), path));
 
-	const walk = (dir) => {
-		for (const entry of readdirSync(dir)) {
-			const path = join(dir, entry);
-			if (statSync(path).isDirectory()) {
-				// The seam's own directory is where these are allowed to be used.
-				if (path === join(repoRoot, 'src', 'lib', 'agents')) continue;
-				walk(path);
-				continue;
-			}
-			if (!/\.(svelte|ts)$/.test(entry)) continue;
-			offenders.push(...interimImports(readFileSync(path, 'utf8'), path));
-		}
-	};
-
-	walk(join(repoRoot, 'src'));
 	assert.deepEqual(offenders, []);
 });
 
