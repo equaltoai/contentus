@@ -606,3 +606,75 @@
 	padding: 0;
 	list-style: none;
 }
+
+/* --- accordion -------------------------------------------------------- */
+
+.contentus-accordion {
+	margin-top: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-bg);
+}
+
+.contentus-accordion__summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	cursor: pointer;
+	/* The native marker is replaced by the one below, which can be positioned
+	   and sized to the brand. `list-style` covers Firefox, `::-webkit-details-marker`
+	   covers Safari. */
+	list-style: none;
+}
+
+.contentus-accordion__summary::-webkit-details-marker {
+	display: none;
+}
+
+.contentus-accordion__summary:focus-visible {
+	outline: 2px solid var(--tc-accent);
+	outline-offset: -2px;
+	border-radius: var(--tc-radius-md);
+}
+
+.contentus-accordion__title {
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-accordion__marker {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-right: 2px solid var(--tc-fg-muted);
+	border-bottom: 2px solid var(--tc-fg-muted);
+	transform: rotate(45deg) translate(-2px, -2px);
+	transition: transform var(--tc-dur-fast) var(--tc-ease-out);
+}
+
+.contentus-accordion[open] .contentus-accordion__marker {
+	transform: rotate(-135deg) translate(-2px, -2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.contentus-accordion__marker {
+		transition: none;
+	}
+}
+
+.contentus-accordion__body {
+	padding: 0 var(--tc-space-3) var(--tc-space-3);
+}
+
+/* An accordion inside the config list separates its neighbours rather than
+   stacking flush against them. */
+.contentus-accordion + .contentus-accordion {
+	margin-top: var(--tc-space-2);
+}

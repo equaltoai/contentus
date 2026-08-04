@@ -36,6 +36,7 @@ single most misleading thing this panel could do.
 
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 
+	import Accordion from './Accordion.svelte';
 	import CopyBlock from './CopyBlock.svelte';
 	import {
 		mcpClientConfigs,
@@ -128,26 +129,24 @@ single most misleading thing this panel could do.
 		</div>
 
 		{#if access?.scopes?.length}
-			<div class="contentus-mcp__scopes">
-				<h3 class="contentus-mcp__subheading">Scopes this instance supports</h3>
+			<Accordion title="Scopes this instance supports">
 				<ul class="contentus-mcp__scope-list">
 					{#each access.scopes as scope (scope)}
 						<li class="contentus-agent-pill contentus-agent-pill--neutral">{scope}</li>
 					{/each}
 				</ul>
-			</div>
+			</Accordion>
 		{/if}
 
 		{#if access?.guidance?.length}
-			<div class="contentus-mcp__guidance-block">
-				<h3 class="contentus-mcp__subheading">Instance guidance</h3>
+			<Accordion title="Instance guidance">
 				<!-- lesser's own guidance strings, rendered verbatim and in order. -->
 				<ul class="contentus-mcp__guidance">
 					{#each access.guidance as line, index (index)}
 						<li>{line}</li>
 					{/each}
 				</ul>
-			</div>
+			</Accordion>
 		{/if}
 	</Panel>
 
@@ -251,16 +250,18 @@ single most misleading thing this panel could do.
 				Published by the MCP server for all souled agents. It is not a statement about what
 				<strong>@{agent.username}</strong> has been granted — see this agent's capabilities above.
 			</p>
-			<ul class="contentus-mcp__tools">
-				{#each discovery.document.tools as tool (tool.name)}
-					<li class="contentus-mcp__tool">
-						<p class="contentus-mcp__tool-name">{tool.name}</p>
-						{#if tool.description}
-							<p class="contentus-mcp__tool-description">{tool.description}</p>
-						{/if}
-					</li>
-				{/each}
-			</ul>
+			<Accordion title={`${discovery.document.tools.length} tools`}>
+				<ul class="contentus-mcp__tools">
+					{#each discovery.document.tools as tool (tool.name)}
+						<li class="contentus-mcp__tool">
+							<p class="contentus-mcp__tool-name">{tool.name}</p>
+							{#if tool.description}
+								<p class="contentus-mcp__tool-description">{tool.description}</p>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</Accordion>
 		</Panel>
 	{/if}
 
@@ -271,12 +272,14 @@ single most misleading thing this panel could do.
 			be advertising a credential this page never had.
 		</p>
 		{#each configs as config (config.id)}
-			<CopyBlock
-				label={config.label}
-				destination={config.destination}
-				value={config.body}
-				multiline
-			/>
+			<Accordion title={config.label}>
+				<CopyBlock
+					label={config.label}
+					destination={config.destination}
+					value={config.body}
+					multiline
+				/>
+			</Accordion>
 		{/each}
 	</Panel>
 {/if}
