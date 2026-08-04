@@ -224,21 +224,55 @@ and not enumerable by anyone reading source. So the mechanism changed rather tha
 the list. `scripts/audit-seam-graph.mjs` (`pnpm run validate:seam-graph`, part of
 `pnpm run validate` and therefore of `pnpm run build`) runs this repository's own
 Vite configuration twice — the client pass and the server pass — and asserts the
-seam rules against **the module graph the bundler finishes with**. Nothing is
-matched; the question is not what the text says but what the build resolved. The
-four forms above are covered because Vite resolved them, and so is every form
-nobody has thought of yet.
+seam rules against what the bundler resolved. Nothing is matched; the question is
+not what the text says but what the build did.
 
-Two channels do not go through the module graph, and both are handled rather than
-assumed away. A `new URL('./X', import.meta.url)` is emitted as an asset; the
-gate reads Vite's own reference marker back into the file it came from, so a
-dependency that is not an import in any dialect is still an edge. A worker is
-bundled by a separate build whose plugin list the main pipeline is not in; the
-gate detects the reference and reports the worker's own dependencies as
-**unknown**, which is a red gate rather than a silence. Supplying
-`worker.plugins` from the gate was tried and rejected — it would replace whatever
-`vite.config.ts` sets, and a gate that measures a build other than the real one is
-worse than a gate with a stated boundary.
+**What that gate reads, stated as channels rather than as a guarantee.** An
+earlier version of this section said the module graph covered every form the
+build resolves, and round 7 disproved it: `url('./CopyBlock.svelte')` in a
+component's `<style>` block crosses the `AgentDetail → AgentMcpPanel` seam, the
+client build emits the component as an asset and writes its name into the
+generated stylesheet, and the gate reported nothing. "The build resolved it" is
+three channels, not one:
+
+- **The module graph**, at `buildEnd` — every form that produces a module, which
+  is where round 6's four live.
+- **Asset references in module code**, also at `buildEnd` — `new URL('./X',
+import.meta.url)` leaves Vite's own marker where an edge would be, and the
+  emitted file names what it came from. A dependency that is not an import in any
+  dialect is still an edge.
+- **Asset references in stylesheets**, mid-pipeline — the same marker for a CSS
+  `url()`, read in the one window where a CSS module's code still exists. By
+  `buildEnd` that content has left the module graph for the stylesheet being
+  assembled, which is why round 7's plant was invisible rather than merely
+  unmatched.
+
+A url() is an edge when the build **resolved it to a file**, whatever its
+spelling: quoted, unquoted, a bare sibling name, through the `$lib` alias, with a
+query, nested in `image-set()`, inside `@media` or `@supports`, an `@font-face`
+source, or a root-absolute path naming a real file. A `data:` URL, a remote or
+protocol-relative origin, and an absolute path with no file behind it resolve to
+nothing and are not dependencies.
+
+**The residual rule, because a list of channels is a list and channels close.**
+Every asset the build **emits** must be attributable to something that references
+it; one that is not is a **finding**, not a silence. That is what makes the next
+closed channel cost the gate its green rather than its coverage — with the
+stylesheet window shut, round 7's plant becomes an unaccounted-for asset instead
+of a pass. The single exception is a worker's own bundle, which is generated code
+named by a marker Vite rewrites from a map of its own and therefore can never be
+attributed; a worker is bundled by a separate build whose plugin list the main
+pipeline is not in, and the gate reports that worker's dependencies as
+**unknown** — a red gate in its own right. Supplying `worker.plugins` from the
+gate was tried and rejected: it would replace whatever `vite.config.ts` sets, and
+a gate that measures a build other than the real one is worse than a gate with a
+stated boundary.
+
+Two boundaries remain stated rather than closed. A file the build never loads has
+no edges here at all — that is the source-reading probes' half, below. And a
+reference the client pass turns into an emitted asset and the server pass does
+not (`new URL(…)`, and a CSS `url()`) is a client-pass edge, so a module only the
+server pass loads takes those dependencies unrecorded.
 
 **Both checks stay, and neither is redundant.** They have different domains, and
 the numbers say so: the build loads 540 of this repository's 1246 tracked
@@ -255,7 +289,12 @@ each of round 6's four forms as a real dependency through the gate's own build
 overlay and asserts the gate names it, along with two forms invented for the
 purpose: a wildcard `import.meta.glob('./[A-Z]*.svelte')`, which names no
 component at all and resolves to ten cross-seam edges, and a `new URL(…)`
-reference, which contains no import for any reader to read.
+reference, which contains no import for any reader to read. Round 7's stylesheet
+form is planted with the **bundle** as its witness rather than the gate's own
+conclusion — the client build must emit the component and name it in the
+generated CSS before the gate is asked anything — and ten url() spellings are
+planted alongside four that resolve to nothing, each in a host of its own so a
+form that stopped resolving loses its own line.
 
 ### Why the composition is local today
 
