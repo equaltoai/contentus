@@ -11,7 +11,9 @@ force them to be swapped together.
 <script lang="ts">
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 
+	import AgentCapabilitiesPanel from './AgentCapabilities.svelte';
 	import AgentMcpPanel from './AgentMcpPanel.svelte';
+	import AgentTrustDetail from './AgentTrustDetail.svelte';
 	import AgentTrustBadge from './AgentTrustBadge.svelte';
 	import { agentsHref } from '../../facetheory/routing';
 	import type { AgentSummary, AgentUnavailable } from './contract';
@@ -89,6 +91,17 @@ force them to be swapped together.
 				{/if}
 			</dl>
 		{/if}
+	</Panel>
+
+	<Panel title="Standing and permissions" headerLevel={2}>
+		<!--
+			Trust and capabilities together, and above the MCP panel deliberately.
+			They are what this instance says about THIS agent; the MCP panel below
+			describes a server surface shared by every souled agent. A reader who
+			skims the tool catalog first would carry the wrong subject into it.
+		-->
+		<AgentTrustDetail {agent} />
+		<AgentCapabilitiesPanel capabilities={agent.capabilities} username={agent.username} />
 	</Panel>
 
 	<AgentMcpPanel {agent} />

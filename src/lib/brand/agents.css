@@ -563,3 +563,46 @@
 .contentus-mcp__addresses .contentus-copy + .contentus-copy {
 	margin-top: 0;
 }
+
+/* --- trust and capabilities ------------------------------------------- */
+
+.contentus-trust {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+}
+
+.contentus-trust__warning {
+	margin: 0;
+	padding: var(--tc-space-3);
+	color: var(--tc-error);
+	border: 1px solid var(--tc-error);
+	border-radius: var(--tc-radius-md);
+	line-height: 1.55;
+	max-width: 70ch;
+}
+
+.contentus-caps {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	margin-top: var(--tc-space-5);
+	padding-top: var(--tc-space-5);
+	border-top: 1px solid var(--tc-outline-variant);
+}
+
+.contentus-caps__lede {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	line-height: 1.55;
+	max-width: 70ch;
+}
+
+.contentus-caps__list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-2);
+	margin: var(--tc-space-1) 0 var(--tc-space-3);
+	padding: 0;
+	list-style: none;
+}

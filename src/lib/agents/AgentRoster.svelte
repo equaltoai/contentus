@@ -46,6 +46,7 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 
 	import AgentCard from './AgentCard.svelte';
 	import AgentRosterFilters from './AgentRosterFilters.svelte';
+	import MyAgents from './MyAgents.svelte';
 	import { agentsHref } from '../../facetheory/routing';
 	import { hasActiveFilters, type AgentRosterFilterState } from './filters';
 	import type { AgentRosterPage, AgentUnavailable } from './contract';
@@ -117,6 +118,13 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 			</ul>
 		</Panel>
 	{/if}
+
+	<!--
+		The viewer's own agents, below the public roster and fetched only in the
+		browser: `myAgents` needs a token and these props are public. It renders
+		nothing at all for an anonymous reader.
+	-->
+	<MyAgents />
 
 	<!--
 		Forward-only paging, because lesser's connection is forward-only: it
