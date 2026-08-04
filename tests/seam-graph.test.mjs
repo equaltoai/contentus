@@ -60,6 +60,18 @@ import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/au
  * the differential — and, in the same run as the external, a module the build did
  * load and nothing read, still named.
  *
+ * ROUND 11 THEN FOUND WHAT "THE BUILD" MEANS IN A GATE THAT RUNS TWO OF THEM. The
+ * modules a pass reached were recorded into ONE set, so a component the CLIENT pass
+ * externalized was contained because the SERVER pass had loaded it — and the client
+ * pass's own edges out of that component were neither recorded nor missed. The
+ * channels are not symmetric, which is what makes that a hole rather than a
+ * duplicate: a `new URL(…, import.meta.url)` is a client-pass edge and an `import()`
+ * behind `import.meta.env.SSR` is a server-pass one, so the pass that was excusing
+ * the other was not looking at the same graph. Both halves are planted below, each
+ * with the unexternalized run as its differential, and the control is a module
+ * externalized in BOTH passes — the case that must stay silent, because a file no
+ * pass opens is a file no pass takes an edge from.
+ *
  * HOW A TREE IS PLANTED. Through the gate's own overlay: a map of
  * repository-relative path to source, handed to the build as a plugin rather than
  * written to disk. Nothing here touches the working tree, which matters twice —
@@ -87,6 +99,15 @@ const OWNED_BY = 'owned by AgentMcpPanel.svelte, imported from behind no seam';
 /** A second component behind the same seam, for plants that need two targets. */
 const ALSO_BEHIND_SEAM = './Accordion.svelte';
 
+/**
+ * A component behind a DIFFERENT seam, and the offence reaching it from the MCP
+ * panel's own tree is. `CopyBlock` may be referenced by the seam that owns it and
+ * may reach nothing outside it, so a dependency it takes on the roster's card is a
+ * cross-seam edge in either direction it is planted.
+ */
+const OWNED_ELSEWHERE = './AgentCard.svelte';
+const OWNED_BY_ROSTER = 'owned by AgentRoster.svelte, imported from AgentMcpPanel.svelte';
+
 /** The same offence taken by the seam that is allowed to compose the MCP panel. */
 const OWNED_BY_FROM_DETAIL = 'owned by AgentMcpPanel.svelte, imported from AgentDetail.svelte';
 
@@ -109,11 +130,15 @@ const reaching = (specifier) => `import ${JSON.stringify(specifier)};\n${contrac
  * reading windows for ONE module and watch what the rest of it makes of that.
  * Round 9's finding is the case that needs it.
  *
- * `external` is the other one: a predicate on the resolved id that turns a match
- * into a module the build resolves and then never loads, through the bundler's own
- * external mechanism rather than a mock of it. Round 10's finding needs it, because
- * nothing in this repository's configuration externalizes anything but `node:`
- * builtins and a rule nobody has watched is a rule nobody should trust.
+ * `external` is the other one: a predicate on the resolved id AND THE PASS that
+ * turns a match into a module the build resolves and then never loads, through the
+ * bundler's own external mechanism rather than a mock of it. Round 10's finding
+ * needs it, because nothing in this repository's configuration externalizes
+ * anything but `node:` builtins and a rule nobody has watched is a rule nobody
+ * should trust. Round 11's needs the pass: a consumer can externalize in one pass
+ * and not the other, and a predicate that could not say so was a case nobody could
+ * plant. A predicate that ignores the argument externalizes in both, which is round
+ * 10's case unchanged.
  */
 const audit = async (overlay, blind, external) =>
 	(await auditSeamGraph({ root: repoRoot, overlay, blind, external })).findings;
@@ -121,6 +146,21 @@ const audit = async (overlay, blind, external) =>
 /** Close the stylesheet window for one component's own `<style>` and nothing else. */
 const stylesheetOf = (component) => (id) =>
 	id.includes(`${component}?`) && id.includes('type=style');
+
+/**
+ * A face component with one statement spliced onto the end of its instance script,
+ * and optional markup appended after it.
+ *
+ * Appended rather than woven into the component's own markup: a plant that matched
+ * an element inside the file would silently become a no-op the day that element was
+ * edited, and a no-op plant is a green that proves nothing. The differential run in
+ * every case below is what would catch that, and this keeps it from arising.
+ */
+const scripted = (name, statement, markup = '') =>
+	readFileSync(join(repoRoot, `src/lib/agents/${name}`), 'utf8').replace(
+		'</script>',
+		`\t${statement}\n</script>`
+	) + markup;
 
 /** A face component with a `<style>` block appended, which none of them has. */
 const styled = (name, ...rules) =>
@@ -692,11 +732,113 @@ test('a face component the build externalizes is a file this gate cannot judge',
 	// module the gate never saw the inside of.
 	//
 	// No overlay at all: the tree the repository carries, with one component
-	// externalized through the gate's own injection.
+	// externalized through the gate's own injection. A predicate that ignores the
+	// pass externalizes in BOTH, so both passes report it — each for its own graph,
+	// which is round 11's rule and reads here as the same fact said twice.
 	assert.deepEqual(await audit({}, undefined, (id) => id.endsWith('CopyBlock.svelte')), [
-		'src/lib/agents/CopyBlock.svelte is tracked inside the face and no build pass loads it, ' +
-			'so no edge of its own is recorded and this gate cannot judge it',
+		'src/lib/agents/CopyBlock.svelte is tracked inside the face and the client build resolves ' +
+			'it and never loads it, so the edges it takes in that pass are unrecorded and this gate ' +
+			'cannot judge it there',
+		'src/lib/agents/CopyBlock.svelte is tracked inside the face and the server build resolves ' +
+			'it and never loads it, so the edges it takes in that pass are unrecorded and this gate ' +
+			'cannot judge it there',
 	]);
+});
+
+test('the pass that loads a component does not excuse the pass that externalizes it', async () => {
+	// ROUND 11's FINDING, planted the way the review demonstrated it. `CopyBlock`
+	// takes a `new URL('./AgentCard.svelte', import.meta.url)` — a dependency ONLY THE
+	// CLIENT PASS has, because the server build leaves that expression verbatim as a
+	// runtime URL and emits nothing. Externalize `CopyBlock` in the client pass alone
+	// and the edge is gone: the pass that had it never opened the module that carries
+	// it. The gate was green, because the containment rule read one set of reached
+	// modules for both passes and the SERVER pass had loaded the file.
+	const overlay = {
+		'src/lib/agents/CopyBlock.svelte': scripted(
+			'CopyBlock.svelte',
+			`const probe = new URL(${JSON.stringify(OWNED_ELSEWHERE)}, import.meta.url).href;`,
+			'\n<span hidden data-probe={probe}></span>\n'
+		),
+	};
+
+	// LOADED, the differential. The plant is a real cross-seam dependency and the
+	// gate names it — so a clean run below is the masking rather than a plant that
+	// never built.
+	assert.deepEqual(await audit(overlay), [
+		`src/lib/agents/CopyBlock.svelte → src/lib/agents/AgentCard.svelte (${OWNED_BY_ROSTER})`,
+	]);
+
+	// EXTERNALIZED IN THE CLIENT PASS ONLY, which is the whole case. The edge is
+	// unrecorded and unrecordable — and the finding says exactly that about exactly
+	// that pass, rather than resting on the server pass having opened the same file.
+	assert.deepEqual(
+		await audit(
+			overlay,
+			undefined,
+			(id, pass) => pass === 'client' && id.endsWith('CopyBlock.svelte')
+		),
+		[
+			'src/lib/agents/CopyBlock.svelte is tracked inside the face and the client build ' +
+				'resolves it and never loads it, so the edges it takes in that pass are unrecorded ' +
+				'and this gate cannot judge it there',
+		]
+	);
+});
+
+test('the same holds for the pass the other one cannot see into', async () => {
+	// THE SYMMETRIC HALF, and the reason the rule is about passes rather than about
+	// the client pass. `import.meta.env.SSR` is replaced with a constant before the
+	// bundler parses, so the client build eliminates this branch and never resolves
+	// the target: the edge exists in the SERVER graph and in no other. Externalizing
+	// `CopyBlock` in the server pass alone takes it away, and the client pass — which
+	// loads the file and records its imports — has nothing to say about it.
+	const overlay = {
+		'src/lib/agents/CopyBlock.svelte': scripted(
+			'CopyBlock.svelte',
+			`if (import.meta.env.SSR) void import(${JSON.stringify(OWNED_ELSEWHERE)});`
+		),
+	};
+
+	// LOADED, the differential again. One finding, from the server pass's `import()`.
+	assert.deepEqual(await audit(overlay), [
+		`src/lib/agents/CopyBlock.svelte → src/lib/agents/AgentCard.svelte (${OWNED_BY_ROSTER})`,
+	]);
+
+	assert.deepEqual(
+		await audit(
+			overlay,
+			undefined,
+			(id, pass) => pass === 'server' && id.endsWith('CopyBlock.svelte')
+		),
+		[
+			'src/lib/agents/CopyBlock.svelte is tracked inside the face and the server build ' +
+				'resolves it and never loads it, so the edges it takes in that pass are unrecorded ' +
+				'and this gate cannot judge it there',
+		]
+	);
+});
+
+test('a module no pass opens is a module no pass takes an edge from', async () => {
+	// THE CONTROL, and the direction a rule that just got stricter owes. Round 10's
+	// silence must survive round 11's fix: a module the configuration externalizes in
+	// BOTH passes is not a file this gate failed to read, and the per-pass rule must
+	// not turn it into two findings where the union rule had none.
+	//
+	// The plant carries the same client-pass-only reference as the case above, so
+	// this is the closest thing to a false positive the new rule could produce — a
+	// cross-seam dependency in the source, invisible to the server pass by channel and
+	// to the client pass by configuration — and the answer is still silence, because
+	// no pass opened the module and none of them takes the edge.
+	const helper = './seam-external.ts';
+	const overlay = {
+		'src/lib/agents/contract.ts': reaching(helper),
+		'src/lib/agents/seam-external.ts': `export const href = new URL(${JSON.stringify(BEHIND_SEAM)}, import.meta.url).href;\n`,
+	};
+
+	assert.deepEqual(await audit(overlay), [
+		`src/lib/agents/seam-external.ts → src/lib/agents/CopyBlock.svelte (${OWNED_BY})`,
+	]);
+	assert.deepEqual(await audit(overlay, undefined, (id) => id.endsWith('seam-external.ts')), []);
 });
 
 test('the declared nesting is the one cross-seam import that is not a defect', async () => {
