@@ -18,8 +18,9 @@ import {
 	graphqlEndpointForOrigin,
 	resolveRequestOrigin,
 } from '$lib/cms/origin';
-import { fetchAgentRoster } from '$lib/agents/contract';
+import { fetchAgent, fetchAgentRoster } from '$lib/agents/contract';
 import { resolveAgentFilters } from '$lib/agents/filters';
+import { mcpConnectOrigin } from '$lib/agents/mcp';
 import { loadSourceStatus } from '$lib/cms/compose';
 import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cms/loaders';
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
@@ -31,6 +32,7 @@ import App from './App.svelte';
 import { queryFromSearchString } from './query-parser';
 import {
 	ROUTE_PATTERNS,
+	resolveAgentUsername,
 	resolveComposeIntent,
 	resolveConversationId,
 	resolveDraftId,
@@ -100,6 +102,7 @@ async function createRouteProps(
 		timelines: null,
 		messages: null,
 		agents: null,
+		agentDetail: null,
 		profile: null,
 	};
 
@@ -195,6 +198,26 @@ async function createRouteProps(
 					page: result.ok ? result.page : null,
 					failure: result.ok ? null : result.failure,
 					filters,
+				},
+			};
+		}
+		case 'agent-detail': {
+			// Anonymous, like the roster. `mcpAccess` is not among the fields lesser
+			// redacts for non-owners, so the whole published MCP contract —
+			// endpoint, protected-resource URL, scopes, guidance — lands in the
+			// server's paint and a reader with no script still gets every address.
+			// The live probes against those addresses are the client's; they are
+			// requests to a sibling origin and would report the SSR host's
+			// reachability rather than the reader's.
+			const username = resolveAgentUsername(path);
+			const result = await fetchAgent({ endpoint }, username ?? '');
+
+			return {
+				...base,
+				agentDetail: {
+					username,
+					agent: result.ok ? result.agent : null,
+					failure: result.ok ? null : result.failure,
 				},
 			};
 		}
@@ -405,7 +428,28 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
  */
 const SOCKET_ROUTES: ReadonlySet<string> = new Set(['timelines', 'messages', 'message-thread']);
 
+/**
+ * `/agents/{username}` gets the same treatment for the same reason, one
+ * milestone later and from a better source.
+ *
+ * The MCP detail panel probes two discovery documents in the browser, and lesser
+ * canonicalises MCP onto `api.<domain>` (`canonicalMCPResourceBaseURL`) — a
+ * sibling of the host serving this page — so without an addition here the
+ * browser blocks both probes before they leave.
+ *
+ * The addition is narrower than the socket one in the way that matters: the
+ * origin is not derived from the request at all, it is the ORIGIN OF THE URL
+ * LESSER JUST RETURNED for this agent. If lesser published no MCP endpoint,
+ * there is nothing to probe and nothing is added. Still exactly one origin,
+ * still only on the route that connects, and still never touching `script-src`
+ * or `style-src`: no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
+ */
 function cspOptionsForRoute(props: RouteProps, origin: string | null) {
+	if (props.page.key === 'agent-detail') {
+		const mcpOrigin = mcpConnectOrigin(props.agentDetail?.agent?.mcpAccess);
+		return mcpOrigin ? { directives: { 'connect-src': [mcpOrigin] } } : {};
+	}
+
 	if (!SOCKET_ROUTES.has(props.page.key)) return {};
 
 	const endpoint = subscriptionEndpoint(origin);

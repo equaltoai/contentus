@@ -1,4 +1,4 @@
-import type { AgentRosterPage, AgentUnavailable } from '$lib/agents/contract';
+import type { AgentRosterPage, AgentSummary, AgentUnavailable } from '$lib/agents/contract';
 import type { AgentRosterFilterState } from '$lib/agents/filters';
 import type { ArticleBodyDecision } from '$lib/cms/articles';
 import type { SourceStatus } from '$lib/cms/compose';
@@ -20,6 +20,7 @@ export type AppPageKey =
 	| 'messages'
 	| 'message-thread'
 	| 'agents'
+	| 'agent-detail'
 	| 'profile'
 	| 'auth-callback'
 	| 'not-found';
@@ -236,6 +237,20 @@ export interface AgentsRouteData {
 	filters: AgentRosterFilterState;
 }
 
+/**
+ * One agent's detail page.
+ *
+ * Anonymous like the roster, and for a stronger reason: `mcpAccess` is not
+ * among the fields lesser redacts for non-owners, so the whole published MCP
+ * contract belongs in the server's paint. The live probes against it do not —
+ * they are browser requests to a sibling origin.
+ */
+export interface AgentDetailRouteData {
+	username: string | null;
+	agent: AgentSummary | null;
+	failure: AgentUnavailable | null;
+}
+
 export interface RouteProps {
 	page: AppPageDescriptor;
 	/** Slug captured from `/articles/{slug}`, `/series/{slug}`, `/categories/{slug}`. */
@@ -247,5 +262,6 @@ export interface RouteProps {
 	timelines: TimelinesRouteData | null;
 	messages: MessagesRouteData | null;
 	agents: AgentsRouteData | null;
+	agentDetail: AgentDetailRouteData | null;
 	profile: ProfileRouteData | null;
 }

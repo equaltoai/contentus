@@ -312,3 +312,254 @@
 		justify-content: space-between;
 	}
 }
+
+/* --- detail ----------------------------------------------------------- */
+
+.contentus-agent-detail__head {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	margin-bottom: var(--tc-space-5);
+}
+
+.contentus-agent-detail__handle {
+	margin: 0;
+	font-family: var(--tc-font-mono);
+	color: var(--tc-fg-muted);
+}
+
+.contentus-agent-detail__bio {
+	margin: var(--tc-space-2) 0 0;
+	color: var(--tc-fg-muted);
+	line-height: 1.6;
+	max-width: 60ch;
+}
+
+/* --- mcp panel -------------------------------------------------------- */
+
+.contentus-mcp__lede {
+	margin: 0 0 var(--tc-space-4);
+	color: var(--tc-fg-muted);
+	line-height: 1.6;
+	max-width: 70ch;
+}
+
+.contentus-mcp__subheading {
+	margin: 0;
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-mcp__addresses {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+}
+
+.contentus-mcp__scopes,
+.contentus-mcp__guidance-block {
+	margin-top: var(--tc-space-5);
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+}
+
+.contentus-mcp__scope-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-mcp__guidance {
+	margin: 0;
+	padding-left: var(--tc-space-5);
+	color: var(--tc-fg-muted);
+	line-height: 1.6;
+	max-width: 70ch;
+}
+
+.contentus-mcp__guidance li + li {
+	margin-top: var(--tc-space-1);
+}
+
+.contentus-mcp__probe + .contentus-mcp__probe {
+	margin-top: var(--tc-space-5);
+	padding-top: var(--tc-space-5);
+	border-top: 1px solid var(--tc-outline-variant);
+}
+
+.contentus-mcp__probe-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-2);
+	margin-bottom: var(--tc-space-3);
+}
+
+.contentus-mcp__facts {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+	gap: var(--tc-space-3);
+	margin: 0 0 var(--tc-space-3);
+}
+
+.contentus-mcp__facts dt {
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-mcp__facts dd {
+	margin: 2px 0 0;
+	color: var(--tc-fg);
+	/* URLs and actor IDs are long and must not push the grid wide. */
+	overflow-wrap: anywhere;
+}
+
+.contentus-mcp__mono {
+	font-family: var(--tc-font-mono);
+	font-size: 0.8125rem;
+}
+
+.contentus-mcp__note {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: 0.875rem;
+	line-height: 1.55;
+	max-width: 70ch;
+}
+
+.contentus-mcp__tools {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+	gap: var(--tc-space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-mcp__tool {
+	padding: var(--tc-space-3);
+	background: var(--tc-bg);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+}
+
+.contentus-mcp__tool-name {
+	margin: 0;
+	font-family: var(--tc-font-mono);
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--tc-fg);
+	overflow-wrap: anywhere;
+}
+
+.contentus-mcp__tool-description {
+	margin: var(--tc-space-1) 0 0;
+	color: var(--tc-fg-muted);
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+/* --- copy block ------------------------------------------------------- */
+
+.contentus-copy {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+}
+
+.contentus-copy__head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-2);
+}
+
+.contentus-copy__label {
+	display: flex;
+	align-items: baseline;
+	gap: var(--tc-space-2);
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-copy__destination {
+	font-family: var(--tc-font-mono);
+	font-size: 0.75rem;
+	font-weight: 500;
+	letter-spacing: 0;
+	text-transform: none;
+	color: var(--tc-fg-dim);
+}
+
+.contentus-copy__button {
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	color: var(--tc-fg);
+	background: transparent;
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-copy__button:hover,
+.contentus-copy__button:focus-visible {
+	border-color: var(--tc-accent);
+	color: var(--tc-accent);
+}
+
+.contentus-copy__value {
+	margin: 0;
+	padding: var(--tc-space-3);
+	background: var(--tc-bg);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	font-family: var(--tc-font-mono);
+	font-size: 0.8125rem;
+	line-height: 1.5;
+	color: var(--tc-fg);
+	/* Always selectable: the copy button is an affordance, never the only way
+	   out of the block. */
+	user-select: text;
+	overflow-wrap: anywhere;
+}
+
+.contentus-copy__value--block {
+	overflow-x: auto;
+	white-space: pre;
+	overflow-wrap: normal;
+}
+
+.contentus-copy__value code {
+	font: inherit;
+	background: none;
+	padding: 0;
+}
+
+.contentus-copy__hint {
+	margin: 0;
+	color: var(--tc-phi-gold);
+	font-size: 0.8125rem;
+}
+
+.contentus-mcp__addresses .contentus-copy + .contentus-copy {
+	margin-top: 0;
+}

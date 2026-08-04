@@ -8,6 +8,7 @@ is no catch-all render path that could silently show the wrong surface.
 
 <script lang="ts">
 	import AppShell from '$lib/shell/AppShell.svelte';
+	import AgentDetailRoute from '$lib/routes/AgentDetailRoute.svelte';
 	import AgentsRoute from '$lib/routes/Agents.svelte';
 	import ArticleReaderRoute from '$lib/routes/ArticleReader.svelte';
 	import ArticlesIndexRoute from '$lib/routes/ArticlesIndex.svelte';
@@ -33,6 +34,7 @@ is no catch-all render path that could silently show the wrong surface.
 		timelines,
 		messages,
 		agents,
+		agentDetail,
 		profile,
 	}: RouteProps = $props();
 </script>
@@ -66,6 +68,11 @@ is no catch-all render path that could silently show the wrong surface.
 				failure: null,
 				filters: { type: null, query: null, verified: null, after: null },
 			}}
+		/>
+	{:else if page.key === 'agent-detail'}
+		<AgentDetailRoute
+			{page}
+			data={agentDetail ?? { username: null, agent: null, failure: null }}
 		/>
 	{:else if page.key === 'profile'}
 		<ProfileRoute

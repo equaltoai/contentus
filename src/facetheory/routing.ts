@@ -143,6 +143,18 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		// so themselves rather than gating the whole public roster.
 		requiresAuth: false,
 	},
+	'agent-detail': {
+		key: 'agent-detail',
+		path: '/agents',
+		title: 'Agent',
+		eyebrow: 'Agents and MCP',
+		summary: 'An agent on this instance, and the MCP surface it publishes.',
+		surface: 'mcp',
+		// Anonymous, and `mcpAccess` in particular is NOT among the fields lesser
+		// redacts for non-owners — so the published MCP contract is public and
+		// belongs in the server's paint.
+		requiresAuth: false,
+	},
 	profile: {
 		key: 'profile',
 		path: '/profiles',
@@ -185,6 +197,7 @@ export const ROUTE_PATTERNS = [
 	'/messages',
 	'/messages/{conversationId}',
 	'/agents',
+	'/agents/{username}',
 	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
@@ -234,6 +247,12 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// Same rule as `/review/drafts` and `/profiles` above.
 	if (segmentAfter(route, '/messages/')) return PAGE_DEFINITIONS['message-thread'];
 	if (route === '/agents') return PAGE_DEFINITIONS.agents;
+	// `/agents/` with no username names no agent, so it is not the detail
+	// surface: it falls through to the roster rather than rendering an empty
+	// one. The trailing slash normalises away first, which is why this reads as
+	// the roster above rather than as not-found — the same resolution
+	// `/messages/` takes, and the better of the two answers.
+	if (segmentAfter(route, '/agents/')) return PAGE_DEFINITIONS['agent-detail'];
 	// `/profiles` with no username names no actor, so it is not the profile
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` above.
@@ -431,6 +450,18 @@ export function agentsHref(
 
 	const search = params.toString();
 	return search ? `${href('/agents')}?${search}` : href('/agents');
+}
+
+/**
+ * Agent username captured from `/agents/{username}`, or null.
+ *
+ * Kept separate from `resolveProfileUsername` because the two name different
+ * things: a profile handle is `user@host` and may be remote, while `agent(username:)`
+ * resolves a LOCAL agent on this instance. One shared accessor would invite a
+ * route to read one where it meant the other.
+ */
+export function resolveAgentUsername(pathname: string): string | null {
+	return segmentAfter(normalizeRoutePath(pathname), '/agents/');
 }
 
 /** App-relative href for one agent's detail page. */

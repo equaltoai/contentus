@@ -105,6 +105,11 @@ export const AUDIT_ROUTES = [
 		path: '/l/agents?type=CURATOR&q=weather&verified=true',
 		expectStatus: 200,
 	},
+	// One agent, deep-linked cold. Anonymous like the roster, and the surface
+	// where the published MCP contract has to appear in the SERVER's paint —
+	// `mcpAccess` is not redacted for non-owners, so a no-script reader gets every
+	// address. The live probes against those addresses are the client's.
+	{ name: 'agent-detail', path: '/l/agents/weatherbot', expectStatus: 200 },
 	{ name: 'profile', path: '/l/profiles/ada', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },
