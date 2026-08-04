@@ -57,6 +57,28 @@
  * module. A window that closes — for every module or for one — costs this gate its
  * green there, whoever else references the same file.
  *
+ * WHICH MODULES THE BUILD LOADS IS ASKED OF THE BUILD, not of the id, and round 10
+ * is why that distinction is written down. A module the build marks EXTERNAL is
+ * resolved and then deliberately never loaded — and Rolldown lists it in the graph
+ * under the id it resolved TO, which for an external file is an absolute path
+ * spelled exactly like every loaded module's. Reading "the build went and got this
+ * file" off that spelling made every module a consumer externalizes a module this
+ * gate had failed to read, so a legitimate build went red for doing something
+ * legitimate. `ModuleInfo` cannot be asked either: Rolldown has no `isExternal`,
+ * and its `code` is `null` for "external OR not yet available" — the two cases this
+ * rule exists to tell apart. So the LOAD PIPELINE is watched instead, by a plugin
+ * that reads nothing and returns nothing and records every id the build enters it
+ * for. An id it never saw and for which the build holds no code is a module nobody
+ * loaded, and there is nothing here this gate failed to read.
+ *
+ * That watch only ever WIDENS what must be covered: a module the build holds code
+ * for is loaded whether or not the watch saw it, so the day that plugin's position
+ * stops seeing every load, the rule falls back to what it checked before rather
+ * than quietly covering less. And what the build never loaded it also cannot be
+ * judged for — so an externalized module is not counted as reached, and a tracked
+ * face file a consumer externalizes lands in the containment rule below as a file
+ * this gate cannot judge rather than passing as one it read.
+ *
  * WHAT THIS GATE CANNOT SEE, stated plainly, because a mechanism that claims
  * everything is a mechanism nobody can check. Each one is either covered by
  * another check that stays, or turned into a TRIPWIRE — a red gate the day the
@@ -68,7 +90,11 @@
  *      close by pretending to load them — it is why the source-reading probes
  *      STAY, and their headers say so. The two checks have different domains:
  *      this one reads every form on the modules the build loads, they read every
- *      tracked file in one form. Neither subsumes the other and both run.
+ *      tracked file in one form. Neither subsumes the other and both run. A module
+ *      the build EXTERNALIZES is the same boundary reached from the other side —
+ *      the configuration saying this file is not part of this build — and inside
+ *      the face it is a red gate, because a tracked face file no pass loads is
+ *      already a finding of its own.
  *   2. A WORKER's own modules. `new Worker(new URL(…))` is bundled by a separate
  *      Rolldown build whose plugin list is `config.worker.plugins` — the main
  *      pipeline is not in it, so a recorder in `plugins` never sees inside one.
@@ -278,6 +304,66 @@ function styleRecorder(pass, root, references, observed, blind) {
 }
 
 /**
+ * Which modules the build actually LOADED, which is not a question about ids.
+ *
+ * `load` is the hook the bundler calls when it is about to go and get a module's
+ * content, and it is called for exactly the modules it goes and gets: a module
+ * marked external is resolved and then skipped, so this hook never sees it. That
+ * is the whole answer, and the reason it is asked here rather than inferred at
+ * `buildEnd` — see the header. This returns null for everything, so it says
+ * nothing about what any module contains and cannot change the build it counts.
+ *
+ * `enforce: 'pre'` and first in the stack, so a module another plugin LOADS is
+ * still a module this hook was called for. If that position ever stops seeing
+ * every load, the rule that uses this falls back to "the build holds code for it",
+ * which is what it checked before this existed.
+ */
+function loadWatcher(loads) {
+	return {
+		name: 'contentus:seam-graph-loads',
+		enforce: 'pre',
+
+		load(id) {
+			loads.add(String(id));
+			return null;
+		},
+	};
+}
+
+/**
+ * A module the build resolves and then never loads, for proving this gate does NOT
+ * fire — the one direction the planted trees above cannot reach.
+ *
+ * Round 10 found the false positive this answers: an absolute module externalized
+ * through Vite is listed in the graph under an absolute id with no code, which read
+ * as a file the build had gone and got and then lost. Nothing in this repository's
+ * own configuration externalizes anything but `node:` builtins, and a rule that
+ * only ever runs against ids that happen to be bare would be a rule nobody has
+ * watched. So the case is INJECTED, the way `blind` injects a closed window: a
+ * predicate on the resolved id, and a match becomes a genuine external through the
+ * bundler's own mechanism rather than a mock of one.
+ *
+ * `enforce: 'pre'` and ahead of the overlay, because this asks the rest of the
+ * pipeline to resolve first and then marks what came back — so a planted file is
+ * externalized at the id the plant resolved to, which is the shape round 10 found.
+ *
+ * The command-line path passes no predicate and this plugin is not in the stack at
+ * all, so the gate the rubric runs resolves exactly what it resolved before.
+ */
+function externalizer(external) {
+	return {
+		name: 'contentus:seam-graph-external',
+		enforce: 'pre',
+
+		async resolveId(source, importer, options) {
+			const resolved = await this.resolve(source, importer, options);
+			if (!resolved || !external(String(resolved.id))) return null;
+			return { id: resolved.id, external: true };
+		},
+	};
+}
+
+/**
  * The emitted files nothing accounts for, as findings.
  *
  * WHY THIS IS THE BACKSTOP AND NOT A DETAIL. An emitted asset is the build saying
@@ -339,7 +425,7 @@ export function unattributedAssets(pass, emitted, attributed, workers = false) {
  * something. An emitted file nothing accounts for is a dependency of something,
  * and this gate not knowing of what is a finding rather than a silence.
  */
-function recorder(pass, root, sink, references, observed) {
+function recorder(pass, root, sink, references, observed, loads) {
 	// Whether this pass built a worker, which `unattributedAssets` needs and the
 	// tripwire below is what learns.
 	let workers = false;
@@ -361,7 +447,22 @@ function recorder(pass, root, sink, references, observed) {
 					continue;
 				}
 
-				sink.modules.add(importer);
+				// WHETHER THE BUILD LOADED THIS MODULE, which decides both rules that follow.
+				// `load` is called for the modules the bundler goes and gets and for no
+				// others, so an id it never saw and for which the build holds no code is a
+				// module the build resolved and then left alone — a bare `node:…` the server
+				// pass externalizes, or anything a consumer's configuration externalizes,
+				// whatever the id it resolved to looks like. `info.code` is `null` for those
+				// and for nothing else here; a module the build DID load holds a string,
+				// empty or not.
+				const loaded = loads.has(String(id)) || typeof info.code === 'string';
+
+				// REACHED, and therefore judgeable. A module the build never loaded takes no
+				// dependency it could record, so counting it as reached would tell the
+				// containment rule that a tracked face file had been examined when nothing
+				// examined it. Externalizing a component in the face is a red gate for that
+				// reason, in the sentence that says what is actually unknown.
+				if (loaded) sink.modules.add(importer);
 				for (const target of info.importedIds ?? [])
 					sink.edges.push({ importer, target: repoPath(root, target), channel: `${pass}:import` });
 				for (const target of info.dynamicallyImportedIds ?? [])
@@ -380,19 +481,19 @@ function recorder(pass, root, sink, references, observed) {
 				// for this module: it cannot say what the module references, and saying so is
 				// the difference between a gap and a silence.
 				//
-				// WHAT IS EXCLUDED AND WHY. An id that names no file AND for which the build
-				// produced no code is a module the build never LOADED — a bare `node:…` the
-				// server pass resolves and leaves alone. There is no code for it in any
-				// window, so there is nothing this gate failed to read. An id that names a
-				// file is NOT excluded when its code is missing: the build went and got that
-				// file, and code that has gone missing since is the shape this rule is for.
+				// WHAT IS EXCLUDED AND WHY. Only a module the build never loaded, which is
+				// `loaded` above and is asked of the build rather than read off the id. An
+				// earlier version of this asked whether the id named a FILE, on the reasoning
+				// that the build had gone and got it — and round 10 found that an external
+				// module's id names a file too, because it IS one; the build just never
+				// opened it. Every module a consumer externalizes was reported unread, which
+				// is this gate going red at a build for being configured.
 				//
 				// The request is reported whole — `X.svelte?svelte&type=style&lang.css` rather
 				// than `X.svelte` — because WHICH PIECE of a file went unread is the first
 				// thing the next reader needs.
-				const [file, tail] = splitSpecifier(String(id));
+				const [, tail] = splitSpecifier(String(id));
 				const readable = typeof info.code === 'string' && info.code !== '';
-				const loaded = isAbsolute(file) || typeof info.code === 'string';
 				if (loaded && !readable && !observed.has(String(id)))
 					sink.findings.push(
 						`${importer}${tail}: neither window this gate reads holds the ${pass} build's ` +
@@ -570,7 +671,12 @@ export function overlayPlugin(root, overlay) {
  * client build still reports what the server build resolved instead of reporting
  * nothing at all. Either way the gate is red.
  */
-export async function seamGraph({ root = process.cwd(), overlay = {}, blind = () => false } = {}) {
+export async function seamGraph({
+	root = process.cwd(),
+	overlay = {},
+	blind = () => false,
+	external,
+} = {}) {
 	const sink = { edges: [], modules: new Set(), findings: [], passes: [] };
 	const planted = Object.keys(overlay).length > 0;
 	const stack = (pass) => {
@@ -581,10 +687,15 @@ export async function seamGraph({ root = process.cwd(), overlay = {}, blind = ()
 		// Which module ids the observer actually read, so the recorder can tell a
 		// module with nothing to read from one it never looked at.
 		const observed = new Set();
+		// Which module ids the build LOADED, so the recorder can tell that module from
+		// one the build resolved and deliberately never opened.
+		const loads = new Set();
 		return [
+			loadWatcher(loads),
+			...(external ? [externalizer(external)] : []),
 			...(planted ? [overlayPlugin(root, overlay)] : []),
 			styleRecorder(pass, root, references, observed, blind),
-			recorder(pass, root, sink, references, observed),
+			recorder(pass, root, sink, references, observed, loads),
 		];
 	};
 
@@ -680,8 +791,8 @@ export function seamFindings(sink, tracked) {
 }
 
 /** Run the gate as `pnpm run validate:seam-graph` runs it. */
-export async function auditSeamGraph({ root = process.cwd(), overlay = {}, blind } = {}) {
-	const sink = await seamGraph({ root, overlay, blind });
+export async function auditSeamGraph({ root = process.cwd(), overlay = {}, blind, external } = {}) {
+	const sink = await seamGraph({ root, overlay, blind, external });
 	return { sink, findings: seamFindings(sink, trackedFaceFiles(root)) };
 }
 
@@ -698,7 +809,7 @@ async function main() {
 
 	console.log('# Seam graph audit — face 6 (%s)\n', FACE_DIR);
 	console.log(`- Build passes recorded: ${sink.passes.join(', ') || 'none'}`);
-	console.log(`- Modules in the resolved graph: ${sink.modules.size}`);
+	console.log(`- Modules the build loaded: ${sink.modules.size}`);
 	console.log(`- Dependency edges recorded: ${sink.edges.length}`);
 	console.log(`- Distinct edges into the face: ${intoTheFace.size}`);
 	console.log(`- Findings: ${findings.length}\n`);
