@@ -112,7 +112,7 @@
       "tests/timeline-feed-state.test.mjs": "bd850c59dd3bd6f2b203b00dcf8a1868eb03c306d429717810378595f91431f5",
       "tests/timeline-subscription.test.mjs": "c38b67766d3ddadb8945466aed2a2899f06c8abd7ab00c5a2376e52fcb959374",
       "tests/vendored-content-renderer.test.mjs": "a6fe1483279fad32b037b25c7a2dc09795b97f164923c8d9d6724802510e7936",
-      "tests/vendored-messaging-render.test.mjs": "fe085672e02725f03d71b638a73b5d3fa818d824a35b3a45329fcc83f7a5f4b5",
+      "tests/vendored-messaging-render.test.mjs": "4634a97b213685733fb03d8e27114f0f60224a7b60c3a145805efc4ce2f26e80",
       "tests/vendored-runes.test.mjs": "b35d47a32182afedc28fd80ee797f94602514efaafbdba22f2fb2d31dda10bb2"
     }
   },

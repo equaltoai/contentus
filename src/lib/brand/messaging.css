@@ -358,14 +358,14 @@
 /* =============================================================
    Disclosures and honest states
    -------------------------------------------------------------
-   `__gap` is ALWAYS rendered — it discloses the vendored message
-   component escaping lesser's sanitized HTML, which a reader would
-   otherwise read as contentus mangling what was sent. Styled as a
-   standing note rather than an alert: it is a known limit, not an
-   incident.
+   Standing notes rather than alerts: a known limit or a reported
+   transport state is not an incident.
+
+   `__gap` was here and is gone with the disclosure it styled —
+   greater-v0.13.0 fixed both rendering sinks, so the class had no
+   element left to paint.
    ============================================================= */
 
-.contentus-messages__gap,
 .contentus-messages__realtime,
 .contentus-messages__partial,
 .contentus-messages__notice {

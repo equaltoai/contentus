@@ -848,35 +848,26 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	{/if}
 
 	<!--
-	ALWAYS RENDERED, never conditional on a state that might not be reached.
+	THE RENDERING DISCLOSURE THAT USED TO STAND HERE IS WITHDRAWN, at
+	greater-v0.13.0. It said the vendored components escaped lesser's sanitized
+	HTML, so message bodies reached readers as literal markup. Both halves are
+	now upstream-fixed and the fixes are different fixes, which is why the notice
+	goes rather than narrows again:
 
-	NARROWED AT greater-v0.13.0, not withdrawn. The gap this disclosed was that
-	the vendored `Messages.Message` rendered `{message.content}` through Svelte's
-	ESCAPING interpolation while lesser's `content` is server-sanitized HTML, so
-	every message body showed its own markup as literal text. `Message.svelte`
-	now sanitizes and renders declaratively, so message bodies in the THREAD are
-	fixed.
+	  - `Message.svelte` sanitizes through its own `sanitize.ts` and renders
+	    `{@html sanitizedMessageContent}`. Thread bodies are markup again.
+	  - `Conversations.svelte` runs the LIST preview through
+	    `sanitizeMessagePreview`, which returns markup-free, entity-decoded,
+	    length-capped TEXT. Escaping plain text with `{…}` is correct — a preview
+	    line is text by design — so there is nothing left to disclose there
+	    either.
 
-	The conversation LIST preview still takes the escaping sink — `Conversations`
-	interpolates the body the old way — so the gap survives where a reader meets
-	it first. Withdrawing the whole notice because the larger half was fixed
-	would leave the remaining half undisclosed, which is worse than the original
-	state: a reader who has been told the problem is gone stops attributing it to
-	the client. So the claim shrinks to exactly what is still true.
-
-	Contentus still cannot repair it: vendored source is never hand-edited, an
-	`{@html}` in owned source is what check 3 of `audit-renderer-authority.mjs`
-	forbids, and the component exposes no prop that changes the sink. Pinned by
+	A disclosure kept past its defect is not a cautious disclosure, it is a false
+	one: it tells a reader their instance is mangling what was sent when it is
+	not. Pinned in the other direction now by
 	`tests/vendored-messaging-render.test.mjs`, which drives the real components
-	and fails the day upstream fixes the remaining half too.
+	and the real sanitizer and fails if either sink regresses.
 	-->
-	<p class="contentus-messages__gap">
-		Message previews in the conversation list are shown as plain text on this build, so any
-		formatting this instance applied appears as markup there. Opening a conversation shows the
-		message properly. The text itself is complete and unaltered either way. This is an upstream
-		gap in the vendored conversation-list component, not a change contentus makes to what was
-		sent.
-	</p>
 
 	{#if notice}
 		<!-- The only state that renders nothing here is a socket that is live, with
