@@ -72,6 +72,18 @@ import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/au
  * externalized in BOTH passes — the case that must stay silent, because a file no
  * pass opens is a file no pass takes an edge from.
  *
+ * ROUND 12 THEN FOUND WHAT "A FILE" MEANS IN A BUILD THAT MAKES SEVERAL MODULES OF
+ * ONE. Reach was keyed by the file, so `CopyBlock.svelte?raw` — the component's
+ * TEXT, a module whose code is a string literal and which carries none of the
+ * component's dependencies — put `CopyBlock.svelte` in `loaded` and answered for the
+ * executable module the client pass had externalized beside it. A legal import from
+ * the seam that owns the component, and the gate went green over the same
+ * client-pass edge round 11 had just taught it to see. Both directions are planted
+ * below: the text answering for the component, and the component answering for the
+ * text, because a fix for one mask is where the other one gets introduced. The plant
+ * itself is asserted rather than assumed — a `?raw` module the overlay dropped would
+ * leave the control green for the wrong reason.
+ *
  * HOW A TREE IS PLANTED. Through the gate's own overlay: a map of
  * repository-relative path to source, handed to the build as a plugin rather than
  * written to disk. Nothing here touches the working tree, which matters twice —
@@ -98,6 +110,19 @@ const OWNED_BY = 'owned by AgentMcpPanel.svelte, imported from behind no seam';
 
 /** A second component behind the same seam, for plants that need two targets. */
 const ALSO_BEHIND_SEAM = './Accordion.svelte';
+
+/**
+ * The same component asked for as TEXT, and the module that request produces.
+ *
+ * A DIFFERENT MODULE from the component, which is round 12's whole point: the
+ * bundler resolves and loads `X.svelte?raw` on its own, its code is a string
+ * literal, and it carries none of the component's dependencies. Composed from the
+ * specifier above rather than spelled out, so the two can never drift apart and so
+ * CON-5's raw-text reader has no import position to mistake this for.
+ */
+const BEHIND_SEAM_TEXT = `${BEHIND_SEAM}?raw`;
+const FACE_COMPONENT = 'src/lib/agents/CopyBlock.svelte';
+const FACE_COMPONENT_TEXT = `${FACE_COMPONENT}?raw`;
 
 /**
  * A component behind a DIFFERENT seam, and the offence reaching it from the MCP
@@ -839,6 +864,111 @@ test('a module no pass opens is a module no pass takes an edge from', async () =
 		`src/lib/agents/seam-external.ts → src/lib/agents/CopyBlock.svelte (${OWNED_BY})`,
 	]);
 	assert.deepEqual(await audit(overlay, undefined, (id) => id.endsWith('seam-external.ts')), []);
+});
+
+/**
+ * A legal `?raw` import of a component the importing seam already owns, beside the
+ * client-pass-only cross-seam reference round 11 used.
+ *
+ * `AgentMcpPanel` owns `CopyBlock`, so asking for its TEXT is not an offence in any
+ * direction — which is what makes it the vehicle: the plant has to be something a
+ * consumer would really write, or the mask it produces is a curiosity rather than a
+ * hole. The `new URL(…)` inside `CopyBlock` is the dependency that goes missing.
+ */
+const textAndReference = {
+	'src/lib/agents/AgentMcpPanel.svelte': scripted(
+		'AgentMcpPanel.svelte',
+		`import copyBlockText from ${JSON.stringify(BEHIND_SEAM_TEXT)};\n\tvoid copyBlockText;`
+	),
+	'src/lib/agents/CopyBlock.svelte': scripted(
+		'CopyBlock.svelte',
+		`const probe = new URL(${JSON.stringify(OWNED_ELSEWHERE)}, import.meta.url).href;`,
+		'\n<span hidden data-probe={probe}></span>\n'
+	),
+};
+
+/** Externalize the EXECUTABLE module and not the text of it, in one pass. */
+const externalComponent = (id, pass) => pass === 'client' && id.endsWith('CopyBlock.svelte');
+
+test('the text of a component does not answer for the component', async () => {
+	// ROUND 12's FINDING. A file is not a module. `CopyBlock.svelte` and
+	// `CopyBlock.svelte?raw` are two modules the bundler resolves and loads
+	// separately — the second one's code is a string literal that carries none of the
+	// first one's dependencies — and both reach sets were keyed by the FILE. So the
+	// `?raw` module's load put `CopyBlock.svelte` in `loaded`, the client pass
+	// externalizing the executable module beside it was CONTAINED, and the component's
+	// client-pass edge went unrecorded with nothing to report it. The gate printed
+	// `771 / 771` and no findings over a real cross-seam dependency.
+
+	// THE PLANT ITSELF, asserted rather than assumed, because everything below rests
+	// on that `?raw` module really being in the graph. A `?raw` import the overlay
+	// dropped would leave the control green for the wrong reason and the attack red
+	// for round 11's reason, and the case would prove neither thing.
+	const { sink } = await auditSeamGraph({ root: repoRoot, overlay: textAndReference });
+	assert.ok(
+		sink.reached.get('client')?.resolved.has(FACE_COMPONENT_TEXT),
+		'the ?raw plant must be a module the client pass resolved'
+	);
+	assert.ok(
+		sink.reached.get('client')?.loaded.has(FACE_COMPONENT_TEXT),
+		'and one it loaded, which is what used to answer for the component'
+	);
+
+	// THE CONTROL. A legal `?raw` import of a component the seam owns is not a
+	// finding, and a rule that just started counting modules separately must not have
+	// made one of it.
+	assert.deepEqual(
+		await audit({
+			'src/lib/agents/AgentMcpPanel.svelte':
+				textAndReference['src/lib/agents/AgentMcpPanel.svelte'],
+		}),
+		[]
+	);
+
+	// THE DIFFERENTIAL. Both plants, nothing externalized: the cross-seam reference is
+	// a real dependency and the gate names it, so a clean attack run below would be
+	// the masking rather than a plant that never built.
+	assert.deepEqual(await audit(textAndReference), [
+		`src/lib/agents/CopyBlock.svelte → src/lib/agents/AgentCard.svelte (${OWNED_BY_ROSTER})`,
+	]);
+
+	// THE ATTACK. The executable module externalized in the client pass, its text
+	// still loaded beside it. The edge is gone and the finding says which module the
+	// pass never opened, rather than resting on a different module of the same file.
+	assert.deepEqual(await audit(textAndReference, undefined, externalComponent), [
+		'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
+			'client build resolves it and never loads it, so the edges it takes in that pass are ' +
+			'unrecorded and this gate cannot judge it there',
+	]);
+});
+
+test('and the component does not answer for the text of it', async () => {
+	// THE OTHER DIRECTION, which the rule owes: a fix for one variant masking another
+	// is exactly where the reverse mask gets introduced. Externalize the `?raw` module
+	// and leave the component loaded, and the module the build never opened is the
+	// TEXT — so the finding must name that request, tail and all, rather than fall
+	// silent because the component beside it was read.
+	//
+	// WHICH PIECE went unread is the first thing the next reader needs, which is the
+	// convention the reading-window finding already keeps.
+	//
+	// The component's own cross-seam edge is in this run TOO, and that is the shape of
+	// a correct answer rather than noise: the pass loaded the component, so it recorded
+	// what the component depends on and says so, and separately it never opened the
+	// text, so it says that as well. Two modules, two facts, neither standing in for
+	// the other.
+	assert.deepEqual(
+		await audit(textAndReference, undefined, (id) => id.endsWith('CopyBlock.svelte?raw')),
+		[
+			`src/lib/agents/CopyBlock.svelte → src/lib/agents/AgentCard.svelte (${OWNED_BY_ROSTER})`,
+			'src/lib/agents/CopyBlock.svelte?raw is a module of a file tracked inside the face and ' +
+				'the client build resolves it and never loads it, so the edges it takes in that pass ' +
+				'are unrecorded and this gate cannot judge it there',
+			'src/lib/agents/CopyBlock.svelte?raw is a module of a file tracked inside the face and ' +
+				'the server build resolves it and never loads it, so the edges it takes in that pass ' +
+				'are unrecorded and this gate cannot judge it there',
+		]
+	);
 });
 
 test('the declared nesting is the one cross-seam import that is not a defect', async () => {
