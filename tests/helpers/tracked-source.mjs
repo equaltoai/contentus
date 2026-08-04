@@ -33,6 +33,34 @@ import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
+ * Every suffix this build loads as a MODULE, which is the set the seam walks
+ * have to read.
+ *
+ * WHY IT IS NOT `\.(svelte|ts)$`. That is what both walks matched, and round 5 of
+ * this pull request's review compiled a tracked `agents.svelte.js` — a runes
+ * module, ordinary source this build loads — that imported a component from
+ * behind a seam. The reading was not the problem; the SET it was pointed at was
+ * two suffixes wide, so the file was never opened. A check is only as honest as
+ * the files it is given, and "the two extensions this repository happens to
+ * carry today" is not a property anyone stated on purpose.
+ *
+ * So the set is stated by what the build can load: a component, and a module in
+ * any of JavaScript's and TypeScript's suffixes. `.svelte.js` and `.svelte.ts`
+ * fall out of it rather than being named — they are a `.js` and a `.ts` file —
+ * and so does the `.mjs`/`.cjs`/`.mts`/`.cts` family, none of which is in `src/`
+ * today and any of which could be tomorrow without a second review round.
+ *
+ * `.css`, `.json` and assets are outside it: they are not modules whose imports
+ * this scan reads, and handing one to the TypeScript parser would only produce a
+ * parse error for a file that never had an import.
+ *
+ * It lives here, exported, because BOTH walks need it and two copies of one
+ * pattern is how the second survives the fix to the first — the same reason the
+ * reading itself is shared (`./module-imports.mjs`).
+ */
+export const MODULE_SOURCE = /\.(svelte|[cm]?[jt]s)$/;
+
+/**
  * Absolute paths of the tracked files under `directory`, repository-relative,
  * matching `pattern`.
  *

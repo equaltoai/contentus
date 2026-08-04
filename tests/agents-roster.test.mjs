@@ -21,7 +21,7 @@ import {
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
 import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
-import { trackedSource } from './helpers/tracked-source.mjs';
+import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -284,7 +284,7 @@ test('nothing outside src/lib/agents imports the interim roster components', () 
 	// Another test plants malformed fixtures inside `src/lib/compose` and removes
 	// them, and a listing walk reads whatever is on disk when it happens to run.
 	const seam = join(repoRoot, 'src', 'lib', 'agents');
-	const offenders = trackedSource(repoRoot, 'src', /\.(svelte|ts)$/)
+	const offenders = trackedSource(repoRoot, 'src', MODULE_SOURCE)
 		// The seam's own directory is where these are allowed to be used.
 		.filter((path) => !path.startsWith(`${seam}/`))
 		.flatMap((path) => interimImports(readFileSync(path, 'utf8'), path));

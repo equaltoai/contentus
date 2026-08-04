@@ -15,7 +15,7 @@ import {
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
 import { computedImports, liveScript, moduleSpecifiers } from './helpers/module-imports.mjs';
-import { trackedSource } from './helpers/tracked-source.mjs';
+import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -1067,7 +1067,7 @@ test('nothing outside the face imports anything behind a seam', () => {
 	// Another test plants malformed fixtures inside `src/lib/compose` and removes
 	// them, and a listing walk reads whatever is on disk when it happens to run.
 	const outside = Object.fromEntries(
-		trackedSource(repoRoot, 'src', /\.(svelte|ts)$/)
+		trackedSource(repoRoot, 'src', MODULE_SOURCE)
 			// The face's own directory is checked by `crossSeamImports`, which is
 			// stricter than this walk rather than exempt from it.
 			.filter((path) => !path.startsWith(`${agentsDir}/`))
@@ -1082,6 +1082,57 @@ test('nothing outside the face imports anything behind a seam', () => {
 	assert.ok(
 		Object.keys(outside).some((path) => path.endsWith('src/lib/routes/Agents.svelte')),
 		'the routes that import the face must be in the walked set'
+	);
+});
+
+test('the walked set is every module the build loads, not two suffixes', () => {
+	// ROUND 5's SECOND FORM. Both walks matched `/\.(svelte|ts)$/`, so a tracked
+	// `agents.svelte.js` — a runes module, ordinary source this build loads —
+	// importing a component from behind a seam was never OPENED. The reading was
+	// not the problem; the set it was pointed at was two suffixes wide, and a check
+	// is only as honest as the files it is given.
+	//
+	// The set now comes from what the build can load (`MODULE_SOURCE`), shared by
+	// both walks. Asserted in a scratch repository for the reason the test below
+	// gives: planting files here to test which planted files are read is the race
+	// `./helpers/tracked-source.mjs` exists to end.
+	const scratch = mkdtempSync(join(tmpdir(), 'contentus-suffixes-'));
+
+	try {
+		execFileSync('git', ['-C', scratch, 'init', '-q']);
+		const modules = [
+			'Card.svelte',
+			'agents.svelte.js',
+			'agents.svelte.ts',
+			'contract.d.ts',
+			'contract.ts',
+			'helper.cjs',
+			'helper.cts',
+			'helper.js',
+			'helper.mjs',
+			'helper.mts',
+		];
+		// Not modules whose imports this scan reads, and a parse error if handed over.
+		const assets = ['logo.png', 'manifest.json', 'tokens.css'];
+		for (const name of [...modules, ...assets]) writeFileSync(join(scratch, name), '\n');
+		execFileSync('git', ['-C', scratch, 'add', '--', ...modules, ...assets]);
+
+		assert.deepEqual(
+			trackedSource(scratch, '.', MODULE_SOURCE).map((path) => path.slice(scratch.length + 1)),
+			modules
+		);
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
+
+	// And a walked runes module gets the same reading every other module gets: it is
+	// a `.js` file, not a component, so its import is read as a script's import.
+	assert.deepEqual(
+		importsBehindASeam(
+			{ 'src/lib/state/agents.svelte.js': `import Card from '$lib/agents/AgentCard.svelte';\n` },
+			{}
+		),
+		['src/lib/state/agents.svelte.js → $lib/agents/AgentCard.svelte']
 	);
 });
 
