@@ -158,6 +158,12 @@
         "reason": "Loads a rewritten copy of a vendored module the probe has just written to a temp directory, so the real component runs against stubbed imports. The bytes are produced by this pinned probe from vendored source; there is no repository file to hash."
       },
       {
+        "file": "tests/auth-session.test.mjs",
+        "line": 3,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs a resolve hook that maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims, and resolves the TypeScript source extensions Vite supplies but Node does not. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probe drives the real auth session module. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
         "file": "tests/vendored-messaging-render.test.mjs",
         "line": 40,
         "expression": "import { registerHooks } from 'node:module';",
@@ -241,6 +247,7 @@
       "tests/agents-roster.test.mjs": "639c3cbbff67e5f1595c20648c59f29fa6930c9a802873e0249ea141990a63ef",
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
+      "tests/auth-session.test.mjs": "02b93b15d7a7d9b4b9f9f3281d0548adc9d2735f53aefa4c9621f22f30327131",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
       "tests/drone-seams.test.mjs": "e3c721943e3deee16182604b1dc0fd76656c8e438e0780854fd99e44a46db4b1",
