@@ -73,6 +73,17 @@
  * the name, and a walk that collected a match from every entry at once let a later
  * repository file answer for an earlier directory it cannot see into.
  *
+ * A GRAMMAR IS READ THROUGH WHATEVER RUNS THE CHILD, which is round 13 and the
+ * same sentence one word further along. `exec sh -c '<code>'`, `env FOO=1 sh -c …`,
+ * `command sh -c …` and `nohup sh -c …` each put the shell behind a TRANSPARENT
+ * wrapper, and a reading scoped to the first word of a line saw `exec` and applied
+ * no shell grammar to the payload at all; `env PATH=scripts/lib helper.mjs` moves
+ * the lookup path and the name searched on it one word along in exactly the same
+ * way. `runChain` walks the exec chain through the wrappers it models, reads a
+ * `-c` by where a shell's NAME stands rather than by which word came first, and
+ * reports the wrapper option it cannot place instead of guessing which word the
+ * operand is.
+ *
  * What no static reading can follow is a load whose TARGET is computed, or whose
  * LOADER is a construction the reading does not model — an aliased `require`,
  * `module.require`, `eval`, `new Function`, a `node:vm` import. This control says
@@ -895,6 +906,212 @@ const SHELL_INTERPRETERS = new Set(['sh', 'bash', 'dash', 'ash', 'ksh', 'mksh', 
 const isShellInterpreter = (word) => SHELL_INTERPRETERS.has(word.split('/').pop());
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+/**
+ * A COMMAND THAT RUNS ANOTHER COMMAND IS TRANSPARENT, which is round 13's first
+ * finding and round 12's sentence one word further along. Which grammar a string
+ * is read with is decided by the child that reads it — and `exec sh -c '<code>'`,
+ * `env sh -c '<code>'`, `env FOO=1 sh -c …`, `command sh -c …` and `nohup sh -c …`
+ * each put the shell somewhere other than the front of the line. A reading that
+ * asked only the first word saw `exec` and applied no shell grammar to the payload
+ * at all, so an unpinned helper named inside it stayed green through every one of
+ * them. A wrapper does not change WHAT runs; it moves where the name of it is
+ * written. So the exec chain is walked through it: the wrapper's own options and
+ * assignments are its own, and the first word after them is the command it runs.
+ *
+ * IT IS THE OPERAND, NOT ONLY THE PAYLOAD. `env PATH=scripts/lib helper.mjs` is
+ * round 12's lookup-path decoy standing behind a wrapper: the assignment is env's
+ * to make rather than a shell's, and the bare word after it is the name the CHILD
+ * searches for. Both are read where they are, or the search answers with the file
+ * beside the site while the child opens the one on the path.
+ *
+ * WHAT A WRAPPER TAKES FOR ITSELF IS MODELLED, AND AN OPTION OUTSIDE THAT MODEL IS
+ * REPORTED. `env -u NAME sh -c …` hides its operand behind an option that carries a
+ * value, and a peel that stepped over `-` words alone would take `NAME` for the
+ * command. So each wrapper carries its own options — which take a value, which do
+ * not, and which carry a command line of their own — and an option this reading
+ * does not model ends the walk as undetermined rather than guessing which word the
+ * operand is. An optional-value option (`xargs -i`, `-l`, `-e`) is exactly that
+ * case and is left out on purpose: whether the next word is its value or the
+ * command cannot be read from the line.
+ *
+ * AND THE LIST IS NOT THE RULE. A wrapper outside this table would hide a `-c`
+ * again, so the payload reading in `siteWords` does not rest on the table at all:
+ * it asks where a SHELL NAME stands in the line, which is a question no wrapper can
+ * move — in the array form a shell payload cannot exist unless the shell is one of
+ * the words the site is written to hand its child. The table buys the operand and
+ * the search it is answered by; the shell name closes the grammar.
+ */
+const wrapperSpec = (spec) => ({
+	short: '',
+	shortValued: '',
+	long: new Set(),
+	longValued: new Set(),
+	payload: new Set(),
+	assignments: false,
+	operands: 0,
+	...spec,
+});
+const TRANSPARENT_WRAPPERS = new Map(
+	Object.entries({
+		exec: wrapperSpec({ short: 'cl', shortValued: 'a' }),
+		command: wrapperSpec({ short: 'pvV' }),
+		nohup: wrapperSpec({ long: new Set(['help', 'version']) }),
+		env: wrapperSpec({
+			short: 'i0v',
+			shortValued: 'uCS',
+			long: new Set(['ignore-environment', 'null', 'debug', 'help', 'version']),
+			longValued: new Set(['unset', 'chdir', 'split-string']),
+			// `-S` is a command line the wrapper splits into words itself, which is the
+			// same string a `-c` carries by another spelling.
+			payload: new Set(['S', 'split-string']),
+			assignments: true,
+		}),
+		nice: wrapperSpec({ shortValued: 'n', longValued: new Set(['adjustment']) }),
+		setsid: wrapperSpec({ short: 'cfw', long: new Set(['ctty', 'fork', 'wait']) }),
+		stdbuf: wrapperSpec({
+			shortValued: 'ioe',
+			longValued: new Set(['input', 'output', 'error']),
+		}),
+		time: wrapperSpec({
+			short: 'apv',
+			shortValued: 'fo',
+			long: new Set(['append', 'portability', 'verbose']),
+			longValued: new Set(['format', 'output']),
+		}),
+		timeout: wrapperSpec({
+			short: 'fpv',
+			shortValued: 'ks',
+			long: new Set(['foreground', 'preserve-status', 'verbose']),
+			longValued: new Set(['kill-after', 'signal']),
+			// The duration is the wrapper's own word, and the command follows it.
+			operands: 1,
+		}),
+		xargs: wrapperSpec({
+			short: '0prtx',
+			shortValued: 'adEILnPs',
+			long: new Set(['null', 'no-run-if-empty', 'interactive', 'verbose', 'exit', 'open-tty']),
+			longValued: new Set([
+				'arg-file',
+				'delimiter',
+				'max-args',
+				'max-chars',
+				'max-lines',
+				'max-procs',
+				'process-slot-var',
+				'replace',
+			]),
+		}),
+	})
+);
+const wrapperFor = (word) => TRANSPARENT_WRAPPERS.get(word.split('/').pop()) ?? null;
+
+/**
+ * One option of a wrapper and the words it takes for itself: where the wrapper's
+ * own words carry on, the command lines the option holds, or null where this
+ * reading does not model the option — which is where its operand stops being
+ * determined.
+ */
+function wrapperOption(spec, tokens, index) {
+	const token = tokens[index];
+	const payloads = [];
+	if (token.startsWith('--')) {
+		const separator = token.indexOf('=');
+		const name = separator === -1 ? token.slice(2) : token.slice(2, separator);
+		if (spec.longValued.has(name)) {
+			if (separator !== -1) {
+				if (spec.payload.has(name)) payloads.push(token.slice(separator + 1));
+				return { next: index + 1, payloads };
+			}
+			if (index + 1 >= tokens.length) return null;
+			if (spec.payload.has(name)) payloads.push(tokens[index + 1]);
+			return { next: index + 2, payloads };
+		}
+		return separator === -1 && spec.long.has(name) ? { next: index + 1, payloads } : null;
+	}
+	// A cluster of short options, each of which may take the rest of its own word —
+	// or the word after it — as a value.
+	for (let position = 1; position < token.length; position += 1) {
+		const letter = token[position];
+		if (spec.shortValued.includes(letter)) {
+			const attached = token.slice(position + 1);
+			if (attached) {
+				if (spec.payload.has(letter)) payloads.push(attached);
+				return { next: index + 1, payloads };
+			}
+			if (index + 1 >= tokens.length) return null;
+			if (spec.payload.has(letter)) payloads.push(tokens[index + 1]);
+			return { next: index + 2, payloads };
+		}
+		if (!spec.short.includes(letter)) return null;
+	}
+	return { next: index + 1, payloads };
+}
+
+/**
+ * The words a segment RUNS, in the order the exec chain reaches them, with the
+ * role each of the line's other words carries and the command lines its options
+ * hold as data.
+ */
+function runChain(tokens) {
+	const roles = new Map();
+	const runs = [];
+	const payloads = [];
+	const chain = (open, undetermined) => ({ runs, roles, payloads, open, undetermined });
+	let index = 0;
+	// A variable in front of a command is the shell's own syntax, and it is that
+	// command's environment.
+	while (index < tokens.length && ASSIGNMENT.test(tokens[index])) {
+		roles.set(index, 'assignment');
+		index += 1;
+	}
+	while (index < tokens.length) {
+		const word = tokens[index];
+		roles.set(index, 'run');
+		runs.push({ word, index });
+		const spec = wrapperFor(word);
+		if (!spec) return chain(false, null);
+		index += 1;
+		let operands = spec.operands;
+		while (index < tokens.length) {
+			const token = tokens[index];
+			// A variable in front of a wrapper's operand is the WRAPPER's to set, and
+			// it means there what it means in an `env` bag.
+			if (spec.assignments && ASSIGNMENT.test(token)) {
+				roles.set(index, 'assignment');
+				index += 1;
+				continue;
+			}
+			if (token === '--') {
+				index += 1;
+				break;
+			}
+			if (token.startsWith('-')) {
+				const option = wrapperOption(spec, tokens, index);
+				if (!option)
+					return chain(
+						false,
+						`the option ${JSON.stringify(token)} of \`${word}\`, which decides where that ` +
+							'wrapper’s own words end and the command it runs begins'
+					);
+				payloads.push(...option.payloads);
+				index = option.next;
+				continue;
+			}
+			if (operands > 0) {
+				operands -= 1;
+				index += 1;
+				continue;
+			}
+			break;
+		}
+		// The wrapper's operand is not in this string at all, which is what
+		// `spawnSync('env', ['sh', '-c', …])` looks like from here: the command it
+		// runs is written in the argument list beside it.
+		if (index >= tokens.length) return chain(true, null);
+	}
+	return chain(false, null);
+}
+
 /** How far a `-c` payload may nest before this reading stops following it. */
 const SHELL_DEPTH = 4;
 
@@ -923,30 +1140,45 @@ function siteWords(literals, execPath) {
 			lookup.push(entry ? { text: entry, frame } : { text: '.', frame: 'process' });
 	};
 
-	/** The word a command line RUNS: its first token that is not an assignment. */
-	const commandWord = (tokens) => tokens.find((token) => !ASSIGNMENT.test(token)) ?? null;
-	const runsAShell = (text) =>
-		shellSegments(text).some((segment) => {
-			const word = commandWord(shellTokens(segment));
-			return word !== null && isShellInterpreter(word);
-		});
+	/**
+	 * Whether a string hands a child's command line to something that READS one: a
+	 * shell whose name stands anywhere in it — a wrapper moves where that is, and
+	 * cannot move whether it is there — or a wrapper whose operand is written
+	 * outside this string, which is the array form of the same site.
+	 */
+	const namesAShell = (text) =>
+		shellSegments(text).some((segment) => shellTokens(segment).some(isShellInterpreter));
+	const readsACommandLine = (text) =>
+		namesAShell(text) || shellSegments(text).some((segment) => runChain(shellTokens(segment)).open);
 
 	// Every string this site hands a shell or execvp as a command line: argument 0
-	// of the facility, whatever a `-c` of a shell carries, and — where the command
-	// IS a shell — every argument, since that is where the code sits.
-	const written = literals.filter((literal) => literal.role === 'command');
-	const shell = written.some((literal) => runsAShell(literal.text));
+	// of the facility, whatever a `-c` of a shell carries, and — where the site's
+	// argv reaches a shell or a wrapper that runs one — every argument, since that
+	// is where the code sits.
+	const shell = literals.some((literal) =>
+		literal.role === 'command'
+			? readsACommandLine(literal.text)
+			: literal.role === 'argument' && namesAShell(literal.text)
+	);
 	const commandLines = [];
 	const collect = ({ text, frame }, depth) => {
 		commandLines.push({ text, frame });
 		if (depth >= SHELL_DEPTH) return;
+		// The strings this line hands a child as a command line of its own: what a
+		// `-c` carries after a shell's NAME, wherever in the line a wrapper has moved
+		// that name to, and the value of a wrapper option that takes a command line
+		// as data.
+		const payloads = new Set();
 		for (const segment of shellSegments(text)) {
 			const tokens = shellTokens(segment);
-			const word = commandWord(tokens);
-			if (word === null || !isShellInterpreter(word)) continue;
-			for (const [index, token] of tokens.entries())
-				if (index > 0 && tokens[index - 1] === '-c') collect({ text: token, frame }, depth + 1);
+			for (const payload of runChain(tokens).payloads) payloads.add(payload);
+			for (const [index, token] of tokens.entries()) {
+				if (!isShellInterpreter(token)) continue;
+				for (let after = index + 2; after < tokens.length; after += 1)
+					if (tokens[after - 1] === '-c') payloads.add(tokens[after]);
+			}
 		}
+		for (const payload of payloads) collect({ text: payload, frame }, depth + 1);
 	};
 	for (const literal of literals)
 		if (literal.role === 'command' || (shell && literal.role === 'argument')) collect(literal, 0);
@@ -976,12 +1208,12 @@ function siteWords(literals, execPath) {
 			unreadable.add(`${construct}, in ${JSON.stringify(text)}`);
 		for (const segment of shellSegments(text)) {
 			const tokens = shellTokens(segment);
-			// Where the command word sits, which is after however many assignments
-			// stand in front of it.
-			let position = 0;
+			// Which words this line RUNS, and which of them are the assignments that
+			// stand in front of one — a shell's, and a wrapper's own.
+			const { roles, undetermined } = runChain(tokens);
+			if (undetermined) unreadable.add(`${undetermined}, in ${JSON.stringify(segment)}`);
 			for (const [index, token] of tokens.entries()) {
-				if (index === position && ASSIGNMENT.test(token)) {
-					position = index + 1;
+				if (roles.get(index) === 'assignment') {
 					const separator = token.indexOf('=');
 					const name = token.slice(0, separator);
 					const value = token.slice(separator + 1);
@@ -992,12 +1224,13 @@ function siteWords(literals, execPath) {
 					else readWord(value, frame);
 					continue;
 				}
-				// The word a command line runs is the one execvp SEARCHES rather than
+				// A word a command line runs is one execvp SEARCHES rather than
 				// resolves, so it is answered by the lookup path instead of by this
 				// site's working directory — but only where it is a bare name.
 				// `./helper.mjs` and `sub/helper.mjs` carry a separator and are resolved
 				// against the child's directory like any other word.
-				if (index === position && !token.includes('/')) commands.push({ text: token, frame });
+				if (roles.get(index) === 'run' && !token.includes('/'))
+					commands.push({ text: token, frame });
 				else readWord(token, frame);
 			}
 		}

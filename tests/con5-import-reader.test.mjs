@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -94,6 +94,13 @@ const ROOT_HELPER_SOURCE = "export const value = 'the decoy at the root';\n";
  * file's real content, which is how a case proves the walk REACHED a file rather
  * than merely tolerating it. `links` plants a symlink, which is the one member of
  * a closure whose path and content can be parted without an edit to either.
+ *
+ * `executable` is the mode bit, and it is a claim about what the CHILD can do
+ * rather than about what sits on the disk. A bare command is reached through a
+ * lookup path by execvp, which runs the first entry it can EXECUTE and steps past
+ * one it cannot — so a case whose point is that the search answers has to plant a
+ * file the search can answer with. Everything else a fixture writes is an ordinary
+ * non-executable file, which is what a checkout of this repository holds.
  */
 function runCon5({
 	files,
@@ -102,6 +109,7 @@ function runCon5({
 	corrupt = null,
 	contract = {},
 	links = {},
+	executable = [],
 }) {
 	const directory = mkdtempSync(join(tmpdir(), 'contentus-con5-'));
 	try {
@@ -122,6 +130,7 @@ function runCon5({
 			mkdirSync(dirname(absolute), { recursive: true });
 			symlinkSync(join(directory, target), absolute);
 		}
+		for (const path of executable) chmodSync(join(directory, path), 0o755);
 
 		const sha256 = {};
 		for (const path of pinned)
@@ -3804,4 +3813,228 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 	});
 	assert.equal(rewritten.status, 1, 'and it BINDS what it found there');
 	assert.match(rewritten.output, /helper\.mjs: content does not match its pin/);
+});
+
+/* -------------------------------------------------------------------------
+ * Round 13 — the wrapper a child's grammar is read through
+ * ---------------------------------------------------------------------- */
+
+test('a wrapper does not move which grammar the child it runs applies', () => {
+	// THE REPRO. A command that runs another command is TRANSPARENT: `exec`, `env`,
+	// `command`, `nohup`, `xargs` and `timeout` each hand their operand the line
+	// behind them, and this reading asked only the first word of a segment. So the
+	// shell sat at token 1 and its `-c` payload was read as an ordinary word — the
+	// positional parameter inside it built a target no reading saw, and every one of
+	// these was green with the helper it runs rewritten wholesale.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'execSync',
+		reason: 'the fixture’s point',
+	};
+	const hidden = "'set -- helper.mjs; node scripts/lib/$1'";
+	for (const [what, line] of Object.entries({
+		exec: `exec sh -c ${hidden}`,
+		env: `env sh -c ${hidden}`,
+		'env with an assignment in front of its operand': `env FOO=1 sh -c ${hidden}`,
+		'env with an option that carries a value': `env -u NODE_ENV sh -c ${hidden}`,
+		command: `command sh -c ${hidden}`,
+		nohup: `nohup sh -c ${hidden}`,
+		xargs: `xargs -0 sh -c ${hidden}`,
+		'timeout, whose duration is its own word': `timeout 5 sh -c ${hidden}`,
+		'nice, wrapped in turn by exec': `exec nice -n 5 sh -c ${hidden}`,
+	})) {
+		const wrapped = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { execSync } from 'node:child_process';\n" +
+					`execSync(${JSON.stringify(line)});\n`,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(wrapped.status, 1, `${what} runs a shell, whatever stands in front of it`);
+		assert.match(
+			wrapped.output,
+			/hands a child a string this reading does not model/,
+			`${what} must be read with the grammar its child applies`
+		);
+		assert.match(wrapped.output, /a parameter expansion/, `${what} must name the construct`);
+	}
+
+	// THE REPAIR, and the proof this is a reading rather than a ban: a `-c` of
+	// literals behind a wrapper BINDS the file that line runs.
+	for (const [what, line] of Object.entries({
+		exec: "exec sh -c 'node scripts/lib/helper.mjs'",
+		env: "env sh -c 'node scripts/lib/helper.mjs'",
+		nohup: "nohup sh -c 'node scripts/lib/helper.mjs'",
+		'a shell inside a shell behind a wrapper': 'exec sh -c \'sh -c "node scripts/lib/helper.mjs"\'',
+		'env splitting a command line of its own': 'env -S \'sh -c "node scripts/lib/helper.mjs"\'',
+	})) {
+		const files = {
+			'scripts/gate.mjs':
+				"import { execSync } from 'node:child_process';\n" + `execSync(${JSON.stringify(line)});\n`,
+			[HELPER]: HELPER_SOURCE,
+		};
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} runs a repository file and must name it`);
+		assert.match(
+			silent.output,
+			/runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/,
+			`${what} must be read`
+		);
+
+		const contract = {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }],
+		};
+		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract });
+		assert.equal(bound.status, 0, `${what} binds once it is named\n${bound.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract,
+			corrupt: HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+	}
+});
+
+test('a wrapper’s operand is the name its child searches for', () => {
+	// The other half of the same transparency, and round 12's lookup-path decoy
+	// standing one word behind a wrapper. `env PATH=scripts/lib helper.mjs` makes the
+	// assignment ENV's rather than a shell's, and the bare word after it is what the
+	// child searches for — so a reading that took both for ordinary words reported
+	// the file beside the site while the child opened the one on the path.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'execSync',
+		reason: 'the fixture’s point',
+	};
+	const files = {
+		'scripts/gate.mjs':
+			"import { execSync } from 'node:child_process';\n" +
+			"execSync('env PATH=scripts/lib helper.mjs');\n",
+		[HELPER]: HELPER_SOURCE,
+		[ROOT_HELPER]: ROOT_HELPER_SOURCE,
+	};
+	const honest = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		executable: [HELPER],
+	});
+	assert.equal(bound.status, 0, `the file on the path is the file that runs\n${bound.output}`);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		corrupt: HELPER,
+		executable: [HELPER],
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	const decoy = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER, ROOT_HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER, ROOT_HELPER] }],
+		},
+		executable: [HELPER],
+	});
+	assert.equal(decoy.status, 1, 'the file beside the site is not searched for at all');
+	assert.match(decoy.output, /binds helper\.mjs, which this site is not written to run/);
+
+	// The same site written the way a facility takes it, where the operand is not in
+	// the wrapper's own string at all: the code sits in the argument list beside it.
+	const array = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('env', ['sh', '-c', 'set -- helper.mjs; node scripts/lib/$1']);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, expression: 'spawnSync' }],
+		},
+	});
+	assert.equal(array.status, 1, 'a shell in the argument list is a shell');
+	assert.match(array.output, /a parameter expansion/);
+});
+
+test('a wrapper option this reading does not model ends the walk rather than guessing', () => {
+	// THE FAIL-CLOSED EDGE. Which word a wrapper's operand is depends on what the
+	// wrapper took for itself, so an option outside this model is an operand outside
+	// it: `env -u NAME <command>` hides the command behind a value, and a peel that
+	// stepped over `-` words alone would take NAME for it. An option whose value is
+	// OPTIONAL — `xargs -i`, `-l`, `-e` — cannot be read from the line at all, and is
+	// left out for exactly that reason.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'execSync',
+		reason: 'the fixture’s point',
+	};
+	for (const [what, line] of Object.entries({
+		'a short option this table does not carry': "env -Z sh -c 'node scripts/lib/helper.mjs'",
+		'a long option this table does not carry':
+			"env --keep-going sh -c 'node scripts/lib/helper.mjs'",
+		'an option whose value is optional': "xargs -i sh -c 'node scripts/lib/helper.mjs'",
+	})) {
+		const reported = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { execSync } from 'node:child_process';\n" +
+					`execSync(${JSON.stringify(line)});\n`,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: {
+				unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }],
+			},
+		});
+		assert.equal(reported.status, 1, `${what} leaves the operand undetermined`);
+		assert.match(reported.output, /hands a child a string this reading does not model/);
+		assert.match(
+			reported.output,
+			/which decides where that wrapper’s own words end and the command it runs begins/,
+			`${what} must be named`
+		);
+	}
+
+	// THE OTHER DIRECTION. A rule that fires on a site running nothing is a rule
+	// whose only repair is to weaken it, so a modelled option stays silent, a word
+	// that merely LOOKS like a wrapper's is still an ordinary word, and a shell name
+	// carried as data is data.
+	for (const [what, call] of Object.entries({
+		'a wrapper written with the options it takes':
+			"execFileSync('env', ['-i', '-u', 'NODE_ENV', '/usr/bin/true']);\n",
+		'a flag another program reads': "execFileSync('mkdir', ['-p', 'scripts/lib']);\n",
+		'a pattern flag': "execFileSync('grep', ['-e', 'helper', '--', '/dev/null']);\n",
+		'a shell name carried as data': "execFileSync('grep', ['-e', 'bash', '--', '/dev/null']);\n",
+		'a directory named beside a file': "execFileSync('git', ['-C', 'scripts/lib', 'status']);\n",
+	})) {
+		const quiet = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { execFileSync } from 'node:child_process';\n" + call,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [{ ...declaration, expression: 'execFileSync' }],
+			},
+		});
+		assert.equal(quiet.status, 0, `${what} runs nothing this repository holds\n${quiet.output}`);
+	}
 });
