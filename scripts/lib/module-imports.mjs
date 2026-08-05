@@ -882,8 +882,9 @@ function headedCall(node) {
 }
 
 /**
- * Every string a load or an execution site is WRITTEN to hand its facility, taken
- * as the statically readable literals anywhere inside the call's arguments.
+ * Every string a load or an execution site is WRITTEN to hand its facility, each
+ * with the FRAME it is written in — which is the half that decides which file it
+ * names.
  *
  * WHY THE CALLER NEEDS THEM, which is round 9's third finding. CON-5 lets a
  * disclosure NAME the repository paths its site executes, in `binds`, and admits
@@ -898,28 +899,68 @@ function headedCall(node) {
  * ANY DEPTH, because a path is written in more shapes than an argument slot.
  * `spawnSync(node, ['scripts/x.mjs'])` puts it in an array; `execFileSync(node,
  * [join(root, 'scripts/x.mjs')])` puts it inside another call; `new URL('../x.mjs',
- * import.meta.url)` puts it inside a constructor. All three are text at the site,
- * and the caller can resolve each against the bases it knows. What this cannot see
- * is a path that is not written here at all — a module-level constant, an argv
- * element, a name assembled from pieces — and the caller's rule for that is stated
- * where it is enforced: a `binds` is a claim about a target the site names, and a
- * target this reading cannot see is carried by the disclosure's REASON rather than
- * by a pin that cannot be checked against anything.
+ * import.meta.url)` puts it inside a constructor. All three are text at the site.
+ * What this cannot see is a path that is not written here at all — a module-level
+ * constant, an argv element, a name assembled from pieces — and the caller's rule
+ * for that is stated where it is enforced: a `binds` is a claim about a target the
+ * site names, and a target this reading cannot see is carried by the disclosure's
+ * REASON rather than by a pin that cannot be checked against anything.
  *
- * The strings come back exactly as written, unresolved. Which file `'./x.mjs'`
- * names depends on the base the site resolves it against, and that is the caller's
- * question — the same division `runtimeLoads` draws for a specifier and its loader.
+ * WHY EACH ONE CARRIES ITS FRAME, which is round 11 and the second arrival of
+ * round 10's lesson. The caller used to be handed a flat list of strings and it
+ * resolved every one of them in BOTH frames it knows — the file's directory and
+ * the child's working directory — so a word only one of them could name was
+ * answered by the other. `const where = 'sub'; spawnSync(node, ['helper.mjs'], {
+ * cwd: where })` reports an unreadable `cwd`, which is round 10 working exactly as
+ * written; and the caller then resolved the raw child argument `'helper.mjs'`
+ * against the GATE FILE's directory, found a real `scripts/helper.mjs` beside it,
+ * and let a disclosure bind that pinned file while Node ran the unpinned
+ * `sub/helper.mjs`. An unreadable base stopped being fail-closed because a second
+ * base answered in its place. So provenance travels with the text: a word written
+ * in the file's own frame — `new URL(…, import.meta.url)`, `join(__dirname, …)` —
+ * is named by this file wherever its child runs, and a word handed to the child is
+ * named by the child's working directory and by nothing else.
+ *
+ * THREE FRAMES, NOT TWO, for the same reason. `join(root, 'scripts/x.mjs')` with
+ * `root` a name this reading cannot follow is written in a frame that HAS no value
+ * here — neither the file's nor the child's — and answering either is the same
+ * guess one level in. It comes back as `unknown`, which the caller reports.
+ *
+ * The strings come back exactly as written, unresolved. Which directory a frame
+ * stands for is the caller's question — the same division `runtimeLoads` draws for
+ * a specifier and its loader.
  */
-function siteLiterals(node) {
+function siteWords(node) {
 	const call = headedCall(node);
 	if (!call?.arguments) return [];
-	const literals = new Set();
-	for (const argument of call.arguments)
-		eachNode(argument, (inner) => {
-			const text = staticSpecifier(inner);
-			if (text !== null) literals.add(text);
-		});
-	return [...literals];
+	const words = [];
+	const seen = new Map();
+	const add = (text, frame) => {
+		let texts = seen.get(frame);
+		if (!texts) seen.set(frame, (texts = new Set()));
+		if (texts.has(text)) return;
+		texts.add(text);
+		words.push({ text, frame });
+	};
+	const walk = (inner) => {
+		// A path expression this reading CAN name is taken whole, in its own frame:
+		// `new URL('./lib/x.mjs', import.meta.url)` is one word written in the file's
+		// frame rather than a literal floating in the child's.
+		const written = writtenPath(inner);
+		if (written) return add(written.path, written.from);
+		// A path expression it cannot name puts every literal inside it in a frame
+		// with no value, which is the fail-closed answer rather than a default.
+		if (pathComposer(inner)) {
+			eachNode(inner, (deeper) => {
+				const text = staticSpecifier(deeper);
+				if (text !== null) add(text, 'unknown');
+			});
+			return;
+		}
+		ts.forEachChild(inner, walk);
+	};
+	for (const argument of call.arguments) walk(argument);
+	return words;
 }
 
 /**
@@ -930,17 +971,22 @@ const PROCESS_BASE = Object.freeze({ from: 'process', path: '.' });
 const UNKNOWN_BASE = Object.freeze({ from: 'unknown' });
 
 /**
- * The directory an expression NAMES, in the frame it is written in, or null
- * where this reading cannot name one.
+ * The path an expression NAMES, in the frame it is written in, or null where this
+ * reading cannot name one.
  *
- * TWO FRAMES, because a directory is written in two and the text does not say
- * which. `'sub'` is resolved by the process against its own working directory;
+ * TWO FRAMES, because a path is written in two and the text does not say which.
+ * `'sub'` is resolved by the process against its own working directory;
  * `new URL('..', import.meta.url)` and `join(__dirname, 'fixtures')` are resolved
  * against the FILE, and no working directory moves them. The caller knows both
  * and is told which one it is holding — the same division `runtimeLoads` draws
  * for a specifier and the loader that opens it.
  *
- * WHAT IS DELIBERATELY NOT FOLLOWED is a directory held in a name. `const root =
+ * A DIRECTORY IS A PATH, which is why this answers for both. `siteBase` asks it
+ * about a `cwd` and `siteWords` asks it about every word at the site; the syntax
+ * that decides the frame is identical, and reading it twice is how the two halves
+ * of one question drift apart.
+ *
+ * WHAT IS DELIBERATELY NOT FOLLOWED is a path held in a name. `const root =
  * …; spawnSync(node, [x], { cwd: root })` reads to this function as nothing, and
  * that is the same answer round 9 settled for a TARGET held in a constant: a
  * value declared far above is a value no reading can see at the call, and
@@ -949,8 +995,14 @@ const UNKNOWN_BASE = Object.freeze({ from: 'unknown' });
  * one question asked twice, and answering them differently is how a grammar stops
  * being closed. The discipline is the same in both directions: a site that means
  * its child's directory to be checkable writes it where the child is started.
+ *
+ * `join`/`resolve` NEED A SECOND ARGUMENT to be read as composing a path at all.
+ * `parts.join('/')` is `Array.prototype.join` wearing the same name, and reading
+ * it as `path.join` would name the directory `/` at a site that names no directory
+ * — a base invented out of punctuation. One argument is not a composition, so it
+ * is not read as one.
  */
-function writtenDirectory(node) {
+function writtenPath(node) {
 	if (!node) return null;
 	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
 		return { from: 'process', path: node.text };
@@ -971,16 +1023,45 @@ function writtenDirectory(node) {
 		: ts.isPropertyAccessExpression(node.expression)
 			? node.expression.name.text
 			: null;
-	if (callee === 'fileURLToPath') return writtenDirectory(node.arguments[0]);
-	if (callee !== 'join' && callee !== 'resolve') return null;
+	if (callee === 'fileURLToPath') return writtenPath(node.arguments[0]);
+	if ((callee !== 'join' && callee !== 'resolve') || node.arguments.length < 2) return null;
 	const [first, ...rest] = node.arguments;
-	const head = writtenDirectory(first);
+	const head = writtenPath(first);
 	if (!head) return null;
 	const tail = rest.map((argument) => staticSpecifier(argument));
 	// An absolute segment DISCARDS everything before it in `path.resolve`, so a
 	// reading that joined them would name a directory the call does not.
 	if (tail.some((segment) => segment === null || segment.startsWith('/'))) return null;
 	return { from: head.from, path: [head.path, ...tail].join('/') };
+}
+
+/**
+ * A call that COMPOSES a path out of a base and pieces — which is what makes the
+ * frame of the literals inside it a question rather than a default.
+ *
+ * IT EXISTS FOR THE FAILING CASE. Where `writtenPath` reads one of these, the
+ * whole expression comes back as a word in a named frame and the pieces are
+ * accounted for. Where it cannot — `join(root, 'scripts/x.mjs')`, `new URL(spec,
+ * somewhereElse)` — the pieces are still paths, written against a base this
+ * reading has no value for, and taking them as bare child arguments would resolve
+ * them in a directory the call does not name. So this recognises the shape by its
+ * callee, and `siteWords` puts what is inside it in the `unknown` frame.
+ */
+function pathComposer(node) {
+	if (
+		ts.isNewExpression(node) &&
+		ts.isIdentifier(node.expression) &&
+		node.expression.text === 'URL'
+	)
+		return true;
+	if (!ts.isCallExpression(node)) return false;
+	const callee = ts.isIdentifier(node.expression)
+		? node.expression.text
+		: ts.isPropertyAccessExpression(node.expression)
+			? node.expression.name.text
+			: null;
+	if (callee === 'fileURLToPath' || callee === 'pathToFileURL') return true;
+	return (callee === 'join' || callee === 'resolve') && node.arguments.length >= 2;
 }
 
 /**
@@ -1039,7 +1120,7 @@ function optionKey(property) {
  * command, the module or the worker's URL — so the scan starts at 1 and every
  * later argument is either a shape that cannot be an options bag or an object
  * literal this reading opens. Two bags carrying a `cwd`, a spread, a key it cannot
- * read, a shorthand and a value `writtenDirectory` cannot name all answer UNKNOWN.
+ * read, a shorthand and a value `writtenPath` cannot name all answer UNKNOWN.
  */
 function siteBase(node) {
 	const call = headedCall(node);
@@ -1054,7 +1135,7 @@ function siteBase(node) {
 			if (key === null) return UNKNOWN_BASE;
 			if (key !== 'cwd') continue;
 			if (!ts.isPropertyAssignment(property)) return UNKNOWN_BASE;
-			const directory = writtenDirectory(property.initializer);
+			const directory = writtenPath(property.initializer);
 			if (!directory || written) return UNKNOWN_BASE;
 			written = directory;
 		}
@@ -1087,10 +1168,11 @@ function nameableCallee(callee) {
  * grammar does not model, or because the code does not run in this process at all
  * — as `{ expression, line, kind, detail, literals, base }`, where kind is
  * `'computed'`, `'loader'` or `'execution'`, `literals` is every string the site is
- * written to hand its facility (see `siteLiterals`), and `base` is the working
- * directory it is written to resolve them in (see `siteBase`), so a caller that
- * lets a site DECLARE what it runs can check the declaration against the site's own
- * text — and against the right file, which is what the base decides.
+ * written to hand its facility WITH THE FRAME EACH IS WRITTEN IN (see `siteWords`),
+ * and `base` is the working directory it is written to resolve the child's own
+ * words in (see `siteBase`), so a caller that lets a site DECLARE what it runs can
+ * check the declaration against the site's own text — and against the right file,
+ * which is what the frame and the base decide together.
  *
  * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
  * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
@@ -1184,7 +1266,7 @@ export function unfollowableLoads(source) {
 			line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
 			kind,
 			detail,
-			literals: siteLiterals(node),
+			literals: siteWords(node),
 			base: siteBase(node),
 		});
 

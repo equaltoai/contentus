@@ -637,8 +637,9 @@ function resolveRelativeImport(fromFile, specifier, kind) {
 }
 
 /**
- * A literal as the words a site can hand a program: the string itself, and — since
- * a shell is one of the things a site may hand it to — each token of it.
+ * A literal as the words a site can hand a program — the string itself, and, since
+ * a shell is one of the things a site may hand it to, each token of it — with the
+ * FRAME the literal was written in carried onto every one of them.
  *
  * WHY THE SPLIT. `exec`, `execSync` and any `spawn` with `shell: true` take a
  * COMMAND LINE rather than a file and an argument list, so the whole invocation is
@@ -654,13 +655,26 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * ways is over-inclusive by construction — a word that happens to name a file
  * becomes a target a declaration must name — and that is the direction this check
  * fails in, because the other direction is the decoy it exists to catch.
+ *
+ * WHY THE FRAME TRAVELS. A token of `'./lib/x.mjs ./lib/y.mjs'` is resolved in
+ * exactly the directory the literal is, so splitting a word out of a literal may
+ * not lose which directory that was. Over-inclusion is a property of WHICH words
+ * are asked, never of WHERE they are asked.
  */
 function siteWords(literals) {
-	const words = new Set();
-	for (const literal of literals) {
-		words.add(literal);
-		for (const segment of shellSegments(literal))
-			for (const token of shellTokens(segment)) words.add(token);
+	const words = [];
+	const seen = new Map();
+	const add = (text, frame) => {
+		let texts = seen.get(frame);
+		if (!texts) seen.set(frame, (texts = new Set()));
+		if (texts.has(text)) return;
+		texts.add(text);
+		words.push({ text, frame });
+	};
+	for (const { text, frame } of literals) {
+		add(text, frame);
+		for (const segment of shellSegments(text))
+			for (const token of shellTokens(segment)) add(token, frame);
 	}
 	return words;
 }
@@ -687,22 +701,29 @@ function siteWords(literals) {
  * writes, in which frame; the FILE frame is unmoved by any `cwd`, because the
  * parent computes it before the child exists.
  *
- * A LOOKUP ROOT WRITTEN AT THE SITE IS A BASE TOO. `{ env: { PATH: 'scripts/lib' } }`
- * beside `'helper.mjs'` runs a repository file through a directory the site named,
- * and so does `git -C <dir>` and every other flag that means "look in here". This
- * reading does not model PATH, `-C` or any other option one at a time — it takes
- * every word that names a directory in this tree as a base the site's other words
- * may be resolved in. That is over-inclusive on purpose and closed by construction,
- * where an option-by-option list would be a fifth pattern waiting for a sixth.
+ * A WORD IS RESOLVED IN ITS OWN FRAME AND IN NO OTHER, which is round 11 and the
+ * hole round 10's fix left open. Both frames were asked of every word, so a word
+ * only ONE of them could name was answered by the other — and `const where = 'sub';
+ * spawnSync(node, ['helper.mjs'], { cwd: where })` is exactly that shape. The base
+ * is correctly reported unreadable; the raw child argument `'helper.mjs'` was then
+ * resolved against the GATE FILE's directory, found `scripts/helper.mjs` beside it,
+ * and a disclosure bound that pinned file while Node ran the unpinned
+ * `sub/helper.mjs`. An unreadable base has to be fail-closed, and it stops being so
+ * the moment a second base answers in its place. So the reading reports the frame
+ * each word is written in (`siteWords` there) and each is resolved in that frame
+ * alone: a word the file computes for itself in the file's directory, a word handed
+ * to the child in the child's working directory, and a word written against a base
+ * this reading cannot name in neither.
  *
- * WHAT IS NOT DETERMINED IS REPORTED, NOT GUESSED. Where the `cwd` is written but
- * unreadable — a variable, a call, an options bag this reading cannot open — the
- * process frame has no value, so a word that names a repository file under the root
- * MIGHT be that file or might be another one in a directory computed at run time.
- * Answering the first is the guess that produced the decoy, and answering nothing
- * silently drops a target this control demanded a pin for yesterday. So it is
- * returned as undetermined and the caller reports it, with the repair being to
- * spell the `cwd` at the call or to write the path in the file's own frame.
+ * WHAT IS NOT DETERMINED IS REPORTED, NOT GUESSED. Where a word's frame has no
+ * value — the `cwd` is a variable, a call, an options bag this reading cannot open,
+ * or the word sits inside a `join(<unreadable>, …)` — a word that names a repository
+ * file under the root MIGHT be that file or might be another one in a directory
+ * computed at run time. Answering the first is the guess that produced the decoy,
+ * and answering nothing silently drops a target this control demanded a pin for
+ * yesterday. So it is returned as undetermined and the caller reports it, with the
+ * repair being to spell the `cwd` at the call or to write the path in the file's own
+ * frame.
  *
  * A path that leaves the tree is dropped, and so is one under a declared unpinned
  * root — not because either is safe, but because neither is something `binds` may
@@ -722,13 +743,22 @@ function siteRepositoryTargets(file, literals, base) {
 				? resolve(root, base.path)
 				: null;
 
-	const bases = [fileFrame, ...(processFrame ? [processFrame] : [])];
-	for (const named of [...bases])
-		for (const word of words) {
-			const candidate = resolve(named, word);
-			if (repoRelative(candidate).startsWith('..')) continue;
-			if (isDirectory(candidate) && !bases.includes(candidate)) bases.push(candidate);
-		}
+	// The directories each frame stands for. `unknown` stands for none, which is
+	// what makes it fail closed; the lists grow below with the directories the
+	// site's own words name IN THAT FRAME, and never across frames.
+	const frames = new Map([
+		['file', [fileFrame]],
+		['process', processFrame ? [processFrame] : []],
+		['unknown', []],
+	]);
+	for (const [frame, named] of frames)
+		for (let index = 0; index < named.length; index += 1)
+			for (const word of words) {
+				if (word.frame !== frame) continue;
+				const candidate = resolve(named[index], word.text);
+				if (repoRelative(candidate).startsWith('..')) continue;
+				if (isDirectory(candidate) && !named.includes(candidate)) named.push(candidate);
+			}
 
 	const repositoryFile = (from, word) => {
 		const candidate = repoRelative(resolve(from, word));
@@ -737,31 +767,30 @@ function siteRepositoryTargets(file, literals, base) {
 	};
 
 	const runs = new Set();
-	for (const named of bases)
-		for (const word of words) {
-			const found = repositoryFile(named, word);
+	for (const word of words)
+		for (const named of frames.get(word.frame) ?? []) {
+			const found = repositoryFile(named, word.text);
 			if (found) runs.add(found);
 		}
 
-	// Only where the base is unreadable: a word that names a file under the root
-	// this site may or may not be resolving in, and a word shaped like a path that
-	// names no file in any frame this reading DID determine — which is what a path
-	// under a run-time directory looks like from here. A word with no separator and
-	// no extension (`utf8`, `--`, `init`) is not one, and an absolute path is not
-	// one either, because no working directory moves it.
+	// Only for a word whose frame has no directory: a word that names a file under
+	// the root this site may or may not be resolving in, and a word shaped like a
+	// path that names no file under it — which is what a path under a run-time
+	// directory looks like from here. A word with no separator and no extension
+	// (`utf8`, `--`, `init`) is not one, and an absolute path is not one either,
+	// because no working directory moves it.
 	const undetermined = new Set();
-	if (!processFrame)
-		for (const word of words) {
-			const named = repositoryFile(root, word);
-			if (named && !runs.has(named)) undetermined.add(named);
-			else if (
-				!named &&
-				!word.startsWith('/') &&
-				(word.includes('/') || /\.[A-Za-z0-9]+$/.test(word)) &&
-				!bases.some((from) => repositoryFile(from, word))
-			)
-				undetermined.add(word);
-		}
+	for (const word of words) {
+		if ((frames.get(word.frame) ?? []).length) continue;
+		const named = repositoryFile(root, word.text);
+		if (named && !runs.has(named)) undetermined.add(named);
+		else if (
+			!named &&
+			!word.text.startsWith('/') &&
+			(word.text.includes('/') || /\.[A-Za-z0-9]+$/.test(word.text))
+		)
+			undetermined.add(word.text);
+	}
 
 	return { runs, undetermined };
 }
@@ -855,11 +884,21 @@ function executableClosure() {
 				// literals would silently turn every `binds` back into an unchecked
 				// claim, and a check that disappears quietly is the shape this whole
 				// control exists to refuse — so its absence is a finding, not a default.
-				if (!Array.isArray(literals)) {
+				if (
+					!Array.isArray(literals) ||
+					!literals.every(
+						(word) =>
+							word &&
+							typeof word === 'object' &&
+							typeof word.text === 'string' &&
+							['file', 'process', 'unknown'].includes(word.frame)
+					)
+				) {
 					findings.push(
 						`${path}:${line}: the reading no longer reports the literals ${expression} is written to ` +
-							'hand its facility, so a `binds` here cannot be checked against its own site; this ' +
-							'control cannot tell a bound target from a declared one until that is re-bound'
+							'hand its facility, each with the frame it is written in, so a `binds` here cannot be ' +
+							'checked against its own site; this control cannot tell a bound target from a declared ' +
+							'one until that is re-bound'
 					);
 					continue;
 				}

@@ -65,6 +65,16 @@ const SUB_HELPER = 'sub/scripts/lib/helper.mjs';
 const SUB_HELPER_SOURCE = "export const value = 'the child that really runs';\n";
 
 /**
+ * One stem in two directories, and the pair round 11's repro is built from: a
+ * file BESIDE the gate, which a file-frame answer names, and the file the child
+ * really opens in a directory no reading determined.
+ */
+const BESIDE_GATE = 'scripts/helper.mjs';
+const BESIDE_GATE_SOURCE = "export const value = 'the decoy beside the gate';\n";
+const BELOW_GATE = 'sub/helper.mjs';
+const BELOW_GATE_SOURCE = "export const value = 'the child that really runs';\n";
+
+/**
  * Run CON-5 over a synthetic tree.
  *
  * `pinned` is the exact set of paths the contract binds — exact because CON-5
@@ -2081,4 +2091,242 @@ test('the arguments are read whoever is written to run them', () => {
 		// a `binds` may only name a repository file, and none of these is one.
 		assert.doesNotMatch(named.output, /usr\/bin\/node|which its disclosure does not bind/);
 	}
+});
+
+/* -------------------------------------------------------------------------
+ * Round 11 — the frame each word at a site is written in
+ * ---------------------------------------------------------------------- */
+
+test('a word is resolved in the frame it is written in and in no other', () => {
+	// THE REPRO, verbatim. Round 10 reports an unreadable `cwd` correctly — this
+	// site's base IS undetermined and the walk says so — and the resolution then
+	// answered the question anyway out of the OTHER frame it knows. `'helper.mjs'`
+	// is a raw child argument, resolved by the child in a directory computed at run
+	// time; resolving it against the gate FILE's own directory found a real
+	// `scripts/helper.mjs` beside it, so a disclosure bound that pinned file while
+	// Node opened the unpinned `sub/helper.mjs`. An unreadable base stops being
+	// fail-closed the moment a second base is allowed to answer in its place.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"const where = 'sub';\n" +
+			"spawnSync(process.execPath, ['helper.mjs'], { cwd: where });\n",
+		[BESIDE_GATE]: BESIDE_GATE_SOURCE,
+		[BELOW_GATE]: BELOW_GATE_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 3,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	const decoy = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', BESIDE_GATE],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }],
+		},
+	});
+	assert.equal(decoy.status, 1, 'a raw child word under an unreadable base is not the file frame');
+	assert.match(
+		decoy.output,
+		/hands "helper\.mjs" to a child whose working directory this reading cannot determine/
+	);
+	assert.match(decoy.output, /binds scripts\/helper\.mjs, which this site is not written to run/);
+
+	// And the consequence, which is the whole point: rewriting the file the child
+	// really opens used to change what the run did with the control green. The
+	// finding is now identical either way, because neither reading binds that file.
+	const rewritten = {
+		...files,
+		[BELOW_GATE]: "export const value = 'something else entirely';\nprocess.exitCode = 0;\n",
+	};
+	const after = runCon5({
+		files: rewritten,
+		pinned: ['scripts/gate.mjs', BESIDE_GATE],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }],
+		},
+	});
+	assert.equal(after.status, 1);
+	assert.equal(after.output, decoy.output, 'rewriting an unbound child cannot change the answer');
+
+	// THE REPAIR, and the pairing that proves the BYTES are bound rather than the
+	// finding silenced: spell the directory at the call and the child's own word
+	// resolves in the child's own frame, naming the file that really runs.
+	const spelled = {
+		...files,
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync(process.execPath, ['helper.mjs'], { cwd: 'sub' });\n",
+	};
+	const named = {
+		unfollowable_loads_disclosed: [{ ...declaration, line: 2, binds: [BELOW_GATE] }],
+	};
+	const bound = runCon5({
+		files: spelled,
+		pinned: ['scripts/gate.mjs', BELOW_GATE],
+		contract: named,
+	});
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files: spelled,
+		pinned: ['scripts/gate.mjs', BELOW_GATE],
+		contract: named,
+		corrupt: BELOW_GATE,
+	});
+	assert.equal(moved.status, 1, 'binding the child means rewriting it turns this red');
+	assert.match(moved.output, /sub\/helper\.mjs: content does not match its pin/);
+
+	// And the other direction of the same rule, because a frame that answers for
+	// the wrong words is the same defect mirrored: with the cwd spelled, the word
+	// the CHILD resolves is not the one the file would have named.
+	assert.doesNotMatch(bound.output, /scripts\/helper\.mjs/);
+});
+
+test('a path a file computes for itself is still its own, whatever the cwd is', () => {
+	// THE FALSE NEGATIVE the fix above is where you would introduce, and this
+	// control's own probe is written in exactly this shape: a path computed in the
+	// FILE's frame is unmoved by any working directory, so an unreadable `cwd`
+	// beside it says nothing about which file it names. A fix that answered
+	// `undetermined` for every word at a site with an unreadable base would retire
+	// a pin this control holds today, on its own harness.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"import { fileURLToPath } from 'node:url';\n" +
+			'const where = process.argv[2];\n' +
+			'spawnSync(process.execPath, [\n' +
+			"\tfileURLToPath(new URL('./lib/helper.mjs', import.meta.url)),\n" +
+			'], { cwd: where });\n',
+		[HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 4,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+		binds: [HELPER],
+	};
+
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(bound.status, 0, `a file-framed word is determined either way\n${bound.output}`);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	// The mirror, which is what makes the pair a differential rather than two
+	// examples: the same file named as a RAW CHILD ARGUMENT beside the same
+	// unreadable cwd is undetermined, because the child is what resolves it.
+	const handed = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				'const where = process.argv[2];\n' +
+				"spawnSync(process.execPath, ['scripts/lib/helper.mjs'], { cwd: where });\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{ ...declaration, line: 3, expression: 'spawnSync', binds: [HELPER] },
+			],
+		},
+	});
+	assert.equal(handed.status, 1, 'a child’s own word is the child’s frame');
+	assert.match(
+		handed.output,
+		/hands "scripts\/lib\/helper\.mjs" to a child whose working directory this reading cannot determine/
+	);
+});
+
+test('a word written against a base this reading cannot name is in neither frame', () => {
+	// The third frame, and the reason two are not enough. `join(root, 'x.mjs')` with
+	// `root` a name declared elsewhere is a path composed against a base with no
+	// value here — so it is neither the file's nor the child's, and answering either
+	// is the guess one level in. The literal used to be taken as a bare child
+	// argument and resolved against the repository root, which pinned a file the
+	// site may never open.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"import { join } from 'node:path';\n" +
+			'const root = process.argv[2];\n' +
+			"spawnSync(process.execPath, [join(root, 'scripts/lib/helper.mjs')]);\n",
+		[HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 4,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	const claimed = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] },
+	});
+	assert.equal(claimed.status, 1, 'an unnameable base is not the repository root');
+	assert.match(
+		claimed.output,
+		/hands "scripts\/lib\/helper\.mjs" to a child whose working directory this reading cannot determine/
+	);
+	assert.match(
+		claimed.output,
+		/binds scripts\/lib\/helper\.mjs, which this site is not written to run/
+	);
+
+	// The repair is the one the rule already has, in the frame that has a value
+	// here: compose against the file rather than against a name.
+	const composed = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"import { join } from 'node:path';\n" +
+			"spawnSync(process.execPath, [join(__dirname, 'lib/helper.mjs')]);\n",
+		[HELPER]: HELPER_SOURCE,
+	};
+	const named = {
+		unfollowable_loads_disclosed: [{ ...declaration, line: 3, binds: [HELPER] }],
+	};
+	const bound = runCon5({ files: composed, pinned: ['scripts/gate.mjs', HELPER], contract: named });
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files: composed,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: named,
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	// And the name that is not this composition at all: `Array.prototype.join` wears
+	// the same word with one argument, and reading it as `path.join` would name the
+	// directory `/` at a site that names no directory.
+	const arrayJoin = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				'const parts = process.argv.slice(2);\n' +
+				"spawnSync(process.execPath, [parts.join('/')]);\n",
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, line: 3 }],
+		},
+	});
+	assert.equal(arrayJoin.status, 0, `a joined array names no directory\n${arrayJoin.output}`);
 });
