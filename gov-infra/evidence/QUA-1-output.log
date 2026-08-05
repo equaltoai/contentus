@@ -44,7 +44,7 @@ computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
 build/server/handler.mjs                 1,073.07 kB │ gzip: 264.10 kB
 
-✓ built in 996ms
+✓ built in 991ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs

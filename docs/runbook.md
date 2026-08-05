@@ -14,15 +14,18 @@ Contentus ships only through the installed-client flow:
 - the checked-in manifest is `facetheory.lesser.json`
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm build
-lesser client install \
+pnpm run deploy -- \
   --app <instance-slug> \
   --base-domain <base-domain> \
-  --aws-profile <profile> \
-  --stage dev \
-  --config ./facetheory.lesser.json
+  --stage <dev|staging|live> \
+  --aws-profile <profile>
 ```
+
+The generic entrypoint performs the frozen-lockfile install, `svelte-check`,
+build, artifact assertions, `lesser client install`, and the post-install
+`curl`. It always delegates the install with `--config
+facetheory.lesser.json --skip-build`; the build has already completed and been
+checked before lesser receives it.
 
 ### How instance targeting actually works
 
@@ -42,35 +45,60 @@ per-instance manifest files, and it means no instance name appears anywhere in
 the repo. `facetheory.*.lesser.json` remains gitignored for the case where an
 operator needs a one-off local override via `--config`.
 
-> Note for the operator: product design §3 describes per-instance manifests
-> "differing only in `app_name`". That reading does not match
-> `client_install.go` — `app_name` does not select an instance. The design doc
-> defers the mechanism to this runbook, so this section is the operative
-> description; the discrepancy is reported rather than silently resolved in the
-> design doc.
-
 ## Prereqs
 
 - `node >= 24`
 - `pnpm`
-- a current `lesser` binary that supports `lesser client install` (see the
-  simulacrum runbook `../simulacrum/docs/runbook.md` for how to obtain one —
-  do not assume the binary on `PATH` is new enough)
+- a current `lesser` binary on `PATH` that supports `lesser client install`
 - AWS access for the target instance profile
 - `curl`
 
-## Targets
+## Config-free deploy entrypoint
 
-v1 verification target:
+An already-deployed lesser instance needs no registration in this repository.
+An operator supplies its four values at invocation time:
 
-| instance     | stage | notes                                                                                                                                       |
-| ------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trenchcoat` | dev   | deployed from `lab.lesser.host`; CMS long-form gates enabled. Stage URL and local receipt path are recorded here at first verified install. |
+- `--app`: the lesser instance slug
+- `--base-domain`: the instance base domain
+- `--stage`: `dev`, `staging`, or `live`
+- `--aws-profile`: the AWS profile that can update that instance
 
-The manifest and this runbook are instance-parameterized from day one:
-expanding to further dev instances is a new manifest file plus a row in this
-table, not a code change. Do not use this runbook for production-customer
-lesser instances.
+The instance must already have a lesser deployment receipt whose selected
+stage includes `FrontendDistributionId`. `ClientBucketName`,
+`ClientArtifactBucketName`, and `ClientInstallManifestKey` are advisory: the
+entrypoint reports their absence and lesser derives them. By default the
+entrypoint reads `~/.lesser/<app>/<base-domain>/state.json`; pass
+`--state <path>` for a receipt stored elsewhere. The current `lesser` binary,
+receipt, checked-in manifest, and (when `--skip-build` reuses a build) all
+required artifacts are validated before any AWS operation. A missing
+prerequisite stops with its path or binary name. A dry run from a fresh clone
+does not require build artifacts because the real plan would create them;
+adding `--skip-build` makes those artifacts a preflight requirement.
+
+Preview the exact commands and derived stage origin without executing pnpm,
+lesser, curl, AWS calls, or other network work:
+
+```bash
+pnpm run deploy -- \
+  --app <instance-slug> \
+  --base-domain <base-domain> \
+  --stage <dev|staging|live> \
+  --aws-profile <profile> \
+  --dry-run
+```
+
+`--skip-install` reuses installed dependencies. `--skip-build` reuses build
+artifacts and runs a standalone `svelte-check`; combine it with `--skip-check`
+only when that check has already run. Artifact assertions still run before
+install. After a real install the entrypoint curls `/l/` at
+`https://<stage>.<base-domain>` for `dev` and `staging`, or at the apex
+`https://<base-domain>` for `live`. That bounded curl requires HTTP 200; it is
+the automated availability check. Continue with the smoke test below for the
+CMS, auth, GraphQL, CSP, and renderer-authority evidence of record.
+
+Adding an instance therefore costs only the same four CLI values and an
+already-deployed lesser instance with `FrontendDistributionId`: no target map,
+package script, manifest, or runbook edit.
 
 ## Post-install verification (the smoke test of record)
 

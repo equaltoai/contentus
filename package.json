@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "vite dev",
+    "deploy": "node scripts/deploy-client.mjs",
     "typecheck": "tsc --noEmit",
     "svelte-check": "svelte-check --tsconfig tsconfig.json --threshold error",
     "lint": "prettier --check .",
