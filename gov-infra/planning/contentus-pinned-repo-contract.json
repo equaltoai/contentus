@@ -28,7 +28,9 @@
     "reviewer reads and a different value a control enforces."
   ],
   "package_scripts": {
-    "rubric_items": ["CON-5"],
+    "rubric_items": [
+      "CON-5"
+    ],
     "$comment": [
       "Exact expected text of every script the rubric's exit-code trust depends on,",
       "including the transitive closure reached through `pnpm run`. CON-5 asserts each",
@@ -52,7 +54,9 @@
     }
   },
   "executable_targets": {
-    "rubric_items": ["CON-5"],
+    "rubric_items": [
+      "CON-5"
+    ],
     "$comment": [
       "The content of everything the guarded scripts above actually execute. CON-5 walks",
       "the closure — each `node <path>` target, each file a listed glob expands to, and",
@@ -136,8 +140,14 @@
       "to anything. The practical rule for an author is short: write the path where you run",
       "it, and then bind it."
     ],
-    "unpinned_import_roots": ["src/", "build/"],
-    "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
+    "unpinned_import_roots": [
+      "src/",
+      "build/"
+    ],
+    "allowed_globs": [
+      "tests/*.test.mjs",
+      "scripts/*.test.mjs"
+    ],
     "unfollowable_loads_disclosed": [
       {
         "file": "scripts/deploy-client.mjs",
@@ -204,14 +214,18 @@
         "line": 168,
         "expression": "spawnSync",
         "reason": "Runs this control's own verifier over a synthetic three-file repository in a temp directory — the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The verifier IS bound: `binds` names it, so it is pinned, hashed and walked for its own imports like any other file a guarded command executes, and the path is spelled as a literal at the call so that claim is checkable against the site. The previous entry exempted it instead, on the ground that gov-infra is genome content the parent stages and `packDigest` in `gov-infra/pack.json` binds. Round 9's review refuted that: `packDigest` appears nowhere in this repository but in the file that declares it, no local control recomputes or verifies it, and the pack's file inventory and digest algorithm are not available here to build one — so this verifier's bytes changed in this very pull request while `pack.json` did not move. Verifying `packDigest` belongs to the parent's staging discipline and is routed there; the strongest LOCAL control is the one every other executable in this closure already has, and it is applied here. The cost is real and accepted: a parent restage of the pack turns CON-5 red until this pin moves. A restage is a recorded event, and a pin that forces it to be re-acknowledged is the honest behaviour — an exemption resting on a digest nothing checks is not.",
-        "binds": ["gov-infra/verifiers/check-package-scripts.mjs"]
+        "binds": [
+          "gov-infra/verifiers/check-package-scripts.mjs"
+        ]
       },
       {
         "file": "tests/renderer-authority-audit.test.mjs",
         "line": 39,
         "expression": "spawnSync",
         "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how this probe asserts the audit’s exit code and output rather than its internals. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
-        "binds": ["scripts/audit-renderer-authority.mjs"]
+        "binds": [
+          "scripts/audit-renderer-authority.mjs"
+        ]
       },
       {
         "file": "tests/helpers/tracked-source.mjs",
@@ -230,7 +244,7 @@
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/deploy-client.mjs": "676d93872189a2cadc1d9b6fc1f97cdaaaebe7ba54c3cba538328fdc0f27853f",
-      "scripts/deploy-client.test.mjs": "45f4ae69a7a072e1a212a89cf79c03713854ced20012753643523dc2473d0cf9",
+      "scripts/deploy-client.test.mjs": "f3cc4b8e2c08b9e29eb8cbccb62ccc7772c8e10658fb1c7988673e661fe9bccf",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/module-imports.mjs": "f5017ffef9f51f3717919c7842c3791191a78e8c46d3ef1c8e954d9c2a70f4ad",
@@ -276,7 +290,10 @@
     }
   },
   "install_manifest": {
-    "rubric_items": ["CON-3", "COM-1"],
+    "rubric_items": [
+      "CON-3",
+      "COM-1"
+    ],
     "$comment": [
       "`build.command` is what `lesser client install` executes. An allowlist of exact",
       "invocations is the only form of this check that means anything: any non-empty",
@@ -286,12 +303,21 @@
       "pinned, so the layout can move without a governance edit while containment holds."
     ],
     "allowed_build_commands": [
-      ["pnpm", "build"],
-      ["pnpm", "run", "build"]
+      [
+        "pnpm",
+        "build"
+      ],
+      [
+        "pnpm",
+        "run",
+        "build"
+      ]
     ]
   },
   "security_tests": {
-    "rubric_items": ["SEC-6"],
+    "rubric_items": [
+      "SEC-6"
+    ],
     "$comment": [
       "SEC-6's inventory. `node --test <files>` exits 0 on a file containing no tests,",
       "so existence is not coverage. Each file below must be present and must report at",
@@ -322,7 +348,9 @@
     ]
   },
   "supply_chain": {
-    "rubric_items": ["SEC-3"],
+    "rubric_items": [
+      "SEC-3"
+    ],
     "$comment": [
       "The hard boundary is that no install in this rubric or in CI runs lifecycle",
       "scripts: every `pnpm install` carries `--ignore-scripts`. The scans below are",
@@ -338,7 +366,10 @@
     "pnpmfile_disclosed": []
   },
   "greater": {
-    "rubric_items": ["CON-4", "SEC-7"],
+    "rubric_items": [
+      "CON-4",
+      "SEC-7"
+    ],
     "$comment": [
       "Binds the two greater channels to each other and to a named release, rather than",
       "to a shape. A 40-hex-shaped ref is not evidence of anything: every commit in every",
@@ -385,7 +416,9 @@
     }
   },
   "workflows": {
-    "rubric_items": ["SEC-3"],
+    "rubric_items": [
+      "SEC-3"
+    ],
     "$comment": [
       "Least-privilege GitHub Actions permissions. Every workflow must declare an",
       "explicit top-level `permissions:` block, and every scope in it — top-level or",
@@ -417,9 +450,13 @@
       "comparisons and DCO's commit walk are now content-bound here rather than matched as",
       "command text, while MAI-4 still binds the exact invocation in the workflow."
     ],
-    "allowed_install_invocations": ["pnpm install --frozen-lockfile --ignore-scripts"],
+    "allowed_install_invocations": [
+      "pnpm install --frozen-lockfile --ignore-scripts"
+    ],
     "pinned_run_scripts": {
-      "rubric_items": ["SEC-3"],
+      "rubric_items": [
+        "SEC-3"
+      ],
       "sha256": {
         "scripts/dco-check.mjs": "9774468f7f40852c34c6903870cd4fb18323e8e7ebde611aa24d43e71bb505e8",
         "scripts/main-guard-check.mjs": "37a68ec6fc26fb17b7bbac3362b14a25548b6dadea3fb820dc036f9ea0a93639"

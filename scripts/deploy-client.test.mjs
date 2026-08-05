@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -176,7 +176,17 @@ test('preflight fails clearly when lesser, state, or artifacts are absent', asyn
 		/lesser binary is missing from PATH/
 	);
 
-	await assert.rejects(() => preflight(plan), /Deployment receipt is missing or unreadable/);
+	const stubBin = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-bin-'));
+	context.after(() => rm(stubBin, { recursive: true, force: true }));
+	for (const executable of ['lesser', 'curl', 'pnpm']) {
+		const stub = path.join(stubBin, executable);
+		await writeFile(stub, '#!/bin/sh\nexit 0\n');
+		await chmod(stub, 0o755);
+	}
+	await assert.rejects(
+		() => preflight(plan, { envPath: stubBin }),
+		/Deployment receipt is missing or unreadable/
+	);
 
 	const emptyRoot = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-test-'));
 	context.after(() => rm(emptyRoot, { recursive: true, force: true }));
