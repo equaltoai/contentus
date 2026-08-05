@@ -126,6 +126,11 @@ the sign-in explanation and never fetches an owned roster.
 		</section>
 	</Panel>
 {:else}
+	<div class="contentus-drones__toolbar">
+		<a class="contentus-drone-action contentus-drone-action--primary" href={href('/drones/new')}>
+			Create drone
+		</a>
+	</div>
 	{#if loading}
 		<p class="contentus-drones__status" role="status">Loading your drones…</p>
 	{:else if failure}

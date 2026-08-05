@@ -20,7 +20,9 @@
 }
 
 .contentus-drones__notice,
-.contentus-drone-card {
+.contentus-drone-card,
+.contentus-drone-policy,
+.contentus-drone-credentials {
 	display: flex;
 	flex-direction: column;
 	gap: var(--tc-space-4);
@@ -28,6 +30,10 @@
 
 .contentus-drones__notice h2,
 .contentus-drones__notice p,
+.contentus-drone-policy h2,
+.contentus-drone-policy p,
+.contentus-drone-credentials h2,
+.contentus-drone-credentials p,
 .contentus-drones__status,
 .contentus-drones__error {
 	margin: 0;
@@ -147,6 +153,154 @@
 	color: var(--tc-midnight);
 	background: var(--tc-accent);
 	border-color: var(--tc-accent);
+}
+
+.contentus-drone-action:disabled {
+	opacity: 0.6;
+	cursor: wait;
+}
+
+.contentus-drone-form {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-5);
+}
+
+.contentus-drone-form__field {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-2);
+}
+
+.contentus-drone-form__field > label,
+.contentus-drone-form__scopes legend {
+	font-weight: 700;
+}
+
+.contentus-drone-form__field > label span,
+.contentus-drone-form__hint,
+.contentus-drone-form__scopes > p {
+	color: var(--tc-fg-muted);
+	font-size: 0.8125rem;
+}
+
+.contentus-drone-form__hint,
+.contentus-drone-form__scopes > p {
+	margin: 0;
+}
+
+.contentus-drone-form input[type='text'],
+.contentus-drone-form textarea,
+.contentus-drone-form select {
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 44px;
+	padding: var(--tc-space-3);
+	color: var(--tc-fg);
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+}
+
+.contentus-drone-form textarea {
+	min-height: 8rem;
+	resize: vertical;
+}
+
+.contentus-drone-form input[aria-invalid='true'],
+.contentus-drone-form textarea[aria-invalid='true'] {
+	border-color: var(--tc-error);
+}
+
+.contentus-drone-form__scopes {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-3);
+	margin: 0;
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+}
+
+.contentus-drone-form__scopes label {
+	display: flex;
+	align-items: center;
+	min-height: 44px;
+	gap: var(--tc-space-3);
+}
+
+.contentus-drone-form__scopes input {
+	width: 1.125rem;
+	height: 1.125rem;
+}
+
+.contentus-drone-form__submit {
+	position: sticky;
+	bottom: max(var(--tc-space-3), env(safe-area-inset-bottom));
+	z-index: 2;
+	display: flex;
+	padding: var(--tc-space-3);
+	background: color-mix(in srgb, var(--tc-surface) 92%, transparent);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	backdrop-filter: blur(8px);
+}
+
+.contentus-drone-form__submit .contentus-drone-action {
+	width: 100%;
+}
+
+.contentus-drone-credentials__warning {
+	padding: var(--tc-space-4);
+	color: var(--tc-error);
+	background: var(--tc-error-container);
+	border: 1px solid var(--tc-error);
+	border-radius: var(--tc-radius-md);
+	font-weight: 700;
+}
+
+.contentus-drone-credential {
+	display: grid;
+	gap: var(--tc-space-2);
+}
+
+.contentus-drone-credential__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+}
+
+.contentus-drone-credential__header button {
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	color: var(--tc-fg);
+	background: transparent;
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-drone-credential pre {
+	max-width: 100%;
+	margin: 0;
+	padding: var(--tc-space-3);
+	overflow-x: auto;
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.contentus-drone-credential code {
+	font-family: var(--tc-font-mono);
+}
+
+.contentus-drone-policy {
+	align-items: flex-start;
 }
 
 @media (max-width: 960px) {

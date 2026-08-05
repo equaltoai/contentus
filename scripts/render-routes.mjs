@@ -110,10 +110,11 @@ export const AUDIT_ROUTES = [
 	// `mcpAccess` is not redacted for non-owners, so a no-script reader gets every
 	// address. The live probes against those addresses are the client's.
 	{ name: 'agent-detail', path: '/l/agents/weatherbot', expectStatus: 200 },
-	// Face 7. This is a private client-loaded surface: the server paints the
-	// write-scoped sign-in state and must not read myAgents or workflow data into
-	// the public hydration payload.
+	// Face 7. Both are private client-loaded surfaces: the server paints the
+	// write-scoped sign-in state and must not read roster, policy, delegation, or
+	// credential data into the public hydration payload.
 	{ name: 'drones', path: '/l/drones', expectStatus: 200 },
+	{ name: 'drone-new', path: '/l/drones/new', expectStatus: 200 },
 	{ name: 'profile', path: '/l/profiles/ada', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },

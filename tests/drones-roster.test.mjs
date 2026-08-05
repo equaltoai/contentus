@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import {
 	DRONE_WORKFLOW_QUERY,
+	delegateToDrone,
+	fetchDroneRegistrationPolicy,
 	fetchDroneRoster,
 	hasWriteScope,
 	toDroneWorkflowStatus,
+	validateDroneCreation,
 } from '../src/lib/drones/contract.ts';
 import {
 	AUDIT_HEADERS,
@@ -170,4 +174,154 @@ test('an inbound credential is never forwarded or serialized by /drones SSR', as
 
 	assert.equal(requests.length, 0);
 	assert.ok(!value.html.includes(marker));
+});
+
+test('valid creation details become the exact delegateToAgent input', () => {
+	const validation = validateDroneCreation({
+		username: ' scout_1 ',
+		displayName: ' Scout ',
+		bio: ' Finds primary sources. ',
+		agentType: 'RESEARCHER',
+		scopes: ['read', 'write', 'follow', 'read'],
+	});
+
+	assert.equal(validation.ok, true);
+	assert.deepEqual(validation.input, {
+		agentUsername: 'scout_1',
+		displayName: 'Scout',
+		bio: 'Finds primary sources.',
+		scopes: ['read', 'write', 'follow'],
+		agentType: 'RESEARCHER',
+		agentVersion: '1.0.0',
+		version: '1.0.0',
+	});
+});
+
+test('creation validation mirrors lesser username and UTF-8 byte limits', () => {
+	const validation = validateDroneCreation({
+		username: '@not-an-agent',
+		displayName: 'é'.repeat(16),
+		bio: 'é'.repeat(251),
+		agentType: 'ASSISTANT',
+		scopes: [],
+	});
+
+	assert.equal(validation.ok, false);
+	assert.deepEqual(Object.keys(validation.errors).sort(), [
+		'bio',
+		'displayName',
+		'scopes',
+		'username',
+	]);
+	assert.equal(validation.input, null);
+});
+
+test('delegateToAgent returns a one-time credential bundle without changing it', async () => {
+	const input = validateDroneCreation({
+		username: 'scout',
+		displayName: 'Scout',
+		bio: '',
+		agentType: 'ASSISTANT',
+		scopes: ['read', 'write', 'follow'],
+	}).input;
+	const { value, requests } = await withFetch(
+		({ query }) => {
+			assert.match(query, /delegateToAgent\(input: \$input\)/);
+			return {
+				data: {
+					delegateToAgent: {
+						agent: { username: 'scout', displayName: 'Scout' },
+						accessToken: 'access-secret',
+						refreshToken: 'refresh-secret',
+						tokenType: 'Bearer',
+						scope: 'read write follow',
+						createdAt: '2026-08-05T12:00:00Z',
+						expiresIn: 3600,
+					},
+				},
+			};
+		},
+		() => delegateToDrone({ accessToken: 'owner-token' }, input)
+	);
+
+	assert.equal(value.ok, true);
+	assert.equal(value.credentials.accessToken, 'access-secret');
+	assert.equal(value.credentials.refreshToken, 'refresh-secret');
+	assert.deepEqual(requests[0].body.variables, { input });
+	assert.equal(requests[0].init.headers.authorization, 'Bearer owner-token');
+});
+
+test('registration-disabled errors become the designed policy state', async () => {
+	const input = validateDroneCreation({
+		username: 'scout',
+		displayName: 'Scout',
+		bio: '',
+		agentType: 'ASSISTANT',
+		scopes: ['read'],
+	}).input;
+	const { value } = await withFetch(
+		() => ({ errors: [{ message: 'agent registration is disabled by instance policy' }] }),
+		() => delegateToDrone({ accessToken: 'owner-token' }, input)
+	);
+
+	assert.deepEqual(value, {
+		ok: false,
+		failure: {
+			reason: 'policy-disabled',
+			message: 'This instance does not currently allow new drone registration.',
+		},
+	});
+});
+
+test('admin-readable policy disables the form, while an unreadable policy stays unknown', async () => {
+	const disabled = await withFetch(
+		() => ({
+			data: { adminAgentPolicy: { allowAgents: true, allowAgentRegistration: false } },
+		}),
+		() => fetchDroneRegistrationPolicy({ accessToken: 'admin-token' })
+	);
+	assert.equal(disabled.value, 'disabled');
+
+	const unreadable = await withFetch(
+		() => ({ errors: [{ message: 'not authorized to view agent policy' }] }),
+		() => fetchDroneRegistrationPolicy({ accessToken: 'writer-token' })
+	);
+	assert.equal(unreadable.value, 'unknown');
+});
+
+test('the /drones/new server render never contains credentials or private GraphQL data', async () => {
+	const handler = await loadHandler();
+	const marker = 'credential-must-never-reach-ssr';
+	const { value, requests } = await withStubbedGraphql(
+		() => assert.fail('the creation server pass must not make a GraphQL request'),
+		() =>
+			renderRoute(handler, {
+				...route('drone-new'),
+				headers: { ...AUDIT_HEADERS, authorization: `Bearer ${marker}` },
+			})
+	);
+
+	assert.equal(requests.length, 0);
+	assert.equal(value.status, 200);
+	assert.match(value.html, /Sign in to create a drone/);
+	assert.ok(!value.html.includes(marker));
+	assert.ok(!value.html.includes('accessToken'));
+	assert.equal(value.headers['cache-control'], 'no-store');
+	assert.equal(value.headers['x-robots-tag'], 'noindex, nofollow');
+});
+
+test('the client renders policy-disabled and one-time credential states without persistence', () => {
+	const flow = readFileSync('src/lib/drones/DroneCreationFlow.svelte', 'utf8');
+	const policy = readFileSync('src/lib/drones/DronePolicyDisabled.svelte', 'utf8');
+	const credentials = readFileSync('src/lib/drones/DroneCredentials.svelte', 'utf8');
+
+	assert.match(flow, /policy === 'disabled'/);
+	assert.match(flow, /<DronePolicyDisabled/);
+	assert.match(policy, /This instance is not accepting new drones/);
+	assert.match(credentials, /only time Contentus will show the OAuth tokens/);
+	assert.match(credentials, /dismiss permanently/);
+	const executable = `${flow}\n${credentials}`.replace(/<!--[\s\S]*?-->/g, '');
+	assert.doesNotMatch(executable, /localStorage|setItem\(|pushState\(/);
+	assert.match(flow, /credentials = null/);
+	assert.match(flow, /scope\.holds\(stamp\)/);
 });

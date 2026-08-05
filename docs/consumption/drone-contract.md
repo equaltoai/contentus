@@ -22,3 +22,24 @@ state.
 
 No article or draft content crosses this face, so lesser's renderer authority
 is unaffected.
+
+## Creation and policy
+
+- `/drones/new` sends one `delegateToAgent(input)` mutation. The visible form
+  owns username, display name, bio, the six-value `AgentType` enum, and the
+  delegated scope selection. Contentus supplies `1.0.0` for both required
+  version fields because version is not a product-design field in this face.
+- Validation mirrors lesser's current byte limits and username expression:
+  `^[a-zA-Z0-9_-]{1,30}$`, 30 UTF-8 bytes for display name, 500 UTF-8 bytes
+  for bio, and at least one scope. Lesser remains authoritative and can reject
+  an otherwise locally valid request.
+- `adminAgentPolicy { allowAgents allowAgentRegistration }` is a best-effort
+  preflight. Lesser restricts that field to administrators, so a refusal means
+  policy **unknown**, not enabled. For ordinary write-scoped callers, the
+  mutation's explicit registration-disabled error is the authoritative signal;
+  Contentus then replaces the form with the policy-disabled state.
+- The returned access and refresh tokens are held only in the mounted creation
+  component's memory. They are never written to Web Storage, route state,
+  hydration data, logs, or another request. Dismiss, navigation, sign-out, and
+  session change make them unrecoverable from Contentus. Each token remains
+  selectable when Clipboard API access is unavailable.

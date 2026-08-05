@@ -15,6 +15,7 @@ is no catch-all render path that could silently show the wrong surface.
 	import AuthCallbackRoute from '$lib/routes/AuthCallback.svelte';
 	import ComposeRoute from '$lib/routes/Compose.svelte';
 	import DronesRoute from '$lib/routes/Drones.svelte';
+	import DroneNewRoute from '$lib/routes/DroneNew.svelte';
 	import MessageThreadRoute from '$lib/routes/MessageThread.svelte';
 	import MessagesRoute from '$lib/routes/Messages.svelte';
 	import NotFoundRoute from '$lib/routes/NotFound.svelte';
@@ -77,6 +78,8 @@ is no catch-all render path that could silently show the wrong surface.
 		/>
 	{:else if page.key === 'drones'}
 		<DronesRoute {page} />
+	{:else if page.key === 'drone-new'}
+		<DroneNewRoute {page} />
 	{:else if page.key === 'profile'}
 		<ProfileRoute
 			{page}

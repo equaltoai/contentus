@@ -164,6 +164,15 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'mcp',
 		requiresAuth: true,
 	},
+	'drone-new': {
+		key: 'drone-new',
+		path: '/drones/new',
+		title: 'Create a drone',
+		eyebrow: 'Drone creation',
+		summary: 'Delegate a new unsouled agent and save its one-time OAuth credentials.',
+		surface: 'mcp',
+		requiresAuth: true,
+	},
 	profile: {
 		key: 'profile',
 		path: '/profiles',
@@ -208,6 +217,7 @@ export const ROUTE_PATTERNS = [
 	'/agents',
 	'/agents/{username}',
 	'/drones',
+	'/drones/new',
 	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
@@ -264,6 +274,7 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// `/messages/` takes, and the better of the two answers.
 	if (segmentAfter(route, '/agents/')) return PAGE_DEFINITIONS['agent-detail'];
 	if (route === '/drones') return PAGE_DEFINITIONS.drones;
+	if (route === '/drones/new') return PAGE_DEFINITIONS['drone-new'];
 	// `/profiles` with no username names no actor, so it is not the profile
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` above.

@@ -22,6 +22,7 @@ export type AppPageKey =
 	| 'agents'
 	| 'agent-detail'
 	| 'drones'
+	| 'drone-new'
 	| 'profile'
 	| 'auth-callback'
 	| 'not-found';
