@@ -10,22 +10,24 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785928339647 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785928339650 COMPLETED 859 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+Getting Svelte diagnostics...
+
+svelte-check found 0 errors and 0 warnings
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 791 modules transformed.
+[2Ktransforming...✓ 801 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-DIaTzgif.js                665.78 kB │ gzip: 202.88 kB
+build/client/assets/entry-client-C2ZwG2kn.js                687.41 kB │ gzip: 208.92 kB
 
-✓ built in 1.03s
+✓ built in 1.08s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -36,19 +38,19 @@ build/client/assets/entry-client-DIaTzgif.js                665.78 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 767 modules transformed.
+[2Ktransforming...✓ 777 modules transformed.
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 1,069.48 kB │ gzip: 263.65 kB
+build/server/handler.mjs                 1,073.07 kB │ gzip: 264.10 kB
 
-✓ built in 948ms
+✓ built in 961ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 327333 bytes, 143 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 333834 bytes, 143 --tc-* definitions, integrity assertions passed
 brand assets: copied 12 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -67,7 +69,7 @@ brand assets: copied 12 files to build/client/brand/
 - owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 15
+- Contentus-owned source roots scanned: 16
 - Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
 
 Renderer-authority audit: clean.
@@ -77,8 +79,8 @@ Renderer-authority audit: clean.
 
 # CSP Audit — contentus SSR output
 
-- Routes rendered from build/server/handler.mjs: 21
-- Documents scanned: 20
+- Routes rendered from build/server/handler.mjs: 23
+- Documents scanned: 22
 - Ship-blocking findings: 0
 - Off-origin script/style references: 0
 - Route status mismatches: 0
@@ -101,7 +103,9 @@ Renderer-authority audit: clean.
 - agents           200    5550 bytes  findings=0
 - agents-filtered  200    5608 bytes  findings=0
 - agent-detail     200    5630 bytes  findings=0
-- profile          200    5260 bytes  findings=0
+- drones           200    5745 bytes  findings=0
+- drone-new        200    5783 bytes  findings=0
+- profile          200    5261 bytes  findings=0
 - auth-callback    200    5064 bytes  findings=0
 - not-found        404    5064 bytes  findings=0
 - hydration-data   200     557 bytes  findings=0
@@ -111,13 +115,13 @@ CSP audit: clean.
 > @equaltoai/contentus@0.1.0 validate:seam-graph /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/audit-seam-graph.mjs
 
-# Seam graph audit — face 6 (src/lib/agents)
+# Seam graph audit — faces 6–7 (src/lib/agents, src/lib/drones)
 
 - Build passes recorded: client, server
-- Modules the client build resolved / loaded: 790 / 790
-- Modules the server build resolved / loaded: 773 / 766
-- Dependency edges recorded: 4395
-- Distinct edges into the face: 21
+- Modules the client build resolved / loaded: 800 / 800
+- Modules the server build resolved / loaded: 783 / 776
+- Dependency edges recorded: 4482
+- Distinct edges into the face: 33
 - Findings: 0
 
 ## Edges into the face
@@ -140,7 +144,19 @@ CSP audit: clean.
 - src/lib/agents/MyAgents.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/agents/filters.ts → src/lib/agents/contract.ts [client:import, server:import]
+- src/lib/drones/DroneCard.svelte → src/lib/drones/identity.ts [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/DroneCreationForm.svelte [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/DroneCredentials.svelte [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/DronePolicyDisabled.svelte [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/contract.ts [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/identity.ts [client:import, server:import]
+- src/lib/drones/DroneCreationForm.svelte → src/lib/drones/contract.ts [client:import, server:import]
+- src/lib/drones/DroneRoster.svelte → src/lib/drones/DroneCard.svelte [client:import, server:import]
+- src/lib/drones/DroneRoster.svelte → src/lib/drones/contract.ts [client:import, server:import]
+- src/lib/drones/contract.ts → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/routes/AgentDetailRoute.svelte → src/lib/agents/AgentDetail.svelte [client:import, server:import]
 - src/lib/routes/Agents.svelte → src/lib/agents/AgentRoster.svelte [client:import, server:import]
+- src/lib/routes/DroneNew.svelte → src/lib/drones/DroneCreationFlow.svelte [client:import, server:import]
+- src/lib/routes/Drones.svelte → src/lib/drones/DroneRoster.svelte [client:import, server:import]
 
 Seam graph audit: clean.
