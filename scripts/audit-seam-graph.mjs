@@ -76,9 +76,9 @@
  * stops seeing every load, the rule falls back to what it checked before rather
  * than quietly covering less. And what the build never loaded it also cannot be
  * judged for — so RESOLVED and LOADED are kept as two facts rather than folded into
- * one, and a tracked face file a consumer externalizes is resolved and not loaded
- * and lands in the containment rule below as a file this gate cannot judge rather
- * than passing as one it read.
+ * one, and a module of a tracked face file that a consumer externalizes is resolved
+ * and not loaded and lands in the containment rule below as a module this gate
+ * cannot judge rather than passing as one it read.
  *
  * REACHED IS A FACT ABOUT A PASS, NOT ABOUT THE REPOSITORY, and round 11 is what
  * that sentence cost when it was not written down. The two passes recorded what
@@ -92,10 +92,10 @@
  * boundary 3 below, stated long before this — so a union hands each pass the other
  * pass's reading and excuses it for a file the other pass never had the same edge
  * to. Both sets are therefore kept PER PASS, and the containment rule asks its
- * question of each pass on its own: a tracked face file a pass RESOLVES and never
- * LOADS is that pass's finding, whatever the other pass did with the same file. A
- * file no pass resolves at all is the older finding, unchanged — the build never
- * reached it, so there is nothing unexamined about it in either pass.
+ * question of each pass on its own: a module of a tracked face file that a pass
+ * RESOLVES and never LOADS is that pass's finding, whatever the other pass did with
+ * the same file. A file no pass resolves at all is the older finding, unchanged —
+ * the build never reached it, so there is nothing unexamined about it in either pass.
  *
  * A FILE IS NOT A MODULE, and round 12 is what THAT cost. One file produces as many
  * modules as there are ways to ask for it: `CopyBlock.svelte` is the component,
@@ -138,8 +138,9 @@
  *      tracked file in one form. Neither subsumes the other and both run. A module
  *      the build EXTERNALIZES is the same boundary reached from the other side —
  *      the configuration saying this file is not part of this build — and inside
- *      the face it is a red gate IN THE PASS THAT DID IT, because a tracked face
- *      file a pass resolves and never loads is that pass's own finding.
+ *      the face it is a red gate IN THE PASS THAT DID IT, because a module of a
+ *      tracked face file that a pass resolves and never loads is that pass's own
+ *      finding.
  *   2. A WORKER's own modules. `new Worker(new URL(…))` is bundled by a separate
  *      Rolldown build whose plugin list is `config.worker.plugins` — the main
  *      pipeline is not in it, so a recorder in `plugins` never sees inside one.
@@ -535,12 +536,13 @@ function recorder(pass, root, sink, references, observed, loads, reach) {
 				// empty or not.
 				const loaded = loads.has(String(id)) || typeof info.code === 'string';
 
-				// REACHED, and therefore judgeable — IN THIS PASS AND NOWHERE ELSE. A module
-				// the build never loaded takes no dependency it could record, so counting it
-				// as reached would tell the containment rule that a tracked face file had
-				// been examined when nothing examined it. Externalizing a component in the
-				// face is a red gate for that reason, in the sentence that says what is
-				// actually unknown.
+				// WHAT THIS PASS REACHED, AND THEREFORE WHAT IT CAN JUDGE — IN THIS PASS AND
+				// NOWHERE ELSE. A module the build resolved and never loaded takes dependencies
+				// nothing here recorded, so recording the resolution SEPARATELY from the load is
+				// what keeps the containment rule from reading a module of a tracked face file
+				// as examined when nothing examined it. Externalizing a component in the face is
+				// a red gate for that reason — in the pass that did it, and in the sentence that
+				// says what is actually unknown.
 				//
 				// Both facts are recorded, and they are not the same fact. RESOLVED is this
 				// pass having an edge to the module — it is in this pass's graph, so this
@@ -784,10 +786,13 @@ export async function seamGraph({
 		// Which module ids the build LOADED, so the recorder can tell that module from
 		// one the build resolved and deliberately never opened.
 		const loads = new Set();
-		// What THIS PASS reached, as repository-relative paths: the files its graph
-		// resolved, and the subset of those it went and loaded. Per pass because a
-		// pass's edges are its own — a union lets one pass's reading excuse the other's
-		// blind spot, which is the header's round 11.
+		// What THIS PASS reached, as two facts about repository-relative MODULES — the
+		// request whole, query and fragment included: the modules its graph resolved,
+		// and the subset of those it went and loaded. Per pass because a pass's edges
+		// are its own — a union lets one pass's reading excuse the other's blind spot,
+		// which is the header's round 11. Per module because a file's variants are
+		// separate modules with separate edges, so one being loaded says nothing about
+		// another, which is round 12. Edges stay keyed by the FILE: see `repoPath`.
 		const reach = { resolved: new Set(), loaded: new Set() };
 		sink.reached.set(pass, reach);
 		return [

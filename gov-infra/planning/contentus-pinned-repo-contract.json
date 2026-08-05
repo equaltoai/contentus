@@ -79,7 +79,7 @@
     "sha256": {
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
-      "scripts/audit-seam-graph.mjs": "2ba2cc40935b3446aede89966df598f6e9cfe6c3189917ef5a60293bf32caf35",
+      "scripts/audit-seam-graph.mjs": "a2ddda5a3b442d04650c4ce18ee6d62eb1ea1269b36d17d9b5290cdb19ea4431",
       "scripts/build-stylesheet.mjs": "5776f7250e94ec03944ace3b02a52b883d302f38b6e8d5a349c04a6dccc38a2a",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
