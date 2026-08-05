@@ -43,3 +43,19 @@ is unaffected.
   hydration data, logs, or another request. Dismiss, navigation, sign-out, and
   session change make them unrecoverable from Contentus. Each token remains
   selectable when Clipboard API access is unavailable.
+
+## Soul-promotion boundary
+
+Contentus does not implement `drone → graduating → souled`. Roster cards and
+the post-creation credential panel link to simulacrum's same-origin
+`/identity/{username}` surface. The helper intentionally does not add the `/l`
+Contentus base path and encodes the lesser-provided username; it never invents
+an instance hostname or duplicates the identity workflow.
+
+## Replacement seams
+
+`DroneRoster.svelte` owns the roster card; `DroneCreationFlow.svelte` owns the
+form, policy-disabled panel, and credential reveal. Routes import only those two
+seams. `scripts/lib/drone-seams.mjs` is the single declaration consumed by the
+build-resolved seam-graph gate, so a future greater-components replacement can
+swap either workspace without leaving a cross-seam component dependency behind.

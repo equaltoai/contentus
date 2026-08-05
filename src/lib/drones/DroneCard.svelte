@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { agentHref } from '../../facetheory/routing';
 	import type { OwnedDrone } from './contract';
+	import { identitySurfaceHref } from './identity';
 
 	interface Props {
 		drone: OwnedDrone;
@@ -49,5 +50,10 @@
 		{/if}
 	</dl>
 
-	<a class="contentus-drone-action" href={agentHref(drone.agent.username)}>View agent details</a>
+	<div class="contentus-drone-card__actions">
+		<a class="contentus-drone-action" href={agentHref(drone.agent.username)}>View agent details</a>
+		<a class="contentus-drone-action" href={identitySurfaceHref(drone.agent.username)}>
+			Open identity &amp; promotion
+		</a>
+	</div>
 </article>

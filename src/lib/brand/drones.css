@@ -127,6 +127,12 @@
 	overflow-wrap: anywhere;
 }
 
+.contentus-drone-card__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-3);
+}
+
 .contentus-drone-action {
 	display: inline-flex;
 	align-items: center;
@@ -306,5 +312,9 @@
 @media (max-width: 960px) {
 	.contentus-drones__grid {
 		grid-template-columns: 1fr;
+	}
+
+	.contentus-drone-card__actions {
+		flex-direction: column;
 	}
 }

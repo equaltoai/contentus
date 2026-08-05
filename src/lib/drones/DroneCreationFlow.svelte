@@ -25,6 +25,7 @@ the URL, SSR props, logs, or the public hydration resource.
 		type DroneCredentials as CredentialBundle,
 		type DroneRegistrationPolicy,
 	} from './contract';
+	import { identitySurfaceHref } from './identity';
 
 	let session = $state<'unknown' | 'anonymous' | 'insufficient-scope' | 'authenticated'>(
 		'unknown'
@@ -34,6 +35,7 @@ the URL, SSR props, logs, or the public hydration resource.
 	let submitting = $state(false);
 	let serverError = $state<string | null>(null);
 	let credentials = $state<CredentialBundle | null>(null);
+	let createdUsername = $state<string | null>(null);
 	let dismissed = $state(false);
 	let signInError = $state<string | null>(null);
 	let controller: AbortController | null = null;
@@ -42,6 +44,7 @@ the URL, SSR props, logs, or the public hydration resource.
 
 	function clearSensitiveState() {
 		credentials = null;
+		createdUsername = null;
 		serverError = null;
 		dismissed = false;
 	}
@@ -128,6 +131,7 @@ the URL, SSR props, logs, or the public hydration resource.
 		submitting = false;
 		if (result.ok) {
 			credentials = result.credentials;
+			createdUsername = result.credentials.username;
 			return;
 		}
 		if (result.failure.reason === 'policy-disabled') {
@@ -171,9 +175,16 @@ the URL, SSR props, logs, or the public hydration resource.
 	</Panel>
 {:else}
 	{#if dismissed}
-		<p class="contentus-drones__status" role="status">
-			The credential panel was dismissed and its tokens were cleared from Contentus.
-		</p>
+		<section class="contentus-drones__notice" aria-label="Credential dismissal confirmation">
+			<p class="contentus-drones__status" role="status">
+				The credential panel was dismissed and its tokens were cleared from Contentus.
+			</p>
+			{#if createdUsername}
+				<a class="contentus-drone-action" href={identitySurfaceHref(createdUsername)}>
+					Open identity &amp; promotion
+				</a>
+			{/if}
+		</section>
 	{/if}
 	<Panel class="contentus-drones__panel" padding="md">
 		<DroneCreationForm {submitting} {serverError} onSubmit={submit} />
