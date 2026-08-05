@@ -194,7 +194,7 @@
       },
       {
         "file": "tests/con5-import-reader.test.mjs",
-        "line": 131,
+        "line": 138,
         "expression": "spawnSync",
         "reason": "Runs this control's own verifier over a synthetic three-file repository in a temp directory — the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The verifier IS bound: `binds` names it, so it is pinned, hashed and walked for its own imports like any other file a guarded command executes, and the path is spelled as a literal at the call so that claim is checkable against the site. The previous entry exempted it instead, on the ground that gov-infra is genome content the parent stages and `packDigest` in `gov-infra/pack.json` binds. Round 9's review refuted that: `packDigest` appears nowhere in this repository but in the file that declares it, no local control recomputes or verifies it, and the pack's file inventory and digest algorithm are not available here to build one — so this verifier's bytes changed in this very pull request while `pack.json` did not move. Verifying `packDigest` belongs to the parent's staging discipline and is routed there; the strongest LOCAL control is the one every other executable in this closure already has, and it is applied here. The cost is real and accepted: a parent restage of the pack turns CON-5 red until this pin moves. A restage is a recorded event, and a pin that forces it to be re-acknowledged is the honest behaviour — an exemption resting on a digest nothing checks is not.",
         "binds": ["gov-infra/verifiers/check-package-scripts.mjs"]
@@ -214,7 +214,7 @@
       }
     ],
     "sha256": {
-      "gov-infra/verifiers/check-package-scripts.mjs": "7c848cddd3e52b140637853d338e321d0a18f1970a0bca280f1e8dc1fccd297a",
+      "gov-infra/verifiers/check-package-scripts.mjs": "69ac3566d101b15af5cb7be6232adea58763288a14cc61b9679bf9beb9cd57da",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
@@ -223,7 +223,7 @@
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
-      "scripts/lib/module-imports.mjs": "46e90357a94c56df0f25dba2e7f8e971c3df20b205a272df933816c713c1f926",
+      "scripts/lib/module-imports.mjs": "f5ee8cd3741e461c560d6b914d1e010a56a2ec49642aebbf5c0a4fa51a11da81",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/render-routes.mjs": "332823b287f559249b9e831bd42406deae2cddff55d5884dd0659a897fd0432f",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
@@ -232,7 +232,7 @@
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
-      "tests/con5-import-reader.test.mjs": "20b02c3db4e60033366fd67e99acf33e1ce92c9c24290097b26c0caf66a44ce8",
+      "tests/con5-import-reader.test.mjs": "e77bece7a008edc650868c4bc28be94a2aa909fd78135c59d68c6839e9c5d255",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
@@ -242,7 +242,7 @@
       "tests/messaging-session.test.mjs": "c66ab8245e34ca0b49875b70b27f38793c41d2254f079455ba013659a6f03881",
       "tests/mobile-chrome.test.mjs": "5194c79368253af8ad90a73ea067cd42cea8d4f2cb6bf61b22baceaf15a89d9a",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
-      "tests/renderer-authority-audit.test.mjs": "cdf99e5f4d9a3053579069e5714e1825cf27d4707161c5c278e1268b7d0f980d",
+      "tests/renderer-authority-audit.test.mjs": "d8ed3deb435c7f2fb92f11ea9cec6adde7862152a0001ef0f728ac14c9cc5ba7",
       "tests/renderer-authority.test.mjs": "034ca59fd865f2a204973ea36073958e1fb8834675266a05be4726781823de58",
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",

@@ -141,6 +141,17 @@
  * unpinned one. So every finding now carries the literals its call is written to
  * hand its facility, and the caller can hold a declaration to them.
  *
+ * WHERE THOSE LITERALS ARE RESOLVED is round 10, and it is the round-7 lesson
+ * arriving for the third time: A LOADER'S BASE IS PART OF ITS MODEL. A text is not
+ * a file until something resolves it, `spawnSync(node, ['scripts/lib/helper.mjs'],
+ * { cwd: 'sub' })` resolves it in `sub`, and the caller was resolving every literal
+ * against the repository root — so the declaration bound a real, pinned, never-run
+ * file at the root while the child rewrote `sub/scripts/lib/helper.mjs` freely. The
+ * `cwd` an execution site WRITES is now reported beside its literals, in the frame
+ * it is written in (`siteBase`), and a `cwd` this reading cannot read is reported as
+ * unreadable rather than defaulted — because defaulting it is the guess that put a
+ * pin on the decoy.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -583,6 +594,14 @@ function importedLocals(file, modules, exports_) {
 	return locals;
 }
 
+/** `import.meta.<name>`, which is how a module names its own location. */
+const importMeta = (node, name) =>
+	Boolean(node) &&
+	ts.isPropertyAccessExpression(node) &&
+	node.name.text === name &&
+	ts.isMetaProperty(node.expression) &&
+	node.expression.keywordToken === ts.SyntaxKind.ImportKeyword;
+
 /**
  * `import.meta.url` or `__filename` — the two spellings of "the file this is
  * written in", and the only bases under which a loader built here resolves a
@@ -591,12 +610,7 @@ function importedLocals(file, modules, exports_) {
 function namesThisFile(node) {
 	if (!node) return false;
 	if (ts.isIdentifier(node)) return node.text === '__filename';
-	return (
-		ts.isPropertyAccessExpression(node) &&
-		node.name.text === 'url' &&
-		ts.isMetaProperty(node.expression) &&
-		node.expression.keywordToken === ts.SyntaxKind.ImportKeyword
-	);
+	return importMeta(node, 'url');
 }
 
 /**
@@ -908,6 +922,146 @@ function siteLiterals(node) {
 	return [...literals];
 }
 
+/**
+ * The two answers a site can give about where its child resolves a relative
+ * path, and the third that says it will not say.
+ */
+const PROCESS_BASE = Object.freeze({ from: 'process', path: '.' });
+const UNKNOWN_BASE = Object.freeze({ from: 'unknown' });
+
+/**
+ * The directory an expression NAMES, in the frame it is written in, or null
+ * where this reading cannot name one.
+ *
+ * TWO FRAMES, because a directory is written in two and the text does not say
+ * which. `'sub'` is resolved by the process against its own working directory;
+ * `new URL('..', import.meta.url)` and `join(__dirname, 'fixtures')` are resolved
+ * against the FILE, and no working directory moves them. The caller knows both
+ * and is told which one it is holding — the same division `runtimeLoads` draws
+ * for a specifier and the loader that opens it.
+ *
+ * WHAT IS DELIBERATELY NOT FOLLOWED is a directory held in a name. `const root =
+ * …; spawnSync(node, [x], { cwd: root })` reads to this function as nothing, and
+ * that is the same answer round 9 settled for a TARGET held in a constant: a
+ * value declared far above is a value no reading can see at the call, and
+ * following one would mean tracking assignment, shadowing and reassignment
+ * through a file to decide which write reaches this read. A base and a target are
+ * one question asked twice, and answering them differently is how a grammar stops
+ * being closed. The discipline is the same in both directions: a site that means
+ * its child's directory to be checkable writes it where the child is started.
+ */
+function writtenDirectory(node) {
+	if (!node) return null;
+	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+		return { from: 'process', path: node.text };
+	if (ts.isIdentifier(node) && node.text === '__dirname') return { from: 'file', path: '.' };
+	if (importMeta(node, 'dirname')) return { from: 'file', path: '.' };
+	if (
+		ts.isNewExpression(node) &&
+		ts.isIdentifier(node.expression) &&
+		node.expression.text === 'URL'
+	) {
+		const [specifier, base] = node.arguments ?? [];
+		const written = staticSpecifier(specifier);
+		return written !== null && namesThisFile(base) ? { from: 'file', path: written } : null;
+	}
+	if (!ts.isCallExpression(node)) return null;
+	const callee = ts.isIdentifier(node.expression)
+		? node.expression.text
+		: ts.isPropertyAccessExpression(node.expression)
+			? node.expression.name.text
+			: null;
+	if (callee === 'fileURLToPath') return writtenDirectory(node.arguments[0]);
+	if (callee !== 'join' && callee !== 'resolve') return null;
+	const [first, ...rest] = node.arguments;
+	const head = writtenDirectory(first);
+	if (!head) return null;
+	const tail = rest.map((argument) => staticSpecifier(argument));
+	// An absolute segment DISCARDS everything before it in `path.resolve`, so a
+	// reading that joined them would name a directory the call does not.
+	if (tail.some((segment) => segment === null || segment.startsWith('/'))) return null;
+	return { from: head.from, path: [head.path, ...tail].join('/') };
+}
+
+/**
+ * Argument shapes that cannot be an options bag, so finding one says nothing
+ * about where the site's child runs. Everything else in a position that could
+ * hold options and is not an object literal this reading can read leaves the base
+ * UNKNOWN, which is the fail-closed direction: a bag it cannot open may carry a
+ * `cwd`, and assuming it does not is the guess this whole model exists to stop.
+ */
+function notAnOptionsBag(node) {
+	return (
+		ts.isArrayLiteralExpression(node) ||
+		ts.isStringLiteral(node) ||
+		ts.isNoSubstitutionTemplateLiteral(node) ||
+		ts.isTemplateExpression(node) ||
+		ts.isNumericLiteral(node) ||
+		ts.isArrowFunction(node) ||
+		ts.isFunctionExpression(node) ||
+		node.kind === ts.SyntaxKind.TrueKeyword ||
+		node.kind === ts.SyntaxKind.FalseKeyword ||
+		node.kind === ts.SyntaxKind.NullKeyword
+	);
+}
+
+/** The key an object literal's member reads, or null where no static read can. */
+function optionKey(property) {
+	const name = property.name;
+	if (!name) return null;
+	if (ts.isComputedPropertyName(name))
+		return isLiteralKey(name.expression) ? name.expression.text : null;
+	if (ts.isIdentifier(name)) return name.text;
+	return isLiteralKey(name) ? name.text : null;
+}
+
+/**
+ * The working directory a site is WRITTEN to start its child in — the base every
+ * relative path it hands that child is resolved against.
+ *
+ * WHY THE READING OWES THE CALLER THIS, which is round 10. CON-5 resolved a site's
+ * literals against the repository root and against the file, and an explicit
+ * `cwd` moves the first of those to somewhere else entirely. So `spawnSync(node,
+ * ['scripts/lib/helper.mjs'], { cwd: 'sub' })` executed `sub/scripts/lib/helper.mjs`
+ * while a disclosure bound the root-spelled `scripts/lib/helper.mjs` — a real file,
+ * pinned, hashed, and never run — and the control was green with the actual child
+ * rewritten wholesale. That is round 7's decoy exactly, and the reason is the one
+ * round 7 wrote down: A LOADER'S BASE IS PART OF ITS MODEL. `createRequire` has
+ * this rule already, because a loader built on another directory opens another
+ * file; a child process is the same fact with a bigger loader.
+ *
+ * It belongs here rather than in the caller because it is a question about SYNTAX
+ * — which argument is the options bag, whether it carries a `cwd`, and which frame
+ * that `cwd` is written in — and the caller is handed a flat list of strings in
+ * which `'sub'` and `'scripts/lib/helper.mjs'` are indistinguishable.
+ *
+ * ARGUMENT 0 IS NEVER OPTIONS in any facility this grammar names — it is the
+ * command, the module or the worker's URL — so the scan starts at 1 and every
+ * later argument is either a shape that cannot be an options bag or an object
+ * literal this reading opens. Two bags carrying a `cwd`, a spread, a key it cannot
+ * read, a shorthand and a value `writtenDirectory` cannot name all answer UNKNOWN.
+ */
+function siteBase(node) {
+	const call = headedCall(node);
+	if (!call?.arguments) return PROCESS_BASE;
+	let written = null;
+	for (const argument of call.arguments.slice(1)) {
+		if (notAnOptionsBag(argument)) continue;
+		if (!ts.isObjectLiteralExpression(argument)) return UNKNOWN_BASE;
+		for (const property of argument.properties) {
+			if (ts.isSpreadAssignment(property)) return UNKNOWN_BASE;
+			const key = optionKey(property);
+			if (key === null) return UNKNOWN_BASE;
+			if (key !== 'cwd') continue;
+			if (!ts.isPropertyAssignment(property)) return UNKNOWN_BASE;
+			const directory = writtenDirectory(property.initializer);
+			if (!directory || written) return UNKNOWN_BASE;
+			written = directory;
+		}
+	}
+	return written ?? PROCESS_BASE;
+}
+
 /** A callee this grammar can name, which is the condition for reading the call. */
 function nameableCallee(callee) {
 	if (!callee) return false;
@@ -931,10 +1085,12 @@ function nameableCallee(callee) {
  * Every load in this source that the reading above cannot follow to a file —
  * because the TARGET is computed, because the LOADER is a construction this
  * grammar does not model, or because the code does not run in this process at all
- * — as `{ expression, line, kind, detail, literals }`, where kind is `'computed'`,
- * `'loader'` or `'execution'` and `literals` is every string the site is written to
- * hand its facility (see `siteLiterals`), so a caller that lets a site DECLARE what
- * it runs can check the declaration against the site's own text.
+ * — as `{ expression, line, kind, detail, literals, base }`, where kind is
+ * `'computed'`, `'loader'` or `'execution'`, `literals` is every string the site is
+ * written to hand its facility (see `siteLiterals`), and `base` is the working
+ * directory it is written to resolve them in (see `siteBase`), so a caller that
+ * lets a site DECLARE what it runs can check the declaration against the site's own
+ * text — and against the right file, which is what the base decides.
  *
  * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
  * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
@@ -1029,6 +1185,7 @@ export function unfollowableLoads(source) {
 			kind,
 			detail,
 			literals: siteLiterals(node),
+			base: siteBase(node),
 		});
 
 	/**

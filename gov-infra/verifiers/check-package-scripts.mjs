@@ -50,6 +50,16 @@
  * The load's KIND now travels with its specifier and `resolveRelativeImport`
  * resolves by the rules of the loader that opens it.
  *
+ * A base is the other half of that same sentence, and it is where this walk was
+ * wrong for the third time. Which file `'scripts/lib/helper.mjs'` names depends on
+ * the DIRECTORY it is resolved in, an execution site may write its own with `cwd`,
+ * and this walk resolved every literal against the repository root — so
+ * `spawnSync(node, ['scripts/lib/helper.mjs'], { cwd: 'sub' })` ran an unpinned
+ * `sub/scripts/lib/helper.mjs` while its disclosure bound the root-spelled file,
+ * which is real, pinned, hashed and never executed. `siteRepositoryTargets`
+ * resolves in the base the site writes, in the frame it writes it, and reports
+ * rather than guesses where that base cannot be read.
+ *
  * What no static reading can follow is a load whose TARGET is computed, or whose
  * LOADER is a construction the reading does not model — an aliased `require`,
  * `module.require`, `eval`, `new Function`, a `node:vm` import. This control says
@@ -223,6 +233,20 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
  * them to be exactly what `binds` names. A file the site runs and the declaration
  * misses is a finding, and a file the declaration names and the site does not run
  * is a finding too.
+ *
+ * AND WHERE THAT CLAIM IS RESOLVED, which is round 10 and the same defect in the
+ * last of the three places a path gets decided. The reading reported the literals
+ * and this control resolved them — against the repository root, always, because
+ * that is where a guarded command starts. An execution site may write its own
+ * working directory, and one that did ran `sub/scripts/lib/helper.mjs` while its
+ * declaration bound the root-spelled `scripts/lib/helper.mjs`: a real file, pinned,
+ * hashed, walked, and never executed. The check held the declaration to the site's
+ * text and then resolved that text in the wrong directory, which is a decoy the
+ * contract cannot be blamed for. So the site's own `cwd` is part of the reading now
+ * (`siteBase` there, `siteRepositoryTargets` here), and a `cwd` no static read can
+ * name leaves the site's targets UNDETERMINED — reported, because resolving them
+ * against the root anyway is the guess that pinned the decoy, and dropping them
+ * silently would retire a pin this control demanded yesterday.
  *
  * WHAT A `binds` CANNOT DO, stated because the rule above has an edge and silence
  * about it would be the same defect one level up: it cannot excuse a target no
@@ -613,19 +637,35 @@ function resolveRelativeImport(fromFile, specifier, kind) {
 }
 
 /**
- * The repository files a disclosed site is WRITTEN to run: each literal at the
- * call, resolved against every base a site can plausibly mean it in, keeping the
- * ones that name a file inside this tree.
+ * The repository files a disclosed site is WRITTEN to run: each word at the call,
+ * resolved in the bases that site names, keeping the ones that name a file inside
+ * this tree — and, separately, the ones whose file cannot be determined at all.
  *
- * TWO BASES, because a path argument is written in two frames and the text does
- * not say which. A `spawn` argument is resolved by the child against its `cwd`,
- * which for every guarded command is the repository root — `spawnSync(node,
- * ['scripts/audit-renderer-authority.mjs'])`. A path a file computes for itself is
- * resolved against the file — `new URL('../gov-infra/verifiers/x.mjs',
- * import.meta.url)`, `join(__dirname, 'lib/helper.mjs')`. Asking both and keeping
- * every hit is deliberately over-inclusive: the cost of a wrong hit is that a
- * declaration has to name a file its site mentions, and the cost of a miss is the
- * decoy this check exists to catch. It fails toward naming more.
+ * THE BASE IS PART OF THE SITE, which is round 10 and the third arrival of round
+ * 7's lesson. This used to ask two fixed bases: the repository root, because a
+ * `spawn` argument is resolved by the child against its working directory and for
+ * a guarded command that is the root; and the file, because a path a file computes
+ * for itself is written in its own frame — `new URL('../gov-infra/verifiers/x.mjs',
+ * import.meta.url)`, `join(__dirname, 'lib/helper.mjs')`. An explicit `cwd` moves
+ * the first of those, and nothing here read it: `spawnSync(node,
+ * ['scripts/lib/helper.mjs'], { cwd: 'sub' })` ran `sub/scripts/lib/helper.mjs`
+ * while its disclosure bound the root-spelled `scripts/lib/helper.mjs` — a real
+ * file, pinned, hashed, and never executed — and rewriting the actual child changed
+ * the run's output with this control green. A pin on a file that does not run is
+ * round 7's decoy; the resolver was fixed then, the contract was held to the site
+ * in round 9, and this is the same defect in the third of the three places a path
+ * gets decided. `siteBase` in the shared reader answers which directory the site
+ * writes, in which frame; the FILE frame is unmoved by any `cwd`, because the
+ * parent computes it before the child exists.
+ *
+ * WHAT IS NOT DETERMINED IS REPORTED, NOT GUESSED. Where the `cwd` is written but
+ * unreadable — a variable, a call, an options bag this reading cannot open — the
+ * process frame has no value, so a word that names a repository file under the root
+ * MIGHT be that file or might be another one in a directory computed at run time.
+ * Answering the first is the guess that produced the decoy, and answering nothing
+ * silently drops a target this control demanded a pin for yesterday. So it is
+ * returned as undetermined and the caller reports it, with the repair being to
+ * spell the `cwd` at the call or to write the path in the file's own frame.
  *
  * A path that leaves the tree is dropped, and so is one under a declared unpinned
  * root — not because either is safe, but because neither is something `binds` may
@@ -635,15 +675,52 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * a rule with no repair, and a rule with no repair is how a gate gets weakened.
  * Those sites are carried by the disclosure's reason, which is what it is for.
  */
-function siteRepositoryTargets(file, literals) {
-	const found = new Set();
-	for (const literal of literals)
-		for (const base of [root, resolve(root, dirname(file))]) {
-			const candidate = repoRelative(resolve(base, literal));
-			if (candidate.startsWith('..') || underUnpinnedRoot(candidate)) continue;
-			if (isFile(resolve(root, candidate))) found.add(candidate);
+function siteRepositoryTargets(file, literals, base) {
+	const words = new Set(literals);
+	const fileFrame = resolve(root, dirname(file));
+	const processFrame =
+		base.from === 'file'
+			? resolve(fileFrame, base.path)
+			: base.from === 'process'
+				? resolve(root, base.path)
+				: null;
+
+	const bases = [fileFrame, ...(processFrame ? [processFrame] : [])];
+
+	const repositoryFile = (from, word) => {
+		const candidate = repoRelative(resolve(from, word));
+		if (candidate.startsWith('..') || underUnpinnedRoot(candidate)) return null;
+		return isFile(resolve(root, candidate)) ? candidate : null;
+	};
+
+	const runs = new Set();
+	for (const named of bases)
+		for (const word of words) {
+			const found = repositoryFile(named, word);
+			if (found) runs.add(found);
 		}
-	return found;
+
+	// Only where the base is unreadable: a word that names a file under the root
+	// this site may or may not be resolving in, and a word shaped like a path that
+	// names no file in any frame this reading DID determine — which is what a path
+	// under a run-time directory looks like from here. A word with no separator and
+	// no extension (`utf8`, `--`, `init`) is not one, and an absolute path is not
+	// one either, because no working directory moves it.
+	const undetermined = new Set();
+	if (!processFrame)
+		for (const word of words) {
+			const named = repositoryFile(root, word);
+			if (named && !runs.has(named)) undetermined.add(named);
+			else if (
+				!named &&
+				!word.startsWith('/') &&
+				(word.includes('/') || /\.[A-Za-z0-9]+$/.test(word)) &&
+				!bases.some((from) => repositoryFile(from, word))
+			)
+				undetermined.add(word);
+		}
+
+	return { runs, undetermined };
 }
 
 /**
@@ -727,7 +804,7 @@ function executableClosure() {
 			continue;
 		}
 
-		for (const { expression, line, kind, detail, literals } of unfollowable) {
+		for (const { expression, line, kind, detail, literals, base } of unfollowable) {
 			const declaration = disclosedLoads.take(path, line, expression);
 			if (declaration.status === 'declared') {
 				// The reading has to still be answering the question this check asks.
@@ -740,6 +817,24 @@ function executableClosure() {
 						`${path}:${line}: the reading no longer reports the literals ${expression} is written to ` +
 							'hand its facility, so a `binds` here cannot be checked against its own site; this ' +
 							'control cannot tell a bound target from a declared one until that is re-bound'
+					);
+					continue;
+				}
+				// The base is the other half of the same reading, and it decides WHICH
+				// file a literal names. A release that stopped reporting it would put
+				// every literal back in the repository root by default — the guess that
+				// pinned a decoy while its site ran something else — and it would do it
+				// silently, so its absence is a finding rather than a default.
+				if (
+					!base ||
+					typeof base !== 'object' ||
+					!['process', 'file', 'unknown'].includes(base.from) ||
+					(base.from !== 'unknown' && typeof base.path !== 'string')
+				) {
+					findings.push(
+						`${path}:${line}: the reading no longer reports the working directory ${expression} is ` +
+							'written to run in, so the literals at this site cannot be resolved to the files they ' +
+							'name; this control cannot tell a bound target from a decoy until that is re-bound'
 					);
 					continue;
 				}
@@ -764,7 +859,18 @@ function executableClosure() {
 				// list exists to close, wearing a declaration; a file the declaration
 				// binds and the site is not written to run is a pin pointed away from
 				// the thing that runs — round 7's decoy, moved into the contract.
-				const runs = siteRepositoryTargets(path, literals);
+				// Which files those are is decided by the base the site writes, so a
+				// target it names in a directory this reading cannot read is neither:
+				// it is reported as undetermined rather than resolved by guess.
+				const { runs, undetermined } = siteRepositoryTargets(path, literals, base);
+				for (const target of undetermined)
+					findings.push(
+						`${path}:${line}: ${expression} hands ${JSON.stringify(target)} to a child whose working ` +
+							'directory this reading cannot determine, so which file it opens is a guess, and a ' +
+							'`binds` here would pin whichever file this walk guessed at; write the cwd as a ' +
+							"literal at the call, or write the path in this file's own frame — " +
+							'`new URL(…, import.meta.url)` — which no working directory moves'
+					);
 				for (const target of runs)
 					if (!bound.has(target))
 						findings.push(
