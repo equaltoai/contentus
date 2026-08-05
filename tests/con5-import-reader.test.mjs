@@ -2566,7 +2566,13 @@ test('an option spelled with an equals names the same file the spaced form does'
 			contract: { unfollowable_loads_disclosed: [declaration] },
 		});
 		assert.equal(silent.status, 1, `${what} loads a repository file and must name it`);
-		assert.match(silent.output, new RegExp(`runs ${target.replace(/\./g, '\\.')}, which its`));
+		// A substring rather than a built pattern: the target is a path, and escaping
+		// one metacharacter of it into a regex leaves the rest — which is a partial
+		// escape rather than a match, and the assertion needs no pattern at all.
+		assert.ok(
+			silent.output.includes(`runs ${target}, which its`),
+			`${what} must name the file it loads\n${silent.output}`
+		);
 
 		const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [target] }] };
 		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', target], contract: named });
