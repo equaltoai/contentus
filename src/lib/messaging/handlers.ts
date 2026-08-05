@@ -12,10 +12,10 @@
  * refused here:
  *
  *   - Installing Apollo adds a second GraphQL client to a client that posts one
- *     document per action, and pulls `graphql-ws`, which MOVES the SEC-2
- *     advisory path pinned in
- *     `gov-infra/planning/contentus-disclosed-upstream-findings.json`. M4
- *     weighed that exact trade and declined it.
+ *     document per action, and pulls `graphql-ws` with it. M4 weighed that exact
+ *     trade and declined it. (Part of M4's cost then was that it moved a pinned
+ *     SEC-2 advisory path; that advisory retired at the greater-v0.13.0 bump and
+ *     the disclosed set is now empty. The second client is the cost that stands.)
  *   - Declaring ambient stubs for them would be a fake contract state.
  *   - Suppressing the errors would make contentus's own typecheck gate report
  *     a colour it had not earned.
@@ -59,7 +59,7 @@ import {
 	type MessagePage,
 } from './contract.ts';
 import { createRereadQueue, REREAD_CONCURRENCY } from './reread-queue.ts';
-import { createSessionScope } from './session-scope.ts';
+import { createSessionScope } from '../auth/session-scope.ts';
 
 /**
  * How many conversations a folder read asks for.

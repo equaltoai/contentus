@@ -11,7 +11,7 @@
 - owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 14
+- Contentus-owned source roots scanned: 15
 - Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
 
 Renderer-authority audit: clean.

@@ -14,6 +14,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import {
@@ -161,27 +162,21 @@ test('the Federated tab reads PUBLIC, from the same route', async () => {
 });
 
 /* ---------------------------------------------------------------------------
- * The pinned upstream gap
+ * The gap that was pinned here, now closed
  * ------------------------------------------------------------------------ */
 
-test('PINNED GAP: the vendored ContentRenderer emits no status body during SSR', async () => {
-	// `ContentRenderer.svelte` writes its sanitized output through a Svelte
-	// ACTION (`use:setHtml` → `node.innerHTML`). Actions do not run during SSR,
-	// so the server emits `<div class="content"></div>` and the body appears
-	// only at hydration. Every social status path reaches it — `StatusCard` and
-	// `Status.Content` both — while the blog face's `Article.Content` uses
-	// `{@html}` and renders correctly, so this is one component's defect rather
-	// than a framework limit.
+test('status bodies server-render, which is what the pinned gap used to deny', async () => {
+	// THIS PROBE USED TO ASSERT THE OPPOSITE. `ContentRenderer` wrote its
+	// sanitized output through a Svelte ACTION (`use:setHtml` → `node.innerHTML`),
+	// actions do not run during SSR, and so the server emitted an empty
+	// `<div class="content">` and the text appeared only at hydration. The probe
+	// pinned that, and said in as many words that failing was the good news and
+	// the forcing function.
 	//
-	// Contentus cannot fix it here: vendored source is never hand-edited, and an
-	// `{@html}` in contentus-owned source is what check 3 of the
-	// renderer-authority audit exists to forbid. Weakening that gate to work
-	// around an upstream bug is the repair that is never correct.
-	//
-	// So the gap is PINNED rather than hidden. This probe fails the day upstream
-	// fixes it, which is the forcing function to delete this test, restore the
-	// body assertions above, and drop the `<noscript>` notice from the route.
-	// Routed as equaltoai/greater-components; see docs/consumption/timeline-contract.md.
+	// greater-v0.13.0 fixed it: the component renders `{@html processedContent}`
+	// declaratively, so the body is in the server's paint. The probe is inverted
+	// rather than deleted — the property a no-script reader depends on is now
+	// worth protecting in the direction it actually matters.
 	const handler = await loadHandler();
 	const { value } = await withStubbedGraphql(
 		({ operation }) =>
@@ -191,53 +186,35 @@ test('PINNED GAP: the vendored ContentRenderer emits no status body during SSR',
 		() => renderRoute(handler, route('timelines-instance'))
 	);
 
+	assert.ok(value.html.includes('class="status-content"'), 'the body container renders');
 	assert.ok(
-		value.html.includes('class="status-content"'),
-		'the body CONTAINER renders; only its contents are missing'
+		value.html.includes('BODY-MARKER-TEXT'),
+		'and the body itself is in the server’s paint, with no script at all'
 	);
+	// The markup survives as MARKUP rather than arriving escaped into literal
+	// text — the second half of the same upstream fix (#926).
 	assert.ok(
-		!value.html.includes('BODY-MARKER-TEXT'),
-		'GOOD NEWS IF THIS FAILS: upstream now server-renders status bodies. ' +
-			'Delete this probe, restore the body assertions in the reads above, and remove ' +
-			'the no-script notice from src/lib/routes/Timelines.svelte.'
+		!value.html.includes('&lt;p&gt;BODY-MARKER-TEXT'),
+		'sanitized markup must not be escaped into literal text'
 	);
 });
 
-test('the surface discloses BOTH ContentRenderer gaps, to every reader', async () => {
-	// Two different gaps and two different audiences, and the first version of
-	// this disclosure covered only one of each.
+test('the disclosure left with the fault, rather than outliving it', () => {
+	// The feed used to carry two disclosures — an unconditional one about
+	// corrupted post text, and a `<noscript>` one about text that never
+	// server-rendered. greater-v0.13.0 closed both faults, and a disclosure that
+	// outlives the fault it discloses teaches readers to ignore disclosures.
 	//
-	//   1. Nothing server-renders, so a no-script reader gets cards with no text
-	//      at all. That is the `<noscript>` half.
-	//   2. What hydration fills in is ESCAPED — see
-	//      tests/vendored-content-renderer.test.mjs — so the reader WITH
-	//      JavaScript, the ordinary case, sees `<p>` printed in their posts. That
-	//      reader never sees a `<noscript>` block, so the disclosure has to render
-	//      unconditionally, which is what `.contentus-feed__gap` is.
-	const handler = await loadHandler();
-	const rendered = await renderRoute(handler, route('timelines-instance'));
+	// This is a source check rather than a render check on purpose: the claim is
+	// that the component no longer OWNS the text, not merely that one route did
+	// not happen to show it.
+	const source = readFileSync(
+		new URL('../src/lib/timelines/TimelineFeed.svelte', import.meta.url),
+		'utf8'
+	);
 
-	assert.match(rendered.html, /<noscript>/, 'the no-script half');
-	assert.match(rendered.html, /JavaScript/i);
-
-	assert.match(
-		rendered.html,
-		/class="contentus-feed__gap"/,
-		'the hydrated half must be disclosed to readers who never see a noscript block'
-	);
-	assert.match(
-		rendered.html,
-		/literal text/i,
-		'and it must name what the reader actually sees, not gesture at "a rendering issue"'
-	);
-	// Svelte escapes `<` and leaves `>` alone, so both encodings are accepted —
-	// the claim is that the reader is shown the tag, not how the compiler spelled
-	// it.
-	assert.match(
-		rendered.html,
-		/<code>&lt;p(&gt;|>)<\/code>/,
-		'showing the markup they will find in their posts'
-	);
+	assert.ok(!source.includes('contentus-feed__gap'), 'the hydrated-corruption notice is gone');
+	assert.ok(!source.includes('contentus-feed__noscript'), 'and the no-script notice with it');
 });
 
 test('a profile deep link server-renders the actor card AND their posts', async () => {

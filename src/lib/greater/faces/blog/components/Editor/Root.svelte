@@ -7,8 +7,8 @@ Provides a minimal authoring experience for markdown/HTML drafts with optional a
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
-	import { MarkdownRenderer } from 'src/lib/greater/content';
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { MarkdownRenderer } from '../../../../content';
+	import { sanitizeHtml } from '../../../../utils';
 	import type { DraftData, EditorConfig, EditorContext } from '../../types.js';
 	import { createEditorContext, DEFAULT_EDITOR_CONFIG } from './context.js';
 	import Toolbar from './Toolbar.svelte';

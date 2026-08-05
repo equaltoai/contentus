@@ -15,6 +15,35 @@ the directory as an artifact. There is no second rubric and no alternate refresh
 | CMP-\*, DOC-\*         | verifier                             | planning docs and `DOC-5-parity.log`                      |
 | MAI-4                  | verifier / `check_ci_hook`           | `gov-infra/evidence/MAI-4-output.log`                     |
 
+## What the report is evidence OF
+
+The report carries a `source` block, read before any control runs:
+
+```json
+"source": { "sha": "<40-hex>", "tree": "<40-hex>", "worktree": "clean" }
+```
+
+`sha` is the commit the controls scanned. **A report cannot contain the SHA of
+the commit that carries it** — the gate runs, writes the file, and the file is
+committed afterwards — so in a committed report `sha` names that commit's
+**parent**. That is the whole binding and it is checkable:
+
+```
+git log -1 --format=%P <the commit that added the report>   # must equal source.sha
+```
+
+A timestamp binds nothing, which is what made "evidence recorded at its own HEAD"
+an unverifiable claim: it says when a file was written, not what was scanned to
+write it. `tree` is the tree object of that commit, so a report can be matched to
+a tree even where the commit is unreachable. `worktree` is `clean` or `modified`
+depending on whether anything OUTSIDE `gov-infra/evidence/` was uncommitted when
+the run started — a `modified` run is a real run, and saying so is the difference
+between evidence for a commit and evidence for somebody's working copy. All three
+are `null` / `unknown` outside a git checkout rather than guessed.
+
+CI runs the verifier at the pull-request head, so the artifact it uploads names
+that head directly and no parent relationship is involved.
+
 ## Two pins, two purposes
 
 `contentus-disclosed-upstream-findings.json` records upstream state this repository

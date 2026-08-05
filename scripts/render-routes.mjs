@@ -94,6 +94,22 @@ export const AUDIT_ROUTES = [
 	// two answers and is asserted as such in `tests/ssr-messages.test.mjs`
 	// rather than left to whichever branch happened to win.
 	{ name: 'messages-no-id', path: '/l/messages/', expectStatus: 200 },
+	// Face 6. The roster is an anonymous-safe read, so the server fetches it and
+	// the probe exercises a real render rather than a signed-out placeholder. The
+	// filtered variant is audited separately because its controls, its empty
+	// state and its paging link all differ from the unfiltered one, and CSP
+	// findings hide in exactly that kind of conditional markup.
+	{ name: 'agents', path: '/l/agents', expectStatus: 200 },
+	{
+		name: 'agents-filtered',
+		path: '/l/agents?type=CURATOR&q=weather&verified=true',
+		expectStatus: 200,
+	},
+	// One agent, deep-linked cold. Anonymous like the roster, and the surface
+	// where the published MCP contract has to appear in the SERVER's paint —
+	// `mcpAccess` is not redacted for non-owners, so a no-script reader gets every
+	// address. The live probes against those addresses are the client's.
+	{ name: 'agent-detail', path: '/l/agents/weatherbot', expectStatus: 200 },
 	{ name: 'profile', path: '/l/profiles/ada', expectStatus: 200 },
 	{ name: 'auth-callback', path: '/l/auth/callback', expectStatus: 200 },
 	{ name: 'not-found', path: '/l/no-such-surface', expectStatus: 404 },

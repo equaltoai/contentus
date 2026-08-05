@@ -2,8 +2,8 @@
   Manage push notification subscription
 -->
 <script lang="ts">
-	import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
-	import { SettingsSection, Button } from 'src/lib/greater/primitives';
+	import type { LesserGraphQLAdapter } from '../../greater/adapters';
+	import { SettingsSection, Button } from '../../greater/primitives';
 
 	interface Props {
 		adapter: LesserGraphQLAdapter;
@@ -73,7 +73,7 @@
 
 <style>
 	.error {
-		color: var(--gr-color-error);
+		color: var(--gr-semantic-action-error-default);
 		margin-bottom: 1rem;
 	}
 </style>

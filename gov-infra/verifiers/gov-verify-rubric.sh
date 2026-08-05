@@ -30,11 +30,39 @@ PIN="$PLAN/contentus-disclosed-upstream-findings.json"
 # that happens to exit 3 is still a FAIL.
 BLOCKED_RC=3
 BLOCKED_SENTINEL='GOV-BLOCKED:'
+# WHICH SOURCE THIS RUN IS EVIDENCE OF, read BEFORE any control runs and before
+# the evidence directory is touched, so it names the tree the controls actually
+# scanned rather than the one they left behind.
+#
+# A REPORT CANNOT CONTAIN THE SHA OF THE COMMIT THAT CARRIES IT. The gate runs,
+# writes this file, and the file is committed afterwards — so a committed report
+# names the PARENT of its own commit. That is the honest binding and it is the
+# one recorded here: `source.sha` is checkable against
+# `git log -1 --format=%P <the commit that added this report>`. A timestamp binds
+# nothing, which is what made "evidence at its own HEAD" an unverifiable claim.
+#
+# `worktree` reports whether anything OTHER than evidence was uncommitted when
+# the run started. A `modified` run is still a real run, and saying so is the
+# difference between evidence for a commit and evidence for somebody's desk.
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  SOURCE_SHA="$(git rev-parse HEAD 2>/dev/null || echo '')"
+  SOURCE_TREE="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || echo '')"
+  if [[ -n "$(git status --porcelain -- . ':(exclude)gov-infra/evidence' 2>/dev/null)" ]]; then
+    SOURCE_WORKTREE=modified
+  else
+    SOURCE_WORKTREE=clean
+  fi
+else
+  SOURCE_SHA='' SOURCE_TREE='' SOURCE_WORKTREE=unknown
+fi
 mkdir -p "$EVIDENCE" "$TOOLS/bin"
 rm -f "$REPORT" "$EVIDENCE"/*-output.log "$EVIDENCE/DOC-5-parity.log"
 declare -a RESULTS=()
 pass=0 fail=0 blocked=0
 escape() { node -p 'JSON.stringify(process.argv[1])' "$1"; }
+# A value the run could not read is `null`, never an empty string: "" is a value
+# and would read as "the gate ran against nothing".
+escape_or_null() { [[ -z "$1" ]] && printf 'null' || escape "$1"; }
 record() { local id=$1 category=$2 status=$3 message=$4 evidence=$5; case "$status" in PASS) ((pass++)) || true;; FAIL) ((fail++)) || true;; BLOCKED) ((blocked++)) || true;; *) exit 2;; esac; RESULTS+=("{\"id\":$(escape "$id"),\"category\":$(escape "$category"),\"status\":$(escape "$status"),\"message\":$(escape "$message"),\"evidencePath\":$(escape "$evidence")}"); }
 run() {
   local id=$1 category=$2 command=$3 out="$EVIDENCE/$1-output.log"
@@ -180,8 +208,9 @@ run DOC-4 Docs "test -s README.md && test -s $PIN && ! grep -R -q '{{[A-Z_][A-Z_
 
 status=PASS; [[ $fail -gt 0 ]] && status=FAIL; [[ $blocked -gt 0 && $fail -eq 0 ]] && status=BLOCKED
 printf -v joined '%s,' "${RESULTS[@]}"; joined="[${joined%,}]"
+source_note='The commit this run scanned, read before any control ran. Evidence is committed after the run, so in a committed report this names the PARENT of the commit carrying it, never that commit itself; check it with git log -1 --format=%P on the evidence commit. worktree reports whether anything outside gov-infra/evidence was uncommitted when the run started.'
 cat > "$REPORT" <<EOF2
-{"\$schema":"https://gov.pai.dev/schemas/gov-rubric-report.schema.json","schemaVersion":1,"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pack":{"version":"bc41187efb6f5b3c3bfb4d9295836d4e071941d7","digest":"a613e19a4367d98a8f4b45f7c19c11881d21491eb55b8409446ca4a10d4e5cd7"},"project":{"name":"contentus","slug":"contentus"},"summary":{"status":"$status","pass":$pass,"fail":$fail,"blocked":$blocked},"results":$joined}
+{"\$schema":"https://gov.pai.dev/schemas/gov-rubric-report.schema.json","schemaVersion":1,"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","source":{"sha":$(escape_or_null "$SOURCE_SHA"),"tree":$(escape_or_null "$SOURCE_TREE"),"worktree":"$SOURCE_WORKTREE","note":$(escape "$source_note")},"pack":{"version":"bc41187efb6f5b3c3bfb4d9295836d4e071941d7","digest":"a613e19a4367d98a8f4b45f7c19c11881d21491eb55b8409446ca4a10d4e5cd7"},"project":{"name":"contentus","slug":"contentus"},"summary":{"status":"$status","pass":$pass,"fail":$fail,"blocked":$blocked},"results":$joined}
 EOF2
 # Validate the document, then rewrite it indented. Evidence is committed and this
 # repository lints everything it commits, so a report that is only valid JSON puts

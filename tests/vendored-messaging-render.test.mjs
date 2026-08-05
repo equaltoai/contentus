@@ -1,40 +1,43 @@
 /**
- * The vendored messaging suite's rendering gap, pinned.
+ * The vendored messaging suite's rendering, pinned — and the disclosure it once
+ * required, withdrawn.
  *
- * THE DEFECT. lesser's `Object.content` is server-sanitized HTML — that is the
- * renderer-authority contract, and every other contentus surface treats it as
- * such. greater's `Messages.Message` renders it with `{message.content}`,
- * Svelte's ESCAPING interpolation, so a message body arrives in the DOM as its
- * own markup shown as literal text:
+ * WHAT THE DEFECT WAS. lesser's `Object.content` is server-sanitized HTML — that
+ * is the renderer-authority contract, and every other contentus surface treats
+ * it as such. Both `Messages.Message` and `Messages.Conversations` rendered it
+ * with `{message.content}`, Svelte's ESCAPING interpolation, so a body arrived
+ * in the DOM as its own markup shown as literal text. contentus could not repair
+ * it — vendored source is never hand-edited, an `{@html}` in owned source is what
+ * check 3 of `audit-renderer-authority.mjs` forbids — so it was disclosed on the
+ * surface and routed upstream.
  *
- *   lesser sends  <p>Hello <strong>world</strong></p>
- *   reader sees   <p>Hello <strong>world</strong></p>   (as text)
+ * BOTH HALVES ARE FIXED AT greater-v0.13.0, and by two different correct
+ * answers:
  *
- * `Messages.Conversations` does the same to the list preview. Same family as
- * the `ContentRenderer` gap M4 pinned, in a different component.
+ *   - `Message.svelte` sanitizes with its own `sanitizeMessageHtml` and renders
+ *     `{@html sanitizedMessageContent}`. Thread bodies are markup again.
+ *   - `Conversations.svelte` runs the LIST preview through
+ *     `sanitizeMessagePreview`, which returns markup-free, entity-decoded,
+ *     whitespace-collapsed, length-capped TEXT. The escaping interpolation
+ *     stays, and is right: escaping text yields text.
  *
- * WHY CONTENTUS DOES NOT FIX IT. Vendored source is never hand-edited; an
- * `{@html}` in owned source is what check 3 of `audit-renderer-authority.mjs`
- * forbids; and the component exposes no prop, snippet or child that changes the
- * sink. So the gap is DISCLOSED in the surface (`MessagingSurface.svelte`
- * renders the notice unconditionally) and routed upstream.
+ * WHY THE SECOND HALF SURVIVED A ROUND OF REVIEW AS A "GAP". The old probe
+ * asserted the compiled sink — `$.escape(getMessagePreview(...))` — and then
+ * demonstrated the consequence by escaping the RAW sanitized body. That is not
+ * what the component does. The sink was real and the input was imagined, so the
+ * probe went on agreeing with a disclosure whose defect had gone. A test that
+ * models one end of a pipeline proves nothing about the other end.
  *
- * WHY THIS PROBE IS SHAPED THE WAY IT IS. M4 cost a review round on exactly
- * this: a probe that REPRODUCES the pipeline in test code agrees with itself no
- * matter what the vendored file says, so upstream could fix the component and
- * the probe would stay green while the disclosure went on claiming a defect
- * that no longer existed. So this compiles the REAL vendored component with the
- * REAL Svelte compiler and asserts on the sink the compiler emitted, and runs
- * the REAL `escape` from `svelte/internal/server` to show the consequence.
- *
- * EVERY ASSERTION IS INVERTED — it describes the BROKEN behaviour and fails the
- * day upstream fixes it. That is deliberate. When it goes red, the fix is to
- * delete the disclosure in `MessagingSurface.svelte`, the note in
- * `docs/consumption/messaging-contract.md`, and this file.
+ * SO THE PIPELINE IS DRIVEN, END TO END: the REAL vendored components compiled
+ * by the REAL Svelte compiler, the REAL `sanitizeMessagePreview` they call, and
+ * the REAL `escape` from `svelte/internal/server` applied to its result. The
+ * assertions describe the WORKING behaviour and go red if either sink regresses
+ * — which is also the day a disclosure would be owed again.
  */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
 import { test } from 'node:test';
 
 import { compile } from 'svelte/compiler';
@@ -49,6 +52,40 @@ import { escape } from 'svelte/internal/server';
 // and runs the real audit over it.
 import { stripComments } from '../scripts/lib/strip-comments.mjs';
 
+/**
+ * Resolve the vendored barrel the way the build does, so Node can load the REAL
+ * sanitizer rather than a model of it.
+ *
+ * `src/lib/components/messaging/sanitize.ts` imports exactly one name —
+ * `sanitizeHtml` — from `../../greater/utils`. That barrel is a directory (Node
+ * does not resolve those), and it also re-exports a `.svelte` component and the
+ * dormant `html-to-markdown` branch whose Markdown dependencies contentus
+ * deliberately does not install; `vite.config.ts` aliases those to a throwing
+ * stub for the same reason. Node has neither behaviour, so this hook points the
+ * barrel at the real module that owns the export this pipeline uses.
+ *
+ * NOTHING IS STUBBED AND NOTHING IS REIMPLEMENTED. `sanitizeHtml` is the
+ * vendored implementation loaded from the vendored file; the hook only supplies
+ * the resolution vite would have. The alternative — asserting on the sanitizer's
+ * source text — is precisely the "model one end of the pipeline" mistake this
+ * file exists to stop repeating.
+ */
+registerHooks({
+	resolve(specifier, context, nextResolve) {
+		if (specifier === '../../greater/utils') {
+			return {
+				url: new URL('../src/lib/greater/utils/sanitizeHtml.ts', import.meta.url).href,
+				shortCircuit: true,
+			};
+		}
+		return nextResolve(specifier, context);
+	},
+});
+
+// Dynamic, because the hook above has to be registered before the module graph
+// beneath it is resolved, and static imports are hoisted past it.
+const { sanitizeMessagePreview } = await import('../src/lib/components/messaging/sanitize.ts');
+
 /** Compile a vendored component exactly as the build does for the server pass. */
 function compileServer(path) {
 	const source = readFileSync(path, 'utf8');
@@ -61,67 +98,93 @@ const CONVERSATIONS = 'src/lib/components/messaging/Conversations.svelte';
 /** A body in the shape lesser's sanitizer actually emits. */
 const SANITIZED = '<p>Hello <strong>world</strong></p>';
 
-test('the vendored message body is emitted through the escaping sink', () => {
+test('the message body is no longer escaped — the half upstream fixed', () => {
+	// THIS PROBE USED TO ASSERT THE OPPOSITE, and its failure message said that
+	// failing meant upstream had fixed it. greater-v0.13.0 did: `Message.svelte`
+	// sanitizes through its own `sanitize.ts` and renders `{@html}`, so the body
+	// reaches the reader as markup.
+	//
+	// Inverted rather than deleted. The compiler's own output is still what is
+	// read — `{expr}` compiles to `$.escape(expr)` and `{@html expr}` to a raw
+	// push — so a regression to the escaping sink fails here rather than
+	// reaching readers as literal `<p>`.
 	const code = compileServer(MESSAGE);
 
-	// The compiler's own output, not a reading of the template. `{expr}` compiles
-	// to `$.escape(expr)`; `{@html expr}` compiles to a raw push. Finding the
-	// former around `message.content` IS the defect.
-	const contentDiv = code.match(/message__content"[^`]*?\$\.escape\(([^)]*)\)/);
-	assert.ok(
-		contentDiv,
-		'the message body is no longer emitted through $.escape — upstream may have fixed this; ' +
-			'delete the disclosure in MessagingSurface.svelte and this file'
+	const escapedBody = code.match(
+		/message__content"[^`]*?\$\.escape\(([^)]*message\.content[^)]*)\)/
 	);
-	assert.match(
-		contentDiv[1],
-		/message\.content/,
-		'the escaped expression next to message__content is not the body'
-	);
+	assert.equal(escapedBody, null, 'the body must not be emitted through the escaping sink');
 
-	// And the other half of the claim: there is no raw sink anywhere in the
-	// component, so no branch renders the body correctly.
-	assert.ok(
-		!/\$\.html\(/.test(code),
-		'the component now has a raw HTML sink — check whether the body path uses it'
+	const source = readFileSync(MESSAGE, 'utf8');
+	assert.match(source, /\{@html sanitizedMessageContent\}/, 'it is rendered declaratively');
+	assert.match(
+		source,
+		/sanitizeMessageHtml\(message\.content\)/,
+		'through the component’s own sanitizer, which is what earns the raw sink'
 	);
 });
 
-test('the vendored conversation preview escapes the body too', () => {
+test('the conversation preview reaches the escaping sink as TEXT, not as markup', () => {
 	const code = compileServer(CONVERSATIONS);
+	const source = readFileSync(CONVERSATIONS, 'utf8');
 
-	// The list preview reads `message.content` through `getMessagePreview`, which
-	// returns it unchanged, and renders it with `{...}`. Pinned separately
-	// because it is a second surface a reader meets before opening anything —
-	// M4's lesson that a gap must be pinned on EVERY surface it reaches, not the
-	// first one found.
+	// The compiled sink is unchanged — the preview is still `$.escape(...)` — but
+	// what reaches it is not. THIS is the half the old probe got wrong: it
+	// asserted the escape call and inferred the consequence, when the consequence
+	// depends entirely on what `getMessagePreview` returns.
 	assert.ok(
 		/\$\.escape\(getMessagePreview\(/.test(code),
-		'the conversation preview no longer escapes the body — re-check the disclosure'
+		'the preview is still rendered through the escaping interpolation'
 	);
-	assert.ok(!/\$\.html\(/.test(code), 'the conversation list now has a raw HTML sink');
+	assert.ok(
+		!/\$\.html\(/.test(code),
+		'and the list has no raw HTML sink, which is correct for text'
+	);
+
+	// And it is markup-free by the time it gets there, because the component runs
+	// it through its own sanitizer first.
+	assert.match(
+		source,
+		/return sanitizeMessagePreview\(message\.content, 200\)/,
+		'the preview must be extracted by the component’s sanitizer, not interpolated raw'
+	);
 });
 
-test('escaping a sanitized body produces literal markup for the reader', () => {
-	// The real `escape` from Svelte's server runtime — the exact function the
-	// compiled component calls. This is the consequence of the two assertions
-	// above, demonstrated rather than described.
-	const rendered = escape(SANITIZED);
+test('the real preview sanitizer turns a sanitized body into readable text', () => {
+	// THE PIPELINE, DRIVEN. Not `escape(SANITIZED)` — that was the old probe's
+	// mistake: it escaped the RAW body, which is not what the component does, and
+	// then reported the literal-markup output as the reader's screen.
+	//
+	// This runs the REAL `sanitizeMessagePreview` the REAL component calls, then
+	// the REAL `escape` from Svelte's server runtime that the compiled template
+	// applies to its result. What comes out is what a reader sees.
+	const preview = sanitizeMessagePreview(SANITIZED, 200);
+	const rendered = escape(preview);
 
-	// Svelte escapes `<` and `&` and leaves `>` alone — that is enough to stop an
-	// element being parsed, which is why the body becomes visible text. The exact
-	// output is asserted rather than a paraphrase of it, so a change in Svelte's
-	// escaping is a red probe rather than a silently different screen.
+	assert.equal(preview, 'Hello world', 'the sanitizer extracts text, tags and all');
+	assert.equal(rendered, 'Hello world', 'and escaping text is a no-op — no markup is shown');
+
+	// The specific thing the withdrawn disclosure claimed a reader would see.
+	assert.ok(!rendered.includes('&lt;'), 'no escaped angle bracket reaches the reader');
+	assert.ok(!rendered.includes('<p>'), 'and no element is produced from a preview line either');
+});
+
+test('the preview sanitizer decodes, collapses and caps rather than truncating markup', () => {
+	// The properties that make "text by design" a real answer rather than a
+	// downgrade, each driven through the real function.
 	assert.equal(
-		rendered,
-		'&lt;p>Hello &lt;strong>world&lt;/strong>&lt;/p>',
-		'Svelte no longer escapes this input the same way — re-check the disclosure'
+		sanitizeMessagePreview('<p>a &amp; b</p><p>c</p>', 200),
+		'a & b c',
+		'entities are decoded and block boundaries become one space'
+	);
+	assert.equal(
+		sanitizeMessagePreview('<script>alert(1)</script><p>safe</p>', 200),
+		'safe',
+		'the shared allow-list sanitizer runs first, so a script body is not preview text'
 	);
 
-	// What that means on screen: the tags are visible text, and the emphasis
-	// lesser applied is gone.
-	assert.ok(rendered.includes('&lt;strong>'), 'the markup should be shown rather than applied');
-	assert.ok(!rendered.includes('<strong>'), 'no element is produced from the sanitized body');
+	const capped = sanitizeMessagePreview(`<p>${'x'.repeat(400)}</p>`, 200);
+	assert.equal(capped, `${'x'.repeat(200)}...`, 'and the cap counts characters, not bytes or tags');
 });
 
 test('the component exposes no prop that would change the sink', () => {
@@ -141,25 +204,32 @@ test('the component exposes no prop that would change the sink', () => {
 	);
 });
 
-test('contentus discloses the gap unconditionally, not only when a message exists', () => {
+test('the withdrawn disclosure is gone from the surface and from the stylesheet', () => {
+	// It was rendered unconditionally, which was right while it was true. Both
+	// sinks are fixed upstream, so the notice is withdrawn rather than narrowed
+	// again — a disclosure kept past its defect tells a reader their instance is
+	// mangling what was sent when it is not.
+	//
+	// Asserted on both files because a class left behind in the stylesheet is how
+	// a withdrawn notice comes back: the rule survives, someone re-adds the
+	// element to match it, and nothing fails.
 	const surface = readFileSync('src/lib/messaging/MessagingSurface.svelte', 'utf8');
-
-	// A disclosure gated on having messages would never reach the reader whose
-	// inbox is empty today and receives one tomorrow. The notice sits outside
-	// every `{#if}` in the template, which is what "always rendered" means here.
+	const stylesheet = readFileSync('src/lib/brand/messaging.css', 'utf8');
 	const notice = 'contentus-messages__gap';
-	assert.ok(surface.includes(notice), 'the renderer-authority disclosure is missing');
 
-	const template = surface.slice(surface.indexOf('</script>'));
-	const before = template.slice(0, template.indexOf(notice));
-	// Every block opened before the notice must also be closed before it.
-	const opened = (before.match(/\{#(if|each|key)\b/g) ?? []).length;
-	const closed = (before.match(/\{\/(if|each|key)\}/g) ?? []).length;
-	assert.equal(
-		opened,
-		closed,
-		'the disclosure sits inside a conditional — it must render for every reader on this surface'
+	// Comments are stripped with the GATE'S scanner, not with a replace: the
+	// template still EXPLAINS the withdrawal in prose, and a check that failed on
+	// the explanation would be measuring its own documentation.
+	const template = stripComments(surface.slice(surface.indexOf('</script>')));
+	assert.ok(!template.includes(notice), 'the withdrawn disclosure must not still be rendered');
+	assert.ok(
+		!stripComments(stylesheet).includes(notice),
+		'and its stylesheet rule goes with it — a rule left behind is how the notice comes back'
 	);
+
+	// The other disclosures on this surface are untouched: they report transport
+	// state, which is still a thing that happens.
+	assert.ok(template.includes('contentus-messages__realtime'));
 });
 
 test('the comment stripper reads a nested delimiter the way a parser does', () => {

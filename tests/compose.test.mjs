@@ -21,11 +21,9 @@ import {
 import { composeSeed } from '../src/lib/compose/seed.ts';
 import { buildComposeSubmission } from '../src/lib/compose/submission.ts';
 import {
-	droppedFilesMessage,
-	filesDroppedBeforeUpload,
 	NO_CLIENT_SIZE_CEILING,
 	PICKER_MEDIA_TYPES,
-	wholeSelectionDroppedMessage,
+	rejectionMessage,
 } from '../src/lib/compose/media-policy.ts';
 import { loadHandler, renderRoute, withStubbedGraphql } from '../scripts/render-routes.mjs';
 
@@ -649,28 +647,25 @@ test('the attribution panel offers the enum and nothing lesser ignores', () => {
  * Media: the instance decides, and nothing vanishes quietly (F6, F7)
  * ---------------------------------------------------------------------- */
 
-test('files the vendored picker discarded are recovered by identity', () => {
-	// Not by name: two files can share one. The pattern filters the very File
-	// objects it was handed, so identity is exactly the right comparison.
-	const a = { name: 'shot.avif', type: 'image/avif' };
-	const b = { name: 'shot.avif', type: 'image/avif' };
-	const c = { name: 'clip.mkv', type: 'video/x-matroska' };
-
-	assert.deepEqual(filesDroppedBeforeUpload([a, b, c], [a, c]), [b]);
-	assert.deepEqual(filesDroppedBeforeUpload([a], [a]), [], 'nothing dropped, nothing reported');
-	assert.deepEqual(filesDroppedBeforeUpload([], []), []);
-});
-
-test('a discarded file is named to the poster, not to the console', () => {
-	// The defect: `console.warn` and a silent `return false`, so a file simply
-	// never appeared and the instance was never asked.
-	const message = droppedFilesMessage([{ name: 'holiday.heic', type: 'image/heic' }]);
+test('a rejected file is named to the poster, not to the console', () => {
+	// The defect this whole area exists for: `console.warn` and a silent
+	// `return false`, so a file simply never appeared and the instance was never
+	// asked. greater-v0.13.0 reports it instead; contentus turns it into a
+	// sentence.
+	const message = rejectionMessage([{ name: 'holiday.heic', type: 'image/heic' }], {
+		kind: 'unsupported-type',
+		allowedTypes: PICKER_MEDIA_TYPES,
+	});
 
 	assert.ok(message, 'there must be something to show');
 	assert.match(message, /holiday\.heic/, 'by name');
 	assert.match(message, /composer refusing rather than the instance/, 'and by whose refusal it is');
 
-	assert.equal(droppedFilesMessage([]), null, 'and silence when nothing was dropped');
+	assert.equal(
+		rejectionMessage([], { kind: 'unsupported-type', allowedTypes: [] }),
+		null,
+		'and silence when nothing was rejected'
+	);
 });
 
 test('the client imposes no size ceiling of its own', () => {
@@ -700,81 +695,47 @@ test('the picker spans every media category lesser names', () => {
 	assert.ok(PICKER_MEDIA_TYPES.length > 6);
 });
 
-test('a selection the composer discards whole is named, not swallowed', () => {
-	// The residual after the delta fix: `MediaComposer.uploadFiles` returns
-	// before `onUpload` when its filter empties the list, so there is no delta to
-	// compute and the files vanish with nothing on screen. Every file here has a
-	// type the picker cannot offer.
-	const message = wholeSelectionDroppedMessage(
+test('every rejected file is named, however many there are', () => {
+	// The case the old prediction existed for — a selection the gate discards
+	// whole — is now simply a report with several files in it.
+	const message = rejectionMessage(
 		[
 			{ name: 'notes.docx', type: 'application/vnd.openxmlformats' },
 			{ name: 'archive.zip', type: 'application/zip' },
 		],
-		{ allowedTypes: PICKER_MEDIA_TYPES, attachmentCount: 0, maxAttachments: 4 }
+		{ kind: 'unsupported-type', allowedTypes: PICKER_MEDIA_TYPES }
 	);
 
-	assert.ok(message, 'a wholly-discarded selection must say so');
+	assert.ok(message);
 	assert.match(message, /notes\.docx/, 'by name');
 	assert.match(message, /archive\.zip/, 'every one of them');
 	assert.match(message, /composer refusing rather than the instance/, 'and by whose refusal');
 });
 
-test('the whole-selection message stays silent when anything gets through', () => {
-	// Silence is correct here and only here: `onUpload` runs, and its delta names
-	// the discarded file. Speaking as well would report the same file twice.
-	const message = wholeSelectionDroppedMessage(
-		[
-			{ name: 'shot.png', type: 'image/png' },
-			{ name: 'archive.zip', type: 'application/zip' },
-		],
-		{ allowedTypes: PICKER_MEDIA_TYPES, attachmentCount: 0, maxAttachments: 4 }
-	);
-
-	assert.equal(message, null);
-	assert.equal(
-		wholeSelectionDroppedMessage([], {
-			allowedTypes: PICKER_MEDIA_TYPES,
-			attachmentCount: 4,
-			maxAttachments: 4,
-		}),
-		null,
-		'and an empty selection is not an event'
-	);
-});
-
-test('a full composer says so rather than dropping the selection in silence', () => {
-	// The same early return by a different limb: with the maximum already
-	// attached, the vendored filter rejects even files it would otherwise take,
-	// and `onUpload` — where the attachment-count failure is raised — is never
-	// reached to raise it.
-	const message = wholeSelectionDroppedMessage([{ name: 'shot.png', type: 'image/png' }], {
-		allowedTypes: PICKER_MEDIA_TYPES,
-		attachmentCount: 4,
+test('a full composer says so, and names the limit rather than the file', () => {
+	const message = rejectionMessage([{ name: 'shot.png', type: 'image/png' }], {
+		kind: 'max-attachments-reached',
 		maxAttachments: 4,
 	});
 
-	assert.ok(message, 'a full composer must not swallow the selection either');
+	assert.ok(message);
 	assert.match(message, /4 attachments/, 'naming the limit');
-	assert.match(message, /Nothing was sent/, 'and that nothing reached the instance');
-	assert.doesNotMatch(message, /shot\.png/, 'without blaming a file whose type was fine');
+	assert.match(message, /Remove one/, 'and what to do about it');
 });
 
-test('both reasons are told when both apply', () => {
-	// The vendored filter tests type first and returns, so an unusable file is
-	// dropped for its type whatever the cap is doing. Reporting only the cap
-	// would leave the poster converting nothing; reporting only the type would
-	// leave them re-picking a file the cap will refuse again.
-	const message = wholeSelectionDroppedMessage(
-		[
-			{ name: 'shot.png', type: 'image/png' },
-			{ name: 'archive.zip', type: 'application/zip' },
-		],
-		{ allowedTypes: PICKER_MEDIA_TYPES, attachmentCount: 4, maxAttachments: 4 }
-	);
+test('a size rejection blames the composer, because it could not be lesser', () => {
+	// Unreachable while `MediaField` passes `NO_CLIENT_SIZE_CEILING` — which is
+	// the point. If it ever fires it is a contentus configuration bug, not an
+	// instance limit, and the message must not tell the poster their instance
+	// refused the file.
+	const message = rejectionMessage([{ name: 'clip.mkv', type: 'video/x-matroska' }], {
+		kind: 'file-too-large',
+		maxFileSize: 10 * 1024 * 1024,
+	});
 
 	assert.ok(message);
-	assert.match(message, /archive\.zip/, 'the unusable file, by name');
-	assert.match(message, /4 attachments/, 'and the cap that stopped the usable one');
+	assert.match(message, /composer applied a size limit of its own/);
+	assert.doesNotMatch(message, /this instance (refused|rejected)/i);
 });
 
 test('the upload sets a timeout, so a stalled transfer cannot hang the UI', () => {
@@ -831,53 +792,52 @@ test('the composer does not exist until its seed does', () => {
 	);
 });
 
-test('the whole-selection message is wired to the surface that shows it', () => {
-	// SOURCE-SHAPE, and it says so. The rule is tested directly above; what no
-	// probe here can reach is whether `MediaField` asks it before the vendored
-	// validator gets its chance. It has to happen in the capture-phase listener:
-	// by the time `onUpload` would run, the case this covers is precisely the
-	// case in which `onUpload` does not run.
+test('the rejection report is wired to the surface that shows it', () => {
+	// SOURCE-SHAPE, and it says so. The message builder is tested directly above;
+	// what no probe here can reach is whether `MediaField` actually hands the
+	// pattern a handler and puts the result somewhere a poster sees.
 	const source = readFileSync(
 		new URL('../src/lib/compose/MediaField.svelte', import.meta.url),
 		'utf8'
 	);
 
+	assert.match(source, /handlers=\{\{ onUpload, onReject,/, 'the callback is passed down');
 	assert.match(
 		source,
-		/function notePicked[\s\S]*?rejected = wholeSelectionDroppedMessage\(picked, \{/,
-		'the prediction is made where the selection is first seen'
-	);
-	assert.match(
-		source,
-		/attachmentCount: extras\.state\.attachmentIds\.length/,
-		'with the real count'
+		/function onReject\(files: File\[\], reason: MediaRejectionReason\)/,
+		'and handled with the reason the pattern reports'
 	);
 	assert.match(source, /\{#if rejected\}/, 'and the message reaches an alert, not a console');
 	assert.match(source, /role="alert"/);
-
-	assert.doesNotMatch(
-		source,
-		/function notePicked\([^)]*\)\s*\{[^}]*rejected = null;/,
-		'the unconditional reset was the silence this fixes'
-	);
 });
 
-test('the vendored early return this shim exists for is still there', () => {
-	// The sunset condition, asserted rather than remembered. `MediaComposer`
-	// returning before `onUpload` is the entire reason contentus predicts a
-	// rejection it would rather have been told about. If a `greater update` ever
-	// makes the pattern report its own rejections, this fails — and that failure
-	// is the signal to delete the prediction and the recovery both, not to
-	// re-pin the test.
-	const source = readFileSync(
-		new URL('../src/lib/patterns/MediaComposer.svelte', import.meta.url),
+test('the prediction the callback replaced is gone, not kept beside it', () => {
+	// THE SUNSET, ASSERTED RATHER THAN REMEMBERED — the other way round from how
+	// this test read before greater-v0.13.0. It used to check that the vendored
+	// early return was STILL silent, so that the day it stopped being silent this
+	// failed and forced the shim out. That day came. What it guards now is that
+	// the shim actually left: a prediction kept alongside an authoritative report
+	// is how the two drift apart.
+	const field = readFileSync(
+		new URL('../src/lib/compose/MediaField.svelte', import.meta.url),
+		'utf8'
+	);
+	const policy = readFileSync(
+		new URL('../src/lib/compose/media-policy.ts', import.meta.url),
 		'utf8'
 	);
 
-	assert.match(
-		source,
-		/if \(!validFiles\.length\) return;/,
-		'the whole-selection discard is still silent upstream'
+	for (const gone of ['notePicked', 'onchangecapture', 'ondropcapture']) {
+		assert.ok(!field.includes(gone), `${gone} was part of the shim and must be gone`);
+	}
+	for (const gone of ['filesDroppedBeforeUpload', 'wholeSelectionDroppedMessage']) {
+		assert.ok(!policy.includes(`export function ${gone}`), `${gone} must be gone`);
+	}
+
+	// And the upstream capability that retired it is really there.
+	const pattern = readFileSync(
+		new URL('../src/lib/patterns/MediaComposer.svelte', import.meta.url),
+		'utf8'
 	);
-	assert.doesNotMatch(source, /onReject/, 'and no rejection callback has landed to replace it');
+	assert.match(pattern, /onReject\?: \(files: File\[\], reason: MediaComposerRejectionReason\)/);
 });

@@ -56,7 +56,7 @@ tokens via the bundled `shell.css`.
 	import type { HTMLAttributes } from 'svelte/elements';
 	import type { Snippet } from 'svelte';
 	import { onDestroy, tick, untrack } from 'svelte';
-	import { useStableId } from 'src/lib/greater/utils';
+	import { useStableId } from '../../utils';
 	import {
 		createFocusTrap,
 		createDismissable,
@@ -64,7 +64,7 @@ tokens via the bundled `shell.css`.
 		type FocusTrap,
 		type Dismissable,
 		type LiveRegion,
-	} from 'src/lib/greater/headless';
+	} from '../../headless';
 	import type { CommandPaletteFilter, CommandPaletteGroup, CommandPaletteItem } from '../types.js';
 	import { filterAndRankItems, tokenizeQuery } from '../utils/fuzzy-filter.js';
 

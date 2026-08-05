@@ -2,7 +2,7 @@
   Messages.Composer - Message Input
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { getMessagesContext } from './context.svelte.js';
 
 	interface Props {

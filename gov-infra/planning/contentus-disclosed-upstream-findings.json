@@ -22,44 +22,29 @@
       "not outside the boundary: they execute in CI with the checkout and the runner's",
       "environment in reach, and they resolve from the same lockfile as the shipped",
       "build. A dev-only advisory is disclosed here as its own entry with its own owner",
-      "and sunset, never excluded by scope. At the rework head the full-graph audit",
-      "reports exactly the one advisory below, the same one `--prod` reported."
+      "and sunset, never excluded by scope. The full-graph audit currently reports NO",
+      "advisory at or above the gated severity, which is why the list below is empty.",
+      "",
+      "GHSA-96hv-2xvq-fx4p (ws, high) was disclosed here and is RETIRED at the",
+      "greater-v0.13.0 pin bump. The entry's own sunset named this exact condition:",
+      "\"Delete this entry at the first `greater` CLI pin bump whose adapters release",
+      "resolves ws >= 8.21.0.\" greater-v0.13.0 bumped graphql-ws to 6.2.0, which",
+      "resolves ws@8.21.0, so the vulnerable range >=8.0.0 <8.21.0 no longer contains",
+      "the installed version. `pnpm audit` reports zero advisories across the WHOLE",
+      "graph, not only --prod.",
+      "",
+      "The entry is deleted rather than kept with a note, because SEC-2 asserts the",
+      "finding set is EXACTLY this list: a retired advisory left in place fails the",
+      "gate just as loudly as a new one appearing, and that symmetry is the whole",
+      "design. An empty list is not a weakened gate — a new advisory now fails SEC-2",
+      "immediately, which is the strongest this check has been."
     ],
-    "advisories": [
-      {
-        "id": "GHSA-96hv-2xvq-fx4p",
-        "severity": "high",
-        "module": "ws",
-        "vulnerable_versions": ">=8.0.0 <8.21.0",
-        "paths": [".>@equaltoai/greater-components-adapters>graphql-ws>ws"],
-        "owner": "equaltoai/greater-components",
-        "upstream_issue": "equaltoai/greater-components#922",
-        "why_not_fixable_here": [
-          "`ws` is a transitive dependency of the pinned",
-          "@equaltoai/greater-components-adapters release tarball, reached through",
-          "graphql-ws. Contentus does not declare graphql-ws, @apollo/client, or ws;",
-          "they arrive with the adapters pin. Forcing a resolution override would",
-          "edit the pinned upstream dependency graph from the consumer side, which is",
-          "the vendored-source workaround this repo refuses. The fix belongs upstream:",
-          "greater-components bumping graphql-ws so it resolves ws >= 8.21.0."
-        ],
-        "routing_status": [
-          "Contentus's GitHub binding covers equaltoai/contentus only, so this could not",
-          "be filed directly. Factory routed it to the greater-components steward and",
-          "filed equaltoai/greater-components#922."
-        ],
-        "sunset": [
-          "Delete this entry at the first `greater` CLI pin bump whose adapters",
-          "release resolves ws >= 8.21.0. SEC-2 then fails until the entry is removed,",
-          "which is the intended forcing function."
-        ]
-      }
-    ]
+    "advisories": []
   },
   "greater_doctor": {
     "gate": "greater doctor --json",
     "rubric_item": "SEC-7",
-    "cli_pin": "greater-v0.12.0",
+    "cli_pin": "greater-v0.13.0",
     "must_pass": ["Component Files", "Orphaned Files"],
     "must_pass_reason": [
       "These are the two integrity properties the gate exists for: every vendored",
@@ -88,12 +73,12 @@
           "hast-util-to-mdast@^10.1.2",
           "mdast-util-gfm@^3.1.0",
           "mdast-util-to-markdown@^2.1.2",
-          "@apollo/client@^4.0.9",
-          "@apollo/client-react-streaming@^0.14.0",
+          "@apollo/client@4.2.9",
+          "@apollo/client-react-streaming@^0.14.5",
           "@graphql-typed-document-node/core@^3.2.0",
           "graphql@^16.12.0",
           "graphql-ws@^6.0.6",
-          "viem@^2.47.14",
+          "viem@^2.55.10",
           "remark-gfm@^4.0.1",
           "remark-parse@^11.0.0",
           "remark-rehype@^11.1.2",
@@ -104,6 +89,18 @@
           "shared module, or the day the Markdown chain moves out of it. The same day",
           "retires src/types/absent-renderer-modules.d.ts and the",
           "absent-renderer-module alias in vite.config.ts."
+        ],
+        "$comment": [
+          "VERSION RANGES MOVED AT THE greater-v0.13.0 PIN BUMP, and the finding did not.",
+          "The same thirteen dependencies are still required by the blog face's registry",
+          "manifest and still declined here; three of them are simply required at newer",
+          "ranges by the v0.13.0 registry (@apollo/client ^4.0.9 -> 4.2.9,",
+          "@apollo/client-react-streaming ^0.14.0 -> ^0.14.5, viem ^2.47.14 -> ^2.55.10).",
+          "",
+          "SEC-7 asserts the disclosed set EXACTLY, so a moved range reads as one finding",
+          "retired and another appearing — which is the gate working. The strings are",
+          "updated to what `greater doctor` now reports; nothing was installed and the",
+          "reason for declining is unchanged."
         ]
       }
     ],

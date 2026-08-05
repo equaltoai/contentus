@@ -29,9 +29,16 @@ instance's configuration, and `cms/media.ts` is explicit that lesser's real
 limits are unadvertised and must not be guessed. So the size ceiling is set
 where the check can never trip it, the type list is widened to lesser's own
 `MediaCategory` vocabulary, and anything the vendored validator still discards
-is RECOVERED and named to the poster rather than swallowed — including the
-selection it discards WHOLE, which returns before `onUpload` and so leaves no
-delta to recover, and is therefore predicted from the selection instead. The
+is named to the poster rather than swallowed.
+
+HOW THAT LAST PART IS DONE CHANGED AT greater-v0.13.0, and the change is a
+deletion. contentus used to RECOVER discarded files by diffing the poster's
+selection against what `onUpload` received, with capture-phase listeners on this
+wrapper to capture the selection, plus a PREDICTION for the case the diff could
+not reach — the validator discarding everything and returning before `onUpload`
+ran. All of that was inference about a component's internals. The pattern now
+reports its own rejections through `onReject`, so the listeners, the diff and the
+prediction are gone and this component reads what the component says. The
 reasoning, the residual limit, and the upstream `greater` issue it belongs to
 are in `$lib/compose/media-policy`.
 -->
@@ -44,11 +51,10 @@ are in `$lib/compose/media-policy`.
 
 	import { getComposeExtras } from './extras.svelte';
 	import {
-		droppedFilesMessage,
-		filesDroppedBeforeUpload,
 		NO_CLIENT_SIZE_CEILING,
 		PICKER_MEDIA_TYPES,
-		wholeSelectionDroppedMessage,
+		rejectionMessage,
+		type MediaRejectionReason,
 	} from './media-policy';
 
 	interface Props {
@@ -63,36 +69,36 @@ are in `$lib/compose/media-policy`.
 	let failure = $state<ComposeFailure | null>(null);
 	let inFlight = $state<{ name: string; percent: number } | null>(null);
 	let rejected = $state<string | null>(null);
+	/**
+	 * Whether the rejections arriving now belong to the batch already on screen.
+	 *
+	 * `onReject` fires once per distinct reason within one selection, and those
+	 * calls have to accumulate; the next selection has to replace them. Closed by
+	 * `onUpload` — which runs after the whole batch's rejections — and by the
+	 * pattern having nothing left to forward.
+	 */
+	let batchOpen = false;
 
 	/**
-	 * What the poster actually chose, captured before the vendored validator
-	 * runs.
+	 * The vendored gate refused files, and said which and why.
 	 *
-	 * Capture-phase listeners on the wrapper, so they see the picker's `change`
-	 * and the drop zone's `drop` ahead of the pattern's own handlers. This is
-	 * the only way to learn what was discarded without editing vendored source:
-	 * `onUpload` is called with the survivors and nothing says what is missing.
-	 * Adapter-level and documented, with the upstream issue and its sunset
-	 * recorded in `media-policy.ts`.
+	 * Called once per distinct reason, so the messages accumulate rather than
+	 * overwrite: a selection that trips both the type gate and the attachment cap
+	 * produces two calls, and a poster who is told only about one of them will fix
+	 * that one and watch the rest vanish again.
+	 *
+	 * Cleared at the start of each upload, not here — `onReject` runs before
+	 * `onUpload` in the same selection, so clearing here would erase the message
+	 * the previous call just wrote.
 	 */
-	let picked: File[] = [];
-
-	function notePicked(files: FileList | null | undefined) {
-		picked = Array.from(files ?? []);
-
-		// The delta in `onUpload` cannot speak for a selection `onUpload` never
-		// sees, and the vendored validator returns before calling it when it
-		// discards every file (`patterns/MediaComposer.svelte:246`). That case is
-		// decidable from here — the selection is in hand and the config is ours —
-		// so it is named now rather than left to a `console.warn`. Anything that
-		// does get through reaches `onUpload`, which overwrites this with the
-		// delta it can compute; `wholeSelectionDroppedMessage` returns null in
-		// exactly that case so the two never report the same file twice.
-		rejected = wholeSelectionDroppedMessage(picked, {
-			allowedTypes: PICKER_MEDIA_TYPES,
-			attachmentCount: extras.state.attachmentIds.length,
-			maxAttachments,
-		});
+	function onReject(files: File[], reason: MediaRejectionReason) {
+		const message = rejectionMessage(files, reason);
+		if (!message) return;
+		// A new selection starts a new report: the pattern validates the whole
+		// selection before reporting any of it, so the first call of a batch is
+		// where the previous batch's messages stop being true.
+		rejected = batchOpen ? `${rejected} ${message}` : message;
+		batchOpen = true;
 	}
 
 	/**
@@ -119,12 +125,9 @@ are in `$lib/compose/media-policy`.
 
 	async function onUpload(files: File[]): Promise<MediaComposerAttachment[]> {
 		failure = null;
-
-		// Anything the poster chose that never arrived here was dropped by the
-		// vendored validator. Say so by name; a file that disappears without a
-		// word reads as a bug in the instance.
-		rejected = droppedFilesMessage(filesDroppedBeforeUpload(picked, files));
-		picked = [];
+		// Every rejection for this selection has already been reported; anything
+		// arriving after this belongs to the next one.
+		batchOpen = false;
 
 		const room = Math.max(0, maxAttachments - extras.state.attachmentIds.length);
 		const accepted = files.slice(0, room);
@@ -196,12 +199,7 @@ are in `$lib/compose/media-policy`.
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="contentus-compose-media"
-	onchangecapture={(event) => notePicked((event.target as HTMLInputElement | null)?.files)}
-	ondropcapture={(event) => notePicked(event.dataTransfer?.files)}
->
+<div class="contentus-compose-media">
 	{#if failure}
 		<p class="contentus-compose-media__error" role="alert">{failure.message}</p>
 	{/if}
@@ -231,6 +229,6 @@ are in `$lib/compose/media-policy`.
 			allowedTypes: [...PICKER_MEDIA_TYPES],
 			maxFileSize: NO_CLIENT_SIZE_CEILING,
 		}}
-		handlers={{ onUpload, onRemove, onReorder, onUpdateAltText, onUpdateFocalPoint }}
+		handlers={{ onUpload, onReject, onRemove, onReorder, onUpdateAltText, onUpdateFocalPoint }}
 	/>
 </div>

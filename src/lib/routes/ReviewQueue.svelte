@@ -18,7 +18,7 @@ queue shows enough to choose what to open; approving from a list means approving
 without having read the server-rendered preview, and a review gate whose
 approvals can be given without reading is a gate in name only.
 
-WHAT IS VENDORED. `Review.QueueCard` comes from the greater-v0.12.0 `review`
+WHAT IS VENDORED. `Review.QueueCard` comes from the greater-v0.13.0 `review`
 registry entry untouched, and it owns the card: title, state badge, the
 "latest activity, not publication state" qualifier, the agent badge, and the
 timestamps. This route owns the queue AROUND it — grouping, order, empty

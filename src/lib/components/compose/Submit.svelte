@@ -15,7 +15,7 @@ Submit button with loading state and disabled when over limit.
 
 <script lang="ts">
 	import { getComposeContext } from './context.js';
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 
 	interface Props {
 		/**

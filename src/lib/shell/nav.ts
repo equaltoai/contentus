@@ -79,11 +79,19 @@ export const NAV_ENTRIES: NavEntry[] = [
 	{
 		id: 'agents',
 		label: 'Agents',
-		href: null,
-		pageKey: null,
+		href: href('/agents'),
+		pageKey: 'agents',
+		// `/agents/{username}` is its own route with its own descriptor, but it is
+		// still the Agents destination — a nav that dropped its current marker
+		// when a reader opened an agent would say they had left the surface they
+		// are looking at. Same rule as Messages and its thread.
+		alsoCurrentFor: ['agent-detail'],
 		surface: 'mcp',
+		// Anonymous, like Timelines and unlike Messages: lesser serves `agents`
+		// and `agent` without a caller. The owned view on the same route says
+		// what it needs rather than gating the public roster.
 		requiresAuth: false,
-		upcoming: 'M6',
+		upcoming: null,
 	},
 ];
 

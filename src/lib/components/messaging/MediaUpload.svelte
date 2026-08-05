@@ -4,9 +4,9 @@
   Interface for uploading and attaching media (images, videos, audio) to direct messages.
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { getMessagesContext, type MessageMediaUploadMetadata } from './context.svelte.js';
-	import { MediaUploadHandler } from 'src/lib/components/compose';
+	import { MediaUploadHandler } from '../compose';
 
 	const { mapMimeTypeToMediaCategory } = MediaUploadHandler;
 

@@ -7,7 +7,7 @@ Allows users to filter notifications by type (all, mentions, follows, etc.).
 @example
 ```svelte
 <script>
-  import { Notifications } from 'src/lib/components/notifications';
+  import { Notifications } from './';
 </script>
 
 <Notifications.Root {notifications}>

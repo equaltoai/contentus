@@ -29,7 +29,7 @@ import { sessionGeneration } from '../auth/session-events.ts';
 import { resolveBrowserOrigin } from '../cms/origin.ts';
 import { unreadConversationCount } from './contract.ts';
 import { createMessagingBinding } from './handlers.ts';
-import { createSessionScope } from './session-scope.ts';
+import { createSessionScope } from '../auth/session-scope.ts';
 import type { Conversation } from '../components/messaging/context.svelte.js';
 
 export type UnreadState =

@@ -4,7 +4,7 @@
  */
 
 import type { AIAnalysis, Notification, QuoteContext, Status } from './types';
-import type { Conversation, DirectMessage } from 'src/lib/components/messaging';
+import type { Conversation, DirectMessage } from './components/messaging';
 
 export interface ListData {
 	id: string;

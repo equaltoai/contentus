@@ -4,6 +4,7 @@ import type {
 	ContentUnavailable,
 } from '../../facetheory/types';
 import {
+	isArticleTombstone,
 	toArticleConnection,
 	toArticleDetail,
 	toCategorySummary,
@@ -222,13 +223,30 @@ export async function loadArticleBySlug(
 			return { article: null, body: null, unavailable: CMS_DISABLED };
 		}
 
+		// The tombstone check runs BEFORE normalization, because normalization is
+		// what would hide it: lesser's tombstone Article carries no title, so
+		// `toArticleDetail` rejects it and a deletion would arrive here looking
+		// exactly like an address that never existed.
+		//
+		// lesser v1.6.0 closed the gap this used to record. `articleBySlug` now
+		// falls back to a synthesized Article with `deletedAt` set when the live
+		// article is gone, so contentus can finally distinguish "deleted" from
+		// "never existed" on lesser's authority instead of guessing — and a
+		// tombstone lesser is willing to show anonymously is a statement it has
+		// already decided is public (`cmsArticleTombstoneVisible`).
+		if (isArticleTombstone(result.data?.articleBySlug)) {
+			return {
+				article: null,
+				body: null,
+				unavailable: {
+					reason: 'tombstoned',
+					message: 'This article was deleted.',
+				},
+			};
+		}
+
 		const article = toArticleDetail(result.data?.articleBySlug);
 		if (!article) {
-			// lesser's CMS contract has no Tombstone representation on the article
-			// read path, so a deleted article and one that never existed are
-			// indistinguishable here and both resolve to 404. Emitting a
-			// speculative 410 would be a guess about deletion state. Tracked
-			// upstream; this is where a tombstone signal would land.
 			return {
 				article: null,
 				body: null,

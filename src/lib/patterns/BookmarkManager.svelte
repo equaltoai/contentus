@@ -16,7 +16,7 @@
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { createMenu } from 'src/lib/greater/headless/menu';
+	import { createMenu } from '../greater/headless/menu';
 	import { untrack } from 'svelte';
 	import type { Status } from '../types.js';
 

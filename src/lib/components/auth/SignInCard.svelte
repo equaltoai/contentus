@@ -8,8 +8,8 @@
   @example
   ```svelte
   <script>
-    import { SignInCard } from 'src/lib/components/auth';
-    import { GithubIcon, TwitterIcon } from 'src/lib/greater/icons';
+    import { SignInCard } from './';
+    import { GithubIcon, TwitterIcon } from '../../greater/icons';
     
     const providers = [
       { id: 'github', name: 'GitHub', icon: GithubIcon },
@@ -48,7 +48,7 @@
 -->
 <script lang="ts">
 	import type { SignInCardProps, OAuthProvider } from './types.js';
-	import { Card, Button, Alert, Heading, Text } from 'src/lib/greater/primitives';
+	import { Card, Button, Alert, Heading, Text } from '../../greater/primitives';
 
 	let {
 		title = 'Sign in to continue',

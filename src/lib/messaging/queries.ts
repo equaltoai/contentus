@@ -7,12 +7,15 @@
  * in `src/lib/greater/adapters/graphql/generated/types.ts`, whose type surface
  * reaches `@graphql-typed-document-node/core`, `graphql` and `@apollo/client` —
  * packages contentus does not install, because installing Apollo to consume a
- * document AST would add a second GraphQL client and move the SEC-2 advisory
- * path M4 pinned. Importing them from owned source turns contentus's own
- * typecheck red on upstream files it is not allowed to edit. The two ways out
- * of that — declaring fake ambient modules, or adding Apollo — are both refused
- * (`AGENTS.md`: no fake contract states, no perturbing a pinned advisory graph
- * for a type-only need), so the documents are authored here.
+ * document AST would add a second GraphQL client for a type-only need. (It also
+ * moved the SEC-2 advisory path M4 pinned; that advisory retired at the
+ * greater-v0.13.0 bump and the disclosed set is now empty, so the second client
+ * is the cost that stands.) Importing them from owned source turns contentus's
+ * own typecheck red on upstream files it is not allowed to edit. The two ways
+ * out of that — declaring fake ambient modules, or adding Apollo — are both
+ * refused: the first is faking the contract locally, which `AGENTS.md` refuses
+ * outright, and the second is a whole GraphQL client for a type-only need. So
+ * the documents are authored here.
  *
  * That is the same call `$lib/timelines/contract` makes for face 4's
  * `TIMELINE_QUERY`, and it has the same upside: these select exactly what

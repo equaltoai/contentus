@@ -1,4 +1,4 @@
-import { formatDateTime } from 'src/lib/greater/utils';
+import { formatDateTime } from '../../greater/utils/relativeTime';
 
 export interface ArticleFormattedDateTime {
 	label: string;

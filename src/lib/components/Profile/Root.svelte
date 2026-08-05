@@ -17,7 +17,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { onDestroy, untrack } from 'svelte';
-	import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+	import type { LesserGraphQLAdapter } from '../../greater/adapters';
 	import { createProfileContext } from './context.js';
 	import type { ProfileData, ProfileHandlers } from './context.js';
 	import { ProfileGraphQLController } from './GraphQLAdapter.js';

@@ -9,7 +9,7 @@
 
 import { getContext, setContext } from 'svelte';
 import type { Snippet } from 'svelte';
-import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+import type { LesserGraphQLAdapter } from '../../greater/adapters';
 
 const PROFILE_CONTEXT_KEY = Symbol('profile-context');
 

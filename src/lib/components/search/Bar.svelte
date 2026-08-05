@@ -12,7 +12,7 @@
   ```
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { getSearchContext } from './context.svelte.js';
 
 	interface Props {

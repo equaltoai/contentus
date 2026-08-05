@@ -6,7 +6,7 @@
 	import type { Status } from '../types';
 	import type { TimelineIntegrationConfig } from '../integration';
 	import { createTimelineIntegration, createGraphQLTimelineIntegration } from '../integration';
-	import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+	import type { LesserGraphQLAdapter } from '../greater/adapters';
 	import type { GraphQLTimelineView } from '../graphqlTimelineStore';
 
 	interface StatusCardActionHandlers {
@@ -124,8 +124,7 @@
 		 * Action handlers for timeline status cards
 		 */
 		actionHandlers?:
-			| StatusCardActionHandlers
-			| ((status: Status) => StatusCardActionHandlers | undefined);
+			StatusCardActionHandlers | ((status: Status) => StatusCardActionHandlers | undefined);
 		/**
 		 * Stable browser-test hook for rendered status cards
 		 */

@@ -2,9 +2,10 @@
   Messages.Message - Individual Message Display
 -->
 <script lang="ts">
-	import { Menu } from 'src/lib/greater/primitives';
-	import { MoreVerticalIcon, TrashIcon } from 'src/lib/greater/icons';
+	import { Menu } from '../../greater/primitives';
+	import { MoreVerticalIcon, TrashIcon } from '../../greater/icons';
 	import { formatMessageTime, isParticipantId } from './utils.js';
+	import { sanitizeMessageHtml } from './sanitize.js';
 	import { getMessagesContext } from './context.svelte.js';
 	import type { DirectMessage, MessagesContext } from './context.svelte.js';
 	import WorkflowThreadMoment from './WorkflowThreadMoment.svelte';
@@ -24,6 +25,7 @@
 	const isSensitive = $derived(message.sensitive === true);
 	const isContentVisible = $derived(!isSensitive || sensitiveContentRevealed);
 	const messageContentId = $derived(`message-content-${message.id.replace(/[^\w-]/g, '-')}`);
+	const sanitizedMessageContent = $derived(sanitizeMessageHtml(message.content));
 
 	const context = (() => {
 		try {
@@ -120,7 +122,10 @@
 			</div>
 		{/if}
 		{#if isContentVisible}
-			<div class="message__content" id={messageContentId}>{message.content}</div>
+			<div class="message__content" id={messageContentId}>
+				<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+				{@html sanitizedMessageContent}
+			</div>
 		{/if}
 		{#if message.workflowMoments?.length}
 			<div class="message__workflow">

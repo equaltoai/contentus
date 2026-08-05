@@ -7,7 +7,7 @@ Safe by default: message previews are rendered as plain text.
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { sanitizeForPreview } from 'src/lib/greater/utils';
+	import { sanitizeForPreview } from '../../greater/utils';
 
 	interface CommunicationFrom {
 		address: string;

@@ -477,11 +477,18 @@ Contentus-owned components offered upstream once proven on an instance
 `src/lib/shell/MobileTabBar.svelte`, `src/lib/shell/Sheet.svelte`, and the
 compose-side content-warning field.
 
-Advisory pinned by the gov-infra spine (SEC-2 disclosed set, same day):
+**SEC-2's disclosed advisory set is EMPTY as of the greater-v0.13.0 pin bump.**
+`pnpm audit --audit-level=high` reports nothing across the whole installed graph,
+not only `--prod`, and `gov-infra/planning/contentus-disclosed-upstream-findings.json`
+carries no advisory entry. That is the strongest this control has been: with an
+empty pinned set, a new advisory fails SEC-2 immediately rather than blending
+into a standing disclosure.
 
-| Item                                                                                                          | Owner                | Status                                                                                              |
-| ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
-| GHSA-96hv-2xvq-fx4p: `ws@8.20.1` (<8.21.0) via `greater-components-adapters > graphql-ws > ws`                | `greater-components` | Filed greater-components#922 — pinned in the SEC-2 disclosed set; sunset on the first adapters release resolving ws >=8.21.0 |
+_Historical — resolved, kept for the record:_
+
+| Item                                                                                          | Owner                | Outcome                                                                                                                                                    |
+| --------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GHSA-96hv-2xvq-fx4p: `ws@8.20.1` (<8.21.0) via `greater-components-adapters > graphql-ws > ws` | `greater-components` | Filed greater-components#922. **Retired at greater-v0.13.0**, which moved `graphql-ws` to 6.2.0 and resolves `ws@8.21.0` — the exact sunset the entry named. |
 
 ## 8. Non-negotiables carried into every face
 

@@ -8,6 +8,8 @@ is no catch-all render path that could silently show the wrong surface.
 
 <script lang="ts">
 	import AppShell from '$lib/shell/AppShell.svelte';
+	import AgentDetailRoute from '$lib/routes/AgentDetailRoute.svelte';
+	import AgentsRoute from '$lib/routes/Agents.svelte';
 	import ArticleReaderRoute from '$lib/routes/ArticleReader.svelte';
 	import ArticlesIndexRoute from '$lib/routes/ArticlesIndex.svelte';
 	import AuthCallbackRoute from '$lib/routes/AuthCallback.svelte';
@@ -22,8 +24,19 @@ is no catch-all render path that could silently show the wrong surface.
 
 	import type { RouteProps } from './types';
 
-	let { page, slug, index, reader, compose, review, timelines, messages, profile }: RouteProps =
-		$props();
+	let {
+		page,
+		slug,
+		index,
+		reader,
+		compose,
+		review,
+		timelines,
+		messages,
+		agents,
+		agentDetail,
+		profile,
+	}: RouteProps = $props();
 </script>
 
 <AppShell {page}>
@@ -47,6 +60,20 @@ is no catch-all render path that could silently show the wrong surface.
 		<MessagesRoute {page} data={messages ?? { folder: 'inbox', conversationId: null }} />
 	{:else if page.key === 'message-thread'}
 		<MessageThreadRoute {page} data={messages ?? { folder: 'inbox', conversationId: null }} />
+	{:else if page.key === 'agents'}
+		<AgentsRoute
+			{page}
+			data={agents ?? {
+				page: null,
+				failure: null,
+				filters: { type: null, query: null, verified: null, after: null },
+			}}
+		/>
+	{:else if page.key === 'agent-detail'}
+		<AgentDetailRoute
+			{page}
+			data={agentDetail ?? { username: null, agent: null, failure: null }}
+		/>
 	{:else if page.key === 'profile'}
 		<ProfileRoute
 			{page}

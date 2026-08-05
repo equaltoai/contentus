@@ -13,8 +13,8 @@
   ```
 -->
 <script lang="ts">
-	import { createButton } from 'src/lib/greater/headless/button';
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { createButton } from '../../greater/headless/button';
+	import { sanitizeHtml } from '../../greater/utils';
 	import { getProfileContext, getRelationshipText } from './context.js';
 
 	interface Props {

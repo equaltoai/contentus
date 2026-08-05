@@ -1,4 +1,4 @@
-import type { LesserGraphQLAdapter } from 'src/lib/greater/adapters';
+import type { LesserGraphQLAdapter } from '../../greater/adapters';
 
 /**
  * Push subscription data (from GraphQL)

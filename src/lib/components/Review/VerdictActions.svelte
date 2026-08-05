@@ -17,7 +17,7 @@ come from the `Modal` primitive.
 -->
 
 <script lang="ts">
-	import { Button, Modal, TextArea } from 'src/lib/greater/primitives';
+	import { Button, Modal, TextArea } from '../../greater/primitives';
 	import type { DraftReviewVerdict, VerdictSubmission } from '../../blog-types.js';
 
 	interface Props {

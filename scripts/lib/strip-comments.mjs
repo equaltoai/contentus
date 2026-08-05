@@ -41,6 +41,20 @@
  * (CodeQL flagged the regex form as `js/incomplete-multi-character-sanitization`,
  * CWE-116. The first fix attempted was the loop-until-stable that rule
  * recommends; it silences the rule and is wrong here for the reason above.)
+ *
+ * THIS IS A TEMPLATE READING AND ONLY A TEMPLATE READING. A `stripScriptSource`
+ * lived beside it for one round, so the face-6 seam probes could find imports a
+ * pattern was missing because a comment sat where it expected whitespace. It is
+ * gone, and the next reader should not re-add it: stripping a comment out of
+ * SCRIPT text CONCATENATES the tokens it separated, so `import/* … *\/X` becomes
+ * `importX` and the statement disappears from exactly the scan that was supposed
+ * to find it. That is not a bug in the stripper — it is what stripping means.
+ * Script is read by `typescript` now, in `tests/helpers/module-imports.mjs`,
+ * where comments are trivia the tokenizer already accounts for.
+ *
+ * What survives here is the template reading, which has no such failure mode:
+ * `{@html}` is a template construct, its absence is what the audit asserts, and
+ * a comment removed from markup joins prose to prose.
  */
 
 export const COMMENT_DELIMITERS = [

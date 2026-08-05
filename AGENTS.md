@@ -116,6 +116,10 @@ Notes:
   - Verifier (single entrypoint): `bash gov-infra/verifiers/gov-verify-rubric.sh`
   - Evidence: `gov-infra/evidence/`, report
     `gov-infra/evidence/gov-rubric-report.json` in schema `gov_rubric_report.v1`
+  - The report's `source.sha` is the commit the controls **scanned**. A committed
+    report names its own commit's **parent** — the gate runs before the evidence
+    is committed — so say "the gate ran at SHA X, recorded in the commit after
+    it", never "evidence at its own HEAD". A timestamp binds nothing.
   - CI hook: `.github/workflows/gov-rubric.yml`, on pull requests to `staging`
   - A control that cannot run is **BLOCKED**, never PASS, and BLOCKED is not
     green. Never weaken a gate, add a blanket exclude, or simulate a result.

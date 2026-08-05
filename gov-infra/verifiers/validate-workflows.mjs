@@ -1682,7 +1682,7 @@ export function validateWorkflowPermissions(
 ) {
 	const findings = [];
 	const allowed = new Set(
-		allowedWrites.map((entry) => `${entry.workflow} ${entry.scope} ${entry.value}`)
+		allowedWrites.map((entry) => `${entry.workflow}\u0000${entry.scope}\u0000${entry.value}`)
 	);
 	for (const file of yamlFiles(directory)) {
 		const { mappingLines } = scanWorkflowLines(readFileSync(file, 'utf8'));
@@ -1703,7 +1703,7 @@ export function validateWorkflowPermissions(
 			}
 			for (const { scope, value } of parsed.entries) {
 				if (READ_ONLY_VALUES.has(value)) continue;
-				if (allowed.has(`${fileLabel(file)} ${scope} ${value}`)) continue;
+				if (allowed.has(`${fileLabel(file)}\u0000${scope}\u0000${value}`)) continue;
 				findings.push(
 					`${file}:${mapping.index + 1}: permission ${scope}: ${value} is not read/none and is not a pinned exception`
 				);

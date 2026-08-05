@@ -130,6 +130,31 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		surface: 'mcp',
 		requiresAuth: true,
 	},
+	agents: {
+		key: 'agents',
+		path: '/agents',
+		title: 'Agents',
+		eyebrow: 'Agents and MCP',
+		summary: 'Agents registered on this instance, and the MCP surface each publishes.',
+		surface: 'mcp',
+		// Anonymous, like `/timelines` and unlike `/messages`: lesser serves
+		// `agents` and `agent` without a caller. Only `myAgents` and the
+		// `ownerUsername` filter need a token, and the surfaces that use them say
+		// so themselves rather than gating the whole public roster.
+		requiresAuth: false,
+	},
+	'agent-detail': {
+		key: 'agent-detail',
+		path: '/agents',
+		title: 'Agent',
+		eyebrow: 'Agents and MCP',
+		summary: 'An agent on this instance, and the MCP surface it publishes.',
+		surface: 'mcp',
+		// Anonymous, and `mcpAccess` in particular is NOT among the fields lesser
+		// redacts for non-owners — so the published MCP contract is public and
+		// belongs in the server's paint.
+		requiresAuth: false,
+	},
 	profile: {
 		key: 'profile',
 		path: '/profiles',
@@ -171,6 +196,8 @@ export const ROUTE_PATTERNS = [
 	'/timelines',
 	'/messages',
 	'/messages/{conversationId}',
+	'/agents',
+	'/agents/{username}',
 	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
@@ -219,6 +246,13 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` and `/profiles` above.
 	if (segmentAfter(route, '/messages/')) return PAGE_DEFINITIONS['message-thread'];
+	if (route === '/agents') return PAGE_DEFINITIONS.agents;
+	// `/agents/` with no username names no agent, so it is not the detail
+	// surface: it falls through to the roster rather than rendering an empty
+	// one. The trailing slash normalises away first, which is why this reads as
+	// the roster above rather than as not-found — the same resolution
+	// `/messages/` takes, and the better of the two answers.
+	if (segmentAfter(route, '/agents/')) return PAGE_DEFINITIONS['agent-detail'];
 	// `/profiles` with no username names no actor, so it is not the profile
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` above.
@@ -387,6 +421,54 @@ export function profileHref(handle: string): string {
 	return href(`/profiles/${encodeURIComponent(handle)}`);
 }
 
+/**
+ * App-relative href for the agent roster, filters included.
+ *
+ * Lives here with the other href builders rather than beside the filter model,
+ * so `$lib/agents/filters` stays a pure module with no route dependency — the
+ * same split `$lib/timelines/tabs` and `timelinesHref` already use.
+ *
+ * `after` is a cursor, and a cursor is only meaningful within the query that
+ * produced it: a caller changing any facet must drop it, or lesser is asked to
+ * resume a list that no longer exists. The type makes that the caller's
+ * decision by taking the whole state at once.
+ */
+export function agentsHref(
+	filters: {
+		type?: string | null;
+		query?: string | null;
+		verified?: boolean | null;
+		after?: string | null;
+	} = {}
+): string {
+	const params = new URLSearchParams();
+	if (filters.type) params.set('type', filters.type);
+	if (filters.query) params.set('q', filters.query);
+	if (filters.verified === true) params.set('verified', 'true');
+	if (filters.verified === false) params.set('verified', 'false');
+	if (filters.after) params.set('after', filters.after);
+
+	const search = params.toString();
+	return search ? `${href('/agents')}?${search}` : href('/agents');
+}
+
+/**
+ * Agent username captured from `/agents/{username}`, or null.
+ *
+ * Kept separate from `resolveProfileUsername` because the two name different
+ * things: a profile handle is `user@host` and may be remote, while `agent(username:)`
+ * resolves a LOCAL agent on this instance. One shared accessor would invite a
+ * route to read one where it meant the other.
+ */
+export function resolveAgentUsername(pathname: string): string | null {
+	return segmentAfter(normalizeRoutePath(pathname), '/agents/');
+}
+
+/** App-relative href for one agent's detail page. */
+export function agentHref(username: string): string {
+	return href(`/agents/${encodeURIComponent(username.trim().replace(/^@/, ''))}`);
+}
+
 /** Build an app-relative href, base path included. */
 export function href(path: string): string {
 	if (path === '/') return `${FACETHEORY_BASE_PATH}/`;
@@ -428,13 +510,19 @@ export function reviewDraftHref(draftId: string, panel?: ReviewPanel): string {
  * rendered, not a missing resource. `transport` is contentus reporting that the
  * instance did not answer, which is a page that rendered exactly as designed.
  *
- * lesser's CMS contract has no Tombstone on the article read path, so a deleted
- * article and one that never existed are indistinguishable here and both get
- * 404. A speculative 410 would be a guess about deletion state.
+ * `tombstoned` is 410, and it is a separate status from 404 because lesser now
+ * makes it a separate FACT. Under v1.6.0 the article reads fall back to a
+ * tombstone Article carrying `deletedAt`, so "this address held an article that
+ * was deleted" is something the instance states rather than something contentus
+ * would be guessing at. 410 is the honest rendering of that statement: it tells
+ * a crawler to drop the URL rather than keep retrying it, which 404 does not.
+ * The distinction is only ever drawn from `deletedAt` — never from a missing
+ * title or an empty body, which is what inferring it would look like.
  */
 export function statusForRoute(props: RouteProps): number {
 	if (props.page.key === 'not-found') return 404;
 
 	const unavailable = props.reader?.unavailable ?? props.index?.unavailable ?? null;
+	if (unavailable?.reason === 'tombstoned') return 410;
 	return unavailable?.reason === 'not-found' ? 404 : 200;
 }

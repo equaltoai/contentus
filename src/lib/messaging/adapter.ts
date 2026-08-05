@@ -19,9 +19,10 @@
  * NO APOLLO, NO SECOND CLIENT. Queries go over `$lib/cms/graphql` — one `fetch`
  * — and the subscription over `$lib/timelines/subscription`, which speaks the
  * `graphql-transport-ws` framing lesser documents. Both choices are M2d's and
- * M4's, unchanged: contentus needs the protocol, not a client library, and
- * declaring `graphql-ws` would move the SEC-2 advisory path pinned in
- * `gov-infra/planning/contentus-disclosed-upstream-findings.json`.
+ * M4's, unchanged: contentus needs the protocol, not a client library. (M4 also
+ * weighed that declaring `graphql-ws` moved a then-pinned SEC-2 advisory path;
+ * that advisory retired at the greater-v0.13.0 bump and the disclosed set is now
+ * empty, so the choice rests on the surface it avoids, not on that.)
  */
 
 import { graphqlRequest, GraphQLTransportError, type GraphQLError } from '../cms/graphql.ts';

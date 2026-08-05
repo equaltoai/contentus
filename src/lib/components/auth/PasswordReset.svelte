@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { getAuthContext, isValidEmail, isValidPassword } from './context.js';
 	import type { PasswordResetData } from './context.js';
 

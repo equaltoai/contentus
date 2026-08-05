@@ -12,7 +12,7 @@
   ```
 -->
 <script lang="ts">
-	import { createTabs } from 'src/lib/greater/headless/tabs';
+	import { createTabs } from '../../greater/headless/tabs';
 	import { untrack } from 'svelte';
 	import { getProfileContext } from './context.js';
 

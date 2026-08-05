@@ -848,25 +848,26 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	{/if}
 
 	<!--
-	ALWAYS RENDERED, never conditional on a state that might not be reached.
+	THE RENDERING DISCLOSURE THAT USED TO STAND HERE IS WITHDRAWN, at
+	greater-v0.13.0. It said the vendored components escaped lesser's sanitized
+	HTML, so message bodies reached readers as literal markup. Both halves are
+	now upstream-fixed and the fixes are different fixes, which is why the notice
+	goes rather than narrows again:
 
-	The vendored `Messages.Message` renders `{message.content}` — Svelte's
-	ESCAPING interpolation — and lesser's `content` is server-sanitized HTML. So
-	every message body displays its own markup as literal text. Same family of
-	defect as the `ContentRenderer` gap M4 pinned, in a different component, and
-	contentus cannot repair it: vendored source is never hand-edited, an
-	`{@html}` in owned source is what check 3 of `audit-renderer-authority.mjs`
-	forbids, and the component exposes no prop that changes the sink.
+	  - `Message.svelte` sanitizes through its own `sanitize.ts` and renders
+	    `{@html sanitizedMessageContent}`. Thread bodies are markup again.
+	  - `Conversations.svelte` runs the LIST preview through
+	    `sanitizeMessagePreview`, which returns markup-free, entity-decoded,
+	    length-capped TEXT. Escaping plain text with `{…}` is correct — a preview
+	    line is text by design — so there is nothing left to disclose there
+	    either.
 
-	Disclosed here rather than left for a reader to puzzle over, and pinned by
-	`tests/vendored-messaging-render.test.mjs`, which drives the real component
-	and fails the day upstream fixes it.
+	A disclosure kept past its defect is not a cautious disclosure, it is a false
+	one: it tells a reader their instance is mangling what was sent when it is
+	not. Pinned in the other direction now by
+	`tests/vendored-messaging-render.test.mjs`, which drives the real components
+	and the real sanitizer and fails if either sink regresses.
 	-->
-	<p class="contentus-messages__gap">
-		Message bodies are shown as plain text on this build, so any formatting this instance applied
-		appears as markup. The text itself is complete and unaltered. This is an upstream gap in the
-		vendored message component, not a change contentus makes to what was sent.
-	</p>
 
 	{#if notice}
 		<!-- The only state that renders nothing here is a socket that is live, with

@@ -35,7 +35,7 @@ const listeners = new Set<SessionListener>();
  * session is there — the next reader's inbox count, the previous reader's badge.
  * Stamping the read with this number at dispatch and checking it at completion
  * is what makes the difference observable to the read itself; see
- * `$lib/messaging/session-scope`.
+ * `$lib/auth/session-scope`.
  *
  * It advances on sign-IN as well as sign-out, because a sign-out and a sign-in
  * with a read spanning both is exactly the case a sign-out-only counter misses.

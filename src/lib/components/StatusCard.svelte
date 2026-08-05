@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { formatDateTime } from 'src/lib/greater/utils';
+	import { formatDateTime } from '../greater/utils';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import ActionBar from './ActionBar.svelte';
-	import { ReplyIcon, RepeatIcon } from 'src/lib/greater/icons';
+	import { ReplyIcon, RepeatIcon } from '../greater/icons';
 	import type { MediaAttachment, Status } from '../types';
 	import type { Snippet } from 'svelte';
 

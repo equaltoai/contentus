@@ -165,11 +165,11 @@ of them in a vendored file contentus is not allowed to edit.
 
 The three ways to make them resolve were each refused:
 
-| Option                       | Why refused                                                                                                                                                                                                                                                       |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Install `@apollo/client`     | Adds a second GraphQL client to a client that posts one document per action, and pulls `graphql-ws` — which MOVES the SEC-2 advisory path pinned in `gov-infra/planning/contentus-disclosed-upstream-findings.json`. M4 weighed that exact trade and declined it. |
-| Declare ambient module stubs | A fake contract state. `AGENTS.md` refuses these outright, and a wrong stub masks real type errors.                                                                                                                                                               |
-| Suppress the errors          | The gate would report a colour it had not earned.                                                                                                                                                                                                                 |
+| Option                       | Why refused                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install `@apollo/client`     | Adds a second GraphQL client to a client that posts one document per action, and pulls `graphql-ws` with it. M4 weighed that exact trade and declined it. (Part of M4's cost then was that it moved a pinned SEC-2 advisory path; that advisory retired at the greater-v0.13.0 bump and the disclosed set is now empty. The second client is the cost that stands.) |
+| Declare ambient module stubs | A fake contract state. `AGENTS.md` refuses these outright, and a wrong stub masks real type errors.                                                                                                                                                                                                                                                                 |
+| Suppress the errors          | The gate would report a colour it had not earned.                                                                                                                                                                                                                                                                                                                   |
 
 So `MessagesHandlers` — **the interface the vendored COMPONENTS define**, in
 `components/messaging/context.svelte.ts` — is implemented directly in
@@ -316,35 +316,37 @@ The server ships the route, its folder and the conversation id. Asserted in
 
 ### To `equaltoai/greater-components`
 
-1. **`Messages.Message` and `Messages.Conversations` escape lesser's sanitized
-   HTML.** The blocking one. `Object.content` is server-sanitized HTML — that is
-   the renderer-authority contract — and the component renders it with
-   `{message.content}`, Svelte's escaping interpolation:
+1. ~~**`Messages.Message` and `Messages.Conversations` escape lesser's sanitized
+   HTML.**~~ **RESOLVED UPSTREAM at greater-v0.13.0. Historical.**
 
-   | Input (lesser's sanitized HTML)       | What the reader sees                                   |
-   | ------------------------------------- | ------------------------------------------------------ |
-   | `<p>Hello <strong>world</strong></p>` | the literal text `<p>Hello <strong>world</strong></p>` |
+   What it was: `Object.content` is server-sanitized HTML — that is the
+   renderer-authority contract — and both components rendered it with
+   `{message.content}`, Svelte's escaping interpolation, so a body reached the
+   reader as `<p>Hello <strong>world</strong></p>` shown as literal text. It was
+   the blocking finding of M4/M5 and the same family as the `ContentRenderer`
+   gap M4 pinned.
 
-   The conversation list preview does the same via `getMessagePreview`. Same
-   family as the `ContentRenderer` gap M4 pinned, in a different component, and
-   pinned on **both** surfaces it reaches rather than the first one found.
+   How it was fixed, in two different ways for the two surfaces:
 
-   Contentus cannot repair it: vendored source is never hand-edited, an
-   `{@html}` in owned source is what check 3 of
-   `scripts/audit-renderer-authority.mjs` forbids, and the component's whole
-   `Props` surface is `message`, `currentUserId` and `class` — no prop, snippet
-   or child changes the sink.
+   | Surface                        | greater-v0.13.0                                                                     |
+   | ------------------------------ | ----------------------------------------------------------------------------------- |
+   | Thread body (`Message`)        | `sanitizeMessageHtml(message.content)` → `{@html sanitizedMessageContent}` — markup |
+   | List preview (`Conversations`) | `sanitizeMessagePreview(content, 200)` → markup-free decoded text → `{…}` — text    |
 
-   Suggested fix: render the body through a sanitizing HTML sink as the blog
-   face's `Article.Content` does, rather than through the escaping
-   interpolation.
+   The preview's answer is not a lesser fix of the same problem, it is a
+   different correct answer: a one-line preview is text by design, and
+   `sanitizeMessagePreview` strips tags, decodes entities, collapses whitespace
+   and caps the length before the escaping interpolation ever sees it. Escaping
+   plain text produces plain text.
 
-   **Pinned** by `tests/vendored-messaging-render.test.mjs`, which compiles the
-   REAL component with the REAL Svelte compiler and asserts on the `$.escape`
-   sink the compiler emitted, then runs the REAL `escape` from
-   `svelte/internal/server` to show the consequence. Every assertion is inverted
-   — it describes the broken behaviour and fails the day upstream fixes it.
-   **Disclosed** by the always-rendered `.contentus-messages__gap` notice.
+   **The contentus disclosure is withdrawn** — the `.contentus-messages__gap`
+   notice and its stylesheet rule are gone. A disclosure kept past its defect is
+   a false statement about the instance, not a cautious one.
+
+   **Pinned in the other direction** by `tests/vendored-messaging-render.test.mjs`:
+   it compiles the REAL components with the REAL Svelte compiler, drives the REAL
+   `sanitizeMessagePreview` over lesser-shaped bodies, and fails if either sink
+   regresses to escaping raw `content`.
 
 2. **`createLesserMessagesHandlers` cannot be consumed without Apollo.** Its
    config takes the concrete `LesserGraphQLAdapter` while calling only seven

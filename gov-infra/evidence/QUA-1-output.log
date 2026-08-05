@@ -10,24 +10,22 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
-Getting Svelte diagnostics...
-
-svelte-check found 0 errors and 0 warnings
+1785894135944 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785894135949 COMPLETED 859 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 772 modules transformed.
+[2Ktransforming...✓ 791 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
-build/client/assets/entry-client-Y0sAu2xR.css                25.06 kB │ gzip:   4.34 kB
-build/client/assets/entry-client-CR8QLrqr.js                625.69 kB │ gzip: 191.56 kB
+build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
+build/client/assets/entry-client-DIaTzgif.js                665.78 kB │ gzip: 202.88 kB
 
-✓ built in 1.01s
+✓ built in 1.04s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -38,23 +36,23 @@ build/client/assets/entry-client-CR8QLrqr.js                625.69 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 748 modules transformed.
+[2Ktransforming...✓ 767 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/chunks/server-B2vBH2a4.mjs    0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 993.18 kB │ gzip: 245.91 kB
+build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
+build/server/handler.mjs                 1,069.48 kB │ gzip: 263.65 kB
 
-✓ built in 926ms
+✓ built in 994ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 310248 bytes, 143 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 327333 bytes, 143 --tc-* definitions, integrity assertions passed
 brand assets: copied 12 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
-> pnpm run validate:renderer-authority && pnpm run validate:csp
+> pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph
 
 
 > @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -69,7 +67,7 @@ brand assets: copied 12 files to build/client/brand/
 - owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 14
+- Contentus-owned source roots scanned: 15
 - Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
 
 Renderer-authority audit: clean.
@@ -79,30 +77,70 @@ Renderer-authority audit: clean.
 
 # CSP Audit — contentus SSR output
 
-- Routes rendered from build/server/handler.mjs: 18
-- Documents scanned: 17
+- Routes rendered from build/server/handler.mjs: 21
+- Documents scanned: 20
 - Ship-blocking findings: 0
 - Off-origin script/style references: 0
 - Route status mismatches: 0
 
 ## Per-route
-- articles-index   200    5364 bytes  findings=0
-- article-reader   200    5076 bytes  findings=0
-- series           200    5277 bytes  findings=0
-- category         200    5291 bytes  findings=0
-- compose          200    6220 bytes  findings=0
-- review-queue     200    5651 bytes  findings=0
-- review-workspace 200    5655 bytes  findings=0
-- timelines-instance 200    7077 bytes  findings=0
-- timelines-federated 200    7134 bytes  findings=0
-- timelines-home   200    5827 bytes  findings=0
-- messages-inbox   200    5325 bytes  findings=0
-- messages-requests 200    5354 bytes  findings=0
-- message-thread   200    5316 bytes  findings=0
-- messages-no-id   200    5328 bytes  findings=0
-- profile          200    5296 bytes  findings=0
-- auth-callback    200    5099 bytes  findings=0
-- not-found        404    5099 bytes  findings=0
-- hydration-data   200     524 bytes  findings=0
+- articles-index   200    5328 bytes  findings=0
+- article-reader   200    5040 bytes  findings=0
+- series           200    5241 bytes  findings=0
+- category         200    5255 bytes  findings=0
+- compose          200    6184 bytes  findings=0
+- review-queue     200    5615 bytes  findings=0
+- review-workspace 200    5619 bytes  findings=0
+- timelines-instance 200    6446 bytes  findings=0
+- timelines-federated 200    6503 bytes  findings=0
+- timelines-home   200    5791 bytes  findings=0
+- messages-inbox   200    5289 bytes  findings=0
+- messages-requests 200    5318 bytes  findings=0
+- message-thread   200    5280 bytes  findings=0
+- messages-no-id   200    5292 bytes  findings=0
+- agents           200    5550 bytes  findings=0
+- agents-filtered  200    5608 bytes  findings=0
+- agent-detail     200    5630 bytes  findings=0
+- profile          200    5260 bytes  findings=0
+- auth-callback    200    5064 bytes  findings=0
+- not-found        404    5064 bytes  findings=0
+- hydration-data   200     557 bytes  findings=0
 
 CSP audit: clean.
+
+> @equaltoai/contentus@0.1.0 validate:seam-graph /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-seam-graph.mjs
+
+# Seam graph audit — face 6 (src/lib/agents)
+
+- Build passes recorded: client, server
+- Modules the client build resolved / loaded: 790 / 790
+- Modules the server build resolved / loaded: 773 / 766
+- Dependency edges recorded: 4395
+- Distinct edges into the face: 21
+- Findings: 0
+
+## Edges into the face
+- src/facetheory/entry-server.ts → src/lib/agents/contract.ts [server:import]
+- src/facetheory/entry-server.ts → src/lib/agents/filters.ts [server:import]
+- src/facetheory/entry-server.ts → src/lib/agents/mcp.ts [server:import]
+- src/lib/agents/AgentCard.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentCapabilities.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentMcpPanel.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustDetail.svelte [client:import, server:import]
+- src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/Accordion.svelte [client:import, server:import]
+- src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/CopyBlock.svelte [client:import, server:import]
+- src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/mcp.ts [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentRosterFilters.svelte [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/MyAgents.svelte [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/filters.ts [client:import, server:import]
+- src/lib/agents/AgentRosterFilters.svelte → src/lib/agents/filters.ts [client:import, server:import]
+- src/lib/agents/MyAgents.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
+- src/lib/agents/MyAgents.svelte → src/lib/agents/contract.ts [client:import, server:import]
+- src/lib/agents/filters.ts → src/lib/agents/contract.ts [client:import, server:import]
+- src/lib/routes/AgentDetailRoute.svelte → src/lib/agents/AgentDetail.svelte [client:import, server:import]
+- src/lib/routes/Agents.svelte → src/lib/agents/AgentRoster.svelte [client:import, server:import]
+
+Seam graph audit: clean.

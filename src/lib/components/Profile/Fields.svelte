@@ -14,7 +14,7 @@
 -->
 <script lang="ts">
 	import { getProfileContext } from './context.js';
-	import { sanitizeHtml } from 'src/lib/greater/utils';
+	import { sanitizeHtml } from '../../greater/utils';
 
 	interface Props {
 		/**

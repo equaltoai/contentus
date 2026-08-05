@@ -42,10 +42,19 @@ that quietly prints Markdown source.
 </script>
 
 {#if !data.article}
+	<!--
+		"Deleted" and "never existed" are different statements, and since lesser
+		v1.6.0 the instance makes the distinction itself (`Article.deletedAt`).
+		Saying "not found" over a deletion would misreport an address that did
+		hold an article — so the tombstone gets its own title, and the SSR layer
+		gives it 410 rather than 404.
+	-->
 	<Notice
 		title={data.unavailable?.reason === 'cms-disabled'
 			? 'Long-form publishing is off'
-			: 'Article not found'}
+			: data.unavailable?.reason === 'tombstoned'
+				? 'Article deleted'
+				: 'Article not found'}
 		message={data.unavailable?.message ?? 'No article matches this address.'}
 	/>
 {:else}

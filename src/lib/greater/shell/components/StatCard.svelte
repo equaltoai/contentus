@@ -19,7 +19,7 @@ the default announcement (e.g. for unit text).
 <script lang="ts">
 	import type { HTMLAttributes } from 'svelte/elements';
 	import type { Snippet } from 'svelte';
-	import { useStableId } from 'src/lib/greater/utils';
+	import { useStableId } from '../../utils';
 	import type { StatCardStatus, StatCardTrend } from '../types.js';
 
 	// SSR/hydration-safe stable id per component instance.

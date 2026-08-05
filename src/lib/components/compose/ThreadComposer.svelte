@@ -7,7 +7,7 @@ Create threads with multiple connected posts, each with its own character limit.
 @example
 ```svelte
 <script>
-  import { Compose } from 'src/lib/components/compose';
+  import { Compose } from './';
   
   async function handleSubmitThread(posts) {
     // Submit posts in sequence
@@ -26,7 +26,7 @@ Create threads with multiple connected posts, each with its own character limit.
 
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import { countWeightedCharacters } from './UnicodeCounter.js';
 	import type { PostVisibility } from './context.js';
 

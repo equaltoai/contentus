@@ -43,8 +43,25 @@
  * as what it is: a vendored-component requirement, not an instance policy, and
  * anything outside it is named to the poster rather than swallowed. The fix is
  * an `onReject` callback (or a `validate: false` config) upstream. SUNSET:
- * remove this module's list and its recovery when the vendored pattern can
- * defer.
+ * remove this module's list when the vendored pattern can defer validation to
+ * the server.
+ *
+ * THE `onReject` HALF OF THAT SUNSET HAS LANDED (greater-v0.13.0,
+ * `MediaComposerRejectionReason`), and this module shrank accordingly. Two
+ * functions are gone rather than kept alongside the callback:
+ *
+ *   - `filesDroppedBeforeUpload`, which recovered discarded files by diffing
+ *     the poster's selection against what `onUpload` received;
+ *   - `wholeSelectionDroppedMessage`, which PREDICTED the case that diff could
+ *     not reach — the validator discarding everything and returning before
+ *     `onUpload` ran — from the selection and contentus's own config.
+ *
+ * Both were inferences about a component's internals, and the capture-phase
+ * listeners `MediaField` needed to feed them are gone too. Keeping a prediction
+ * beside an authoritative report is how the two drift apart: the component now
+ * says which files it rejected and under which limit, and that is the only
+ * source this module reads. The tests that pinned the gap were the sunset
+ * condition, and they fired.
  */
 
 /**
@@ -99,98 +116,60 @@ export interface PickedFile {
 }
 
 /**
- * The files the picker accepted from the poster but never handed to `onUpload`.
+ * Why the vendored gate rejected files, structurally matching the pattern's
+ * `MediaComposerRejectionReason`.
  *
- * Compared by identity, not by name: the vendored pattern filters the very
- * `File` objects it was given, so anything missing from `forwarded` is
- * something its validator discarded. Two files with the same name are two
- * files.
+ * Declared structurally rather than imported so this module stays a pure,
+ * probe-loadable module with no dependency on a `.svelte` file. The shape is
+ * the vendored one and a drift between them is a compile error at the call
+ * site, which is where it should surface.
  */
-export function filesDroppedBeforeUpload<T>(selected: readonly T[], forwarded: readonly T[]): T[] {
-	return selected.filter((file) => !forwarded.includes(file));
-}
+export type MediaRejectionReason =
+	| { kind: 'unsupported-type'; allowedTypes: readonly string[] }
+	| { kind: 'file-too-large'; maxFileSize: number }
+	| { kind: 'max-attachments-reached'; maxAttachments: number };
 
 /**
- * What to tell the poster about files that never reached the instance.
+ * What to tell the poster about files the composer refused.
  *
- * Names them, says the instance never saw them, and says why — because the
- * alternative on offer was a `console.warn` nobody reads and a thumbnail that
- * never appeared. Returns null when there is nothing to say.
+ * The wording's job is to place the blame correctly. None of these rejections
+ * are lesser's: they are the client-side gate refusing before the instance was
+ * ever asked, and a poster who reads "rejected" without that distinction will
+ * reasonably conclude their instance will not take the file. So each message
+ * says which side refused.
+ *
+ * `file-too-large` is included for completeness and should be unreachable:
+ * `MediaField` passes `NO_CLIENT_SIZE_CEILING`, so the size limb of the gate
+ * cannot trip and size stays lesser's decision. If it ever does appear, the
+ * message says plainly that the composer refused, because that would be a
+ * contentus configuration bug rather than an instance limit.
  */
-export function droppedFilesMessage(dropped: readonly PickedFile[]): string | null {
-	if (dropped.length === 0) return null;
-
-	const named = dropped.map((file) => file.name || 'an unnamed file').join(', ');
-	const subject = dropped.length === 1 ? 'file was' : 'files were';
-
-	return (
-		`${dropped.length} ${subject} not sent: ${named}. ` +
-		'The file picker rejected them before this instance was asked, so this is the ' +
-		'composer refusing rather than the instance. Converting to a common image, video, ' +
-		'or audio format usually works.'
-	);
-}
-
-/**
- * What to say when the vendored validator will discard the WHOLE selection.
- *
- * `filesDroppedBeforeUpload` recovers the discarded files by comparing what was
- * picked against what `onUpload` received — which works for every partial
- * rejection and for none of the total ones, because `MediaComposer.uploadFiles`
- * returns at `if (!validFiles.length) return;`
- * (`src/lib/patterns/MediaComposer.svelte:246`) without calling `onUpload` at
- * all. Pick four files the composer will not take and the delta never runs: the
- * selection disappears into a `console.warn` and the poster watches nothing
- * happen. Same silent discard, one branch earlier.
- *
- * That branch is predictable from outside the component, which is why this is a
- * pure function and not an edit to vendored source: the inputs are the poster's
- * selection and the config CONTENTUS ITSELF passed down. So the whole-selection
- * case is named here, before the pattern gets a chance to swallow it, and the
- * partial case stays with the delta that already handles it.
- *
- * PRECEDENCE MIRRORS THE VALIDATOR, deliberately. Its filter tests type first
- * and returns false, so a file with an unusable type is dropped for its type
- * whether or not the composer is also full; the cap only explains the files
- * that got past the type test. Reporting one reason for the other would be its
- * own kind of silence. Both are reported when both apply.
- *
- * NEITHER REASON IS LESSER'S. lesser decides every upload it is asked about;
- * these are the files it is never asked about, and saying so is the whole
- * point. The size limb of that same filter is not modelled here because
- * `NO_CLIENT_SIZE_CEILING` puts it beyond reach — if that ceiling ever becomes
- * a real number again, this function has to grow a third reason.
- *
- * SUNSET: shares `filesDroppedBeforeUpload`'s. Both go when the vendored
- * pattern can report its own rejections or defer them to the server.
- */
-export function wholeSelectionDroppedMessage(
-	selected: readonly PickedFile[],
-	composer: {
-		allowedTypes: readonly string[];
-		attachmentCount: number;
-		maxAttachments: number;
-	}
+export function rejectionMessage(
+	files: readonly PickedFile[],
+	reason: MediaRejectionReason
 ): string | null {
-	if (selected.length === 0) return null;
+	if (files.length === 0) return null;
 
-	const unusable = selected.filter((file) => !composer.allowedTypes.includes(file.type));
-	const survivors = selected.length - unusable.length;
-	const full = composer.attachmentCount >= composer.maxAttachments;
+	const named = files.map((file) => file.name || 'an unnamed file').join(', ');
+	const subject = files.length === 1 ? 'file was' : 'files were';
+	const lead = `${files.length} ${subject} not sent: ${named}.`;
 
-	// Something will reach `onUpload`, so the delta reports what did not. Saying
-	// it here as well would report the same file twice.
-	if (survivors > 0 && !full) return null;
-
-	const parts: string[] = [];
-	const dropped = droppedFilesMessage(unusable);
-	if (dropped) parts.push(dropped);
-	if (survivors > 0) {
-		parts.push(
-			`Nothing was sent: this post already holds the ${composer.maxAttachments} attachments ` +
-				'this instance accepts. Remove one to attach another.'
-		);
+	switch (reason.kind) {
+		case 'unsupported-type':
+			return (
+				`${lead} The file picker rejected them before this instance was asked, so this is ` +
+				'the composer refusing rather than the instance. Converting to a common image, ' +
+				'video, or audio format usually works.'
+			);
+		case 'file-too-large':
+			return (
+				`${lead} The composer applied a size limit of its own before asking this ` +
+				"instance. That limit is not this instance's and should not have been reached."
+			);
+		case 'max-attachments-reached':
+			return (
+				`${lead} This post already holds the ${reason.maxAttachments} attachments this ` +
+				'instance accepts. Remove one to attach another.'
+			);
 	}
-
-	return parts.join(' ');
 }

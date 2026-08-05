@@ -173,7 +173,7 @@ const OBJECT_CORE_FIELDS = `
 	tags { name url }
 	mentions { id username domain url }
 	inReplyTo { id actor { id } }
-	agentAttribution { triggerType modelId delegatedBy schemaVersion }
+	agentAttribution { triggerType modelId delegatedBy approvedBy schemaVersion }
 `;
 
 const OBJECT_FIELDS = `
@@ -450,11 +450,27 @@ export function toTimelineStatus(
 	// are lesser's own (`AgentPostAttribution`) and map onto the vendored
 	// `AgentAttribution` one-for-one; nothing here is derived or guessed, which
 	// is the point — attribution that a client inferred is not attribution.
+	//
+	// `approvedBy` (lesser v1.6.0) wins over `delegatedBy` when lesser sets it.
+	// Both are server-derived — neither has been client-suppliable — but they
+	// are not the same claim: `approvedBy` is populated only from a delegation
+	// credential lesser VALIDATED for this specific post, while `delegatedBy`
+	// otherwise carries what the caller's token claims say. lesser itself
+	// collapses the two, overwriting `delegatedBy` with `approvedBy` whenever
+	// the latter is non-empty (`graph/mutation_resolvers_notes.go`), so this
+	// preference does not change the string contentus displays today. It makes
+	// the display depend on the field that MEANS "verified approver" rather
+	// than on lesser continuing to mirror it into the weaker one.
+	//
+	// The vendored `AgentAttribution` has no `approvedBy` slot, so the value
+	// lands in `delegatedBy` — the vendored shape is greater's to extend, and
+	// hand-editing it to add a field would break the CLI-managed channel for a
+	// value that is already correct in the slot that exists.
 	if (isRecord(raw['agentAttribution'])) {
 		const attribution = raw['agentAttribution'];
 		status.agentAttribution = {
 			triggerType: str(attribution['triggerType']) ?? null,
-			delegatedBy: str(attribution['delegatedBy']) ?? null,
+			delegatedBy: str(attribution['approvedBy']) ?? str(attribution['delegatedBy']) ?? null,
 			schemaVersion: str(attribution['schemaVersion']) ?? null,
 			modelId: str(attribution['modelId']) ?? null,
 		};

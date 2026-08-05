@@ -24,7 +24,7 @@
 	 * </Auth.Root>
 	 */
 
-	import { createButton } from 'src/lib/greater/headless/button';
+	import { createButton } from '../../greater/headless/button';
 	import type { AuthHandlers } from './context.js';
 
 	type ProviderRequest = {
