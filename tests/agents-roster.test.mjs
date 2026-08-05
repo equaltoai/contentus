@@ -535,6 +535,10 @@ test('malformed errors, HTTP failures, and empty data degrade to an agents page 
 	const cases = [
 		['non-object error entries', { data: null, errors: [null, 42, 'broken'] }],
 		['a non-GraphQL HTTP failure', { httpStatus: 503 }],
+		[
+			'a non-2xx GraphQL response',
+			{ httpStatus: 503, data: null, errors: [{ message: 'internal server error' }] },
+		],
 		['an answer with no agents connection', { data: { agents: null } }],
 	];
 
