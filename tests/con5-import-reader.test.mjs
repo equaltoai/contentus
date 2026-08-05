@@ -2668,3 +2668,230 @@ test('inline code at a node child is refused, and only at a node child', () => {
 		assert.equal(ordinary.status, 0, `${what} is not node's flag\n${ordinary.output}`);
 	}
 });
+
+/* -------------------------------------------------------------------------
+ * Round 11 — the lookup path a bare command is searched on
+ * ---------------------------------------------------------------------- */
+
+test('a lookup path is read as the list of directories it is', () => {
+	// THE REPRO. The rule here used to be that any word naming a directory in this
+	// tree is a base the site's other words may be resolved in, and one entry of a
+	// PATH happens to be such a word. A REAL path is not: `'scripts/lib:/usr/bin'`
+	// names no directory as one string, so the base disappeared, the bare command
+	// resolved nowhere, and the repository file it opens ran with this control green
+	// and green again with it rewritten wholesale.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync('helper.mjs', [], { env: { PATH: 'scripts/lib:/usr/bin' } });\n",
+		[HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	const silent = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(silent.status, 1, 'a path with two entries is searched at both of them');
+	assert.match(silent.output, /runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/);
+
+	const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: named });
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: named,
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	// Every arrangement of the same list, because an entry's position is not what
+	// makes it searched, and a Windows-style separator is the same list.
+	for (const path of [
+		'scripts/lib',
+		'/usr/bin:scripts/lib',
+		'/usr/bin:scripts/lib:/usr/local/bin',
+		'scripts/lib;C:/Windows',
+	]) {
+		const searched = runCon5({
+			files: {
+				...files,
+				'scripts/gate.mjs':
+					"import { spawnSync } from 'node:child_process';\n" +
+					`spawnSync('helper.mjs', [], { env: { PATH: ${JSON.stringify(path)} } });\n`,
+			},
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: named,
+		});
+		assert.equal(searched.status, 0, `${path} searches scripts/lib\n${searched.output}`);
+	}
+});
+
+test('a directory-valued string is not a lookup path, and is not a base', () => {
+	// THE FALSE POSITIVE the old rule produced, which is the same defect mirrored:
+	// two ordinary labels beside a system binary were read as a directory and a file
+	// name, and the site was reported as running `scripts/lib/helper.mjs` — a file
+	// the child never opens, demanded of a `binds` that could not honestly name it.
+	// A rule that fires on a site running nothing is a rule whose only repair is to
+	// weaken it.
+	const labelled = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('/usr/bin/true', [], { env: { LABEL_DIR: 'scripts/lib', LABEL_FILE: 'helper.mjs' } });\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(labelled.status, 1, 'the helper is pinned and nothing reaches it');
+	assert.doesNotMatch(
+		labelled.output,
+		/runs scripts\/lib\/helper\.mjs/,
+		'a label is not a lookup root'
+	);
+	assert.match(labelled.output, /pins scripts\/lib\/helper\.mjs, which no guarded command reaches/);
+
+	// The same tree with the helper simply absent from the pins passes outright,
+	// which is what "this site runs nothing this repository holds" looks like.
+	const quiet = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('/usr/bin/true', [], { env: { LABEL_DIR: 'scripts/lib', LABEL_FILE: 'helper.mjs' } });\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(quiet.status, 0, `a label names nothing to bind\n${quiet.output}`);
+
+	// And a directory named beside a file at an ordinary argument position is the
+	// same non-base: `git -C <dir> <file>` does not open `<dir>/<file>` as code.
+	const dashC = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { execFileSync } from 'node:child_process';\n" +
+				"execFileSync('git', ['-C', 'scripts/lib', 'add', '--', 'helper.mjs']);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'execFileSync',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(dashC.status, 0, `a -C directory is not a base for arguments\n${dashC.output}`);
+});
+
+test('a bare command searched on a path this file does not write is reported', () => {
+	// The fail-closed edge of the rule above. A command with no separator is never
+	// sought in the working directory — execvp searches a lookup path — so a site
+	// that writes none has handed the choice of file to the environment. That is not
+	// something a `binds` can name, and it is not something to answer by guessing at
+	// the repository root either.
+	const inherited = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\nspawnSync('helper.mjs', []);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(inherited.status, 1, 'an inherited lookup path is not written here');
+	assert.match(inherited.output, /runs the bare command "helper\.mjs"/);
+
+	// THE PAIRING, both repairs, and the reason this is a rule rather than a ban: a
+	// command word is only reported where it could name a file at all. `git`, `node`
+	// and `mkdir` carry no extension and no separator, and are the ordinary case.
+	for (const [what, call] of Object.entries({
+		'the path spelled at the call': "spawnSync('./scripts/lib/helper.mjs', []);\n",
+		'the lookup path written beside it':
+			"spawnSync('helper.mjs', [], { env: { PATH: 'scripts/lib' } });\n",
+	})) {
+		const repaired = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { spawnSync } from 'node:child_process';\n" + call,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'spawnSync',
+						reason: 'the fixture’s point',
+						binds: [HELPER],
+					},
+				],
+			},
+		});
+		assert.equal(repaired.status, 0, `${what} names the file\n${repaired.output}`);
+	}
+
+	for (const command of ['git', 'node', 'mkdir', 'true']) {
+		const ordinary = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { execFileSync } from 'node:child_process';\n" +
+					`execFileSync(${JSON.stringify(command)}, ['--version']);\n`,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'execFileSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(ordinary.status, 0, `${command} names no file to pin\n${ordinary.output}`);
+	}
+});

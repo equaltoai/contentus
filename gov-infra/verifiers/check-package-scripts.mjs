@@ -805,12 +805,32 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * other literal keeps the over-inclusive tokenization and no rejection, because a
  * rule that fired on a `$` inside a query string would be a finding with no repair
  * — and a rule with no repair is how a gate gets weakened.
+ *
+ * A LOOKUP PATH IS ITS OWN KIND OF STRING, which is round 11's third finding and
+ * the reason this reading asks the reader for a variable's NAME. The rule here used
+ * to be that every word naming a directory in this tree is a base the site's other
+ * words may be resolved in — over-inclusive on purpose, and wrong in both
+ * directions at once. `{ env: { PATH: 'scripts/lib:/usr/bin' } }` is a lookup path
+ * with two entries, and as one word it names no directory at all, so a bare command
+ * beside it ran a repository file with this control green. `{ env: { LABEL_DIR:
+ * 'scripts/lib', LABEL_FILE: 'helper.mjs' } }` beside `/usr/bin/true` is two labels
+ * and no lookup path whatsoever, and the same rule reported the site as running
+ * `scripts/lib/helper.mjs` — a file the child never opens, demanded of a `binds`
+ * that could not honestly name it. A directory-valued string is not a base; a
+ * variable a child SEARCHES is, and the variable has a name. So `PATH` is split into
+ * its entries, each in the frame its literal was written in, and a command word with
+ * no separator is resolved through those entries and through nothing else — which is
+ * also what execvp does, since a bare name is never sought in the working directory.
  */
+const LOOKUP_VARIABLES = new Set(['PATH', 'Path']);
+
 function siteWords(literals, execPath) {
 	const words = [];
 	const seen = new Set();
 	const unreadable = new Set();
 	const inlineCode = new Set();
+	const lookup = [];
+	const commands = [];
 	const add = (text, frame) => {
 		const identity = JSON.stringify([frame, text]);
 		if (seen.has(identity)) return;
@@ -829,19 +849,34 @@ function siteWords(literals, execPath) {
 
 	for (const literal of literals) {
 		const { text, frame, role, key } = literal;
+		// A lookup path is a LIST of directories, so it is read as one and not as a
+		// word: the whole string names no file, and each entry names no file either.
+		if (role === 'env' && LOOKUP_VARIABLES.has(key)) {
+			for (const entry of text.split(/[:;]/)) if (entry) lookup.push({ text: entry, frame });
+			continue;
+		}
 		const parsed = role === 'command' || (role === 'env' && INHERITED_EXECUTION.has(key));
 		add(text, frame);
 		if (parsed)
 			for (const construct of shellConstructs(text))
 				unreadable.add(`${construct}, in ${JSON.stringify(text)}`);
-		for (const segment of shellSegments(text))
-			for (const token of shellTokens(segment)) {
-				add(token, frame);
+		for (const segment of shellSegments(text)) {
+			const tokens = shellTokens(segment);
+			for (const [index, token] of tokens.entries()) {
+				// The first word of a command is the one execvp searches rather than
+				// resolves, so it is answered by the lookup path below instead of by
+				// this site's working directory — but only where it is a bare name.
+				// `./helper.mjs` and `sub/helper.mjs` carry a separator and are resolved
+				// against the child's directory like any other word.
+				if (role === 'command' && index === 0 && !token.includes('/'))
+					commands.push({ text: token, frame });
+				else add(token, frame);
 				for (const piece of token.split('=').slice(1)) if (piece) add(piece, frame);
 				if (node && inlineCodeFlags.has(token.split('=')[0])) inlineCode.add(token);
 			}
+		}
 	}
-	return { words, unreadable, inlineCode };
+	return { words, unreadable, inlineCode, lookup, commands };
 }
 
 /**
@@ -865,6 +900,18 @@ function siteWords(literals, execPath) {
  * gets decided. `siteBase` in the shared reader answers which directory the site
  * writes, in which frame; the FILE frame is unmoved by any `cwd`, because the
  * parent computes it before the child exists.
+ *
+ * A LOOKUP ROOT IS A BASE, AND IT IS THE ONE THE SITE NAMES. This used to take
+ * every word that happened to name a directory in this tree as a base the site's
+ * other words could be resolved in — over-inclusive on purpose, and wrong in both
+ * directions at once. `{ env: { PATH: 'scripts/lib:/usr/bin' } }` names no
+ * directory as one word, so the bare command beside it ran a repository file with
+ * this control green; `{ env: { LABEL_DIR: 'scripts/lib', LABEL_FILE: 'helper.mjs' } }`
+ * beside `/usr/bin/true` names no lookup path at all, and the same rule reported
+ * the site as running a file the child never opens. A directory-valued string is
+ * not a base. A variable a child SEARCHES is, and it has a name: `PATH` is split
+ * into its entries, each in its literal's own frame, and a bare command word is
+ * answered through those and nothing else — which is also what execvp does.
  *
  * A WORD IS RESOLVED IN ITS OWN FRAME AND IN NO OTHER, which is round 11 and the
  * hole round 10's fix left open. Both frames were asked of every word, so a word
@@ -899,7 +946,7 @@ function siteWords(literals, execPath) {
  * Those sites are carried by the disclosure's reason, which is what it is for.
  */
 function siteRepositoryTargets(file, literals, base, execPath) {
-	const { words, unreadable, inlineCode } = siteWords(literals, execPath);
+	const { words, unreadable, inlineCode, lookup, commands } = siteWords(literals, execPath);
 	const fileFrame = resolve(root, dirname(file));
 	const processFrame =
 		base.from === 'file'
@@ -908,22 +955,13 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 				? resolve(root, base.path)
 				: null;
 
-	// The directories each frame stands for. `unknown` stands for none, which is
-	// what makes it fail closed; the lists grow below with the directories the
-	// site's own words name IN THAT FRAME, and never across frames.
+	// The directory each frame stands for. `unknown` stands for none, which is what
+	// makes it fail closed.
 	const frames = new Map([
-		['file', [fileFrame]],
-		['process', processFrame ? [processFrame] : []],
-		['unknown', []],
+		['file', fileFrame],
+		['process', processFrame],
+		['unknown', null],
 	]);
-	for (const [frame, named] of frames)
-		for (let index = 0; index < named.length; index += 1)
-			for (const word of words) {
-				if (word.frame !== frame) continue;
-				const candidate = resolve(named[index], word.text);
-				if (repoRelative(candidate).startsWith('..')) continue;
-				if (isDirectory(candidate) && !named.includes(candidate)) named.push(candidate);
-			}
 
 	const repositoryFile = (from, word) => {
 		const candidate = repoRelative(resolve(from, word));
@@ -932,11 +970,36 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 	};
 
 	const runs = new Set();
-	for (const word of words)
-		for (const named of frames.get(word.frame) ?? []) {
-			const found = repositoryFile(named, word.text);
-			if (found) runs.add(found);
+	for (const word of words) {
+		const named = frames.get(word.frame);
+		const found = named && repositoryFile(named, word.text);
+		if (found) runs.add(found);
+	}
+
+	// The lookup roots this site writes, resolved in the frames their own literals
+	// were written in — and whether the search this reading models is the whole
+	// search the child performs. A site that writes no lookup path leaves it to the
+	// environment it inherits, which this file does not name.
+	const undeterminedCommands = new Set();
+	const roots = [];
+	let searchesElsewhere = lookup.length === 0;
+	for (const entry of lookup) {
+		const named = frames.get(entry.frame);
+		if (named) roots.push(resolve(named, entry.text));
+		else searchesElsewhere = true;
+	}
+	for (const command of commands) {
+		let found = false;
+		for (const from of roots) {
+			const named = repositoryFile(from, command.text);
+			if (named) {
+				runs.add(named);
+				found = true;
+			}
 		}
+		if (!found && searchesElsewhere && pathShaped(command.text))
+			undeterminedCommands.add(command.text);
+	}
 
 	// Only for a word whose frame has no directory: a word that names a file under
 	// the root this site may or may not be resolving in, and a word shaped like a
@@ -946,13 +1009,13 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 	// because no working directory moves it.
 	const undetermined = new Set();
 	for (const word of words) {
-		if ((frames.get(word.frame) ?? []).length) continue;
+		if (frames.get(word.frame)) continue;
 		const named = repositoryFile(root, word.text);
 		if (named && !runs.has(named)) undetermined.add(named);
 		else if (!named && pathShaped(word.text)) undetermined.add(word.text);
 	}
 
-	return { runs, undetermined, unreadable, inlineCode };
+	return { runs, undetermined, unreadable, inlineCode, undeterminedCommands };
 }
 
 /**
@@ -1116,12 +1179,15 @@ function executableClosure() {
 				// Which files those are is decided by the base the site writes, so a
 				// target it names in a directory this reading cannot read is neither:
 				// it is reported as undetermined rather than resolved by guess.
-				const { runs, undetermined, unreadable, inlineCode } = siteRepositoryTargets(
-					path,
-					literals,
-					base,
-					execPath
-				);
+				const { runs, undetermined, unreadable, inlineCode, undeterminedCommands } =
+					siteRepositoryTargets(path, literals, base, execPath);
+				for (const command of undeterminedCommands)
+					findings.push(
+						`${path}:${line}: ${expression} runs the bare command ${JSON.stringify(command)}, which ` +
+							'is searched for on a lookup path this site does not write, so which file it opens ' +
+							'is decided by the environment rather than by this repository; spell the path to the ' +
+							'file, or write the `env.PATH` the child is meant to search'
+					);
 				for (const construct of unreadable)
 					findings.push(
 						`${path}:${line}: ${expression} hands a child a string this reading does not model — ` +
