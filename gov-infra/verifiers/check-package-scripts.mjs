@@ -79,7 +79,12 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 
-import { modulePath, runtimeLoads, unfollowableLoads } from '../../scripts/lib/module-imports.mjs';
+import {
+	INHERITED_EXECUTION,
+	modulePath,
+	runtimeLoads,
+	unfollowableLoads,
+} from '../../scripts/lib/module-imports.mjs';
 import { readStrictJson } from './strict-json.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
@@ -198,6 +203,15 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
  * one of them is a place the walk stops with something unpinned beyond it.
  * `unfollowableLoads` in the shared reader draws the line and its header states
  * exactly where the grammar's reach ends.
+ *
+ * A WRITE IS THE FOURTH, and it is round 11's. `process.env.NODE_OPTIONS =
+ * '--require=./scripts/lib/helper.cjs'` starts that helper in every child this
+ * process goes on to spawn, and the spawn itself carries no literal at all — so the
+ * site with something to bind was not the site the reading was looking at, and this
+ * control was green with the helper rewritten wholesale. The variable has a name,
+ * this repository writes it, and the write lives in a file a hash binds; what is
+ * NOT reported is the environment this process inherits, which is the world rather
+ * than the tree.
  *
  * WHY THE THIRD KIND ARRIVED IN ROUND 8, having been argued out of scope in round
  * 7. The reader's header then said `node:child_process` was outside a reading
@@ -573,28 +587,10 @@ const inlineCodeFlags = new Set(['-e', '--eval', '-p', '--print', '--input-type'
 /** The names a command word carries when the child is Node rather than something else. */
 const isNodeInterpreter = (word) => ['node', 'nodejs', 'node.exe'].includes(word.split('/').pop());
 
-/**
- * Environment variables whose VALUE names code a child loads before it reaches
- * its own entry point — a command line by another name, parsed by the child's
- * interpreter or by its dynamic linker rather than by a shell.
- *
- * THEY ARE NAMED RATHER THAN GUESSED. `NODE_OPTIONS: '--import ./scripts/lib/x.mjs'`
- * loads a repository file into the child, and so does `--require=`, `--loader=`,
- * `NODE_REPL_EXTERNAL_MODULE`, a `NODE_PATH` entry, and `LD_PRELOAD` one layer
- * below Node entirely. Every one of them is a repository-controlled channel with a
- * name, and a reading that watches names can watch these — the same argument that
- * put `spawn` and `Worker` in the loader grammar in round 8. What is NOT here is
- * ambient inherited environment: what a developer or CI exports is not something
- * this repository writes, and a gate that reported it would be reporting the
- * world rather than the tree.
- */
-const INHERITED_EXECUTION = new Set([
-	'NODE_OPTIONS',
-	'NODE_REPL_EXTERNAL_MODULE',
-	'NODE_PATH',
-	'LD_PRELOAD',
-	'DYLD_INSERT_LIBRARIES',
-]);
+// `INHERITED_EXECUTION` is the shared reader's, imported rather than repeated:
+// there it decides which WRITE into this process's environment is a load, and here
+// which VALUE is a flag list a child's interpreter parses. One list, because two
+// copies of one list is how the halves of a model drift apart.
 
 /** Expand a single-`*` filename glob. `**` and brace expansion are not modelled. */
 function expandGlob(pattern) {

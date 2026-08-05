@@ -473,6 +473,39 @@ const MODELLED_EXECUTION_EXPORTS = new Set([
 const EXECUTION_PROPERTIES = new Set(['dlopen']);
 const EXECUTION_GLOBALS = new Set(['WebAssembly']);
 
+/**
+ * Environment variables whose VALUE names code a child loads before it reaches its
+ * own entry point, and which every child of this process inherits by default.
+ *
+ * WHY A WRITE TO ONE IS A LOAD, which is round 11's fourth finding. This grammar
+ * watched what a call HANDS a facility and nothing else, so
+ * `process.env.NODE_OPTIONS = '--require=./scripts/lib/helper.cjs'` on one line and
+ * `spawnSync(process.execPath, ['-e', ''])` on the next executed a repository
+ * helper with no literal anywhere near the spawn — the site had nothing to bind,
+ * and CON-5 was green with the helper rewritten wholesale. The channel is not
+ * ambient: the variable has a name, this repository writes it, and a reading that
+ * watches names can watch this one, which is the argument round 8 used to put
+ * `spawn` in the grammar at all.
+ *
+ * WHAT IS NOT HERE is the environment this process INHERITS. What a developer or a
+ * CI runner exports is not something this repository writes, and a gate that
+ * reported it would be reporting the world rather than the tree. The boundary is
+ * the write, because the write is the part that lives in a file a hash binds.
+ *
+ * The set is exported because two readings need exactly this list and two copies
+ * of one list is how the halves of a model drift apart — the defect round 8 found
+ * between `unfollowableLoads` and `requireLike`. The caller reads the VALUE of one
+ * of these as the flag list a child's interpreter parses; here they decide which
+ * write is a load at all.
+ */
+export const INHERITED_EXECUTION = new Set([
+	'NODE_OPTIONS',
+	'NODE_REPL_EXTERNAL_MODULE',
+	'NODE_PATH',
+	'LD_PRELOAD',
+	'DYLD_INSERT_LIBRARIES',
+]);
+
 const isLiteralKey = (node) =>
 	Boolean(node) &&
 	(ts.isStringLiteral(node) ||
@@ -945,8 +978,6 @@ function headedCall(node) {
  * the same division `runtimeLoads` draws for a specifier and its loader.
  */
 function siteWords(node) {
-	const call = headedCall(node);
-	if (!call?.arguments) return [];
 	const words = [];
 	const seen = new Set();
 	const add = (text, frame, role, key) => {
@@ -972,6 +1003,30 @@ function siteWords(node) {
 		}
 		ts.forEachChild(inner, (child) => walk(child, role, key));
 	};
+	/** Every member of an object read as the environment variable it names. */
+	const environment = (object) => {
+		if (!ts.isObjectLiteralExpression(object)) return walk(object, 'env', null);
+		for (const variable of object.properties) {
+			const written = ts.isPropertyAssignment(variable) ? variable.initializer : variable;
+			walk(written, 'env', optionKey(variable));
+		}
+	};
+
+	// A write into this process's own environment is a site with one string in it:
+	// the value, read as the variable it is written into.
+	const assigned = assignedExecutionVariable(node);
+	if (assigned) {
+		walk(assigned.value, 'env', assigned.name);
+		return words;
+	}
+
+	const call = headedCall(node);
+	if (!call?.arguments) return words;
+
+	if (mutatesEnvironment(call)) {
+		for (const argument of call.arguments.slice(1)) environment(argument);
+		return words;
+	}
 
 	call.arguments.forEach((argument, index) => {
 		if (index === 0) return walk(argument, 'command', null);
@@ -981,11 +1036,8 @@ function siteWords(node) {
 			const value = ts.isPropertyAssignment(property) ? property.initializer : null;
 			// The one option whose members are named things rather than a bag of
 			// values: every key under `env` is a variable a child reads by that name.
-			if (name === 'env' && value && ts.isObjectLiteralExpression(value)) {
-				for (const variable of value.properties) {
-					const written = ts.isPropertyAssignment(variable) ? variable.initializer : variable;
-					walk(written, 'env', optionKey(variable));
-				}
+			if (name === 'env' && value) {
+				environment(value);
 				continue;
 			}
 			walk(value ?? property, 'option', null);
@@ -1005,6 +1057,61 @@ function siteWords(node) {
  * two ways a site says "this node"; a command spelled as a literal answers the
  * same question in the caller, out of the word itself.
  */
+/** `process.env`, in either spelling of the member. */
+const isProcessEnv = (node) =>
+	Boolean(node) &&
+	((ts.isPropertyAccessExpression(node) && node.name.text === 'env') ||
+		(ts.isElementAccessExpression(node) &&
+			isLiteralKey(node.argumentExpression) &&
+			node.argumentExpression.text === 'env')) &&
+	ts.isIdentifier(node.expression) &&
+	node.expression.text === 'process';
+
+/**
+ * The write this node makes into the environment every child of this process
+ * inherits, as `{ name, value }` — or null where it makes none.
+ *
+ * `name` is the variable for a write to one of `INHERITED_EXECUTION`, and null for
+ * a write that replaces the whole environment, which this reading cannot
+ * enumerate. `value` is the expression written, which is where the caller finds
+ * the repository paths the variable names.
+ *
+ * A WRITE TO AN UNWATCHED VARIABLE IS NOT THIS. `process.env.CI = '1'` starts no
+ * code, and reporting it would be a finding with no repair at an ordinary site —
+ * which is how a list of disclosures stops being read. The line is the same one
+ * `process.binding` sits on: a rule about a NAME costs whatever else in the tree is
+ * spelled that way, and these five names are spelled nowhere else in it.
+ */
+function assignedExecutionVariable(node) {
+	if (!ts.isBinaryExpression(node)) return null;
+	const operator = node.operatorToken.kind;
+	if (operator !== ts.SyntaxKind.EqualsToken && operator !== ts.SyntaxKind.PlusEqualsToken)
+		return null;
+	const left = node.left;
+	if (isProcessEnv(left)) return { name: null, value: node.right };
+	const named = ts.isPropertyAccessExpression(left)
+		? left.name.text
+		: ts.isElementAccessExpression(left) && isLiteralKey(left.argumentExpression)
+			? left.argumentExpression.text
+			: null;
+	if (named === null || !isProcessEnv(left.expression)) return null;
+	return INHERITED_EXECUTION.has(named) ? { name: named, value: node.right } : null;
+}
+
+/**
+ * True where a call MUTATES this process's environment through the object rather
+ * than through a member of it — `Object.assign(process.env, …)` and the
+ * `defineProperty` family. What it writes is not enumerated: an argument this
+ * reading can open may still carry a computed key, so the site is reported and its
+ * strings are read, and the disclosure's reason carries the rest.
+ */
+function mutatesEnvironment(node) {
+	if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
+	if (!['assign', 'defineProperty', 'defineProperties'].includes(node.expression.name.text))
+		return false;
+	return isProcessEnv(node.arguments[0]);
+}
+
 function runsThisInterpreter(node) {
 	const first = headedCall(node)?.arguments?.[0];
 	if (!first) return false;
@@ -1275,7 +1382,11 @@ function nameableCallee(callee) {
  *   - every named Node facility that runs code this process did not load — a
  *     `spawn`/`exec`/`fork` bound from `node:child_process`, a `Worker` bound from
  *     `node:worker_threads`, either module taken in a form whose bindings cannot be
- *     named, `process.dlopen`, and `WebAssembly`.
+ *     named, `process.dlopen`, and `WebAssembly`;
+ *   - a WRITE into one of `INHERITED_EXECUTION` — `process.env.NODE_OPTIONS = …`,
+ *     the subscript and append spellings of it, a replacement of `process.env`
+ *     itself, and `Object.assign(process.env, …)` — which loads code into every
+ *     child this process starts without a call anywhere near the child.
  *
  * WHY THE LAST GROUP IS HERE, when round 7's version of this argued it out of
  * scope. That argument was that this reading covers code THIS process runs, so a
@@ -1376,6 +1487,26 @@ export function unfollowableLoads(source) {
 	};
 
 	eachNode(file, (node) => {
+		// The channel that starts code with no call anywhere near it: a variable
+		// written into this process's environment, which every child inherits.
+		const assigned = assignedExecutionVariable(node);
+		if (assigned)
+			return report(
+				node,
+				'execution',
+				assigned.name
+					? `writes ${assigned.name} into this process's environment, which every child it starts ` +
+							'loads before reaching its own entry point'
+					: "replaces this process's environment, which every child it starts inherits"
+			);
+		if (mutatesEnvironment(node))
+			return report(
+				node,
+				'execution',
+				"mutates this process's environment through the object, so which execution variables it " +
+					'writes is not something this reading enumerates'
+			);
+
 		if (isImportCall(node) || isRequireCall(node, names)) {
 			const specifier = staticSpecifier(node.arguments[0]);
 			if (specifier === null) report(node, 'computed', 'loads a module no static read can name');

@@ -2895,3 +2895,171 @@ test('a bare command searched on a path this file does not write is reported', (
 		assert.equal(ordinary.status, 0, `${command} names no file to pin\n${ordinary.output}`);
 	}
 });
+
+/* -------------------------------------------------------------------------
+ * Round 11 — the execution variables this process writes for its children
+ * ---------------------------------------------------------------------- */
+
+test('a write into an inherited execution variable is a load', () => {
+	// THE REPRO. The reading watched what a CALL hands its facility and nothing
+	// else, so a gate that set `NODE_OPTIONS` on one line and spawned a child on the
+	// next executed a repository helper with no literal anywhere near the spawn:
+	// the site had nothing to bind, the write was invisible, and this control was
+	// green with the helper rewritten wholesale. The channel is not ambient state —
+	// the variable has a name and this repository writes it.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"process.env.NODE_OPTIONS = '--require=./scripts/lib/helper.cjs';\n" +
+			"spawnSync(process.execPath, ['scripts/lib/other.mjs']);\n",
+		[CJS_HELPER]: CJS_HELPER_SOURCE,
+		'scripts/lib/other.mjs': "export const value = 'the child’s own entry point';\n",
+	};
+	const write = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: "process.env.NODE_OPTIONS = '--require=./scripts/lib/helper.cjs'",
+		reason: 'the fixture’s point',
+	};
+	const spawn = {
+		file: 'scripts/gate.mjs',
+		line: 3,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+		binds: ['scripts/lib/other.mjs'],
+	};
+
+	const undisclosed = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/other.mjs'],
+		contract: { unfollowable_loads_disclosed: [spawn] },
+	});
+	assert.equal(undisclosed.status, 1, 'a write that loads code into every child is a site');
+	assert.match(undisclosed.output, /writes NODE_OPTIONS into this process's environment/);
+
+	// Disclosed but unbound is the same hole with a sentence in front of it.
+	const silent = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/other.mjs'],
+		contract: { unfollowable_loads_disclosed: [write, spawn] },
+	});
+	assert.equal(silent.status, 1, 'the value names a repository file and must bind it');
+	assert.match(silent.output, /runs scripts\/lib\/helper\.cjs, which its disclosure does not bind/);
+
+	// The honest form, and the pairing: rewriting the file the children load turns
+	// this red, which is the property the whole control exists for.
+	const named = {
+		unfollowable_loads_disclosed: [{ ...write, binds: [CJS_HELPER] }, spawn],
+	};
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/other.mjs', CJS_HELPER],
+		contract: named,
+	});
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/other.mjs', CJS_HELPER],
+		contract: named,
+		corrupt: CJS_HELPER,
+	});
+	assert.equal(moved.status, 1, 'binding the preloaded file means rewriting it turns this red');
+	assert.match(moved.output, /scripts\/lib\/helper\.cjs: content does not match its pin/);
+});
+
+test('every spelling of the write is the same write, and an ordinary one is not', () => {
+	// The class rather than the instance, because the next bypass is only ever the
+	// next spelling: a subscript instead of a member, an append instead of an
+	// assignment, a replacement of the whole environment, and a mutation through the
+	// object. Each starts the same code in each child.
+	const spellings = {
+		'a member assignment': "process.env.NODE_OPTIONS = '--import=./scripts/lib/helper.mjs';\n",
+		'a subscript assignment':
+			"process.env['NODE_OPTIONS'] = '--import=./scripts/lib/helper.mjs';\n",
+		'an append': "process.env.NODE_OPTIONS += ' --import=./scripts/lib/helper.mjs';\n",
+		'a preload one layer below node': "process.env.LD_PRELOAD = './scripts/lib/helper.mjs';\n",
+		'a resolution root': "process.env.NODE_PATH = './scripts/lib/helper.mjs';\n",
+		'a mutation through the object':
+			"Object.assign(process.env, { NODE_OPTIONS: '--import=./scripts/lib/helper.mjs' });\n",
+	};
+
+	for (const [what, statement] of Object.entries(spellings)) {
+		const files = { 'scripts/gate.mjs': statement, [HELPER]: HELPER_SOURCE };
+		const declaration = {
+			file: 'scripts/gate.mjs',
+			line: 1,
+			expression: statement.trimEnd().replace(/;$/, ''),
+			reason: 'the fixture’s point',
+		};
+
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} loads a repository file into every child`);
+		assert.match(
+			silent.output,
+			/runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/,
+			`${what} must name what it loads`
+		);
+
+		const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: named });
+		assert.equal(bound.status, 0, `${what} binds once it is named\n${bound.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: named,
+			corrupt: HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+	}
+
+	// Replacing the environment wholesale is reported even though its value names
+	// nothing here, because what it carries is exactly what this reading cannot see.
+	const replaced = runCon5({
+		files: { 'scripts/gate.mjs': 'process.env = { PATH: process.env.PATH };\n' },
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 1,
+					expression: 'process.env = { PATH: process.env.PATH }',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(
+		replaced.status,
+		0,
+		`a declared replacement is carried by its reason\n${replaced.output}`
+	);
+	const undeclared = runCon5({
+		files: { 'scripts/gate.mjs': 'process.env = { PATH: process.env.PATH };\n' },
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(undeclared.status, 1, 'and it is a site, so it has to be declared');
+	assert.match(undeclared.output, /replaces this process's environment/);
+
+	// THE OTHER DIRECTION, which is where a rule about names goes wrong: an
+	// ordinary variable starts no code, and reporting one would be a finding with
+	// no repair at every gate in this tree that reads a flag out of its environment.
+	for (const [what, statement] of Object.entries({
+		'a flag a gate sets for itself': "process.env.CI = 'true';\n",
+		'a variable named for a path': "process.env.CONTENTUS_ROOT = './scripts/lib/helper.mjs';\n",
+		'a read rather than a write': "const ci = process.env.NODE_OPTIONS ?? '';\nconsole.log(ci);\n",
+		'a comparison': "if (process.env.NODE_OPTIONS === 'x') console.log('x');\n",
+	})) {
+		const ordinary = runCon5({
+			files: { 'scripts/gate.mjs': statement, [HELPER]: HELPER_SOURCE },
+			pinned: ['scripts/gate.mjs'],
+		});
+		assert.equal(ordinary.status, 0, `${what} starts no code\n${ordinary.output}`);
+	}
+});
