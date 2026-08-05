@@ -113,9 +113,12 @@ export async function graphqlRequest<T>(
  * state to render gracefully — product design §5 is explicit that it must not
  * surface as an error.
  */
-export function isFeatureDisabledError(errors: GraphQLError[]): boolean {
+export function isFeatureDisabledError(errors: readonly unknown[]): boolean {
 	return errors.some((error) => {
-		const message = error.message.toLowerCase();
+		if (typeof error !== 'object' || error === null) return false;
+		const rawMessage = (error as { message?: unknown }).message;
+		if (typeof rawMessage !== 'string') return false;
+		const message = rawMessage.toLowerCase();
 		return (
 			message.includes('not enabled') ||
 			message.includes('disabled') ||

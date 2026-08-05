@@ -71,6 +71,14 @@ function respondWith({ article = null, categories = [], articles = [] } = {}) {
 	};
 }
 
+function articleConnection(articles) {
+	return {
+		totalCount: articles.length,
+		pageInfo: { hasNextPage: false, endCursor: null },
+		edges: articles.map((node) => ({ cursor: node.id, node })),
+	};
+}
+
 /** A well-formed request as lesser's edge delivers it. */
 const INSTANCE_HEADERS = {
 	host: 'instance.example.com',
@@ -229,6 +237,86 @@ test('a loaded article renders rather than 500ing on its own canonical tag', asy
 	assert.equal(value.status, 200, 'the loaded-article path must render, not error');
 	assert.match(value.html, /^<!doctype html>/i);
 	assert.ok(value.html.includes('Hello'), 'the article title should reach the document');
+});
+
+test('article index keeps partial data when the GraphQL error envelope contains null', async () => {
+	const articles = [
+		articleFixture({ id: 'article-1', slug: 'first', title: 'First partial article' }),
+		articleFixture({ id: 'article-2', slug: 'second', title: 'Second partial article' }),
+		articleFixture({ id: 'article-3', slug: 'third', title: 'Third partial article' }),
+	];
+	const category = { id: 'category-1', slug: 'essays', name: 'Essays' };
+	const { value } = await withStubbedGraphql(
+		({ operation }) => {
+			switch (operation) {
+				case 'ContentusArticlesIndex':
+					return { data: { articles: articleConnection(articles) }, errors: [null] };
+				case 'ContentusArticleNavigation':
+					return { data: { categories: [category] }, errors: [null] };
+				default:
+					return { data: null };
+			}
+		},
+		() =>
+			renderRoute(handler, {
+				name: 'partial-articles-index',
+				path: '/l/_facetheory/hydration?path=%2F',
+				headers: INSTANCE_HEADERS,
+				expectStatus: 200,
+			})
+	);
+
+	assert.equal(value.status, 200);
+	const props = JSON.parse(value.html);
+	assert.deepEqual(
+		props.index.articles.map(({ title }) => title),
+		articles.map(({ title }) => title)
+	);
+	assert.deepEqual(
+		props.index.categories.map(({ id, slug, name }) => ({ id, slug, name })),
+		[category]
+	);
+	assert.equal(props.index.unavailable, null);
+});
+
+test('category loader keeps partial data when its GraphQL error envelope contains null', async () => {
+	const category = { id: 'category-1', slug: 'essays', name: 'Essays' };
+	const article = articleFixture({
+		id: 'article-1',
+		slug: 'category-article',
+		title: 'Category partial article',
+	});
+	const { value } = await withStubbedGraphql(
+		({ operation }) => {
+			switch (operation) {
+				case 'ContentusCategoryBySlug':
+					return { data: { categoryBySlug: category }, errors: [null] };
+				case 'ContentusArticlesIndex':
+					return { data: { articles: articleConnection([article]) } };
+				case 'ContentusArticleNavigation':
+					return { data: { categories: [category] }, errors: [null] };
+				default:
+					return { data: null };
+			}
+		},
+		() =>
+			renderRoute(handler, {
+				name: 'partial-category-index',
+				path: '/l/_facetheory/hydration?path=%2Fcategories%2Fessays',
+				headers: INSTANCE_HEADERS,
+				expectStatus: 200,
+			})
+	);
+
+	assert.equal(value.status, 200);
+	const props = JSON.parse(value.html);
+	assert.equal(props.index.articles.length, 1);
+	assert.equal(props.index.articles[0].title, article.title);
+	assert.deepEqual(
+		props.index.categories.map(({ id, slug, name }) => ({ id, slug, name })),
+		[category]
+	);
+	assert.equal(props.index.unavailable, null);
 });
 
 test('an HTML article renders its body through the vendored blog face', async () => {
