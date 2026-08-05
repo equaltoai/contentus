@@ -79,7 +79,7 @@
     "sha256": {
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
-      "scripts/audit-seam-graph.mjs": "eeb62b40e69527ac411852ac5c2eef5543b6a53ef109bf2e46df2ea432f92d29",
+      "scripts/audit-seam-graph.mjs": "30a40e69cc8e59a5ac0a0e63a4ee726457a4f1abc89b33724e7d97ac12bca259",
       "scripts/build-stylesheet.mjs": "5776f7250e94ec03944ace3b02a52b883d302f38b6e8d5a349c04a6dccc38a2a",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
@@ -107,7 +107,7 @@
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",
       "tests/review.test.mjs": "5478670b85ea2e46badd6376a13d784043b99cae2c7d909eee9bead9c698d07b",
-      "tests/seam-graph.test.mjs": "7a46feeb15f7dbd53fc3edebf0a37b55aab2ad7c3910022f5c9f6b9843c0d1e6",
+      "tests/seam-graph.test.mjs": "ebe1abe80a18df1df62f2b17cd65d748ea9239dce0d21ccac7a21ea9191327eb",
       "tests/ssr-messages.test.mjs": "46215833f4c74951839b9f500dec57dad3e709d5cc7601a9a10c2ab188c4b823",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
       "tests/ssr-routes.test.mjs": "6670a40d1ff2df197d85a6bb4d8ebccf10bcce7d3b6e3caa44815c308079b10c",

@@ -281,18 +281,20 @@ quietly covering less.
 
 The same fact is what keeps that exemption from becoming a hole, and **reached is
 two facts rather than one**. **Resolved** is the pass having an edge to the module —
-it is in that pass's graph, so the pass takes whatever the module depends on.
-**Loaded** is the pass having gone and got it, which is the only way an edge _out_ of
-it is ever recorded. An externalized module is resolved and not loaded, so it is
-counted — the gate's own output prints the two numbers side by side and the
-difference between them is what it could not judge — and externalizing a tracked
-file in the face lands in the containment rule below as a file that pass cannot
-judge, instead of passing as a file it read.
+it is in that pass's graph, and that is the whole of it. **Loaded** is the pass having
+gone and got it, which is the only way an edge _out_ of it is ever recorded. An
+externalized module is resolved and not loaded, and the build stops at that boundary:
+none of what that file depends on ever enters the build, so there is no edge out of it
+here to have missed. It is counted — the gate's own output prints the two numbers side
+by side and the difference between them is what it could not judge — and externalizing
+a tracked file in the face lands in the containment rule below as a file that pass
+cannot judge, instead of passing as a file it read.
 
 **Reached is a fact about a pass**, and round 11 is what that cost when it was not
 written down. The two passes recorded what they reached into one set, so a component
-the client pass externalized was contained because the _server_ pass had loaded it,
-and the client pass's own edges out of that component went unrecorded and unremarked.
+the client pass externalized was contained because the _server_ pass had loaded it —
+and that the client pass never opened it, and so had nothing of its own to say about
+what that component references, went unremarked.
 The channels are asymmetric — a `new URL(…, import.meta.url)` is a client-pass edge,
 an `import()` behind `import.meta.env.SSR` is a server-pass one, each invisible to
 the other pass — so a union hands one pass the other's reading for a graph the other
@@ -308,9 +310,10 @@ sentence. One file produces as many modules as there are ways to ask for it:
 bundler resolves and loads separately, and the text carries none of the component's
 dependencies. Both reach sets were keyed by the **file**, so the seam that owns
 `CopyBlock` importing its text put the file in `loaded`, and the client pass
-externalizing the executable module beside it was therefore contained: the
-component's client-pass edge went unrecorded and the gate printed `771 / 771` and no
-findings over a real cross-seam dependency. Reach is keyed by the **module** — the
+externalizing the executable module beside it was therefore contained: the containment
+rule had nothing to say about a module that pass never opened, and the gate printed
+`771 / 771` and no findings over a component whose source carries a real cross-seam
+dependency the text beside it does not. Reach is keyed by the **module** — the
 request whole, query and fragment included — and the containment rule asks its
 question of every module a tracked file produced. Edges stay keyed by the file,
 which is the same distinction from the other side: an import of
@@ -345,8 +348,8 @@ is worse than a gate with a stated boundary.
 Two boundaries remain stated rather than closed. A file the build never loads has
 no edges here at all — that is the source-reading probes' half, below. And a
 reference the client pass turns into an emitted asset and the server pass does
-not (`new URL(…)`, and a CSS `url()`) is a client-pass edge, so a module only the
-server pass loads takes those dependencies unrecorded.
+not (`new URL(…)`, and a CSS `url()`) is a client-pass edge, so for a module only
+the server pass loads, this gate records nothing about those references.
 
 **Both checks stay, and neither is redundant.** They have different domains, and
 the numbers say so: the source-reading probes walk 1246 tracked source **files**

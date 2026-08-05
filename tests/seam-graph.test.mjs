@@ -62,15 +62,16 @@ import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/au
  *
  * ROUND 11 THEN FOUND WHAT "THE BUILD" MEANS IN A GATE THAT RUNS TWO OF THEM. The
  * modules a pass reached were recorded into ONE set, so a component the CLIENT pass
- * externalized was contained because the SERVER pass had loaded it — and the client
- * pass's own edges out of that component were neither recorded nor missed. The
- * channels are not symmetric, which is what makes that a hole rather than a
- * duplicate: a `new URL(…, import.meta.url)` is a client-pass edge and an `import()`
- * behind `import.meta.env.SSR` is a server-pass one, so the pass that was excusing
- * the other was not looking at the same graph. Both halves are planted below, each
- * with the unexternalized run as its differential, and the control is a module
- * externalized in BOTH passes — the case that must stay silent, because a file no
- * pass opens is a file no pass takes an edge from.
+ * externalized was contained because the SERVER pass had loaded it — and that the
+ * client pass had never opened it, and so had nothing of its own to say about what
+ * that component references, went unremarked. The channels are not symmetric, which
+ * is what makes that a hole rather than a duplicate: `new URL(…, import.meta.url)`
+ * is a client-pass edge and an `import()` behind `import.meta.env.SSR` is a
+ * server-pass one, so the pass that was excusing the other was not looking at the
+ * same graph. Both halves are planted below, each with the unexternalized run as its
+ * differential, and the control is a module externalized in BOTH passes — the case
+ * that must stay silent, because a file no pass opens is a file no pass takes an edge
+ * from.
  *
  * ROUND 12 THEN FOUND WHAT "A FILE" MEANS IN A BUILD THAT MAKES SEVERAL MODULES OF
  * ONE. Reach was keyed by the file, so `CopyBlock.svelte?raw` — the component's
@@ -764,11 +765,11 @@ test('a face component the build externalizes is a file this gate cannot judge',
 	// which is round 11's rule and reads here as the same fact said twice.
 	assert.deepEqual(await audit({}, undefined, (id) => id.endsWith('CopyBlock.svelte')), [
 		'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
-			'client build resolves it and never loads it, so the edges it takes in that pass are ' +
-			'unrecorded and this gate cannot judge it there',
+			'client build resolves it and never loads it, so no code of it passed through that ' +
+			'pass and this gate cannot judge it there',
 		'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
-			'server build resolves it and never loads it, so the edges it takes in that pass are ' +
-			'unrecorded and this gate cannot judge it there',
+			'server build resolves it and never loads it, so no code of it passed through that ' +
+			'pass and this gate cannot judge it there',
 	]);
 });
 
@@ -795,9 +796,10 @@ test('the pass that loads a component does not excuse the pass that externalizes
 		`src/lib/agents/CopyBlock.svelte → src/lib/agents/AgentCard.svelte (${OWNED_BY_ROSTER})`,
 	]);
 
-	// EXTERNALIZED IN THE CLIENT PASS ONLY, which is the whole case. The edge is
-	// unrecorded and unrecordable — and the finding says exactly that about exactly
-	// that pass, rather than resting on the server pass having opened the same file.
+	// EXTERNALIZED IN THE CLIENT PASS ONLY, which is the whole case. The dependency is
+	// outside this build entirely — the pass whose channel would carry it never opened
+	// the module — and the finding says exactly that about exactly that pass, rather
+	// than resting on the server pass having opened the same file.
 	assert.deepEqual(
 		await audit(
 			overlay,
@@ -806,8 +808,8 @@ test('the pass that loads a component does not excuse the pass that externalizes
 		),
 		[
 			'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
-				'client build resolves it and never loads it, so the edges it takes in that pass ' +
-				'are unrecorded and this gate cannot judge it there',
+				'client build resolves it and never loads it, so no code of it passed through ' +
+				'that pass and this gate cannot judge it there',
 		]
 	);
 });
@@ -839,8 +841,8 @@ test('the same holds for the pass the other one cannot see into', async () => {
 		),
 		[
 			'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
-				'server build resolves it and never loads it, so the edges it takes in that pass ' +
-				'are unrecorded and this gate cannot judge it there',
+				'server build resolves it and never loads it, so no code of it passed through ' +
+				'that pass and this gate cannot judge it there',
 		]
 	);
 });
@@ -898,9 +900,10 @@ test('the text of a component does not answer for the component', async () => {
 	// separately — the second one's code is a string literal that carries none of the
 	// first one's dependencies — and both reach sets were keyed by the FILE. So the
 	// `?raw` module's load put `CopyBlock.svelte` in `loaded`, the client pass
-	// externalizing the executable module beside it was CONTAINED, and the component's
-	// client-pass edge went unrecorded with nothing to report it. The gate printed
-	// `771 / 771` and no findings over a real cross-seam dependency.
+	// externalizing the executable module beside it was CONTAINED, and nothing was left
+	// to report that the pass had never opened it. The gate printed `771 / 771` and no
+	// findings over a component whose source carries a real cross-seam dependency the
+	// text beside it does not.
 
 	// THE PLANT ITSELF, asserted rather than assumed, because everything below rests
 	// on that `?raw` module really being in the graph. A `?raw` import the overlay
@@ -939,8 +942,8 @@ test('the text of a component does not answer for the component', async () => {
 	// pass never opened, rather than resting on a different module of the same file.
 	assert.deepEqual(await audit(textAndReference, undefined, externalComponent), [
 		'src/lib/agents/CopyBlock.svelte is a module of a file tracked inside the face and the ' +
-			'client build resolves it and never loads it, so the edges it takes in that pass are ' +
-			'unrecorded and this gate cannot judge it there',
+			'client build resolves it and never loads it, so no code of it passed through that ' +
+			'pass and this gate cannot judge it there',
 	]);
 });
 
@@ -964,11 +967,11 @@ test('and the component does not answer for the text of it', async () => {
 		[
 			`src/lib/agents/CopyBlock.svelte → src/lib/agents/AgentCard.svelte (${OWNED_BY_ROSTER})`,
 			'src/lib/agents/CopyBlock.svelte?raw is a module of a file tracked inside the face and ' +
-				'the client build resolves it and never loads it, so the edges it takes in that pass ' +
-				'are unrecorded and this gate cannot judge it there',
+				'the client build resolves it and never loads it, so no code of it passed through ' +
+				'that pass and this gate cannot judge it there',
 			'src/lib/agents/CopyBlock.svelte?raw is a module of a file tracked inside the face and ' +
-				'the server build resolves it and never loads it, so the edges it takes in that pass ' +
-				'are unrecorded and this gate cannot judge it there',
+				'the server build resolves it and never loads it, so no code of it passed through ' +
+				'that pass and this gate cannot judge it there',
 		]
 	);
 });

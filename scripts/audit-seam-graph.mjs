@@ -83,9 +83,10 @@
  * REACHED IS A FACT ABOUT A PASS, NOT ABOUT THE REPOSITORY, and round 11 is what
  * that sentence cost when it was not written down. The two passes recorded what
  * they reached into ONE set, so a component the client pass externalized was
- * CONTAINED because the server pass had loaded it — and the client pass's own
- * edges out of that component went unrecorded and unremarked. Two probes proved
- * it: a `new URL('./X', import.meta.url)` in a component, which only the client
+ * CONTAINED because the server pass had loaded it — and that the client pass never
+ * opened it, and so had nothing of its own to say about what that component
+ * references, went unremarked. Two probes proved it: a
+ * `new URL('./X', import.meta.url)` in a component, which only the client
  * pass turns into an edge, went green under client-only externalization; an
  * `import()` behind `import.meta.env.SSR`, which only the server pass keeps, went
  * green under server-only externalization. The channels ARE asymmetric — that is
@@ -105,9 +106,10 @@
  * another module's unexamined state: `AgentMcpPanel` importing `./CopyBlock.svelte?raw`
  * — a legal import of a component its own seam owns — put the FILE in `loaded`, and
  * the client pass externalizing the executable `CopyBlock.svelte` beside it was
- * therefore CONTAINED. The component's client-pass edge went unrecorded, the
- * containment rule had nothing to say, and the gate printed `771 / 771` and no
- * findings over a real cross-seam dependency.
+ * therefore CONTAINED. The containment rule had nothing to say about a module that
+ * pass never opened, and the gate printed `771 / 771` and no findings over a
+ * component whose source carries a real cross-seam dependency the text beside it
+ * does not.
  *
  * So reach is keyed by the MODULE — the request whole, query and fragment included —
  * and the containment rule asks its question of EVERY module a tracked file
@@ -159,11 +161,12 @@
  *   3. A reference the CLIENT pass turns into an emitted asset and the SERVER
  *      pass does not. `new URL('./X', import.meta.url)` is left verbatim as a
  *      runtime URL in the server build, and a CSS `url('./X')` resolves there
- *      without emitting, so both are client-pass edges. A module only the server
- *      pass loads takes those dependencies unrecorded. The asymmetry runs the
- *      other way too — an `import()` behind `import.meta.env.SSR` is a server-pass
- *      edge the client pass eliminates before the graph records it — which is why
- *      no rule here may excuse one pass with what the other pass read.
+ *      without emitting, so both are client-pass edges. For a module only the
+ *      server pass loads, this gate records nothing about those references. The
+ *      asymmetry runs the other way too — an `import()` behind
+ *      `import.meta.env.SSR` is a server-pass edge the client pass eliminates
+ *      before the graph records it — which is why no rule here may excuse one pass
+ *      with what the other pass read.
  *
  * FAIL-CLOSED, in five places. A build that throws is a red gate rather than an
  * empty edge set. A module whose final code the build's own parser cannot read is
@@ -561,12 +564,13 @@ function recorder(pass, root, sink, references, observed, loads, reach) {
 				//
 				// WHY THE RESOLUTION IS STILL RECORDED. That silence is right for a builtin
 				// and wrong for a component this repository SHIPS. Externalizing a module of a
-				// tracked face file arranges from the outside that no pass ever opens it, and
-				// then what that file depends on is whatever a consumer's build makes of it —
-				// which this gate has not seen. So containment asks its question of every
-				// module a tracked face file produced, in each pass that resolved it, and
-				// names the ones that pass never loaded: not that this build lost an edge, but
-				// that this gate cannot judge that file there.
+				// tracked face file arranges from the outside that a pass never opens it — IN
+				// THAT PASS ALONE if the configuration says so, which is round 11 — and what
+				// that file depends on is then whatever a CONSUMER's build makes of it, which
+				// this gate has not seen. So containment asks its question of every module a
+				// tracked face file produced, in each pass that resolved it, and names the ones
+				// that pass never loaded: not that this pass lost an edge it had, but that this
+				// gate cannot judge that file there.
 				//
 				// Keyed by the MODULE and not by the file, which is round 12: the build
 				// resolves and loads `X.svelte`, `X.svelte?raw` and `X.svelte?svelte&type=…`
@@ -910,14 +914,16 @@ export function seamFindings(sink, tracked) {
 	);
 
 	// CONTAINMENT, ASKED OF EACH PASS ON ITS OWN AND OF EACH MODULE THE FILE MADE.
-	// A pass that RESOLVES a module and never LOADS it has an edge to something whose
-	// own edges it did not record, and neither the other pass nor another module of
-	// the same file says anything about that. The other pass is not looking at the
-	// same graph — the channels are not symmetric, a `new URL(…)` being a client-pass
-	// edge and an `import()` behind `import.meta.env.SSR` a server-pass one, which is
-	// round 11. And another module of the same file is not the same module — the text
-	// of a component carries none of the component's dependencies, which is round 12.
-	// The header carries both arguments.
+	// A pass that RESOLVES a module and never LOADS it has an edge to something it
+	// never opened: the build stopped at that boundary, so what the module depends on
+	// is outside this pass's graph rather than missing from it, and neither the other
+	// pass nor another module of the same file says anything about it. The other pass
+	// is not looking at the same graph — the channels are not symmetric, a
+	// `new URL(…)` being a client-pass edge and an `import()` behind
+	// `import.meta.env.SSR` a server-pass one, which is round 11. And another module
+	// of the same file is not the same module — the text of a component carries none
+	// of the component's dependencies, which is round 12. The header carries both
+	// arguments.
 	//
 	// A file no pass resolved at all is the older finding and a different one: the
 	// build never reached it, so nothing about it is unexamined in either pass, and
@@ -931,8 +937,8 @@ export function seamFindings(sink, tracked) {
 				if (reach.loaded.has(`${path}${tail}`)) continue;
 				findings.push(
 					`${path}${tail} is a module of a file tracked inside the face and the ${name} ` +
-						'build resolves it and never loads it, so the edges it takes in that pass are ' +
-						'unrecorded and this gate cannot judge it there'
+						'build resolves it and never loads it, so no code of it passed through that ' +
+						'pass and this gate cannot judge it there'
 				);
 			}
 		}
