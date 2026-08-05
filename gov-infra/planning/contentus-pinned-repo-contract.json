@@ -214,7 +214,7 @@
       }
     ],
     "sha256": {
-      "gov-infra/verifiers/check-package-scripts.mjs": "f6da5164c419bce472a1f0e04d27a78135a235034907a88b40bdd414f2aec6d1",
+      "gov-infra/verifiers/check-package-scripts.mjs": "59c1c5a22874c85ab8d1842b8cab33bf2e565c9295b6bd7d7acd147b9544d167",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
@@ -223,7 +223,7 @@
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
-      "scripts/lib/module-imports.mjs": "d4a249429f9b7ee4a4849e9c39fdc2990d0cee852de5db04cfa69e789da47b63",
+      "scripts/lib/module-imports.mjs": "f8900a36cca6bbca232f71c969124fea276e45f840f49dde727efbf9c0571482",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/render-routes.mjs": "332823b287f559249b9e831bd42406deae2cddff55d5884dd0659a897fd0432f",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
@@ -232,7 +232,7 @@
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
-      "tests/con5-import-reader.test.mjs": "c3225d84e8bf2aaa9032543e894fe0788f89128605e8b660746a3b44757dc8c9",
+      "tests/con5-import-reader.test.mjs": "6a754c7e7174d5c0ffd0ba740a86578ce398f3b070f1fee97d34dee16fc0ff9b",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",

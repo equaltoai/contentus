@@ -1989,9 +1989,12 @@ test('a target inside a string the child parses is a target', () => {
 				"spawnSync('node scripts/lib/helper.mjs', { shell: true });\n",
 			'spawnSync',
 		],
+		// The child is `--version` rather than the `-e ''` this fixture used to write:
+		// inline code at a node child is its own finding now (round 11), and a fixture
+		// about NODE_OPTIONS may not be carried by a second rule that fires beside it.
 		'a module loaded into the child by a flag': [
 			"import { spawnSync } from 'node:child_process';\n" +
-				"spawnSync(process.execPath, ['-e', ''], { env: { NODE_OPTIONS: '--import ./scripts/lib/helper.mjs' } });\n",
+				"spawnSync(process.execPath, ['--version'], { env: { NODE_OPTIONS: '--import ./scripts/lib/helper.mjs' } });\n",
 			'spawnSync',
 		],
 		'a lookup root written beside a bare command': [
@@ -2329,4 +2332,339 @@ test('a word written against a base this reading cannot name is in neither frame
 		},
 	});
 	assert.equal(arrayJoin.status, 0, `a joined array names no directory\n${arrayJoin.output}`);
+});
+
+/* -------------------------------------------------------------------------
+ * Round 11 — the grammar a child applies to the strings it is handed
+ * ---------------------------------------------------------------------- */
+
+/** The same helper under a name a shell only builds if it reads the escape. */
+const SPACED_HELPER = 'scripts/lib/my helper.mjs';
+
+test('a command line is read with the escapes a shell reads', () => {
+	// THE REPRO. `execSync('node scripts/lib/my\\ helper.mjs')` runs a repository
+	// file whose name carries a space. The tokenizer split on whitespace and knew
+	// nothing of `\`, so it built `scripts/lib/my\` and `helper.mjs` — two words,
+	// neither of which names any file — and the helper executed with this control
+	// green and green again with it rewritten wholesale. A word the shell builds is
+	// a word this reading has to build, or the reading is about another command.
+	const files = {
+		'scripts/gate.mjs':
+			"import { execSync } from 'node:child_process';\n" +
+			"execSync('node scripts/lib/my\\\\ helper.mjs');\n",
+		[SPACED_HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'execSync',
+		reason: 'the fixture’s point',
+	};
+
+	const silent = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(silent.status, 1, 'an escaped space joins two words into the one that runs');
+	assert.match(
+		silent.output,
+		/runs scripts\/lib\/my helper\.mjs, which its disclosure does not bind/
+	);
+
+	const named = {
+		unfollowable_loads_disclosed: [{ ...declaration, binds: [SPACED_HELPER] }],
+	};
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', SPACED_HELPER],
+		contract: named,
+	});
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', SPACED_HELPER],
+		contract: named,
+		corrupt: SPACED_HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/my helper\.mjs: content does not match its pin/);
+
+	// THE OTHER DIRECTION, because an escape rule is where a splitting rule goes
+	// wrong: a quoted space is the same one word, and an ordinary command line with
+	// no escape in it tokenizes exactly as it did before.
+	for (const [what, command] of Object.entries({
+		'a double-quoted name': 'node "scripts/lib/my helper.mjs"',
+		'a single-quoted name': "node 'scripts/lib/my helper.mjs'",
+	})) {
+		const quoted = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { execSync } from 'node:child_process';\n" +
+					`execSync(${JSON.stringify(command)});\n`,
+				[SPACED_HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs', SPACED_HELPER],
+			contract: named,
+		});
+		assert.equal(quoted.status, 0, `${what} names the same one file\n${quoted.output}`);
+	}
+
+	const plain = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { execSync } from 'node:child_process';\n" +
+				"execSync('node scripts/lib/helper.mjs');\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }],
+		},
+	});
+	assert.equal(plain.status, 0, `an unescaped command line is unchanged\n${plain.output}`);
+});
+
+test('a command line whose words are built when it runs is not read, it is refused', () => {
+	// The class round 11's review demonstrated with a command substitution: a word
+	// decided at run time has no answer here, and a reading that quietly reported
+	// the words it COULD see called the site read while an unpinned helper ran.
+	const constructs = {
+		'a command substitution': [
+			"spawnSync('node $(echo scripts/lib/helper.mjs)', { shell: true });\n",
+			/a command substitution `\$\(…\)`/,
+		],
+		'a backtick substitution': [
+			"spawnSync('node `echo scripts/lib/helper.mjs`', { shell: true });\n",
+			/a command substitution in backticks/,
+		],
+		'a parameter expansion': [
+			'spawnSync(\'node "$ENTRY"\', { shell: true });\n',
+			/a parameter expansion/,
+		],
+		'a process substitution': [
+			"spawnSync('node <(echo x)', { shell: true });\n",
+			/a process substitution/,
+		],
+		'a working-directory change': [
+			"spawnSync('cd sub && node helper.mjs', { shell: true });\n",
+			/the shell builtin `cd`/,
+		],
+		'a glob': ["spawnSync('node scripts/lib/*.mjs', { shell: true });\n", /a glob/],
+	};
+
+	for (const [what, [call, pattern]] of Object.entries(constructs)) {
+		const refused = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { spawnSync } from 'node:child_process';\n" + call,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'spawnSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(refused.status, 1, `${what} is a command line with no static answer`);
+		assert.match(refused.output, pattern, `${what} must be named`);
+		assert.match(refused.output, /hands a child a string this reading does not model/);
+	}
+
+	// THE PAIRING, and the direction a rejection rule gets wrong: the same
+	// characters where a shell does not expand them are not a construct at all, and
+	// an ordinary command line is still read rather than refused.
+	const quoted = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('node scripts/lib/helper.mjs \\'$NOT_AN_EXPANSION\\'', { shell: true });\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+					binds: [HELPER],
+				},
+			],
+		},
+	});
+	assert.equal(quoted.status, 0, `a single-quoted dollar is three characters\n${quoted.output}`);
+
+	// And a literal that is NOT a command line keeps the over-inclusive reading with
+	// no rejection: a `$` in an argument is an argument, not a shape with no repair.
+	const argument = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['scripts/lib/helper.mjs', 'query ($id: ID!) { article(id: $id) { id } }']);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+					binds: [HELPER],
+				},
+			],
+		},
+	});
+	assert.equal(argument.status, 0, `an argument is not a command line\n${argument.output}`);
+});
+
+test('an option spelled with an equals names the same file the spaced form does', () => {
+	// The cheapest of round 11's misses. `--require ./x.cjs` is two tokens and was
+	// bound; `--require=./x.cjs` is one token that names no file when it is asked as
+	// a path, and every `=` spelling executed a repository helper with this control
+	// green. A shell assignment packs two of them into one word again.
+	const spellings = {
+		'--require=': ["NODE_OPTIONS: '--require=./scripts/lib/helper.cjs'", CJS_HELPER],
+		'--import=': ["NODE_OPTIONS: '--import=./scripts/lib/helper.mjs'", HELPER],
+		'--loader=': ["NODE_OPTIONS: '--loader=./scripts/lib/helper.mjs'", HELPER],
+		'the spaced form it used to need': [
+			"NODE_OPTIONS: '--require ./scripts/lib/helper.cjs'",
+			CJS_HELPER,
+		],
+		'a shell assignment carrying one': [
+			"NODE_OPTIONS: 'NODE_OPTIONS=--require=./scripts/lib/helper.cjs'",
+			CJS_HELPER,
+		],
+	};
+
+	for (const [what, [option, target]] of Object.entries(spellings)) {
+		const files = {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				`spawnSync(process.execPath, ['--version'], { env: { ${option} } });\n`,
+			[target]: target === CJS_HELPER ? CJS_HELPER_SOURCE : HELPER_SOURCE,
+		};
+		const declaration = {
+			file: 'scripts/gate.mjs',
+			line: 2,
+			expression: 'spawnSync',
+			reason: 'the fixture’s point',
+		};
+
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} loads a repository file and must name it`);
+		assert.match(silent.output, new RegExp(`runs ${target.replace(/\./g, '\\.')}, which its`));
+
+		const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [target] }] };
+		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', target], contract: named });
+		assert.equal(bound.status, 0, `${what} binds once it is named\n${bound.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', target],
+			contract: named,
+			corrupt: target,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /content does not match its pin/);
+	}
+});
+
+test('inline code at a node child is refused, and only at a node child', () => {
+	// The refusal the guarded package.json commands already carry, one level in.
+	// `spawnSync(process.execPath, ['-e', 'require("./scripts/lib/helper.cjs")'])`
+	// executes a repository file named inside a string no reading opens, and there
+	// is no file to hash for the code itself either.
+	for (const [what, argv] of Object.entries({
+		'a short flag': "['-e', 'require(\"./scripts/lib/helper.cjs\")']",
+		'a long flag': "['--eval', 'require(\"./scripts/lib/helper.cjs\")']",
+		'a printing flag': "['-p', '1']",
+		'an equals spelling': "['--eval=1']",
+	})) {
+		const refused = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { spawnSync } from 'node:child_process';\n" +
+					`spawnSync(process.execPath, ${argv});\n`,
+				[CJS_HELPER]: CJS_HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'spawnSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(refused.status, 1, `${what} runs code no hash can bind`);
+		assert.match(refused.output, /runs inline code in a node child/, `${what} must be named`);
+	}
+
+	// The same flag spelled at a command line rather than in an argv array, which
+	// is the reading that has to agree with the one above.
+	const line = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { execSync } from 'node:child_process';\n" +
+				"execSync('node -e \\'require(\"./scripts/lib/helper.cjs\")\\'');\n",
+			[CJS_HELPER]: CJS_HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'execSync',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(line.status, 1, 'a command line spells the same flag');
+	assert.match(line.output, /runs inline code in a node child/);
+
+	// AND ONLY AT A NODE CHILD, which is what keeps this a rule about what runs
+	// rather than about a spelling. `-e` is inline code to node and a pattern to
+	// `grep`; `-p` is inline code to node and "make parents" to `mkdir`. A rule
+	// that fired on both would be a finding with no repair at an ordinary site.
+	for (const [what, call] of Object.entries({
+		'mkdir -p': "execFileSync('mkdir', ['-p', 'scratch/nested']);\n",
+		'grep -e': "execFileSync('grep', ['-e', 'pattern', '--', 'scratch/file']);\n",
+	})) {
+		const ordinary = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { execFileSync } from 'node:child_process';\n" + call,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'execFileSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(ordinary.status, 0, `${what} is not node's flag\n${ordinary.output}`);
+	}
 });

@@ -926,41 +926,102 @@ function headedCall(node) {
  * here — neither the file's nor the child's — and answering either is the same
  * guess one level in. It comes back as `unknown`, which the caller reports.
  *
+ * AND THE ROLE, which is round 11's second half. A string at a site is not one
+ * kind of thing: argument 0 is the COMMAND — a command line where the facility
+ * takes one, a file where it takes a file and a list — a value under `env` is an
+ * ENVIRONMENT VARIABLE with a name that says what the child does with it, and
+ * everything else is an argument or an option. The caller used to be told none of
+ * that, so it had one rule for every string: treat each as a command line, and
+ * treat each word that happens to name a directory as a base the others may be
+ * resolved in. Both halves failed in both directions. `{ env: { PATH:
+ * 'scripts/lib:/usr/bin' } }` is a LOOKUP PATH with two entries and the flat rule
+ * saw no directory at all, so a bare command ran unpinned; `{ env: { LABEL_DIR:
+ * 'scripts/lib', LABEL_FILE: 'helper.mjs' } }` beside `/usr/bin/true` names no
+ * lookup path whatsoever and the same rule reported a repository file the child
+ * never opens. A name is what tells those apart, and the name is here.
+ *
  * The strings come back exactly as written, unresolved. Which directory a frame
- * stands for is the caller's question — the same division `runtimeLoads` draws for
- * a specifier and its loader.
+ * stands for, and what a child does with a variable, is the caller's question —
+ * the same division `runtimeLoads` draws for a specifier and its loader.
  */
 function siteWords(node) {
 	const call = headedCall(node);
 	if (!call?.arguments) return [];
 	const words = [];
-	const seen = new Map();
-	const add = (text, frame) => {
-		let texts = seen.get(frame);
-		if (!texts) seen.set(frame, (texts = new Set()));
-		if (texts.has(text)) return;
-		texts.add(text);
-		words.push({ text, frame });
+	const seen = new Set();
+	const add = (text, frame, role, key) => {
+		const identity = JSON.stringify([role, key ?? null, frame, text]);
+		if (seen.has(identity)) return;
+		seen.add(identity);
+		words.push({ text, frame, role, key: key ?? null });
 	};
-	const walk = (inner) => {
+	const walk = (inner, role, key) => {
 		// A path expression this reading CAN name is taken whole, in its own frame:
 		// `new URL('./lib/x.mjs', import.meta.url)` is one word written in the file's
 		// frame rather than a literal floating in the child's.
 		const written = writtenPath(inner);
-		if (written) return add(written.path, written.from);
+		if (written) return add(written.path, written.from, role, key);
 		// A path expression it cannot name puts every literal inside it in a frame
 		// with no value, which is the fail-closed answer rather than a default.
 		if (pathComposer(inner)) {
 			eachNode(inner, (deeper) => {
 				const text = staticSpecifier(deeper);
-				if (text !== null) add(text, 'unknown');
+				if (text !== null) add(text, 'unknown', role, key);
 			});
 			return;
 		}
-		ts.forEachChild(inner, walk);
+		ts.forEachChild(inner, (child) => walk(child, role, key));
 	};
-	for (const argument of call.arguments) walk(argument);
+
+	call.arguments.forEach((argument, index) => {
+		if (index === 0) return walk(argument, 'command', null);
+		if (!ts.isObjectLiteralExpression(argument)) return walk(argument, 'argument', null);
+		for (const property of argument.properties) {
+			const name = optionKey(property);
+			const value = ts.isPropertyAssignment(property) ? property.initializer : null;
+			// The one option whose members are named things rather than a bag of
+			// values: every key under `env` is a variable a child reads by that name.
+			if (name === 'env' && value && ts.isObjectLiteralExpression(value)) {
+				for (const variable of value.properties) {
+					const written = ts.isPropertyAssignment(variable) ? variable.initializer : variable;
+					walk(written, 'env', optionKey(variable));
+				}
+				continue;
+			}
+			walk(value ?? property, 'option', null);
+		}
+	});
 	return words;
+}
+
+/**
+ * True where argument 0 is the interpreter this process is already running, which
+ * is the one spelling of "node" that is not a literal anywhere at the site.
+ *
+ * THE CALLER NEEDS IT to know whose flags it is reading. `-e`, `-p` and
+ * `--eval` name inline code to node and name something else entirely to `mkdir`
+ * or to `grep`, so a rule that refuses them everywhere is a rule about a spelling
+ * rather than about what runs. `process.execPath` and `process.argv[0]` are the
+ * two ways a site says "this node"; a command spelled as a literal answers the
+ * same question in the caller, out of the word itself.
+ */
+function runsThisInterpreter(node) {
+	const first = headedCall(node)?.arguments?.[0];
+	if (!first) return false;
+	if (ts.isPropertyAccessExpression(first))
+		return (
+			first.name.text === 'execPath' &&
+			ts.isIdentifier(first.expression) &&
+			first.expression.text === 'process'
+		);
+	if (ts.isElementAccessExpression(first))
+		return (
+			isLiteralKey(first.argumentExpression) &&
+			first.argumentExpression.text === '0' &&
+			ts.isPropertyAccessExpression(first.expression) &&
+			first.expression.name.text === 'argv'
+		);
+	return false;
 }
 
 /**
@@ -1166,13 +1227,15 @@ function nameableCallee(callee) {
  * Every load in this source that the reading above cannot follow to a file —
  * because the TARGET is computed, because the LOADER is a construction this
  * grammar does not model, or because the code does not run in this process at all
- * — as `{ expression, line, kind, detail, literals, base }`, where kind is
- * `'computed'`, `'loader'` or `'execution'`, `literals` is every string the site is
- * written to hand its facility WITH THE FRAME EACH IS WRITTEN IN (see `siteWords`),
- * and `base` is the working directory it is written to resolve the child's own
- * words in (see `siteBase`), so a caller that lets a site DECLARE what it runs can
- * check the declaration against the site's own text — and against the right file,
- * which is what the frame and the base decide together.
+ * — as `{ expression, line, kind, detail, literals, base, execPath }`, where kind
+ * is `'computed'`, `'loader'` or `'execution'`, `literals` is every string the site
+ * is written to hand its facility WITH THE FRAME AND ROLE OF EACH (see `siteWords`),
+ * `base` is the working directory it is written to resolve the child's own words in
+ * (see `siteBase`), and `execPath` says whether the child is this process's own
+ * interpreter (see `runsThisInterpreter`) — so a caller that lets a site DECLARE
+ * what it runs can check the declaration against the site's own text, against the
+ * right file, which is what the frame and the base decide together, and with the
+ * grammar the child itself applies to each string.
  *
  * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
  * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
@@ -1268,6 +1331,7 @@ export function unfollowableLoads(source) {
 			detail,
 			literals: siteWords(node),
 			base: siteBase(node),
+			execPath: runsThisInterpreter(node),
 		});
 
 	/**

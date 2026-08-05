@@ -396,10 +396,10 @@ const underUnpinnedRoot = (path) =>
 
 /**
  * Split a shell command into segments the way the pinned scripts are actually
- * written — `&&`, `||`, `;`, `|`, and newlines — respecting quotes so a separator
- * inside an argument is not a boundary. The pinned commands are a small, known
- * vocabulary; anything richer than this is rejected as an unmodelled shape rather
- * than guessed at.
+ * written — `&&`, `||`, `;`, `|`, and newlines — respecting quotes AND backslash
+ * escapes so a separator inside an argument is not a boundary. The pinned commands
+ * are a small, known vocabulary; anything richer than this is rejected by
+ * `shellConstructs` rather than guessed at.
  */
 function shellSegments(command) {
 	const segments = [];
@@ -407,6 +407,14 @@ function shellSegments(command) {
 	let quote = null;
 	for (let index = 0; index < command.length; index += 1) {
 		const char = command[index];
+		// A backslash outside single quotes takes the next character with it, and
+		// both are kept: the escape is the TOKENIZER's to interpret, and losing it
+		// here would hand that reading a word the shell never builds.
+		if (char === '\\' && quote !== "'" && index + 1 < command.length) {
+			current += char + command[index + 1];
+			index += 1;
+			continue;
+		}
 		if (quote) {
 			current += char;
 			if (char === quote) quote = null;
@@ -435,13 +443,36 @@ function shellSegments(command) {
 	return segments.map((segment) => segment.trim()).filter(Boolean);
 }
 
-/** Tokenize one segment, stripping the quotes that only mattered for splitting. */
+/**
+ * Tokenize one segment, stripping the quotes and escapes that only mattered for
+ * splitting.
+ *
+ * THE ESCAPE IS A WORD BOUNDARY THAT IS NOT ONE, and round 11's review walked an
+ * executable through the gap. `execSync('node scripts/lib/my\\ helper.mjs')` runs
+ * a repository file whose name contains a space; a tokenizer that splits on
+ * whitespace and knows nothing of `\` produced `scripts/lib/my\` and `helper.mjs`,
+ * neither of which names any file, and the helper was executed with this control
+ * green and green again with it rewritten wholesale. A word the shell builds is a
+ * word this reading has to build, or the reading is about a different command.
+ */
 function shellTokens(segment) {
 	const tokens = [];
 	let current = '';
 	let quote = null;
 	let started = false;
-	for (const char of segment) {
+	for (let index = 0; index < segment.length; index += 1) {
+		const char = segment[index];
+		if (char === '\\' && quote !== "'" && index + 1 < segment.length) {
+			const escaped = segment[index + 1];
+			// Inside double quotes a backslash is literal except before the four
+			// characters that would otherwise mean something there; outside them it
+			// escapes whatever follows, which is how a space joins two words into one.
+			if (quote === '"' && !['"', '\\', '$', '`', '\n'].includes(escaped)) current += char;
+			current += escaped;
+			started = true;
+			index += 1;
+			continue;
+		}
 		if (quote) {
 			if (char === quote) quote = null;
 			else current += char;
@@ -465,9 +496,105 @@ function shellTokens(segment) {
 	return tokens;
 }
 
+/**
+ * Shell syntax this reading does not model, found in a string a shell parses.
+ *
+ * WHY REJECTING IS THE ANSWER RATHER THAN PARSING. A tokenizer answers "which
+ * words is this", and `node $(echo scripts/lib/helper.mjs)` has no answer until
+ * the shell has run something. The same is true of a parameter expansion, a
+ * process substitution and a backtick: each is a word DECIDED AT RUN TIME, and a
+ * reading that quietly produced the words it can see would report `node` and call
+ * the site read. Round 11's review executed a repository helper through exactly
+ * that gap. So the construct is named and the site's targets are undetermined,
+ * with the repair being the form a `binds` can be checked against: a file and an
+ * argument list of literal paths.
+ *
+ * A `cd` BELONGS HERE for the reason round 10 established: it moves the frame the
+ * following words resolve in, so a reading that kept resolving them against the
+ * site's own `cwd` would name files the child never opens.
+ *
+ * QUOTES DECIDE WHETHER THERE IS A CONSTRUCT AT ALL — `'$HOME'` is three literal
+ * characters and `"$HOME"` is an expansion — so this walks the string with the
+ * same quote and escape rules the tokenizer does rather than scanning for text.
+ */
+const UNMODELLED_BUILTINS = new Set(['cd', 'pushd', 'popd', 'chdir', 'eval', 'source']);
+
+function shellConstructs(text) {
+	const found = new Set();
+	let quote = null;
+	for (let index = 0; index < text.length; index += 1) {
+		const char = text[index];
+		if (char === '\\' && quote !== "'" && index + 1 < text.length) {
+			index += 1;
+			continue;
+		}
+		if (quote === "'") {
+			if (char === "'") quote = null;
+			continue;
+		}
+		if (quote === '"' && char === '"') {
+			quote = null;
+			continue;
+		}
+		if (!quote && (char === '"' || char === "'")) {
+			quote = char;
+			continue;
+		}
+		const pair = text.slice(index, index + 2);
+		if (char === '`') found.add('a command substitution in backticks');
+		else if (pair === '$(') found.add('a command substitution `$(…)`');
+		else if (pair === '<(' || pair === '>(') found.add('a process substitution');
+		else if (char === '$' && /[A-Za-z_{]/.test(text[index + 1] ?? ''))
+			found.add('a parameter expansion');
+	}
+	for (const segment of shellSegments(text))
+		for (const token of shellTokens(segment)) {
+			if (UNMODELLED_BUILTINS.has(token)) found.add(`the shell builtin \`${token}\``);
+			if (/[*?]/.test(token) && pathShaped(token)) found.add(`a glob (${JSON.stringify(token)})`);
+		}
+	return found;
+}
+
+/**
+ * A word that could name a file somewhere — it carries a separator or an
+ * extension — and is not an absolute path, which no working directory moves.
+ * `utf8`, `--`, `init` and `-z` are not.
+ */
+const pathShaped = (word) =>
+	!word.startsWith('/') && (word.includes('/') || /\.[A-Za-z0-9]+$/.test(word));
+
 // `node -e '<code>'` and its relatives run code that lives nowhere on disk, so no
-// content hash can bind them. A guarded script may not smuggle one in.
+// content hash can bind them. A guarded script may not smuggle one in, and neither
+// may an execution site inside the closure: round 11's review ran a repository
+// helper out of `spawnSync(process.execPath, ['-e', 'require("./scripts/lib/x.cjs")'])`,
+// where the file that executes is named inside a string no reading opens.
 const inlineCodeFlags = new Set(['-e', '--eval', '-p', '--print', '--input-type']);
+
+/** The names a command word carries when the child is Node rather than something else. */
+const isNodeInterpreter = (word) => ['node', 'nodejs', 'node.exe'].includes(word.split('/').pop());
+
+/**
+ * Environment variables whose VALUE names code a child loads before it reaches
+ * its own entry point — a command line by another name, parsed by the child's
+ * interpreter or by its dynamic linker rather than by a shell.
+ *
+ * THEY ARE NAMED RATHER THAN GUESSED. `NODE_OPTIONS: '--import ./scripts/lib/x.mjs'`
+ * loads a repository file into the child, and so does `--require=`, `--loader=`,
+ * `NODE_REPL_EXTERNAL_MODULE`, a `NODE_PATH` entry, and `LD_PRELOAD` one layer
+ * below Node entirely. Every one of them is a repository-controlled channel with a
+ * name, and a reading that watches names can watch these — the same argument that
+ * put `spawn` and `Worker` in the loader grammar in round 8. What is NOT here is
+ * ambient inherited environment: what a developer or CI exports is not something
+ * this repository writes, and a gate that reported it would be reporting the
+ * world rather than the tree.
+ */
+const INHERITED_EXECUTION = new Set([
+	'NODE_OPTIONS',
+	'NODE_REPL_EXTERNAL_MODULE',
+	'NODE_PATH',
+	'LD_PRELOAD',
+	'DYLD_INSERT_LIBRARIES',
+]);
 
 /** Expand a single-`*` filename glob. `**` and brace expansion are not modelled. */
 function expandGlob(pattern) {
@@ -660,23 +787,61 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * exactly the directory the literal is, so splitting a word out of a literal may
  * not lose which directory that was. Over-inclusion is a property of WHICH words
  * are asked, never of WHERE they are asked.
+ *
+ * AN OPTION MAY BE SPELLED WITH AN `=` INSTEAD OF A SPACE, which is the third of
+ * round 11's demonstrated misses and the cheapest of them. `--require ./x.cjs` is
+ * two tokens and bound; `--require=./x.cjs` is one token that names no file when
+ * it is asked as a path, and `--require=`, `--import=` and `--loader=` all
+ * executed repository helpers with this control green. `NODE_OPTIONS=--require=…`
+ * as a shell assignment packs two of them into one word. So every token is also
+ * read as its `=`-separated pieces, which is the same over-inclusive direction as
+ * reading it as a command line.
+ *
+ * WHERE THE REJECTION APPLIES, and it is a question of PROVENANCE rather than of
+ * text. A literal in the COMMAND position is parsed by a shell or handed to
+ * execvp; the value of a watched execution variable is split into flags by the
+ * child's own interpreter. Those are the strings whose unmodelled constructs
+ * change what runs, so those are the ones `shellConstructs` is asked about. Every
+ * other literal keeps the over-inclusive tokenization and no rejection, because a
+ * rule that fired on a `$` inside a query string would be a finding with no repair
+ * — and a rule with no repair is how a gate gets weakened.
  */
-function siteWords(literals) {
+function siteWords(literals, execPath) {
 	const words = [];
-	const seen = new Map();
+	const seen = new Set();
+	const unreadable = new Set();
+	const inlineCode = new Set();
 	const add = (text, frame) => {
-		let texts = seen.get(frame);
-		if (!texts) seen.set(frame, (texts = new Set()));
-		if (texts.has(text)) return;
-		texts.add(text);
+		const identity = JSON.stringify([frame, text]);
+		if (seen.has(identity)) return;
+		seen.add(identity);
 		words.push({ text, frame });
 	};
-	for (const { text, frame } of literals) {
+
+	// Whose flags these are. `-e` is inline code to node and something else to
+	// `mkdir`, so the refusal below is scoped to the child that reads it that way.
+	const node =
+		execPath ||
+		literals
+			.filter((literal) => literal.role === 'command')
+			.flatMap((literal) => shellSegments(literal.text).flatMap(shellTokens))
+			.some(isNodeInterpreter);
+
+	for (const literal of literals) {
+		const { text, frame, role, key } = literal;
+		const parsed = role === 'command' || (role === 'env' && INHERITED_EXECUTION.has(key));
 		add(text, frame);
+		if (parsed)
+			for (const construct of shellConstructs(text))
+				unreadable.add(`${construct}, in ${JSON.stringify(text)}`);
 		for (const segment of shellSegments(text))
-			for (const token of shellTokens(segment)) add(token, frame);
+			for (const token of shellTokens(segment)) {
+				add(token, frame);
+				for (const piece of token.split('=').slice(1)) if (piece) add(piece, frame);
+				if (node && inlineCodeFlags.has(token.split('=')[0])) inlineCode.add(token);
+			}
 	}
-	return words;
+	return { words, unreadable, inlineCode };
 }
 
 /**
@@ -733,8 +898,8 @@ function siteWords(literals) {
  * a rule with no repair, and a rule with no repair is how a gate gets weakened.
  * Those sites are carried by the disclosure's reason, which is what it is for.
  */
-function siteRepositoryTargets(file, literals, base) {
-	const words = siteWords(literals);
+function siteRepositoryTargets(file, literals, base, execPath) {
+	const { words, unreadable, inlineCode } = siteWords(literals, execPath);
 	const fileFrame = resolve(root, dirname(file));
 	const processFrame =
 		base.from === 'file'
@@ -784,15 +949,10 @@ function siteRepositoryTargets(file, literals, base) {
 		if ((frames.get(word.frame) ?? []).length) continue;
 		const named = repositoryFile(root, word.text);
 		if (named && !runs.has(named)) undetermined.add(named);
-		else if (
-			!named &&
-			!word.text.startsWith('/') &&
-			(word.text.includes('/') || /\.[A-Za-z0-9]+$/.test(word.text))
-		)
-			undetermined.add(word.text);
+		else if (!named && pathShaped(word.text)) undetermined.add(word.text);
 	}
 
-	return { runs, undetermined };
+	return { runs, undetermined, unreadable, inlineCode };
 }
 
 /**
@@ -811,6 +971,16 @@ function executableClosure() {
 
 	for (const [name, command] of Object.entries(expected)) {
 		if (typeof command !== 'string') continue;
+		// The same refusal the execution sites carry, at the root of the same walk: a
+		// guarded command whose words are decided when it runs is a command whose
+		// `node` targets this closure cannot enumerate. A glob is excepted because it
+		// has a better model here — `allowed_globs` names it and `expandGlob` reads it.
+		for (const construct of shellConstructs(command))
+			if (!construct.startsWith('a glob'))
+				findings.push(
+					`${CONTRACT}: guarded script "${name}" is written with ${construct}, which this walk does ` +
+						'not model; what it runs is decided when it runs, so the targets under it cannot be pinned'
+				);
 		for (const segment of shellSegments(command)) {
 			const tokens = shellTokens(segment);
 			if (tokens[0] !== 'node') continue;
@@ -876,7 +1046,7 @@ function executableClosure() {
 			continue;
 		}
 
-		for (const { expression, line, kind, detail, literals, base } of unfollowable) {
+		for (const { expression, line, kind, detail, literals, base, execPath } of unfollowable) {
 			const declaration = disclosedLoads.take(path, line, expression);
 			if (declaration.status === 'declared') {
 				// The reading has to still be answering the question this check asks.
@@ -885,20 +1055,22 @@ function executableClosure() {
 				// claim, and a check that disappears quietly is the shape this whole
 				// control exists to refuse — so its absence is a finding, not a default.
 				if (
+					typeof execPath !== 'boolean' ||
 					!Array.isArray(literals) ||
 					!literals.every(
 						(word) =>
 							word &&
 							typeof word === 'object' &&
 							typeof word.text === 'string' &&
-							['file', 'process', 'unknown'].includes(word.frame)
+							['file', 'process', 'unknown'].includes(word.frame) &&
+							['command', 'argument', 'env', 'option'].includes(word.role)
 					)
 				) {
 					findings.push(
 						`${path}:${line}: the reading no longer reports the literals ${expression} is written to ` +
-							'hand its facility, each with the frame it is written in, so a `binds` here cannot be ' +
-							'checked against its own site; this control cannot tell a bound target from a declared ' +
-							'one until that is re-bound'
+							'hand its facility, each with the frame it is written in and the role it is written ' +
+							'as, so a `binds` here cannot be checked against its own site; this control cannot ' +
+							'tell a bound target from a declared one until that is re-bound'
 					);
 					continue;
 				}
@@ -944,7 +1116,26 @@ function executableClosure() {
 				// Which files those are is decided by the base the site writes, so a
 				// target it names in a directory this reading cannot read is neither:
 				// it is reported as undetermined rather than resolved by guess.
-				const { runs, undetermined } = siteRepositoryTargets(path, literals, base);
+				const { runs, undetermined, unreadable, inlineCode } = siteRepositoryTargets(
+					path,
+					literals,
+					base,
+					execPath
+				);
+				for (const construct of unreadable)
+					findings.push(
+						`${path}:${line}: ${expression} hands a child a string this reading does not model — ` +
+							`${construct}; what that builds is decided when it runs, so which file the child opens ` +
+							'is not in this file and a `binds` here would pin whichever words this walk could see. ' +
+							'Write the child as a file and an argument list of literal paths'
+					);
+				for (const flag of inlineCode)
+					findings.push(
+						`${path}:${line}: ${expression} runs inline code in a node child (${flag}); inline code has ` +
+							'no file to hash and cannot be pinned — the refusal a guarded package.json script ' +
+							'already carries, one level in. Put the code in a repository file and name that file, ' +
+							'so the bytes the child runs are bound'
+					);
 				for (const target of undetermined)
 					findings.push(
 						`${path}:${line}: ${expression} hands ${JSON.stringify(target)} to a child whose working ` +
