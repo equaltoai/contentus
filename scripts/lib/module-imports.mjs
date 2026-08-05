@@ -58,26 +58,33 @@
  * This module adds no dependency; it stops reimplementing two that are present.
  *
  * WHAT IS STILL NOT READABLE, said plainly, because a parser is not omniscience.
- * `import(someExpression)` names a module no static read can resolve, and that
- * is a FINDING in every walked file, inside the face and outside it — see
- * `computedImports`. A module reached by something that is not an import at all
- * is outside any static reach and outside this module's claim.
+ * `import(someExpression)` names a module no static read can resolve, and so does
+ * `require(someExpression)`. Both are a FINDING in every walked file, inside the
+ * face and outside it — see `computedImports`. A module reached by something that
+ * is not a load at all is outside any static reach and outside this module's
+ * claim.
  *
- * WHERE OVER-INCLUSION IS STILL DELIBERATE. A type-only import and an
- * `import('…')` in type position are not runtime edges, and both are reported.
- * Swapping a component behind a seam breaks a type that names it exactly as it
- * breaks a value that names it, so for a SEAM check they are dependencies. That
- * is the one place this module deliberately reports more than the module system
- * loads; everywhere else it reports what the compilers see, no more and no less.
+ * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
+ * type-only import and an `import('…')` in type position are not runtime edges.
+ * `moduleSpecifiers` reports them, because swapping a component behind a seam
+ * breaks a type that names it exactly as it breaks a value that names it, and for
+ * a SEAM check they are dependencies. `runtimeSpecifiers` drops them, because
+ * CON-5's subject is the code a guarded command executes and an erased
+ * declaration opens no file. Those are the same walk asked two questions, not two
+ * readings; everywhere else this module reports what the compilers see, no more
+ * and no less.
  *
  * WHAT THIS READING IS NOT, AFTER ROUND 6. A parser closed the forms that had
  * been found and did not close the CLASS. Round 6 produced four more at once — a
  * `.jsx` helper and a `.tsx` helper, neither in the walked file set; a literal
- * `require` call in a `.cjs`, which is a call to a function and not an import
+ * `require` call in a `.cjs`, which is a call to a function rather than an import
  * node to any syntax tree; and `import.meta.glob`, which is a member call on
  * `import.meta` and not an import either. Each built a real dependency the client
- * build takes, and this reading returned nothing for all four. The class is every
- * way Vite can create a dependency, and no reader of source enumerates it.
+ * build takes, and this reading returned nothing for all four. `require` is read
+ * now — CON-5 resolves `.cjs` and needed it, and one reader means the probes
+ * gained it in the same change — but that is one form falling, not the class:
+ * the class is every way Vite can create a dependency, and no reader of source
+ * enumerates it.
  *
  * So a second check exists and asks the question a different way.
  * `scripts/audit-seam-graph.mjs` runs the repository's own Vite configuration and
@@ -289,60 +296,126 @@ const isImportCall = (node) =>
 	ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword;
 
 /**
- * Every module specifier a source depends on, in every form that reaches a file:
+ * `require('…')` as a CALL — CommonJS's import, in the one dialect that has one.
+ *
+ * IT IS HERE BECAUSE A GATE NEEDS IT. CON-5's closure resolves `.cjs` among its
+ * module extensions and its previous raw-text scan matched `require(`, so a
+ * reading that dropped the form would have closed one hole by opening another —
+ * the shape this repository has now hit twice, most recently when a fix for a
+ * false positive introduced a false negative beside it. The seam probes inherit
+ * it, which is correct for them too: round 6 compiled a literal `require()` in a
+ * `.cjs` past both of them, and the build-reading gate had to catch it alone.
+ *
+ * The callee must be the IDENTIFIER `require`, so `module.require(x)` and a
+ * method named `require` are not this node. A locally defined function called
+ * `require` still is, and that over-inclusion is deliberate: a specifier it
+ * yields resolves to a real file or is reported as unresolvable, and neither
+ * outcome is worse than the alternative of trusting a name.
+ */
+const isRequireCall = (node) =>
+	ts.isCallExpression(node) &&
+	ts.isIdentifier(node.expression) &&
+	node.expression.escapedText === 'require';
+
+/**
+ * Every module specifier a source references, in every form that reaches a file:
  * `import … from`, `export … from`, `export * from`, a side-effect `import '…'`,
- * `import x = require('…')`, a dynamic `import('…')` with a readable argument,
- * and `import('…')` in type position.
+ * `import x = require('…')`, a `require('…')` call, a dynamic `import('…')` with
+ * a readable argument, and `import('…')` in type position.
  *
  * Pass a component's source through `liveScript` first. This function reads what
  * it is given, and what it is given must be script.
  */
 export function moduleSpecifiers(source) {
+	return collect(source, false);
+}
+
+/**
+ * Every module specifier the module system LOADS — the same reading with the
+ * type positions removed.
+ *
+ * ONE WALK, TWO PROJECTIONS, and the difference is which question the caller is
+ * asking rather than which reading it trusts. The seam probes ask
+ * `moduleSpecifiers`, because a swap behind a seam breaks a type that names a
+ * component exactly as it breaks a value that names it, and a dependency is a
+ * dependency to them. CON-5 asks this one, because its subject is the code a
+ * guarded command EXECUTES: `import type … from './x'`, `export type … from
+ * './x'`, `import type X = require('./x')` and `import('./x')` in type position
+ * are erased before anything runs — Node's `--experimental-strip-types` deletes
+ * them and `tsc` emits nothing for them — so pinning the file's content would
+ * bind bytes no command opens.
+ *
+ * A type-only SPECIFIER inside a value import (`import { type A, B } from './x'`)
+ * is not this: the declaration still loads the module, the clause is not
+ * type-only, and it binds. Only a declaration the compiler erases WHOLE is
+ * dropped here.
+ */
+export function runtimeSpecifiers(source) {
+	return collect(source, true);
+}
+
+/**
+ * The shared walk. `runtimeOnly` drops the declarations that are erased before
+ * execution; everything else about the reading is identical, which is the
+ * property that keeps the two exports from drifting into two readings.
+ */
+function collect(source, runtimeOnly) {
 	const specifiers = new Set();
-	const add = (node) => {
+	const add = (node, typeOnly) => {
+		if (runtimeOnly && typeOnly) return;
 		const specifier = staticSpecifier(node);
 		if (specifier) specifiers.add(specifier);
 	};
 
 	eachNode(parsed(source), (node) => {
-		if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+		if (ts.isImportDeclaration(node))
+			add(node.moduleSpecifier, node.importClause?.isTypeOnly === true);
+		else if (ts.isExportDeclaration(node)) add(node.moduleSpecifier, node.isTypeOnly === true);
 		else if (
 			ts.isImportEqualsDeclaration(node) &&
 			ts.isExternalModuleReference(node.moduleReference)
 		)
-			add(node.moduleReference.expression);
+			add(node.moduleReference.expression, node.isTypeOnly === true);
 		else if (ts.isImportTypeNode(node) && node.argument && ts.isLiteralTypeNode(node.argument))
-			add(node.argument.literal);
-		else if (isImportCall(node)) add(node.arguments[0]);
+			add(node.argument.literal, true);
+		else if (isImportCall(node) || isRequireCall(node)) add(node.arguments[0], false);
 	});
 
 	return [...specifiers];
 }
 
 /**
- * `import(<anything but a readable literal>)` — a dependency no static read can
- * name, returned as the argument's source text so the finding names a place.
+ * A load whose target no static read can name — `import(<anything but a readable
+ * literal>)` and the same shape spelled `require(…)` — returned as the CALL's
+ * source text, so a finding quotes what is in the file.
  *
- * Taken by SUBTRACTION, as it was before: every import call that is not a plain
+ * Taken by SUBTRACTION, as it was before: every such call that is not a plain
  * string or an un-interpolated template is unreadable. `import('$lib/agents/' +
  * name)` opens with a quote and is not a literal; `import(target)` names nothing
  * at all. A call with no argument is unreadable too and reports as `import()`.
  *
+ * WHY THE WHOLE CALL AND NOT THE ARGUMENT. `require(name)` and `import(name)` are
+ * one class — a dependency this reading cannot follow — and callers used to
+ * assemble their offender line by wrapping the argument in the literal text
+ * `import(…)`, which would have printed the wrong keyword for half the class.
+ * The call text is what the next reader has to find, and quoting the source
+ * rather than reconstructing it is the same rule `modulePath` states for a
+ * specifier.
+ *
  * The caller is expected to treat every return value as a finding. Resolving the
  * variable instead was considered and rejected: constant-folding one assignment
  * closes one spelling of an unresolvable import and leaves the rest, and the
- * property worth holding is that the face's dependency graph is statically
- * readable — not that this walker is clever.
+ * property worth holding is that the graph is statically readable — not that
+ * this walker is clever.
  */
 export function computedImports(source) {
 	const file = parsed(source);
 	const computed = [];
 
 	eachNode(file, (node) => {
-		if (!isImportCall(node)) return;
-		const [argument] = node.arguments;
-		if (staticSpecifier(argument) !== null) return;
-		computed.push(argument ? argument.getText(file) : '');
+		if (!isImportCall(node) && !isRequireCall(node)) return;
+		if (staticSpecifier(node.arguments[0]) !== null) return;
+		computed.push(node.getText(file));
 	});
 
 	return computed;

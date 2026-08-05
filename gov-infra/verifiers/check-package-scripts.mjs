@@ -30,6 +30,23 @@
  * application under governance and invert the relationship — the probe is the
  * gate, the module is what it judges.
  *
+ * The walk is only ever as honest as the READING that feeds it, and this one
+ * used to scan raw text with four patterns of its own. A comment between `from`
+ * and its specifier is legal ESM and hid an executable inside a gate's own reach
+ * from that scan entirely; a `?raw` on a specifier that resolves perfectly well
+ * was reported as an import resolving to no file. So the reading is now
+ * `scripts/lib/module-imports.mjs` — the same parser extraction the seam probes
+ * use — and every question about a path is asked of the path the specifier
+ * ADDRESSES rather than of the text it is written as. `relativeImports` carries
+ * the detail.
+ *
+ * The one thing no static reading can follow is a load whose target is computed,
+ * and this control now says so out loud: an `import(<expression>)` or
+ * `require(<expression>)` inside the closure must be declared in the contract
+ * with its reason, or it is a finding. Three exist, all loading a build artifact
+ * or a file a probe has just written; what binds them is that the files holding
+ * them are pinned, so the call cannot appear or move without a governance edit.
+ *
  * What this is still not: a cryptographic binding of the *pin*. An author who
  * edits both an artifact and its hash still moves the gate. What it buys is that
  * the edit has to happen in gov-infra/planning, in the same diff, where it is the
@@ -40,6 +57,11 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 
+import {
+	computedImports,
+	modulePath,
+	runtimeSpecifiers,
+} from '../../scripts/lib/module-imports.mjs';
 import { readStrictJson } from './strict-json.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
@@ -144,6 +166,71 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
 	process.exit(1);
 }
 
+/**
+ * The `import(<expression>)` and `require(<expression>)` sites inside the closure
+ * whose target no static read can name, declared with the reason each one is
+ * there.
+ *
+ * WHY DECLARED RATHER THAN IGNORED. This control's claim is that every file a
+ * guarded command executes is bound by a content hash. A computed load is a hole
+ * in exactly that claim — the walk cannot follow it, so nothing downstream of it
+ * is pinned — and the previous reader did not merely permit them, it could not
+ * see them at all. Silence and permission look identical from the outside, which
+ * is the property a gate may not have.
+ *
+ * WHY NOT SIMPLY A FINDING. Three legitimate sites exist and none can be written
+ * statically: they load a build artifact, or a file the probe itself has just
+ * written to a temp directory. Failing on them would leave the control red with
+ * no repair available, which teaches the next author to weaken the rule rather
+ * than to disclose. So this follows the shape the rest of this contract already
+ * uses for a limit that cannot be closed — `unpinned_import_roots`,
+ * `pnpmfile_disclosed`, `only_built_dependencies_disclosed`: state it, with the
+ * reason, where a reviewer reads it.
+ *
+ * The declaration is exact on both sides. An undisclosed site is a finding, and a
+ * disclosure that matches no site in the closure is a finding too, so this list
+ * stays the truth about the tree instead of drifting into a blanket permission.
+ * It is not a hash: what binds these three is that the files containing them are
+ * themselves pinned, so the call cannot appear, move or change without a
+ * governance edit in the same diff.
+ */
+const computedDisclosures = targets.computed_imports_disclosed ?? [];
+if (!Array.isArray(computedDisclosures)) {
+	console.error(`${CONTRACT}: executable_targets.computed_imports_disclosed must be an array`);
+	process.exit(1);
+}
+const disclosedComputed = (() => {
+	const declared = new Map();
+	const matched = new Set();
+	for (const entry of computedDisclosures) {
+		const shaped =
+			entry &&
+			typeof entry === 'object' &&
+			!Array.isArray(entry) &&
+			['file', 'expression', 'reason'].every(
+				(key) => typeof entry[key] === 'string' && entry[key].length > 0
+			);
+		if (!shaped) {
+			console.error(
+				`${CONTRACT}: every executable_targets.computed_imports_disclosed entry must carry a ` +
+					'non-empty file, expression and reason'
+			);
+			process.exit(1);
+		}
+		declared.set(`${entry.file}\u0000${entry.expression}`, entry);
+	}
+	return {
+		take(file, expression) {
+			const key = `${file}\u0000${expression}`;
+			if (!declared.has(key)) return false;
+			matched.add(key);
+			return true;
+		},
+		unmatched: () => [...declared].filter(([key]) => !matched.has(key)).map(([, entry]) => entry),
+		count: declared.size,
+	};
+})();
+
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const repoRelative = (path) => relative(root, path).split(sep).join(posix.sep);
 const underUnpinnedRoot = (path) =>
@@ -247,19 +334,50 @@ function expandGlob(pattern) {
 	};
 }
 
-/** Static relative module specifiers. Bare specifiers are packages, not targets. */
+/**
+ * Static relative module specifiers a gate file LOADS. Bare specifiers are
+ * packages, not targets.
+ *
+ * THIS USED TO BE FOUR PATTERNS OVER THE TEXT, and both of the defects that
+ * replaced them were the same mistake: a pattern was asked a question about
+ * SYNTAX, and answered by matching characters.
+ *
+ *   1. `from /* a comment *\/ './lib/helper.mjs'` is legal ESM — a comment sits
+ *      exactly where the pattern required whitespace-then-quote — so the import
+ *      was not seen, the file it names never entered the closure, and an
+ *      EXECUTABLE inside a gate's own reach was left unpinned and freely
+ *      editable. A pin updated for the importing file passed with no mention of
+ *      it, and rewriting the helper's contents wholesale changed nothing. This is
+ *      the failure this control exists to prevent, one level in.
+ *
+ *   2. `'./lib/agent-seams.mjs?raw'` is a legal Vite specifier addressing a file
+ *      that exists, and the reader compared the specifier VERBATIM — so it
+ *      resolved to nothing and was reported as an unresolvable import in a gate.
+ *      A probe that needed the form had to spell it as a computed constant to
+ *      keep the rubric green beside the check it was testing.
+ *
+ * One root cause, two directions: matching by the text that is written rather
+ * than by the path it addresses misses edges that are there and invents edges
+ * that are not. So the reading is `scripts/lib/module-imports.mjs` — the parser
+ * extraction the seam probes already use, sharpened by six rounds of review that
+ * found six ways a pattern can be walked past — and every question about a path
+ * is asked of `modulePath(specifier)`, the specifier with its query and fragment
+ * removed. A specifier is still REPORTED as written; a query is not part of the
+ * path and is part of what the next reader has to find in the file.
+ *
+ * `runtimeSpecifiers` rather than `moduleSpecifiers` is the projection this
+ * control wants: `import type … from './x'` is erased by
+ * `--experimental-strip-types` and by `tsc` before anything runs, so the file it
+ * names is not code any guarded command executes, and pinning its bytes would
+ * bind content no command opens. A type-only SPECIFIER inside a value import
+ * still loads the module and still binds. The seam probes ask the other
+ * projection of the same walk, for reasons their own header states.
+ */
 function relativeImports(source) {
-	const specifiers = new Set();
-	const patterns = [
-		/\bfrom\s*['"]([^'"]+)['"]/g,
-		/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-		/\bimport\s+['"]([^'"]+)['"]/g,
-		/\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-	];
-	for (const pattern of patterns)
-		for (const [, specifier] of source.matchAll(pattern))
-			if (specifier.startsWith('./') || specifier.startsWith('../')) specifiers.add(specifier);
-	return [...specifiers];
+	return runtimeSpecifiers(source).filter((specifier) => {
+		const target = modulePath(specifier);
+		return target.startsWith('./') || target.startsWith('../');
+	});
 }
 
 const moduleExtensions = ['', '.mjs', '.js', '.mts', '.ts', '.cjs', '/index.mjs', '/index.js'];
@@ -337,10 +455,36 @@ function executableClosure() {
 			continue;
 		}
 		if (!statSync(absolute).isFile()) continue;
-		for (const specifier of relativeImports(readFileSync(absolute, 'utf8'))) {
-			const lexical = repoRelative(resolve(root, dirname(path), specifier));
+
+		let specifiers;
+		let computed;
+		try {
+			const source = readFileSync(absolute, 'utf8');
+			specifiers = relativeImports(source);
+			computed = computedImports(source);
+		} catch (error) {
+			// A file the reading cannot parse is not a file with no imports, and
+			// answering the same green for both is the fail-open direction. The gate
+			// that cannot read its own subject says so.
+			findings.push(
+				`${path}: this file's imports cannot be read, so its closure is unknown — ${error.message}`
+			);
+			continue;
+		}
+
+		for (const call of computed) {
+			if (disclosedComputed.take(path, call)) continue;
+			findings.push(
+				`${path}: ${call} loads a module no static read can name, and it is not disclosed in ` +
+					`${CONTRACT}; a target this walk cannot reach is a target no hash binds`
+			);
+		}
+
+		for (const specifier of specifiers) {
+			const target = modulePath(specifier);
+			const lexical = repoRelative(resolve(root, dirname(path), target));
 			if (underUnpinnedRoot(lexical)) continue;
-			const resolved = resolveRelativeImport(path, specifier);
+			const resolved = resolveRelativeImport(path, target);
 			if (!resolved) {
 				findings.push(
 					`${path}: relative import ${JSON.stringify(specifier)} resolves to no file; ` +
@@ -400,6 +544,16 @@ for (const path of Object.keys(pinnedHashes))
 				'a pin that binds nothing reads as coverage and is not'
 		);
 
+// The same rule for the other declaration. A disclosure whose site is gone reads
+// as a permission the tree still needs, and the next computed load written into
+// that file would land on it silently.
+for (const entry of disclosedComputed.unmatched())
+	findings.push(
+		`${CONTRACT}: executable_targets.computed_imports_disclosed declares ${entry.expression} in ` +
+			`${entry.file}, which the closure does not contain; a disclosure of nothing reads as ` +
+			'coverage and is not'
+	);
+
 if (printHashes) {
 	const block = {};
 	for (const path of [...closure].sort())
@@ -427,5 +581,8 @@ for (const path of verified)
 	console.log(`  # ${path}: ${(pinnedHashes[path] ?? inventoryHashes.get(path)).slice(0, 16)}…`);
 console.log('');
 console.log(`Outside the closure by declaration: ${unpinnedRoots.join(', ') || 'nothing'}`);
+console.log(
+	`Computed loads inside it, disclosed with a reason: ${disclosedComputed.count || 'none'}`
+);
 console.log('PASS here means the rubric is invoking the commands it believes it is invoking,');
 console.log('and those commands are running the code this repository pinned.');

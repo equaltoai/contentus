@@ -271,7 +271,7 @@ const INTERIM = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
 function interimImports(source, path) {
 	const live = liveScript(path, source);
 	const offenders = computedImports(live).map(
-		(expression) => `${path} → import(${expression.trim()}) (a dependency no static read can name)`
+		(call) => `${path} → ${call.trim()} (a dependency no static read can name)`
 	);
 	for (const specifier of moduleSpecifiers(live))
 		for (const name of INTERIM)
@@ -305,9 +305,10 @@ test('the seam check can still see an import, in every form a comment can hide i
 	// comment that MERGES `import` into the token beside it when it is stripped,
 	// and a markup comment carrying a fake `<script>` opener.
 	//
-	// The specifiers resolve from this file on purpose. CON-5 reads every gate
-	// file's raw text and fails on a relative specifier resolving to no file, and a
-	// fixture that trips the gate it is testing beside is not a fixture.
+	// The specifiers resolve from this file, which CON-5 once required of every
+	// gate file — its reader was raw text and a fixture that trips the gate it is
+	// testing beside is not a fixture. It reads with the parser now, and the form
+	// is kept as the convention it became.
 	const target = '../src/lib/agents/AgentCard.svelte';
 	const route = 'src/lib/routes/Agents.svelte';
 	for (const body of [
@@ -411,8 +412,9 @@ test('a query on a specifier does not hide the interim piece it addresses', () =
 	// swap replaces. `../scripts/lib/module-imports.mjs` carries the reasoning.
 	//
 	// The fixtures address the face as `$lib/…` rather than the `../src/…` used
-	// above because CON-5 fails on a RELATIVE specifier resolving to no file, and a
-	// path with `?raw` on the end is one — the same defect, one gate over.
+	// above because CON-5 read a path with `?raw` on the end as a relative
+	// specifier resolving to no file — the same defect, one gate over, since
+	// repaired by pointing its reader at `modulePath` too.
 	const route = 'src/lib/routes/Agents.svelte';
 
 	for (const query of ['?raw', '?url', '?raw&inline', '#anchor']) {

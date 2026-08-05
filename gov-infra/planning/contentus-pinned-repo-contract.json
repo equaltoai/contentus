@@ -72,10 +72,37 @@
       "new glob is a governance edit rather than a silent widening.",
       "",
       "`node gov-infra/verifiers/check-package-scripts.mjs --print-hashes` prints this map",
-      "for the current tree, so a legitimate move is mechanical rather than hand-computed."
+      "for the current tree, so a legitimate move is mechanical rather than hand-computed.",
+      "",
+      "`computed_imports_disclosed` is the third boundary, and the one no reading can",
+      "close. A load whose target is an expression — `import(pathToFileURL(x).href)` —",
+      "names a module nothing static can follow, so the walk stops there and nothing",
+      "beyond it is pinned. CON-5 used to be silent about them because its raw-text",
+      "reader could not see them at all, and silence and permission are the same green.",
+      "Each site is now declared here with its reason: an undisclosed one is a finding,",
+      "and a disclosure matching no site in the closure is a finding too. What binds",
+      "these three is that the files holding them are pinned above, so the call cannot",
+      "appear, move or change without a governance edit in the same diff."
     ],
     "unpinned_import_roots": ["src/", "build/"],
     "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
+    "computed_imports_disclosed": [
+      {
+        "file": "scripts/render-routes.mjs",
+        "expression": "import(pathToFileURL(handlerPath).href)",
+        "reason": "Loads build/server/handler.mjs, the SSR entry the build just produced. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and its path is assembled at run time rather than written."
+      },
+      {
+        "file": "tests/messaging-races.test.mjs",
+        "expression": "import(pathToFileURL(file).href)",
+        "reason": "Loads a rewritten copy of a vendored module the probe has just written to a temp directory, so the real component runs against stubbed imports. The bytes are produced by this pinned probe from vendored source; there is no repository file to hash."
+      },
+      {
+        "file": "tests/vendored-content-renderer.test.mjs",
+        "expression": "import(pathToFileURL(file).href)",
+        "reason": "Loads a slice extracted from vendored source and written to a temp directory, which is how the probe reaches a function the component does not export. Same shape as the messaging-races disclosure: the bytes are this pinned probe's output."
+      }
+    ],
     "sha256": {
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
@@ -84,20 +111,21 @@
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
-      "scripts/lib/module-imports.mjs": "c5e817edfeaf6a1447fda58943aac302cba51b7c2e3fedf2c40d6fd76ce9fd52",
+      "scripts/lib/module-imports.mjs": "ac42a5abfc9478007a5bbcdb0b5307dbd01d33bcaaad1eb2abfd8cc71994f1a5",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/render-routes.mjs": "332823b287f559249b9e831bd42406deae2cddff55d5884dd0659a897fd0432f",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
-      "tests/agents-mobile.test.mjs": "89c4e998ed11b773724855c62938c13b146b34f51ab76adb93b3c4481040f2b9",
-      "tests/agents-roster.test.mjs": "e6a213d0146c46e537b4f759d13e065ad619e75570541105607287f8d7cdcbfb",
+      "tests/agents-mobile.test.mjs": "197973ced90dff1d1d20700b8d2850ab430888f8c60cd697ea675c371efd9608",
+      "tests/agents-roster.test.mjs": "639c3cbbff67e5f1595c20648c59f29fa6930c9a802873e0249ea141990a63ef",
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
+      "tests/con5-import-reader.test.mjs": "85078875651c4c1fa19ae2dc4ad4d359d2d5d1b05f3b8906a5fa6b3276c05de9",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
       "tests/messaging-queries.test.mjs": "c4ef9c9187f681feb080fc25159aef0c3224f991e910e800020c744804fd2c9f",
-      "tests/messaging-races.test.mjs": "9037063d71f335a712f639d2f2198d2dc36f7ce3d286a69cd38175be46c00fbc",
+      "tests/messaging-races.test.mjs": "617e6fe01b293d72f57d6b0eb726fdbbe041cd9130e2c510a2650a1006863d25",
       "tests/messaging-realtime.test.mjs": "a62518325c801642357c02493398fa25fa1be5a213175cf7be2affd2768dd3fd",
       "tests/messaging-session.test.mjs": "c66ab8245e34ca0b49875b70b27f38793c41d2254f079455ba013659a6f03881",
       "tests/mobile-chrome.test.mjs": "5194c79368253af8ad90a73ea067cd42cea8d4f2cb6bf61b22baceaf15a89d9a",
@@ -107,7 +135,7 @@
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",
       "tests/review.test.mjs": "5478670b85ea2e46badd6376a13d784043b99cae2c7d909eee9bead9c698d07b",
-      "tests/seam-graph.test.mjs": "ebe1abe80a18df1df62f2b17cd65d748ea9239dce0d21ccac7a21ea9191327eb",
+      "tests/seam-graph.test.mjs": "89b89e09b71c2e65d249f3592add793d6c627d66f1b5bb1c509ec389d3d9c5bb",
       "tests/ssr-messages.test.mjs": "46215833f4c74951839b9f500dec57dad3e709d5cc7601a9a10c2ab188c4b823",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
       "tests/ssr-routes.test.mjs": "6670a40d1ff2df197d85a6bb4d8ebccf10bcce7d3b6e3caa44815c308079b10c",

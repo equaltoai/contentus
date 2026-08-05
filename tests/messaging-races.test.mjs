@@ -592,9 +592,10 @@ async function loadVendoredButton() {
 	]) {
 		// Anchored, not assumed: a vendored change that moves either import must
 		// fail loudly here instead of silently driving something else. The anchor
-		// is BUILT UP from the specifier rather than written out, because a
-		// literal `from '...'` in this file would itself read as a static import
-		// to the CON-5 closure scan — and one that resolves to no file.
+		// is BUILT UP from the specifier rather than written out, so the anchor and
+		// the rewrite cannot drift apart. It was also once required: a literal
+		// `from '...'` here read as a static import to CON-5's raw-text closure
+		// scan, and as one that resolves to no file. That reader parses now.
 		const anchor = `from '${specifier}'`;
 		assert.ok(
 			vendored.includes(anchor),

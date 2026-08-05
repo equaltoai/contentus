@@ -201,12 +201,12 @@ hand-written rule has to keep them apart.
 
 One thing the check does NOT rest on, because an earlier version of this section
 implied it did: CON-5 is not a compensating reader for what this check might
-miss. CON-5's own import reader is raw-text regex
-(`gov-infra/verifiers/check-package-scripts.mjs`), and a comment moved inside an
-import statement makes it miss the edge as well. It is a real gate against
-unresolvable relative specifiers in gate files — which is why the planted
-fixtures address the face in a form that resolves — and it is nothing more than
-that here.
+miss. It reads with the same module now
+(`gov-infra/verifiers/check-package-scripts.mjs`), which closed a comment-shaped
+hole of its own, but its subject is the closure of the guarded package.json
+scripts — gate code — and `src/` is declared outside that closure on purpose. A
+cross-seam import in application source is invisible to it whatever it reads
+with.
 
 ### The second check: the edges the build itself resolves
 
