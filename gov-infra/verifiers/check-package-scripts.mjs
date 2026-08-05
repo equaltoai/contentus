@@ -1112,7 +1112,17 @@ function runChain(tokens) {
 	return chain(false, null);
 }
 
-/** How far a `-c` payload may nest before this reading stops following it. */
+/**
+ * How far a `-c` payload may nest before this reading stops following it — and it
+ * stops AS A FINDING, which is round 13's second finding and the difference
+ * between a boundary and a hole. The cap used to return silently, which is a
+ * reading answering "there is nothing further here" to a question it did not ask:
+ * six nested `sh -c` layers carried an unpinned repository helper past the closure
+ * with this control green, and the site that did it looked exactly like a site
+ * whose payload held nothing. A limit a reading cannot cross is one it reports —
+ * the repair being the shape a `binds` can be checked against, which is a file and
+ * an argument list rather than five shells wrapped around one.
+ */
 const SHELL_DEPTH = 4;
 
 function siteWords(literals, execPath) {
@@ -1163,7 +1173,6 @@ function siteWords(literals, execPath) {
 	const commandLines = [];
 	const collect = ({ text, frame }, depth) => {
 		commandLines.push({ text, frame });
-		if (depth >= SHELL_DEPTH) return;
 		// The strings this line hands a child as a command line of its own: what a
 		// `-c` carries after a shell's NAME, wherever in the line a wrapper has moved
 		// that name to, and the value of a wrapper option that takes a command line
@@ -1177,6 +1186,16 @@ function siteWords(literals, execPath) {
 				for (let after = index + 2; after < tokens.length; after += 1)
 					if (tokens[after - 1] === '-c') payloads.add(tokens[after]);
 			}
+		}
+		// Where the nesting outruns this reading, what the innermost line runs is
+		// decided by a string this walk stopped reading — which is undetermined, and
+		// undetermined is reported rather than passed over.
+		if (depth >= SHELL_DEPTH) {
+			if (payloads.size)
+				unreadable.add(
+					`a command line nested deeper than ${SHELL_DEPTH} shells, in ${JSON.stringify(text)}`
+				);
+			return;
 		}
 		for (const payload of payloads) collect({ text: payload, frame }, depth + 1);
 	};

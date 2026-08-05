@@ -4038,3 +4038,73 @@ test('a wrapper option this reading does not model ends the walk rather than gue
 		assert.equal(quiet.status, 0, `${what} runs nothing this repository holds\n${quiet.output}`);
 	}
 });
+
+test('a nesting this reading stops following is reported rather than passed over', () => {
+	// THE REPRO. A `-c` payload is a command line, and a command line may carry
+	// another. This reading follows four of them and then stopped — silently, which
+	// is a reading answering "nothing further here" to a question it never asked. Six
+	// nested shells carried the helper past the closure with this control green, and
+	// looked from the outside exactly like a payload holding nothing.
+	const quote = (line) => `'${line.split("'").join(`'\\''`)}'`;
+	const nest = (line, layers) => {
+		let nested = line;
+		for (let layer = 0; layer < layers; layer += 1) nested = `sh -c ${quote(nested)}`;
+		return nested;
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'execSync',
+		reason: 'the fixture’s point',
+	};
+	const gate = (layers) =>
+		"import { execSync } from 'node:child_process';\n" +
+		`execSync(${JSON.stringify(nest('node scripts/lib/helper.mjs', layers))});\n`;
+
+	for (const layers of [5, 6]) {
+		const files = { 'scripts/gate.mjs': gate(layers), [HELPER]: HELPER_SOURCE };
+		const past = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(past.status, 1, `${layers} shells outrun this reading, and it must say so`);
+		assert.match(past.output, /hands a child a string this reading does not model/);
+		assert.match(past.output, /a command line nested deeper than 4 shells/);
+
+		// And the report is not repaired by a `binds` that names the file the walk
+		// never reached: what the innermost line runs is undetermined either way.
+		const claimed = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] },
+		});
+		assert.equal(claimed.status, 1, 'a claim is not a reading');
+		assert.match(claimed.output, /a command line nested deeper than 4 shells/);
+	}
+
+	// THE PAIRING, and the proof the cap is where this says it is: a nesting inside
+	// it is read to the bottom and BINDS what the innermost line runs.
+	const files = { 'scripts/gate.mjs': gate(4), [HELPER]: HELPER_SOURCE };
+	const silent = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(silent.status, 1, 'four shells are followed to the file at the bottom');
+	assert.match(silent.output, /runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/);
+	assert.doesNotMatch(silent.output, /nested deeper than/, 'four is not deeper than four');
+
+	const contract = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract });
+	assert.equal(bound.status, 0, `a nesting inside the cap binds\n${bound.output}`);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract,
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+});
