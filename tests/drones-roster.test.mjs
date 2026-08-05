@@ -333,6 +333,7 @@ test('the client renders policy-disabled and one-time credential states without 
 	assert.match(flow, /policy === 'disabled'/);
 	assert.match(flow, /<DronePolicyDisabled/);
 	assert.match(policy, /This instance is not accepting new drones/);
+	assert.match(policy, /href=\{href\('\/drones'\)\}/);
 	assert.match(credentials, /only time Contentus will show the OAuth tokens/);
 	assert.match(credentials, /dismiss permanently/);
 	assertNoPersistenceSinks('DroneCreationFlow.svelte', flow);
