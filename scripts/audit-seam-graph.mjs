@@ -537,19 +537,31 @@ function recorder(pass, root, sink, references, observed, loads, reach) {
 				const loaded = loads.has(String(id)) || typeof info.code === 'string';
 
 				// WHAT THIS PASS REACHED, AND THEREFORE WHAT IT CAN JUDGE — IN THIS PASS AND
-				// NOWHERE ELSE. A module the build resolved and never loaded takes dependencies
-				// nothing here recorded, so recording the resolution SEPARATELY from the load is
-				// what keeps the containment rule from reading a module of a tracked face file
-				// as examined when nothing examined it. Externalizing a component in the face is
-				// a red gate for that reason — in the pass that did it, and in the sentence that
-				// says what is actually unknown.
+				// NOWHERE ELSE. Both facts are recorded and they are not the same fact.
+				// RESOLVED is this pass having an edge to the module: it is in this pass's
+				// graph, so this pass depends on it. LOADED is this pass having gone and got
+				// it, which is the only way an edge OUT of it gets recorded. The two differing
+				// is exactly an externalized module, and the containment rule below reads them
+				// per pass because a pass's edges are its own: see the header.
 				//
-				// Both facts are recorded, and they are not the same fact. RESOLVED is this
-				// pass having an edge to the module — it is in this pass's graph, so this
-				// pass takes whatever the module depends on. LOADED is this pass having gone
-				// and got it, which is the only way an edge OUT of it gets recorded. The two
-				// differing is exactly an externalized module, and the containment rule below
-				// reads them per pass because a pass's edges are its own: see the header.
+				// THE TWO SILENCES ARE DIFFERENT SILENCES, and one rationale covering both is
+				// how the wrong rule fires. A module this pass LOADED and no window here held
+				// is a module whose code existed and this gate did not read: the dependencies
+				// it takes in this build went unrecorded, and the reading rule below says
+				// exactly that. A module this pass RESOLVED and never loaded — an externalized
+				// one, a bare `node:…` in the server pass among them — takes no dependencies
+				// IN THIS BUILD at all: the build stopped at the boundary, so no code of its
+				// passed through here to go unread. Round 10 is that distinction, and it is
+				// why the reading rule is asked only of loaded modules.
+				//
+				// WHY THE RESOLUTION IS STILL RECORDED. That silence is right for a builtin
+				// and wrong for a component this repository SHIPS. Externalizing a module of a
+				// tracked face file arranges from the outside that no pass ever opens it, and
+				// then what that file depends on is whatever a consumer's build makes of it —
+				// which this gate has not seen. So containment asks its question of every
+				// module a tracked face file produced, in each pass that resolved it, and
+				// names the ones that pass never loaded: not that this build lost an edge, but
+				// that this gate cannot judge that file there.
 				//
 				// Keyed by the MODULE and not by the file, which is round 12: the build
 				// resolves and loads `X.svelte`, `X.svelte?raw` and `X.svelte?svelte&type=…`
