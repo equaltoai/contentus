@@ -40,7 +40,7 @@ export function usage() {
 		'                        ~/.lesser/<app>/<base-domain>/state.json.',
 		'  --dry-run             Validate local inputs and print the resolved plan only.',
 		'  --skip-install        Skip pnpm install --frozen-lockfile.',
-		'  --skip-check          Skip pnpm run svelte-check.',
+		'  --skip-check          With --skip-build, skip the standalone svelte-check.',
 		'  --skip-build          Skip pnpm run build and use existing artifacts.',
 		'  -h, --help            Show this help.',
 		'',
@@ -179,11 +179,16 @@ export function resolveStatePath(options, { cwd = process.cwd(), home = os.homed
 }
 
 export function buildPlan(options, context = {}) {
+	if (options.skipCheck && !options.skipBuild) {
+		throw new Error(
+			'--skip-check requires --skip-build because pnpm run build includes svelte-check'
+		);
+	}
 	const statePath = resolveStatePath(options, context);
 	const origin = stageOrigin(options.stage, options.baseDomain);
 	const commands = [];
 	if (!options.skipInstall) commands.push(['pnpm', 'install', '--frozen-lockfile']);
-	if (!options.skipCheck) commands.push(['pnpm', 'run', 'svelte-check']);
+	if (options.skipBuild && !options.skipCheck) commands.push(['pnpm', 'run', 'svelte-check']);
 	if (!options.skipBuild) commands.push(['pnpm', 'run', 'build']);
 	commands.push([
 		'lesser',
@@ -208,8 +213,12 @@ export function buildPlan(options, context = {}) {
 		'--fail',
 		'--silent',
 		'--show-error',
+		'--max-time',
+		'30',
 		'--output',
 		'/dev/null',
+		'--write-out',
+		'%{http_code}',
 		`${origin}/l/`,
 	]);
 
@@ -233,7 +242,7 @@ export function formatPlan(plan) {
 		`  stage: ${plan.stage}`,
 		`  aws-profile: ${plan.awsProfile}`,
 		`  state: ${plan.statePath}`,
-		`  install target: ${plan.origin}/l/`,
+		`  derived stage origin (verification only): ${plan.origin}`,
 		`  verify target: ${plan.origin}/l/`,
 		'  commands:',
 		...plan.commands.map((command) => `    $ ${commandLine(command)}`),
@@ -245,6 +254,8 @@ async function executablePath(name, envPath = process.env.PATH ?? '') {
 		if (!directory) continue;
 		const candidate = path.join(directory, name);
 		try {
+			const info = await stat(candidate);
+			if (!info.isFile()) continue;
 			await access(candidate, constants.X_OK);
 			return candidate;
 		} catch {
@@ -331,12 +342,17 @@ export async function preflight(
 	if (plan.skipBuild) await assertBuildArtifacts(repoRoot);
 }
 
-function run(command, args, { cwd = REPO_ROOT } = {}) {
+function run(command, args, { cwd = REPO_ROOT, captureStdout = false } = {}) {
 	return new Promise((resolve, reject) => {
-		const child = spawn(command, [...args], { cwd: cwd, stdio: 'inherit' });
+		const child = spawn(command, [...args], {
+			cwd,
+			stdio: captureStdout ? ['inherit', 'pipe', 'inherit'] : 'inherit',
+		});
+		let stdout = '';
+		if (captureStdout) child.stdout.on('data', (chunk) => (stdout += chunk));
 		child.on('error', (error) => reject(new Error(`Could not start ${command}: ${error.message}`)));
 		child.on('close', (code, signal) => {
-			if (code === 0) resolve();
+			if (code === 0) resolve(stdout);
 			else if (signal) reject(new Error(`${command} terminated by signal ${signal}`));
 			else reject(new Error(`${command} exited with code ${code}`));
 		});
@@ -353,7 +369,18 @@ export async function executePlan(plan, { repoRoot = REPO_ROOT, runCommand = run
 	for (const [command, ...args] of plan.commands) {
 		if (command === 'lesser') await assertBuildArtifacts(repoRoot);
 		console.log(`\n$ ${commandLine([command, ...args])}`);
-		await runCommand(command, args, { cwd: repoRoot });
+		const output = await runCommand(command, args, {
+			cwd: repoRoot,
+			captureStdout: command === 'curl',
+		});
+		if (command === 'curl') {
+			const status = String(output ?? '').trim();
+			if (status !== '200') {
+				throw new Error(
+					`Verification target ${plan.origin}/l/ returned HTTP ${status || '<missing>'}; expected 200`
+				);
+			}
+		}
 	}
 	console.log('\ndeploy-client: install and verification complete');
 }

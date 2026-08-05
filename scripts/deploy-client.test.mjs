@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -88,12 +88,11 @@ test('normalizes the domain and derives stage origins like lesser', () => {
 test('builds the frozen install, check, build, lesser install, and verify plan', () => {
 	const options = parseCliArgs([...required, '--state', './receipt.json', '--dry-run']);
 	const plan = buildPlan(options, { cwd: '/operator/repo', home: '/operator' });
-	assert.deepEqual(plan.commands.slice(0, 3), [
+	assert.deepEqual(plan.commands.slice(0, 2), [
 		['pnpm', 'install', '--frozen-lockfile'],
-		['pnpm', 'run', 'svelte-check'],
 		['pnpm', 'run', 'build'],
 	]);
-	assert.deepEqual(plan.commands[3], [
+	assert.deepEqual(plan.commands[2], [
 		'lesser',
 		'client',
 		'install',
@@ -111,19 +110,37 @@ test('builds the frozen install, check, build, lesser install, and verify plan',
 		'facetheory.lesser.json',
 		'--skip-build',
 	]);
-	assert.deepEqual(plan.commands[4], [
+	assert.deepEqual(plan.commands[3], [
 		'curl',
 		'--fail',
 		'--silent',
 		'--show-error',
+		'--max-time',
+		'30',
 		'--output',
 		'/dev/null',
+		'--write-out',
+		'%{http_code}',
 		'https://dev.example.test/l/',
 	]);
-	assert.match(formatPlan(plan), /install target: https:\/\/dev\.example\.test\/l\//);
+	assert.match(
+		formatPlan(plan),
+		/derived stage origin \(verification only\): https:\/\/dev\.example\.test/
+	);
 });
 
-test('skip flags remove only local preparation commands', () => {
+test('skip flags avoid duplicate checks and reject a silent skip-check no-op', () => {
+	const reusePlan = buildPlan(parseCliArgs([...required, '--dry-run', '--skip-build']), {
+		home: '/operator',
+	});
+	assert.deepEqual(reusePlan.commands.slice(0, 2), [
+		['pnpm', 'install', '--frozen-lockfile'],
+		['pnpm', 'run', 'svelte-check'],
+	]);
+	assert.throws(
+		() => buildPlan(parseCliArgs([...required, '--dry-run', '--skip-check'])),
+		/--skip-check requires --skip-build/
+	);
 	const plan = buildPlan(
 		parseCliArgs([...required, '--dry-run', '--skip-install', '--skip-check', '--skip-build']),
 		{ home: '/operator' }
@@ -186,6 +203,19 @@ test('dry-run prints the resolved plan without executing any command', async () 
 	assert.match(lines.join('\n'), /dry-run complete; no commands executed/);
 });
 
+test('verification requires HTTP 200 and bounds curl runtime', async () => {
+	const plan = buildPlan(
+		parseCliArgs([...required, '--skip-install', '--skip-check', '--skip-build']),
+		{ home: '/operator' }
+	);
+	plan.commands = [plan.commands.at(-1)];
+	await assert.rejects(
+		() => executePlan(plan, { runCommand: async () => '302' }),
+		/returned HTTP 302; expected 200/
+	);
+	await assert.doesNotReject(() => executePlan(plan, { runCommand: async () => '200' }));
+});
+
 test('dry-run supports a fresh clone unless build reuse is requested', async (context) => {
 	const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-fresh-'));
 	const stubBin = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-bin-'));
@@ -238,5 +268,18 @@ test('preflight fails clearly when lesser, state, or artifacts are absent', asyn
 	await assert.rejects(
 		() => assertBuildArtifacts(emptyRoot),
 		/Required build artifact build\/server\/handler\.mjs is missing or unreadable/
+	);
+
+	const directoryPath = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-path-'));
+	context.after(() => rm(directoryPath, { recursive: true, force: true }));
+	await mkdir(path.join(directoryPath, 'lesser'));
+	await mkdir(path.join(directoryPath, 'curl'));
+	const noBuildPlan = buildPlan(
+		parseCliArgs([...required, '--dry-run', '--skip-install', '--skip-check', '--skip-build']),
+		{ home: '/operator' }
+	);
+	await assert.rejects(
+		() => preflight(noBuildPlan, { envPath: directoryPath }),
+		/lesser binary is missing from PATH/
 	);
 });

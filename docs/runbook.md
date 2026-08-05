@@ -87,12 +87,14 @@ pnpm run deploy -- \
   --dry-run
 ```
 
-`--skip-install`, `--skip-check`, and `--skip-build` reuse completed local
-steps; artifact assertions still run before install. After a real install the
-entrypoint curls `/l/` at `https://<stage>.<base-domain>` for `dev` and
-`staging`, or at the apex `https://<base-domain>` for `live`. That curl is the
-automated availability check; continue with the smoke test below for the CMS,
-auth, GraphQL, CSP, and renderer-authority evidence of record.
+`--skip-install` reuses installed dependencies. `--skip-build` reuses build
+artifacts and runs a standalone `svelte-check`; combine it with `--skip-check`
+only when that check has already run. Artifact assertions still run before
+install. After a real install the entrypoint curls `/l/` at
+`https://<stage>.<base-domain>` for `dev` and `staging`, or at the apex
+`https://<base-domain>` for `live`. That bounded curl requires HTTP 200; it is
+the automated availability check. Continue with the smoke test below for the
+CMS, auth, GraphQL, CSP, and renderer-authority evidence of record.
 
 Adding an instance therefore costs only the same four CLI values and an
 already-deployed lesser instance with `FrontendDistributionId`: no target map,
