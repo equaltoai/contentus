@@ -303,11 +303,12 @@ quietly. What was attempted and what it returned:
 | lesser-body MCP `article_draft_*` tools      | no such endpoint is connected to this session                         |
 | `lesser client install` to the dev instance  | operator-only; the steward does not run installs on its own authority |
 
-The runbook's own target table says the trenchcoat stage URL is "recorded here
-at first verified install" and it is still blank, which is consistent: the
-install has not been verified yet, so there is no address to reach. M2b also
-landed on lesser-body's `staging` rather than `main`, so the parity surface is
-not deployed anywhere this session could reach even with an address.
+The runbook's config-free deploy section derives a stage origin from the
+operator-supplied `--stage` and `--base-domain` values for verification only;
+it deliberately keeps no instance registry. No operator-run install outcome
+has been recorded, so there is no verified address to reach. M2b also landed
+on lesser-body's `staging` rather than `main`, so the parity surface is not
+deployed anywhere this session could reach even with an address.
 
 **None of this is evidence that the round trip fails.** It is the absence of
 evidence, and it is recorded as such. The live round trip is an operator-run
