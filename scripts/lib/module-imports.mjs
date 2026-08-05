@@ -105,6 +105,15 @@
  *      key inside it is — correctly — a name rather than a reference. Being a name
  *      was not the whole answer: in a DESTRUCTURING it is also a read.
  *
+ *   3. `spawnSync(process.execPath, ['scripts/lib/helper.mjs'])` ran an editable
+ *      repository file while this module's header said out loud that it was not
+ *      looking. The argument was that a child's closure belongs to the child, which
+ *      is true and was not an answer, because nobody was walking the child. The
+ *      named execution facilities are in the grammar now, and a caller that needs
+ *      one declares the repository paths it runs so CON-5 pins them. What stays
+ *      stated rather than closed is the reflective class — a loader assembled out
+ *      of `Reflect.get` and string pieces, which has no name to watch.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -340,10 +349,10 @@ const isImportCall = (node) =>
  * The names the loader grammar watches.
  *
  * THEY SIT ABOVE BOTH READERS because both read them. `unfollowableLoads` uses
- * them to decide what it cannot follow, and `requireLike` uses them to decide which
- * LOCAL name a modelled import was bound to — which is the half round 8 found
- * missing, and the reason the two have to be looking at one list rather than at two
- * copies of it.
+ * them to decide what it cannot follow, and `requireLike` and `executionLike` use
+ * them to decide which LOCAL name a modelled import was bound to — which is the
+ * half round 8 found missing, and the reason the two halves have to be looking at
+ * one list rather than at two copies of it.
  * ---------------------------------------------------------------------- */
 
 /** Names that hand out a loader or an evaluator when they appear as a PROPERTY. */
@@ -361,6 +370,48 @@ const MODELLED_LOADER_EXPORTS = new Set(['createRequire']);
 
 /** Modules that evaluate text as code. */
 const EVALUATOR_MODULES = new Set(['vm', 'node:vm']);
+
+/**
+ * Modules that start code running where this walk does not follow it, and the
+ * exports of them this reading can NAME at each of their call sites.
+ *
+ * WHY THEY ARE IN THE GRAMMAR AT ALL, when round 7's version of this module said
+ * out loud that they were outside it. That header argued the reading is scoped to
+ * code THIS process runs, so a probe that spawns `node` is ordinary and the child's
+ * closure is the child's own. Round 8's review took that boundary and walked
+ * straight through it: `spawnSync(process.execPath, ['scripts/lib/helper.mjs'])`
+ * inside a gate file executes an editable repository helper, the content pin on the
+ * parent binds nothing about the child, and CON-5 was green in both directions —
+ * as written and with the helper rewritten wholesale. "The child's closure is the
+ * child's" is true and is not an answer: nobody was walking the child.
+ *
+ * The residue this module still states is the one codex's ruling left standing —
+ * a loader or an evaluator ASSEMBLED without ever writing a name, out of
+ * `Reflect.get` and string pieces. That class is genuinely unbounded. This one is
+ * not: it is four facilities with names, and a reader that watches names can watch
+ * these. So it does, and the caller declares the sites it needs — with the paths
+ * they run, where those are repository files.
+ */
+const EXECUTION_MODULES = new Set([
+	'child_process',
+	'node:child_process',
+	'worker_threads',
+	'node:worker_threads',
+]);
+const MODELLED_EXECUTION_EXPORTS = new Set([
+	'spawn',
+	'spawnSync',
+	'exec',
+	'execSync',
+	'execFile',
+	'execFileSync',
+	'fork',
+	'Worker',
+]);
+
+/** Properties and globals that run code this module system never loaded. */
+const EXECUTION_PROPERTIES = new Set(['dlopen']);
+const EXECUTION_GLOBALS = new Set(['WebAssembly']);
 
 const isLiteralKey = (node) =>
 	Boolean(node) &&
@@ -726,8 +777,10 @@ function nameableCallee(callee) {
 
 /**
  * Every load in this source that the reading above cannot follow to a file —
- * both because the TARGET is computed and because the LOADER is a construction
- * this grammar does not model — as `{ expression, line, kind, detail }`.
+ * because the TARGET is computed, because the LOADER is a construction this
+ * grammar does not model, or because the code does not run in this process at all
+ * — as `{ expression, line, kind, detail }`, where kind is `'computed'`,
+ * `'loader'` or `'execution'`.
  *
  * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
  * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
@@ -758,22 +811,38 @@ function nameableCallee(callee) {
  *     `(cond ? a : b)()` — since a callee it cannot name is a loader it cannot
  *     rule out;
  *   - importing `node:vm`, or `node:module` in any form but a named import of
- *     `createRequire`, which is the one loader construction modelled above.
+ *     `createRequire`, which is the one loader construction modelled above;
+ *   - every named Node facility that runs code this process did not load — a
+ *     `spawn`/`exec`/`fork` bound from `node:child_process`, a `Worker` bound from
+ *     `node:worker_threads`, either module taken in a form whose bindings cannot be
+ *     named, `process.dlopen`, and `WebAssembly`.
+ *
+ * WHY THE LAST GROUP IS HERE, when round 7's version of this argued it out of
+ * scope. That argument was that this reading covers code THIS process runs, so a
+ * probe spawning `node` is ordinary and the child's closure belongs to the child.
+ * Round 8's review answered it with a fact rather than a counter-argument: nobody
+ * was walking the child. `spawnSync(process.execPath, ['scripts/lib/helper.mjs'])`
+ * in a gate file ran an editable repository helper, the parent's content pin said
+ * nothing about it, and CON-5 was green with the helper as written and green again
+ * with it rewritten wholesale. So the boundary moved to where it can be defended:
+ * these facilities have NAMES, a reader that watches names can watch them, and a
+ * caller that needs one declares it — with the repository paths it runs, which
+ * CON-5 then pins.
  *
  * WHERE IT STOPS, said plainly, because a closed grammar over NAMES is not a
  * closed grammar over BEHAVIOUR. It reads syntax, so it cannot see a loader
- * assembled without ever writing one of those names — `Reflect.get(x, key)`,
- * a member reached through an alias of an alias, a name built from string pieces
- * and applied to something that is not `globalThis`. It is scoped to code this
- * process runs, so `node:child_process` and `node:worker_threads` are outside it:
- * a probe that spawns `node` is ordinary here, and the code that child runs is
- * the child's own closure rather than this file's. `process.dlopen` and
- * WebAssembly are outside it for the same reason as the first group — no name it
- * watches appears. What backs the residue is not this function: it is that every
- * file CON-5 walks is bound by a content hash, so any of those shapes has to
- * arrive in a governance diff, where the review is the control. That is the same
- * argument the disclosure list rests on, and it is not a claim that the class is
- * closed.
+ * assembled without ever writing one of those names — `Reflect.get(x, key)`, a
+ * member reached through an alias of an alias, a name built from string pieces and
+ * applied to something that is not `globalThis`. That class is genuinely unbounded
+ * and stays stated rather than closed. `process.binding` is left out of the named
+ * group deliberately and not silently: `binding` is a word this repository uses
+ * fifteen times for something else entirely, a rule that must first ask WHICH
+ * object carries the property is the object-tracking this reading does not do, and
+ * the deprecated internal it reaches is inside the reflective residue above. What
+ * backs that residue is not this function: it is that every file CON-5 walks is
+ * bound by a content hash, so any of those shapes has to arrive in a governance
+ * diff, where the review is the control. That is the same argument the disclosure
+ * list rests on, and it is not a claim that the class is closed.
  *
  * LINES ARE 1-BASED and are counted in the SOURCE THIS IS GIVEN. For a component
  * that is the script the caller extracted, not the file on disk; CON-5, which is
@@ -782,6 +851,7 @@ function nameableCallee(callee) {
 export function unfollowableLoads(source) {
 	const file = parsed(source);
 	const { names, factories, modelled } = requireLike(file);
+	const running = importedLocals(file, EXECUTION_MODULES, MODELLED_EXECUTION_EXPORTS);
 	const found = [];
 	const report = (node, kind, detail) =>
 		found.push({
@@ -791,21 +861,40 @@ export function unfollowableLoads(source) {
 			detail,
 		});
 
-	const loaderModule = (node, specifier) => {
-		if (EVALUATOR_MODULES.has(specifier))
-			return report(node, 'loader', `imports ${specifier}, which evaluates text as code`);
-		if (!LOADER_MODULES.has(specifier)) return;
+	/**
+	 * A named import whose every binding this reading can follow to its uses. The
+	 * clause must bind nothing but named exports it models — a default or namespace
+	 * import hands out the whole module object, and the local it produces is a name
+	 * this grammar would then have to track through arbitrary member access.
+	 */
+	const bindsOnlyModelled = (node, exports_) => {
 		const clause = ts.isImportDeclaration(node) ? node.importClause : null;
 		const bindings = clause?.namedBindings;
-		const modelledOnly =
+		return Boolean(
 			clause &&
 			!clause.name &&
 			bindings &&
 			ts.isNamedImports(bindings) &&
 			bindings.elements.every((element) =>
-				MODELLED_LOADER_EXPORTS.has((element.propertyName ?? element.name).text)
-			);
-		if (!modelledOnly)
+				exports_.has((element.propertyName ?? element.name).text)
+			)
+		);
+	};
+
+	const loaderModule = (node, specifier) => {
+		if (EVALUATOR_MODULES.has(specifier))
+			return report(node, 'loader', `imports ${specifier}, which evaluates text as code`);
+		if (EXECUTION_MODULES.has(specifier)) {
+			if (!bindsOnlyModelled(node, MODELLED_EXECUTION_EXPORTS))
+				report(
+					node,
+					'execution',
+					`takes ${specifier} in a form whose bindings this reading cannot name at their uses`
+				);
+			return;
+		}
+		if (!LOADER_MODULES.has(specifier)) return;
+		if (!bindsOnlyModelled(node, MODELLED_LOADER_EXPORTS))
 			report(
 				node,
 				'loader',
@@ -832,22 +921,27 @@ export function unfollowableLoads(source) {
 			const key = keyText(destructured);
 			if (key !== null && LOADER_PROPERTIES.has(key))
 				report(node, 'loader', `takes ${key} out of an object, which no static read follows`);
+			else if (key !== null && EXECUTION_PROPERTIES.has(key))
+				report(node, 'execution', `takes ${key} out of an object, which runs code off this walk`);
 			return;
 		}
 
-		if (ts.isPropertyAccessExpression(node) && LOADER_PROPERTIES.has(node.name.text)) {
-			report(
-				node,
-				'loader',
-				`reaches ${node.name.text} as a property, which no static read follows`
-			);
+		if (ts.isPropertyAccessExpression(node)) {
+			const key = node.name.text;
+			if (LOADER_PROPERTIES.has(key))
+				report(node, 'loader', `reaches ${key} as a property, which no static read follows`);
+			else if (EXECUTION_PROPERTIES.has(key))
+				report(node, 'execution', `reaches ${key}, which loads and runs code no hash here binds`);
 			return;
 		}
 
 		if (ts.isElementAccessExpression(node)) {
 			const key = node.argumentExpression;
-			if (isLiteralKey(key) && LOADER_PROPERTIES.has(key.text))
+			if (!isLiteralKey(key)) return;
+			if (LOADER_PROPERTIES.has(key.text))
 				report(node, 'loader', `reaches ${key.text} by key, which no static read follows`);
+			else if (EXECUTION_PROPERTIES.has(key.text))
+				report(node, 'execution', `reaches ${key.text} by key, which runs code off this walk`);
 			return;
 		}
 
@@ -876,6 +970,22 @@ export function unfollowableLoads(source) {
 		if (factories.has(name)) {
 			if (!modelled.has(node))
 				report(node, 'loader', 'builds a CommonJS loader this reading cannot follow to its uses');
+			return;
+		}
+		if (running.has(name)) {
+			const invoked =
+				(ts.isCallExpression(parent) || ts.isNewExpression(parent)) && parent.expression === node;
+			report(
+				node,
+				'execution',
+				invoked
+					? 'runs code in an execution context whose closure this walk does not reach'
+					: 'hands out a way to run code somewhere this reading cannot follow'
+			);
+			return;
+		}
+		if (EXECUTION_GLOBALS.has(name)) {
+			report(node, 'execution', 'compiles and runs code this module system never loaded');
 			return;
 		}
 		if (EVALUATORS.has(name)) {

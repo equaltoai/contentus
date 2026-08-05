@@ -75,13 +75,15 @@
       "for the current tree, so a legitimate move is mechanical rather than hand-computed.",
       "",
       "`unfollowable_loads_disclosed` is the third boundary, and the one no reading can",
-      "close. Two shapes land here. A load whose TARGET is an expression —",
+      "close. Three shapes land here. A load whose TARGET is an expression —",
       "`import(pathToFileURL(x).href)` — names a module nothing static can follow. A load",
       "whose LOADER is a construction the reading does not model — an aliased `require`,",
-      "`module.require`, `eval`, `new Function`, a `node:vm` import — reaches a file the",
-      "walk never sees. Either way the walk stops there and nothing beyond it is pinned.",
-      "CON-5 used to be silent about both because its reader could not see them at all,",
-      "and silence and permission are the same green.",
+      "`module.require`, a destructured `{ require: r }`, `eval`, `new Function`, a",
+      "`node:vm` import — reaches a file the walk never sees. And an EXECUTION facility —",
+      "`spawn`, `exec`, `fork`, a `Worker`, `process.dlopen`, `WebAssembly` — starts code",
+      "running that this process never loaded at all. Every one of them is a place the walk",
+      "stops with something unpinned beyond it. CON-5 used to be silent about all three",
+      "because its reader could not see them, and silence and permission are the same green.",
       "",
       "Each site is declared here with the line it sits on and its reason. An undisclosed",
       "one is a finding; a disclosure matching no site in the closure is a finding too;",
@@ -89,7 +91,18 @@
       "repeated entry is rejected outright. The line costs nothing to maintain that the",
       "pin does not already cost — the file's own SHA-256 below has to move in the same",
       "diff whenever the line does, and that pin is what binds these sites: no load can",
-      "appear, move or change without a governance edit in the same diff."
+      "appear, move or change without a governance edit in the same diff.",
+      "",
+      "`binds` is the optional half that turns a report into a binding, and the reason the",
+      "execution shape is disclosable rather than banned. A site that runs a REPOSITORY",
+      "file names it there, and CON-5 admits that path to the closure exactly as it admits",
+      "an import: pinned, hashed, and walked for its own imports in turn — so rewriting the",
+      "file the site runs turns this control red. A site that runs the system `git` binary,",
+      "or a build artifact, or bytes the probe has just written to a temp directory, omits",
+      "`binds` and says so in its reason. A path under a declared unpinned root is refused",
+      "there, because a `binds` that pins no bytes reads as coverage and is not. The choice",
+      "is written down here rather than inferred from a walk that stopped, which is the",
+      "whole point of the list."
     ],
     "unpinned_import_roots": ["src/", "build/"],
     "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
@@ -117,6 +130,55 @@
         "line": 97,
         "expression": "import(pathToFileURL(file).href)",
         "reason": "Loads a slice extracted from vendored source and written to a temp directory, which is how the probe reaches a function the component does not export. Same shape as the messaging-races disclosure: the bytes are this pinned probe's output."
+      },
+      {
+        "file": "scripts/audit-seam-graph.mjs",
+        "line": 850,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary to list the tracked files under the face directory, which is what makes the walked set what the repository CARRIES rather than what is on the disk beside a concurrent probe. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system installation, outside anything a repo-local hash can bind."
+      },
+      {
+        "file": "tests/agents-mobile.test.mjs",
+        "line": 1198,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary, which initialises a scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
+      },
+      {
+        "file": "tests/agents-mobile.test.mjs",
+        "line": 1214,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary, which stages the fixture files the probe has just written into that scratch repository. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
+      },
+      {
+        "file": "tests/agents-mobile.test.mjs",
+        "line": 1248,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary, which initialises a second scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
+      },
+      {
+        "file": "tests/agents-mobile.test.mjs",
+        "line": 1251,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary, which stages one of the two fixture files, so the assertion can tell tracked from untracked. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
+      },
+      {
+        "file": "tests/con5-import-reader.test.mjs",
+        "line": 126,
+        "expression": "spawnSync",
+        "reason": "Runs this control's own verifier, `gov-infra/verifiers/check-package-scripts.mjs`, over a synthetic three-file repository in a temp directory — which is the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The target is deliberately NOT bound here: gov-infra is genome content staged by the parent and bound by `packDigest` in `gov-infra/pack.json` under `managedBy: namespace_mcp`, so a second repo-local pin on those bytes would go red the moment the parent restages the pack, and a pin that breaks for a reason unrelated to the change teaches the next author to weaken it."
+      },
+      {
+        "file": "tests/renderer-authority-audit.test.mjs",
+        "line": 39,
+        "expression": "spawnSync",
+        "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how this probe asserts the audit’s exit code and output rather than its internals. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
+        "binds": ["scripts/audit-renderer-authority.mjs"]
+      },
+      {
+        "file": "tests/helpers/tracked-source.mjs",
+        "line": 72,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary to list a directory's tracked files, NUL-separated and rooted with `-C`, which is the reading three probes share so none of them lists a directory a concurrent probe is planting fixtures in. No repository file is executed."
       }
     ],
     "sha256": {
@@ -127,7 +189,7 @@
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
-      "scripts/lib/module-imports.mjs": "d9884f61ab4bc17af0191043cd8be641898f0fd18d297f4e2ca30fd045f3282c",
+      "scripts/lib/module-imports.mjs": "ec84bd3242d367f8a172cd5dddc036172be30aa652ee9b293fbad65dcc015dfe",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/render-routes.mjs": "332823b287f559249b9e831bd42406deae2cddff55d5884dd0659a897fd0432f",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
@@ -136,7 +198,7 @@
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
-      "tests/con5-import-reader.test.mjs": "8aaf18acd89a67b49597cc4babce688a82dc15a2d66aa36d63a98bcf2ee60532",
+      "tests/con5-import-reader.test.mjs": "0579c22a768b8002fc2dc7608aff42e4fd501a4fd7b57aeb067dfd0ece292441",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",

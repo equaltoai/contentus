@@ -178,13 +178,35 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
  * The loads inside the closure this walk cannot follow to a file, declared one by
  * one with the reason each is there.
  *
- * TWO KINDS SHARE THE LIST because they are one fact. A COMPUTED target —
+ * THREE KINDS SHARE THE LIST because they are one fact. A COMPUTED target —
  * `import(<expression>)`, `require(<expression>)` — is a load whose file no
  * static read can name. An unmodelled LOADER — an aliased `require`,
- * `module.require`, `eval`, `new Function`, a `node:vm` import — is a load whose
- * mechanism this reading does not follow. Either way the walk stops, and nothing
- * beyond it is pinned. `unfollowableLoads` in the shared reader draws the line
- * and its header states exactly where the grammar's reach ends.
+ * `module.require`, a destructured `{ require: r }`, `eval`, `new Function`, a
+ * `node:vm` import — is a load whose mechanism this reading does not follow. An
+ * EXECUTION facility — `spawn`, `fork`, a `Worker`, `process.dlopen`,
+ * `WebAssembly` — starts code running that this process never loaded at all. Every
+ * one of them is a place the walk stops with something unpinned beyond it.
+ * `unfollowableLoads` in the shared reader draws the line and its header states
+ * exactly where the grammar's reach ends.
+ *
+ * WHY THE THIRD KIND ARRIVED IN ROUND 8, having been argued out of scope in round
+ * 7. The reader's header then said `node:child_process` was outside a reading
+ * scoped to this process, because the child's closure is the child's own. Round
+ * 8's review answered with a demonstration rather than an argument:
+ * `spawnSync(process.execPath, ['scripts/lib/helper.mjs'])` inside a gate file ran
+ * an editable repository helper, and this control was green with the helper as
+ * written and green again with it rewritten wholesale. Nobody was walking the
+ * child. The parent's pin binds the parent's bytes and says nothing about what the
+ * parent starts.
+ *
+ * WHICH IS WHAT `binds` IS FOR. A declaration may name the repository paths its
+ * site executes, and every one of them is admitted to the closure exactly as an
+ * import is: pinned, hashed, and walked for its own imports in turn. So a site
+ * that runs a repository file has a repair that BINDS it — rewriting that file
+ * turns this control red — and a site that runs something no hash can bind, a
+ * system binary or a build artifact, says so by declaring no paths and giving the
+ * reason. That is the "bind or report" the review asked for, with the choice
+ * written down where a reviewer reads it rather than inferred from silence.
  *
  * WHY DECLARED RATHER THAN IGNORED. This control's claim is that every file a
  * guarded command executes is bound by a content hash. A load the walk cannot
@@ -247,6 +269,29 @@ const disclosedLoads = (() => {
 			);
 			process.exit(1);
 		}
+		// `binds` is optional — a site may genuinely run nothing this repository
+		// holds — but where it is present each path must be one this walk could
+		// admit, so a declaration cannot reach outside the tree it is pinning.
+		if (entry.binds !== undefined) {
+			const bindable =
+				Array.isArray(entry.binds) &&
+				entry.binds.length > 0 &&
+				entry.binds.every(
+					(target) =>
+						typeof target === 'string' &&
+						target.length > 0 &&
+						!target.startsWith('/') &&
+						!target.split('/').includes('..')
+				);
+			if (!bindable) {
+				console.error(
+					`${CONTRACT}: executable_targets.unfollowable_loads_disclosed at ${entry.file}:${entry.line} ` +
+						'carries a `binds` that is not a non-empty array of repository-relative paths. Omit it ' +
+						'where the site runs nothing this repository holds, and say so in the reason.'
+				);
+				process.exit(1);
+			}
+		}
 		const key = identify(entry.file, entry.line, entry.expression);
 		if (declared.has(key)) {
 			console.error(
@@ -259,14 +304,16 @@ const disclosedLoads = (() => {
 		declared.set(key, entry);
 	}
 	return {
-		// `declared` the first time a site matches; `repeated` for a second load
-		// with the same file, line and text; `undeclared` for anything else.
+		// `declared` the first time a site matches, with the paths that declaration
+		// binds; `repeated` for a second load with the same file, line and text;
+		// `undeclared` for anything else.
 		take(file, line, expression) {
 			const key = identify(file, line, expression);
-			if (!declared.has(key)) return 'undeclared';
-			if (consumed.has(key)) return 'repeated';
+			const entry = declared.get(key);
+			if (!entry) return { status: 'undeclared' };
+			if (consumed.has(key)) return { status: 'repeated' };
 			consumed.add(key);
-			return 'declared';
+			return { status: 'declared', binds: entry.binds ?? [] };
 		},
 		unmatched: () => [...declared].filter(([key]) => !consumed.has(key)).map(([, entry]) => entry),
 		count: declared.size,
@@ -603,8 +650,21 @@ function executableClosure() {
 
 		for (const { expression, line, kind, detail } of unfollowable) {
 			const declaration = disclosedLoads.take(path, line, expression);
-			if (declaration === 'declared') continue;
-			if (declaration === 'repeated') {
+			if (declaration.status === 'declared') {
+				for (const target of declaration.binds) {
+					if (underUnpinnedRoot(target)) {
+						findings.push(
+							`${CONTRACT}: the disclosure of ${expression} at ${path}:${line} binds ${target}, which ` +
+								'is under a declared unpinned root and so is bound by nothing; a `binds` that pins ' +
+								'no bytes reads as coverage and is not'
+						);
+						continue;
+					}
+					admit(target, `${path}:${line}, declared`);
+				}
+				continue;
+			}
+			if (declaration.status === 'repeated') {
 				findings.push(
 					`${path}:${line}: a second ${expression} shares this line with a disclosed one, and one ` +
 						'declaration binds one load; put them on separate lines so each carries its own reason'
@@ -615,7 +675,10 @@ function executableClosure() {
 				`${path}:${line}: ${expression} ${detail}, and it is not disclosed in ${CONTRACT}; ` +
 					(kind === 'computed'
 						? 'a target this walk cannot reach is a target no hash binds'
-						: 'a loader this walk cannot follow reaches targets no hash binds')
+						: kind === 'execution'
+							? 'code this walk never opens is code no hash binds — disclose it, and name the ' +
+								'repository paths it runs in `binds` so they are pinned'
+							: 'a loader this walk cannot follow reaches targets no hash binds')
 			);
 		}
 

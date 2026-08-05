@@ -1104,6 +1104,181 @@ test('a loader taken out of an object by destructuring is a read of it', () => {
 	}
 });
 
+test('the named execution facilities are findings, and a repository file they run binds', () => {
+	// THE REPRO, and the boundary that moved. Round 7's reader said
+	// `node:child_process` was outside a reading scoped to this process, because a
+	// child's closure is the child's own. That is true and was not an answer: nobody
+	// was walking the child. `spawnSync(process.execPath, ['scripts/lib/helper.mjs'])`
+	// ran an editable repository helper, and this control was green with the helper
+	// as written and green again with it rewritten wholesale.
+	const shapes = {
+		'a spawn of the node binary': [
+			"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['scripts/lib/helper.mjs']);\n",
+			/scripts\/gate\.mjs:2: spawnSync runs code in an execution context/,
+		],
+		'a spawn bound under an alias': [
+			"import { spawnSync as run } from 'node:child_process';\n" +
+				"run(process.execPath, ['scripts/lib/helper.mjs']);\n",
+			/scripts\/gate\.mjs:2: run runs code in an execution context/,
+		],
+		'a fork': [
+			"import { fork } from 'node:child_process';\nfork('./lib/helper.mjs');\n",
+			/scripts\/gate\.mjs:2: fork runs code in an execution context/,
+		],
+		'a spawn stashed rather than called': [
+			"import { spawn } from 'node:child_process';\nconst run = spawn;\nconsole.log(run);\n",
+			/scripts\/gate\.mjs:2: spawn hands out a way to run code/,
+		],
+		'the module taken as a namespace': [
+			"import cp from 'node:child_process';\ncp.spawnSync('x');\n",
+			/takes node:child_process in a form whose bindings this reading cannot name/,
+		],
+		'the module required rather than imported': [
+			"const cp = require('node:child_process');\ncp.spawnSync('x');\n",
+			/takes node:child_process in a form whose bindings this reading cannot name/,
+		],
+		'a worker thread': [
+			"import { Worker } from 'node:worker_threads';\nnew Worker('./lib/helper.mjs');\n",
+			/scripts\/gate\.mjs:2: Worker runs code in an execution context/,
+		],
+		'a native module': ['process.dlopen(module, path);\n', /reaches dlopen, which loads and runs/],
+		WebAssembly: [
+			'const wasm = await WebAssembly.instantiate(bytes);\nconsole.log(wasm);\n',
+			/WebAssembly compiles and runs code this module system never loaded/,
+		],
+	};
+
+	for (const [what, [source, expected]] of Object.entries(shapes)) {
+		const found = runCon5({
+			files: { 'scripts/gate.mjs': source, [HELPER]: HELPER_SOURCE },
+			pinned: ['scripts/gate.mjs'],
+		});
+		assert.equal(found.status, 1, `${what} must not run code past this control`);
+		assert.match(found.output, expected, `${what} must be named where it sits`);
+	}
+
+	// The pairing. A file that reaches none of these names is silent, so the rule
+	// bites on the facility rather than on being a gate file.
+	const clean = runCon5({
+		files: {
+			'scripts/gate.mjs': "import { readFileSync } from 'node:fs';\nconsole.log(readFileSync);\n",
+		},
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(clean.status, 0, clean.output);
+});
+
+test('a disclosed execution site binds the repository files it names', () => {
+	// "Bind or report", with the choice written down. Reporting alone would leave
+	// the helper editable behind a declared reason, which is the hole with a note
+	// attached — so a declaration may name the repository paths its site runs, and
+	// they enter the closure exactly as an import does.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync(process.execPath, ['scripts/lib/helper.mjs']);\n",
+		[HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	// Declared with the path it runs, that path is a closure member like any other.
+	const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+	const unpinned = runCon5({ files, pinned: ['scripts/gate.mjs'], contract: named });
+	assert.equal(unpinned.status, 1, 'a bound child is a target that needs a pin');
+	assert.match(unpinned.output, /scripts\/lib\/helper\.mjs has no pinned sha256/);
+
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: named });
+	assert.equal(bound.status, 0, bound.output);
+
+	// THE CONSEQUENCE, which is the whole difference between binding and mentioning:
+	// rewriting the helper the site runs turns this control red.
+	const rewritten = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: named,
+		corrupt: HELPER,
+	});
+	assert.equal(rewritten.status, 1);
+	assert.match(rewritten.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	// A site that runs nothing this repository holds omits `binds` and says so. That
+	// is a report rather than a binding, and it is allowed to be — but it cannot be
+	// silent, which is what it was before this round.
+	const declaredOnly = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { execFileSync } from 'node:child_process';\nexecFileSync('git', ['status']);\n",
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, expression: 'execFileSync' }],
+		},
+	});
+	assert.equal(declaredOnly.status, 0, declaredOnly.output);
+});
+
+test('a binds that pins no bytes is a finding, like a pin of nothing', () => {
+	// The same rule the rest of this contract keeps: a declaration that reads as
+	// coverage has to BE coverage. A path under a declared unpinned root is bound by
+	// nothing, and naming it there would read as a binding that is not one.
+	const hollow = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['build/server/handler.mjs']);\n",
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unpinned_import_roots: ['build/'],
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+					binds: ['build/server/handler.mjs'],
+				},
+			],
+		},
+	});
+	assert.equal(hollow.status, 1);
+	assert.match(
+		hollow.output,
+		/binds build\/server\/handler\.mjs, which is under a declared unpinned root/
+	);
+
+	// And a `binds` this control cannot read at all is a hard stop, like every other
+	// shape failure in the contract: half a declaration is not a declaration.
+	for (const binds of [[], 'scripts/lib/helper.mjs', ['/etc/passwd'], ['../outside.mjs']]) {
+		const shapeless = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { spawnSync } from 'node:child_process';\nspawnSync(process.execPath, ['x']);\n",
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'spawnSync',
+						reason: 'the fixture’s point',
+						binds,
+					},
+				],
+			},
+		});
+		assert.equal(shapeless.status, 1, `${JSON.stringify(binds)} is not a set of repository paths`);
+		assert.match(shapeless.output, /carries a `binds` that is not a non-empty array/);
+	}
+});
+
 test('a disclosure without the line it sits on is not a disclosure', () => {
 	// The shape check, which is a hard stop rather than a finding: a contract this
 	// control cannot read is not a contract it may read halfway.
