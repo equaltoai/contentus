@@ -129,18 +129,23 @@
  * another check that stays, or turned into a TRIPWIRE — a red gate the day the
  * channel is used — rather than left as a silence:
  *
- *   1. A file the build never loads. 707 of this repository's 1246 tracked
- *      modules are vendored greater source nothing imports, and a dependency
- *      inside dead code is invisible here. That is not a hole this gate should
- *      close by pretending to load them — it is why the source-reading probes
- *      STAY, and their headers say so. The two checks have different domains:
- *      this one reads every form on the modules the build loads, they read every
- *      tracked file in one form. Neither subsumes the other and both run. A module
- *      the build EXTERNALIZES is the same boundary reached from the other side —
- *      the configuration saying this file is not part of this build — and inside
- *      the face it is a red gate IN THE PASS THAT DID IT, because a module of a
- *      tracked face file that a pass resolves and never loads is that pass's own
- *      finding.
+ *   1. A file the build never loads. The source-reading probes walk 1246 tracked
+ *      source FILES under `src/`; the build loads at least one module of 539 of
+ *      them and never opens the other 707 — 557 of those vendored greater source
+ *      nothing imports, 150 more no entry reaches — and a dependency inside source
+ *      nothing loads is invisible here. Those counts are of FILES, which is not
+ *      what this gate counts: a file makes several modules (`X.svelte`,
+ *      `X.svelte?raw`, its compiled stylesheet), so the per-pass resolved/loaded
+ *      numbers `main` prints measure something else and are larger. That is not a
+ *      hole this gate should close by pretending to load them — it is why the
+ *      source-reading probes STAY, and their headers say so. The two checks have
+ *      different domains: this one reads every form on the modules the build
+ *      loads, they read every tracked source file in one form. Neither subsumes
+ *      the other and both run. A module the build EXTERNALIZES is the same
+ *      boundary reached from the other side — the configuration saying this file
+ *      is not part of this build — and inside the face it is a red gate IN THE
+ *      PASS THAT DID IT, because a module of a tracked face file that a pass
+ *      resolves and never loads is that pass's own finding.
  *   2. A WORKER's own modules. `new Worker(new URL(…))` is bundled by a separate
  *      Rolldown build whose plugin list is `config.worker.plugins` — the main
  *      pipeline is not in it, so a recorder in `plugins` never sees inside one.

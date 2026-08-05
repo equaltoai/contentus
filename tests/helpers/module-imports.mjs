@@ -68,11 +68,16 @@
  * `scripts/audit-seam-graph.mjs` runs the repository's own Vite configuration and
  * asserts the seam rules against the edges the BUILD resolves, which covers every
  * form by construction. It does not replace this module, and the reason is a
- * measurement rather than a preference: the build loads 540 of this repository's
- * 1246 tracked modules, because most of the vendored greater tree is source
- * nothing imports. This reading covers every tracked file in one class of form;
- * that gate covers every form on the modules the build loads. A cross-seam import
- * inside dead vendored source is visible here and invisible there. Both run.
+ * measurement rather than a preference: of the 1246 tracked source FILES the two
+ * walks read, the build loads at least one module of 539 and never opens the
+ * other 707 — 557 of them vendored greater source nothing imports, 150 more no
+ * entry reaches. Those are counts of files, which is what this module's domain is
+ * measured in; a file is not a module, and one file produces several
+ * (`X.svelte`, `X.svelte?raw`, its compiled stylesheet), so the per-pass module
+ * counts that gate prints measure something else. This reading covers every
+ * tracked source file in one class of form; that gate covers every form on the
+ * modules the build loads. A cross-seam import inside source nothing loads is
+ * visible here and invisible there. Both run.
  */
 import { parse } from 'svelte/compiler';
 import ts from 'typescript';

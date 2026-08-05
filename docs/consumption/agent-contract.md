@@ -349,14 +349,18 @@ not (`new URL(…)`, and a CSS `url()`) is a client-pass edge, so a module only 
 server pass loads takes those dependencies unrecorded.
 
 **Both checks stay, and neither is redundant.** They have different domains, and
-the numbers say so: the build loads 540 of this repository's 1246 tracked
-modules, because most of the vendored greater tree is source nothing imports. The
-source-reading probes read every tracked file and see one class of import form;
-the resolver gate reads every dependency form and sees only the modules the build
-loads. A cross-seam import inside dead vendored source is caught by the first and
-invisible to the second; a `.jsx` helper wired into the live graph is caught by
-the second and invisible to the first. Retiring either would open the half the
-other covers.
+the numbers say so: the source-reading probes walk 1246 tracked source **files**
+under `src/`, and the build loads at least one module of 539 of them — of the 707
+it never opens, 557 are vendored greater source nothing imports and 150 more are
+source no entry reaches. Those are counts of files, and a file is not a module:
+one file produces several (`X.svelte`, `X.svelte?raw`, its compiled stylesheet),
+so the per-pass module counts the resolver gate prints are a different
+measurement and a larger one. The source-reading probes read every tracked source
+file and see one class of import form; the resolver gate reads every dependency
+form and sees only the modules the build loads. A cross-seam import inside source
+nothing loads is caught by the first and invisible to the second; a `.jsx` helper
+wired into the live graph is caught by the second and invisible to the first.
+Retiring either would open the half the other covers.
 
 The resolver gate is itself proved to fail. `tests/seam-graph.test.mjs` plants
 each of round 6's four forms as a real dependency through the gate's own build
