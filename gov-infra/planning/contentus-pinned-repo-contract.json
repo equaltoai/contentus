@@ -39,6 +39,7 @@
       "typecheck": "tsc --noEmit",
       "svelte-check": "svelte-check --tsconfig tsconfig.json --threshold error",
       "lint": "prettier --check .",
+      "deploy": "node scripts/deploy-client.mjs",
       "build:client": "vite build",
       "build:server": "vite build --ssr src/facetheory/entry-server.ts",
       "build:assets": "node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs",
@@ -139,6 +140,12 @@
     "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
     "unfollowable_loads_disclosed": [
       {
+        "file": "scripts/deploy-client.mjs",
+        "line": 321,
+        "expression": "spawn",
+        "reason": "Runs only the system `pnpm`, `lesser`, and `curl` binaries from the closed deployment plan assembled in this pinned file. No repository file is handed directly to `spawn`: pnpm's repository script delegation remains separately pinned by package_scripts.expected and this executable closure, while the three executable binaries are operator-installed PATH dependencies outside any repo-local hash boundary."
+      },
+      {
         "file": "scripts/render-routes.mjs",
         "line": 150,
         "expression": "import(pathToFileURL(handlerPath).href)",
@@ -222,6 +229,8 @@
       "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
+      "scripts/deploy-client.mjs": "fb382fc9476c39a97e6f1b964dccfaf0f6cc5fab9e89761835fec3775f5d58e8",
+      "scripts/deploy-client.test.mjs": "83632c4facaf0da5a567ef54853ffffe9cbcc07b97c0f0d9c55082647517cf84",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/module-imports.mjs": "f5017ffef9f51f3717919c7842c3791191a78e8c46d3ef1c8e954d9c2a70f4ad",
