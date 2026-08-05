@@ -81,6 +81,10 @@ const BELOW_GATE_SOURCE = "export const value = 'the child that really runs';\n"
 const IGNORED_HELPER = 'scripts/ignored/helper.mjs';
 const IGNORED_SOURCE = "export const value = 'the file the wrong frame names';\n";
 
+/** The same helper at the root, where an execvp search never looks for a bare name. */
+const ROOT_HELPER = 'helper.mjs';
+const ROOT_HELPER_SOURCE = "export const value = 'the decoy at the root';\n";
+
 /**
  * Run CON-5 over a synthetic tree.
  *
@@ -2727,13 +2731,15 @@ test('a lookup path is read as the list of directories it is', () => {
 	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
 	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
 
-	// Every arrangement of the same list, because an entry's position is not what
-	// makes it searched, and a Windows-style separator is the same list.
+	// Every arrangement whose entries AHEAD of this tree's own are ones this walk can
+	// see into — a directory that does not hold the name, and a Windows-style
+	// separator, which is the same list. Which entry answers when several could is
+	// the subject of the ordered case below, and it is not this one's.
 	for (const path of [
 		'scripts/lib',
-		'/usr/bin:scripts/lib',
-		'/usr/bin:scripts/lib:/usr/local/bin',
+		'scripts/lib:/usr/bin',
 		'scripts/lib;C:/Windows',
+		'scripts:scripts/lib',
 	]) {
 		const searched = runCon5({
 			files: {
@@ -3516,4 +3522,286 @@ test('an options bag this reading cannot open leaves the environment unopened', 
 		});
 		assert.equal(quiet.status, 0, `${what} cannot be an options bag\n${quiet.output}`);
 	}
+});
+
+/* -------------------------------------------------------------------------
+ * Round 12 — the words a shell builds when it runs
+ * ---------------------------------------------------------------------- */
+
+test('a word a shell decides at run time is refused wherever the shell reads it', () => {
+	// THE REPROS, all five of them the same defect: a reading that produced the words
+	// it could see and called the site read. Each ran a repository helper with this
+	// control green and green again with that helper rewritten wholesale.
+	const refused = {
+		'a positional parameter': [
+			"execSync('set -- helper.mjs; node scripts/lib/$1');\n",
+			/a parameter expansion/,
+		],
+		'a bracket glob': ["execSync('node scripts/lib/h[ae]lper.mjs');\n", /a glob/],
+		'a home directory': [
+			"execSync('/usr/bin/node ~/helper.mjs', { env: { HOME: 'scripts/lib' } });\n",
+			/a tilde expansion/,
+		],
+		'a program on the child’s input': [
+			'execSync(\'node <<EOF\\nrequire("./scripts/lib/helper.cjs")\\nEOF\');\n',
+			/a redirection/,
+		],
+		'the same line handed to a shell as data': [
+			"execFileSync('/bin/sh', ['-c', 'set -- helper.mjs; node scripts/lib/$1']);\n",
+			/a parameter expansion/,
+		],
+	};
+
+	for (const [what, [call, construct]] of Object.entries(refused)) {
+		const reported = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { execFileSync, execSync } from 'node:child_process';\n" + call,
+				[HELPER]: HELPER_SOURCE,
+				[CJS_HELPER]: CJS_HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: call.startsWith('execSync') ? 'execSync' : 'execFileSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(reported.status, 1, `${what} decides which file runs when it runs`);
+		assert.match(reported.output, /hands a child a string this reading does not model/);
+		assert.match(reported.output, construct, `${what} must be named`);
+	}
+
+	// THE OTHER DIRECTION. A rule that fires on a site running nothing is a rule
+	// whose only repair is to weaken it, so the ordinary words stay ordinary: a flag
+	// that is not node's, a pattern that is not a path, and a `$` in a string no
+	// shell parses.
+	for (const [what, call] of Object.entries({
+		'a flag another program reads': "execFileSync('mkdir', ['-p', 'scripts/lib']);\n",
+		'a pattern flag': "execFileSync('grep', ['-e', 'helper', '--', '/dev/null']);\n",
+		'a dollar in a word no shell reads': "execFileSync('/usr/bin/true', ['--label=$HOME']);\n",
+		'a redirection character inside a quoted argument':
+			"execFileSync('/usr/bin/true', ['a>b', '~notahome']);\n",
+	})) {
+		const quiet = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { execFileSync } from 'node:child_process';\n" + call,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'execFileSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(quiet.status, 0, `${what} builds no word at run time\n${quiet.output}`);
+	}
+});
+
+test('a shell reads what a shell is handed, and binds the file that line runs', () => {
+	// The repair for the refusals above, and the proof they are a reading rather than
+	// a ban: a command line whose words are all written down is read, wherever it
+	// sits — at argument 0, inside a `-c`, or after the variable assignments that
+	// decide where the command word is looked for.
+	for (const [what, call, binds] of [
+		[
+			'a shell handed a line of literals',
+			"execFileSync('/bin/sh', ['-c', 'node scripts/lib/helper.mjs']);\n",
+			[HELPER],
+		],
+		[
+			'a lookup path assigned in front of the command',
+			"execSync('PATH=scripts/lib helper.mjs');\n",
+			[HELPER],
+		],
+		[
+			'a preload assigned in front of the command',
+			"execSync('NODE_OPTIONS=--import=./scripts/lib/helper.mjs node --version');\n",
+			[HELPER],
+		],
+	]) {
+		const files = {
+			'scripts/gate.mjs': "import { execFileSync, execSync } from 'node:child_process';\n" + call,
+			[HELPER]: HELPER_SOURCE,
+		};
+		const declaration = {
+			file: 'scripts/gate.mjs',
+			line: 2,
+			expression: call.startsWith('execSync') ? 'execSync' : 'execFileSync',
+			reason: 'the fixture’s point',
+		};
+
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} runs a repository file`);
+		assert.match(
+			silent.output,
+			/runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/
+		);
+
+		const contract = { unfollowable_loads_disclosed: [{ ...declaration, binds }] };
+		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', ...binds], contract });
+		assert.equal(bound.status, 0, `${what} binds once it is named\n${bound.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', ...binds],
+			contract,
+			corrupt: HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+	}
+
+	// And the refusal a guarded script already carries reaches through the shell:
+	// inline code has no file to hash whichever interpreter is asked to run it.
+	const inline = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { execFileSync } from 'node:child_process';\n" +
+				"execFileSync('/bin/sh', ['-c', 'node -e \"console.log(1)\"']);\n",
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'execFileSync',
+					reason: 'the fixture’s point',
+				},
+			],
+		},
+	});
+	assert.equal(inline.status, 1, 'a node reached through a shell is still a node');
+	assert.match(inline.output, /runs inline code in a node child \(-e\)/);
+});
+
+/* -------------------------------------------------------------------------
+ * Round 12 — the order a child searches a lookup path in
+ * ---------------------------------------------------------------------- */
+
+test('a lookup path is searched in order, and an empty entry is the working directory', () => {
+	// THE REPRO, first half. A bare command is searched for on the lookup path and
+	// never in the working directory — execvp is explicit about it — and this walk
+	// added the literal as a word resolved against the site's own directory too. So a
+	// tree with a same-named file at the root reported THAT file: binding only the
+	// one the child really opens was red, and binding both was green.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync('helper.mjs', [], { env: { PATH: 'scripts/lib' } });\n",
+		[HELPER]: HELPER_SOURCE,
+		[ROOT_HELPER]: ROOT_HELPER_SOURCE,
+	};
+	const honest = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: honest });
+	assert.equal(bound.status, 0, `the file on the path is the file that runs\n${bound.output}`);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	const both = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER, ROOT_HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER, ROOT_HELPER] }],
+		},
+	});
+	assert.equal(both.status, 1, 'the file beside the site is not searched for at all');
+	assert.match(both.output, /binds helper\.mjs, which this site is not written to run/);
+
+	// THE REPRO, second half. execvp runs the FIRST entry that holds the name and
+	// never looks at the rest; this collected a match from every entry at once, so an
+	// earlier directory this walk cannot see into let a later repository file answer
+	// for whatever really ran.
+	const outside = runCon5({
+		files: {
+			...files,
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('helper.mjs', [], { env: { PATH: '/usr/local/bin:scripts/lib' } });\n",
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+	});
+	assert.equal(outside.status, 1, 'an entry ahead of this tree decides before this tree does');
+	assert.match(outside.output, /runs the bare command "helper\.mjs"/);
+	assert.match(
+		outside.output,
+		/binds scripts\/lib\/helper\.mjs, which this site is not written to run/
+	);
+
+	// A directory ahead of it that this walk CAN see into is answered rather than
+	// refused: it holds the name, so it is what runs; it does not, so the search
+	// carries on to the entry that does.
+	const first = runCon5({
+		files: {
+			...files,
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('helper.mjs', [], { env: { PATH: 'scripts:scripts/lib' } });\n",
+			[BESIDE_GATE]: BESIDE_GATE_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', BESIDE_GATE],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }],
+		},
+	});
+	assert.equal(first.status, 0, `the first entry holding the name is the one\n${first.output}`);
+
+	// AN EMPTY ENTRY IS NOT NOTHING. A leading, trailing or doubled separator names
+	// the child's own working directory, which is where the file beside the site
+	// finally does become the file that runs — and it is FIRST, so it answers before
+	// the directory written after it.
+	const emptyFirst = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync('helper.mjs', [], { env: { PATH: ':scripts/lib' } });\n",
+		[HELPER]: HELPER_SOURCE,
+		[ROOT_HELPER]: ROOT_HELPER_SOURCE,
+	};
+	const cwdFirst = {
+		unfollowable_loads_disclosed: [{ ...declaration, binds: [ROOT_HELPER] }],
+	};
+	const searched = runCon5({
+		files: emptyFirst,
+		pinned: ['scripts/gate.mjs', ROOT_HELPER],
+		contract: cwdFirst,
+	});
+	assert.equal(searched.status, 0, `an empty entry is the working directory\n${searched.output}`);
+
+	const rewritten = runCon5({
+		files: emptyFirst,
+		pinned: ['scripts/gate.mjs', ROOT_HELPER],
+		contract: cwdFirst,
+		corrupt: ROOT_HELPER,
+	});
+	assert.equal(rewritten.status, 1, 'and it BINDS what it found there');
+	assert.match(rewritten.output, /helper\.mjs: content does not match its pin/);
 });

@@ -60,6 +60,19 @@
  * resolves in the base the site writes, in the frame it writes it, and reports
  * rather than guesses where that base cannot be read.
  *
+ * A base is not the only thing between a literal and the file that opens: there is
+ * also the GRAMMAR the child applies to the string, and the ORDER it searches. Round
+ * 12 walked executables through both. `node scripts/lib/$1`, `node ~/helper.mjs`,
+ * `node h[ae]lper.mjs` and a here-document each build a word when they run, and this
+ * reading produced the words it could see and called the site read; `PATH=scripts/lib
+ * helper.mjs` puts the lookup path in front of the command, and a reading that took
+ * token 0 as the command took the assignment instead; and `sh -c '<code>'` carries a
+ * whole command line at an ARGUMENT position, where no shell grammar was applied at
+ * all. Those are `shellConstructs` and `siteWords` now. The search itself is
+ * `siteRepositoryTargets`: execvp runs the FIRST entry of a lookup path that holds
+ * the name, and a walk that collected a match from every entry at once let a later
+ * repository file answer for an earlier directory it cannot see into.
+ *
  * What no static reading can follow is a load whose TARGET is computed, or whose
  * LOADER is a construction the reading does not model — an aliased `require`,
  * `module.require`, `eval`, `new Function`, a `node:vm` import. This control says
@@ -530,14 +543,40 @@ function shellTokens(segment) {
  * QUOTES DECIDE WHETHER THERE IS A CONSTRUCT AT ALL — `'$HOME'` is three literal
  * characters and `"$HOME"` is an expansion — so this walks the string with the
  * same quote and escape rules the tokenizer does rather than scanning for text.
+ *
+ * WHAT ROUND 12 ADDED, and each of them ran a repository helper past round 11's
+ * version of this reading. A `$` was an expansion only in front of a LETTER, so
+ * `set -- helper.mjs; node scripts/lib/$1` built its target out of a positional
+ * parameter and this walk saw the word `scripts/lib/$1`, which names no file and
+ * demanded nothing. `~` is the same fact with the value coming out of the
+ * environment instead of the argument list. A `[…]` is a glob that carries neither
+ * of the two characters this looked for. And `<<EOF` feeds a whole program to a
+ * child on its standard input, where there is no word for any reading to see at
+ * all. So the rule is the grammar rather than the examples: a `$` in front of
+ * anything a shell expands, a `~` where a word begins, a redirection in either
+ * direction, and a bracket among the glob characters.
  */
 const UNMODELLED_BUILTINS = new Set(['cd', 'pushd', 'popd', 'chdir', 'eval', 'source']);
+
+/**
+ * What a `$` may begin: a name, a brace, a positional or special parameter, and
+ * the two quoting forms that build a word out of one.
+ */
+const EXPANSION_STARTS = /[A-Za-z_{(0-9@*#?$!\-'"]/;
+
+/** The characters that make a word a pattern rather than a name. */
+const GLOB_CHARACTERS = /[*?[]/;
 
 function shellConstructs(text) {
 	const found = new Set();
 	let quote = null;
+	// `~` is a home directory only where a WORD begins and only unquoted, so this
+	// tracks that as well as which quote it is inside.
+	let wordStart = true;
 	for (let index = 0; index < text.length; index += 1) {
 		const char = text[index];
+		const begins = wordStart;
+		wordStart = false;
 		if (char === '\\' && quote !== "'" && index + 1 < text.length) {
 			index += 1;
 			continue;
@@ -554,17 +593,25 @@ function shellConstructs(text) {
 			quote = char;
 			continue;
 		}
+		if (!quote && (/\s/.test(char) || ';|&('.includes(char))) {
+			wordStart = true;
+			continue;
+		}
 		const pair = text.slice(index, index + 2);
 		if (char === '`') found.add('a command substitution in backticks');
 		else if (pair === '$(') found.add('a command substitution `$(…)`');
 		else if (pair === '<(' || pair === '>(') found.add('a process substitution');
-		else if (char === '$' && /[A-Za-z_{]/.test(text[index + 1] ?? ''))
+		else if (char === '$' && EXPANSION_STARTS.test(text[index + 1] ?? ''))
 			found.add('a parameter expansion');
+		else if (char === '<' || char === '>')
+			found.add('a redirection, which can carry a program on the child’s input');
+		else if (char === '~' && begins) found.add('a tilde expansion');
 	}
 	for (const segment of shellSegments(text))
 		for (const token of shellTokens(segment)) {
 			if (UNMODELLED_BUILTINS.has(token)) found.add(`the shell builtin \`${token}\``);
-			if (/[*?]/.test(token) && pathShaped(token)) found.add(`a glob (${JSON.stringify(token)})`);
+			if (GLOB_CHARACTERS.test(token) && pathShaped(token))
+				found.add(`a glob (${JSON.stringify(token)})`);
 		}
 	return found;
 }
@@ -592,9 +639,10 @@ const isNodeInterpreter = (word) => ['node', 'nodejs', 'node.exe'].includes(word
 // which VALUE is a flag list a child's interpreter parses. One list, because two
 // copies of one list is how the halves of a model drift apart.
 
-/** Expand a single-`*` filename glob. `**` and brace expansion are not modelled. */
+/** Expand a single-`*` filename glob. `**`, brackets and braces are not modelled. */
 function expandGlob(pattern) {
 	if (pattern.includes('**')) return { error: 'recursive `**` globs are not modelled' };
+	if (pattern.includes('[')) return { error: 'bracket expressions are not modelled' };
 	const slash = pattern.lastIndexOf('/');
 	const directory = slash < 0 ? '.' : pattern.slice(0, slash);
 	const filePattern = slash < 0 ? pattern : pattern.slice(slash + 1);
@@ -802,6 +850,15 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * rule that fired on a `$` inside a query string would be a finding with no repair
  * — and a rule with no repair is how a gate gets weakened.
  *
+ * PROVENANCE IS NOT THE SAME AS POSITION, which is round 12 and the hole that
+ * sentence left. `sh -c '<code>'` hands the child's entire command line at an
+ * ARGUMENT position: the provenance is a shell either way, and only the position
+ * differs. So which strings a shell parses is decided by what the site RUNS — where
+ * the command is one of the named interpreters, its arguments are command lines, and
+ * so is whatever a `-c` inside one of those carries. The scoping that was already
+ * right stays right: `-e` is inline code to a node and a flag to `mkdir`, and it is
+ * the interpreter, not the spelling, that decides which.
+ *
  * A LOOKUP PATH IS ITS OWN KIND OF STRING, which is round 11's third finding and
  * the reason this reading asks the reader for a variable's NAME. The rule here used
  * to be that every word naming a directory in this tree is a base the site's other
@@ -820,6 +877,27 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  */
 const LOOKUP_VARIABLES = new Set(['PATH', 'Path']);
 
+/**
+ * The command words that take their child's whole command line as DATA, and the
+ * assignment that carries a variable in front of one.
+ *
+ * WHY A READING SCOPED TO ARGUMENT 0 IS NOT SCOPED TO WHAT RUNS, which is round
+ * 12's second finding in two of its parts. `spawnSync('/bin/sh', ['-c', 'set --
+ * helper.mjs; node scripts/lib/$1'])` puts a whole command line at an ARGUMENT
+ * position, where this reading applied no shell grammar at all and saw a word;
+ * `execSync('PATH=scripts/lib helper.mjs')` puts the lookup path the child searches
+ * in front of the command, where a reading that took token 0 as the command took
+ * the assignment instead and the real command word was answered by nobody. Both ran
+ * an unpinned repository helper with this control green. A shell's `-c` and a
+ * variable assignment are syntax, so they are read as syntax.
+ */
+const SHELL_INTERPRETERS = new Set(['sh', 'bash', 'dash', 'ash', 'ksh', 'mksh', 'zsh']);
+const isShellInterpreter = (word) => SHELL_INTERPRETERS.has(word.split('/').pop());
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/** How far a `-c` payload may nest before this reading stops following it. */
+const SHELL_DEPTH = 4;
+
 function siteWords(literals, execPath) {
 	const words = [];
 	const seen = new Set();
@@ -834,44 +912,121 @@ function siteWords(literals, execPath) {
 		words.push({ text, frame });
 	};
 
+	/**
+	 * A lookup path as the LIST of directories it is, in the order the child
+	 * searches them. An EMPTY entry — a leading, trailing or doubled separator — is
+	 * the child's own working directory rather than nothing, which is what execvp
+	 * makes of it and what round 12 found this discarding.
+	 */
+	const searchPath = (text, frame) => {
+		for (const entry of text.split(/[:;]/))
+			lookup.push(entry ? { text: entry, frame } : { text: '.', frame: 'process' });
+	};
+
+	/** The word a command line RUNS: its first token that is not an assignment. */
+	const commandWord = (tokens) => tokens.find((token) => !ASSIGNMENT.test(token)) ?? null;
+	const runsAShell = (text) =>
+		shellSegments(text).some((segment) => {
+			const word = commandWord(shellTokens(segment));
+			return word !== null && isShellInterpreter(word);
+		});
+
+	// Every string this site hands a shell or execvp as a command line: argument 0
+	// of the facility, whatever a `-c` of a shell carries, and — where the command
+	// IS a shell — every argument, since that is where the code sits.
+	const written = literals.filter((literal) => literal.role === 'command');
+	const shell = written.some((literal) => runsAShell(literal.text));
+	const commandLines = [];
+	const collect = ({ text, frame }, depth) => {
+		commandLines.push({ text, frame });
+		if (depth >= SHELL_DEPTH) return;
+		for (const segment of shellSegments(text)) {
+			const tokens = shellTokens(segment);
+			const word = commandWord(tokens);
+			if (word === null || !isShellInterpreter(word)) continue;
+			for (const [index, token] of tokens.entries())
+				if (index > 0 && tokens[index - 1] === '-c') collect({ text: token, frame }, depth + 1);
+		}
+	};
+	for (const literal of literals)
+		if (literal.role === 'command' || (shell && literal.role === 'argument')) collect(literal, 0);
+	const parsesHere = new Set(
+		literals.filter(
+			(literal) => literal.role === 'command' || (shell && literal.role === 'argument')
+		)
+	);
+
 	// Whose flags these are. `-e` is inline code to node and something else to
-	// `mkdir`, so the refusal below is scoped to the child that reads it that way.
+	// `mkdir`, so the refusal below is scoped to the child that reads it that way —
+	// including a node reached through a shell, whose name is inside the `-c`.
 	const node =
 		execPath ||
-		literals
-			.filter((literal) => literal.role === 'command')
-			.flatMap((literal) => shellSegments(literal.text).flatMap(shellTokens))
+		commandLines
+			.flatMap(({ text }) => shellSegments(text).flatMap(shellTokens))
 			.some(isNodeInterpreter);
+
+	const readWord = (text, frame) => {
+		add(text, frame);
+		for (const piece of text.split('=').slice(1)) if (piece) add(piece, frame);
+		if (node && inlineCodeFlags.has(text.split('=')[0])) inlineCode.add(text);
+	};
+
+	const readCommandLine = ({ text, frame }) => {
+		for (const construct of shellConstructs(text))
+			unreadable.add(`${construct}, in ${JSON.stringify(text)}`);
+		for (const segment of shellSegments(text)) {
+			const tokens = shellTokens(segment);
+			// Where the command word sits, which is after however many assignments
+			// stand in front of it.
+			let position = 0;
+			for (const [index, token] of tokens.entries()) {
+				if (index === position && ASSIGNMENT.test(token)) {
+					position = index + 1;
+					const separator = token.indexOf('=');
+					const name = token.slice(0, separator);
+					const value = token.slice(separator + 1);
+					// A variable set for one command is that command's environment, and
+					// the two names this reading watches mean there what they mean in an
+					// `env` bag: a list of directories to search, or flags to a child.
+					if (LOOKUP_VARIABLES.has(name)) searchPath(value, frame);
+					else readWord(value, frame);
+					continue;
+				}
+				// The word a command line runs is the one execvp SEARCHES rather than
+				// resolves, so it is answered by the lookup path instead of by this
+				// site's working directory — but only where it is a bare name.
+				// `./helper.mjs` and `sub/helper.mjs` carry a separator and are resolved
+				// against the child's directory like any other word.
+				if (index === position && !token.includes('/')) commands.push({ text: token, frame });
+				else readWord(token, frame);
+			}
+		}
+	};
 
 	for (const literal of literals) {
 		const { text, frame, role, key } = literal;
 		// A lookup path is a LIST of directories, so it is read as one and not as a
 		// word: the whole string names no file, and each entry names no file either.
 		if (role === 'env' && LOOKUP_VARIABLES.has(key)) {
-			for (const entry of text.split(/[:;]/)) if (entry) lookup.push({ text: entry, frame });
+			searchPath(text, frame);
 			continue;
 		}
-		const parsed = role === 'command' || (role === 'env' && INHERITED_EXECUTION.has(key));
-		add(text, frame);
-		if (parsed)
+		// A command line that IS one bare word is the word execvp searches for, and
+		// nothing else. Adding it as a word too resolved it against this site's own
+		// working directory, so a `PATH` naming a directory in this tree put the file
+		// that runs in one place while this control reported the same-named file in
+		// the other — round 12's third finding, and a decoy either way round.
+		const bare = parsesHere.has(literal) && !text.includes('/') && shellTokens(text).length === 1;
+		if (!bare) add(text, frame);
+		if (parsesHere.has(literal)) continue;
+		if (role === 'env' && INHERITED_EXECUTION.has(key))
 			for (const construct of shellConstructs(text))
 				unreadable.add(`${construct}, in ${JSON.stringify(text)}`);
-		for (const segment of shellSegments(text)) {
-			const tokens = shellTokens(segment);
-			for (const [index, token] of tokens.entries()) {
-				// The first word of a command is the one execvp searches rather than
-				// resolves, so it is answered by the lookup path below instead of by
-				// this site's working directory — but only where it is a bare name.
-				// `./helper.mjs` and `sub/helper.mjs` carry a separator and are resolved
-				// against the child's directory like any other word.
-				if (role === 'command' && index === 0 && !token.includes('/'))
-					commands.push({ text: token, frame });
-				else add(token, frame);
-				for (const piece of token.split('=').slice(1)) if (piece) add(piece, frame);
-				if (node && inlineCodeFlags.has(token.split('=')[0])) inlineCode.add(token);
-			}
-		}
+		for (const segment of shellSegments(text))
+			for (const token of shellTokens(segment)) readWord(token, frame);
 	}
+	for (const line of commandLines) readCommandLine(line);
+
 	return { words, unreadable, inlineCode, lookup, commands };
 }
 
@@ -908,6 +1063,19 @@ function siteWords(literals, execPath) {
  * not a base. A variable a child SEARCHES is, and it has a name: `PATH` is split
  * into its entries, each in its literal's own frame, and a bare command word is
  * answered through those and nothing else — which is also what execvp does.
+ *
+ * AND IT IS SEARCHED IN ORDER, which is round 12 and the half of execvp the
+ * sentence above left out. The child runs the FIRST entry that holds the name and
+ * never looks at the rest; this asked every entry and collected every match, so a
+ * lookup path whose earlier entry is a directory this walk cannot see into — an
+ * absolute one, or one in a frame with no value — let a LATER repository file be
+ * bound for an executable the child reaches first somewhere else. A pin on a file
+ * that does not run is round 7's decoy however it is arrived at, so the search stops
+ * at the first entry that answers, and an entry this reading cannot open ends it as
+ * undetermined rather than being stepped over. An EMPTY entry is not nothing either:
+ * a leading, trailing or doubled separator is the child's own working directory, and
+ * dropping it hid the one place a bare command IS answered by the site's own
+ * directory.
  *
  * A WORD IS RESOLVED IN ITS OWN FRAME AND IN NO OTHER, which is round 11 and the
  * hole round 10's fix left open. Both frames were asked of every word, so a word
@@ -972,29 +1140,40 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 		if (found) runs.add(found);
 	}
 
-	// The lookup roots this site writes, resolved in the frames their own literals
-	// were written in — and whether the search this reading models is the whole
-	// search the child performs. A site that writes no lookup path leaves it to the
-	// environment it inherits, which this file does not name.
+	// The search itself, entry by entry, IN THE ORDER THE CHILD WALKS THEM — which
+	// is round 12's third finding and the same decoy from the other end. execvp runs
+	// the FIRST entry that holds the name and never looks at the rest, and this used
+	// to collect a match from every entry at once: with an earlier directory this
+	// walk cannot see into, it bound a later repository file that the child never
+	// reaches, and exited 0 with the file that really runs unpinned. So an entry
+	// this reading cannot place — a frame with no directory, or a path outside this
+	// tree — ends the search as UNDETERMINED rather than being skipped over, because
+	// what it holds decides everything after it. A site that writes no lookup path
+	// at all leaves the search to the environment it inherits, which is the same
+	// answer for the same reason.
 	const undeterminedCommands = new Set();
-	const roots = [];
-	let searchesElsewhere = lookup.length === 0;
-	for (const entry of lookup) {
-		const named = frames.get(entry.frame);
-		if (named) roots.push(resolve(named, entry.text));
-		else searchesElsewhere = true;
-	}
 	for (const command of commands) {
-		let found = false;
-		for (const from of roots) {
-			const named = repositoryFile(from, command.text);
-			if (named) {
-				runs.add(named);
-				found = true;
+		let ran = false;
+		let opaque = lookup.length === 0;
+		for (const entry of lookup) {
+			const named = frames.get(entry.frame);
+			if (!named) {
+				opaque = true;
+				break;
 			}
+			const candidate = repoRelative(resolve(resolve(named, entry.text), command.text));
+			if (candidate.startsWith('..')) {
+				opaque = true;
+				break;
+			}
+			if (!isFile(resolve(root, candidate))) continue;
+			// The search is over at the first entry that holds the name, whether or
+			// not the file it found is one a `binds` may name.
+			if (!underUnpinnedRoot(candidate)) runs.add(candidate);
+			ran = true;
+			break;
 		}
-		if (!found && searchesElsewhere && pathShaped(command.text))
-			undeterminedCommands.add(command.text);
+		if (!ran && opaque && pathShaped(command.text)) undeterminedCommands.add(command.text);
 	}
 
 	// Only for a word whose frame has no directory: a word that names a file under
@@ -1052,7 +1231,7 @@ function executableClosure() {
 						);
 					continue;
 				}
-				if (/[*?]/.test(token)) {
+				if (GLOB_CHARACTERS.test(token)) {
 					if (!allowedGlobs.includes(token)) {
 						findings.push(
 							`${CONTRACT}: guarded script "${name}" passes glob ${JSON.stringify(token)} to node, ` +
@@ -1190,9 +1369,12 @@ function executableClosure() {
 				for (const command of undeterminedCommands)
 					findings.push(
 						`${path}:${line}: ${expression} runs the bare command ${JSON.stringify(command)}, which ` +
-							'is searched for on a lookup path this site does not write, so which file it opens ' +
-							'is decided by the environment rather than by this repository; spell the path to the ' +
-							'file, or write the `env.PATH` the child is meant to search'
+							'is searched for on a lookup path this reading cannot follow to the file it opens — ' +
+							'the site writes none, or an entry ahead of this repository’s own is a directory ' +
+							'this walk cannot see into. Which file the child runs is decided by the environment ' +
+							'rather than by this repository; spell the path to the file, or write an `env.PATH` ' +
+							'whose entries are directories in this tree, the first of them holding what the ' +
+							'child is meant to run'
 					);
 				// An environment this reading cannot open is the same hole as a `cwd` it
 				// cannot read, one channel over: a `NODE_OPTIONS` assembled elsewhere
