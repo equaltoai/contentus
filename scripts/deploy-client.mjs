@@ -69,9 +69,16 @@ export function parseCliArgs(argv) {
 	const values = Object.create(null);
 	const flags = new Set();
 	let help = false;
+	let separator = false;
 
 	for (let index = 0; index < argv.length;) {
 		const argument = argv[index];
+		if (argument === '--') {
+			if (separator) throw new Error('Duplicate option separator --');
+			separator = true;
+			index += 1;
+			continue;
+		}
 		if (argument === '-h' || argument === '--help') {
 			help = true;
 			index += 1;

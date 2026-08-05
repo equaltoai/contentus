@@ -47,6 +47,7 @@ function receipt(plan, overrides = {}) {
 
 test('requires exactly the four instance parameters and accepts operational flags', () => {
 	const options = parseCliArgs([
+		'--',
 		...required,
 		'--state=./receipt.json',
 		'--dry-run',
