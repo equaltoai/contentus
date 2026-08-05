@@ -4255,3 +4255,91 @@ test('a lookup path answers with a file the child can execute', () => {
 		/binds scripts\/lib\/helper\.mjs, which this site is not written to run/
 	);
 });
+
+test('a lookup path written for a command this reading cannot place is reported', () => {
+	// THE EDGE THE TABLE LEAVES, and it is reported rather than left silent. The
+	// wrappers modelled above are the ones this walk can follow to their operand; a
+	// program outside that list — `ionice`, `sudo`, anything a site reaches for — is
+	// transparent all the same, and the bare word beside it is a name its child
+	// searches the site's own lookup path for. From here an operand and an argument
+	// are the same word, so which file that search opens is not in this file.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+	for (const [what, call] of Object.entries({
+		'the argument form':
+			"spawnSync('/usr/bin/ionice', ['-c2', 'helper.mjs'], { env: { PATH: 'scripts/lib' } });\n",
+		'the command line': "spawnSync('PATH=scripts/lib ionice -c2 helper.mjs', { shell: true });\n",
+	})) {
+		const files = {
+			'scripts/gate.mjs': "import { spawnSync } from 'node:child_process';\n" + call,
+			[HELPER]: HELPER_SOURCE,
+		};
+		const reported = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+			executable: [HELPER],
+		});
+		assert.equal(reported.status, 1, `${what} runs a file decided by a search`);
+		assert.match(
+			reported.output,
+			/writes its child a lookup path and hands "helper\.mjs" to a command this reading cannot place/,
+			`${what} must be reported`
+		);
+
+		// And a `binds` does not repair it: naming the file this walk cannot prove the
+		// child reaches is the decoy, not the reading.
+		const claimed = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] },
+			executable: [HELPER],
+		});
+		assert.equal(claimed.status, 1, `${what} is not repaired by a claim`);
+		assert.match(claimed.output, /to a command this reading cannot place/);
+	}
+
+	// THE OTHER DIRECTION, three ways. A command this reading DOES place answers for
+	// the words beside it — a node opens them, a shell reads them, a modelled wrapper
+	// runs the first of them — and a site that writes no lookup path at all is the
+	// bare-command rule's business rather than this one's.
+	for (const [what, call, extra] of [
+		[
+			'a node, whose arguments are files it opens',
+			"spawnSync(process.execPath, ['scripts/lib/helper.mjs'], { env: { PATH: 'scripts/lib' } });\n",
+			[HELPER],
+		],
+		[
+			'a shell, whose words are a command line',
+			"spawnSync('/bin/sh', ['-c', 'node scripts/lib/helper.mjs'], { env: { PATH: '/usr/bin' } });\n",
+			[HELPER],
+		],
+		[
+			'a modelled wrapper, whose operand is followed',
+			"spawnSync('env', ['helper.mjs'], { env: { PATH: 'scripts/lib' } });\n",
+			[HELPER],
+		],
+		['a site that writes no lookup path', "spawnSync('git', ['add', '--', 'helper.mjs']);\n", []],
+	]) {
+		const quiet = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { spawnSync } from 'node:child_process';\n" + call,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs', ...extra],
+			contract: {
+				// An empty `binds` is refused outright — a site that runs nothing this
+				// repository holds omits it and says so in its reason.
+				unfollowable_loads_disclosed: [
+					extra.length ? { ...declaration, binds: extra } : declaration,
+				],
+			},
+			executable: [HELPER],
+		});
+		assert.equal(quiet.status, 0, `${what} is answered rather than reported\n${quiet.output}`);
+	}
+});

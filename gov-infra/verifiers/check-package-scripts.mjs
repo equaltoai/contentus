@@ -995,7 +995,11 @@ const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
  * it asks where a SHELL NAME stands in the line, which is a question no wrapper can
  * move — in the array form a shell payload cannot exist unless the shell is one of
  * the words the site is written to hand its child. The table buys the operand and
- * the search it is answered by; the shell name closes the grammar.
+ * the search it is answered by; the shell name closes the grammar. The other half
+ * of what the table leaves — an unmodelled wrapper's operand searched on a lookup
+ * path the site itself writes — is not silent either: `loose` collects the bare
+ * words beside a command this reading cannot place, and where a lookup path is
+ * written they are reported as a search this walk cannot follow to its end.
  */
 const wrapperSpec = (spec) => ({
 	short: '',
@@ -1188,6 +1192,7 @@ function siteWords(literals, execPath) {
 	const inlineCode = new Set();
 	const lookup = [];
 	const commands = [];
+	const loose = [];
 	const add = (text, frame) => {
 		const identity = JSON.stringify([frame, text]);
 		if (seen.has(identity)) return;
@@ -1216,6 +1221,21 @@ function siteWords(literals, execPath) {
 		shellSegments(text).some((segment) => shellTokens(segment).some(isShellInterpreter));
 	const readsACommandLine = (text) =>
 		namesAShell(text) || shellSegments(text).some((segment) => runChain(shellTokens(segment)).open);
+
+	/**
+	 * A name whose relationship to the words beside it this reading knows: a shell
+	 * reads them as a command line, a node opens them as files, a modelled wrapper
+	 * runs the first of them. Anything else may or may not be transparent, and the
+	 * word beside it may or may not be the name its child searches a lookup path
+	 * for — which is what `loose` collects.
+	 */
+	const placed = (word) =>
+		isShellInterpreter(word) || isNodeInterpreter(word) || wrapperFor(word) !== null;
+	const chainEndsPlaced = (text) =>
+		shellSegments(text).some((segment) => {
+			const last = runChain(shellTokens(segment)).runs.at(-1);
+			return last !== undefined && placed(last.word);
+		});
 
 	// Every string this site hands a shell or execvp as a command line: argument 0
 	// of the facility, whatever a `-c` of a shell carries, and — where the site's
@@ -1285,8 +1305,15 @@ function siteWords(literals, execPath) {
 			const tokens = shellTokens(segment);
 			// Which words this line RUNS, and which of them are the assignments that
 			// stand in front of one — a shell's, and a wrapper's own.
-			const { roles, undetermined } = runChain(tokens);
+			const { runs, roles, undetermined } = runChain(tokens);
 			if (undetermined) unreadable.add(`${undetermined}, in ${JSON.stringify(segment)}`);
+			// Where the chain ends at a name this reading cannot place, a bare word
+			// after it may be the operand that name runs — a program that runs its own
+			// operand is transparent whether or not it is one this table models.
+			const last = runs.at(-1);
+			if (last !== undefined && !placed(last.word))
+				for (const token of tokens.slice(last.index + 1))
+					if (!token.includes('/') && pathShaped(token)) loose.push({ text: token, frame });
 			for (const [index, token] of tokens.entries()) {
 				if (roles.get(index) === 'assignment') {
 					const separator = token.indexOf('=');
@@ -1335,7 +1362,19 @@ function siteWords(literals, execPath) {
 	}
 	for (const line of commandLines) readCommandLine(line);
 
-	return { words, unreadable, inlineCode, lookup, commands };
+	// The same word one facility over: where the site hands its argv to a program
+	// this reading cannot place, every bare argument beside it is a candidate for
+	// the same search — `spawnSync('/usr/bin/ionice', ['-c2', 'helper.mjs'], { env: {
+	// PATH: 'scripts/lib' } })` runs a repository file that no word here resolves to.
+	if (!literals.some((literal) => literal.role === 'command' && chainEndsPlaced(literal.text)))
+		for (const literal of literals)
+			if (literal.role === 'argument' && !parsesHere.has(literal)) {
+				const tokens = shellTokens(literal.text);
+				if (tokens.length === 1 && !literal.text.includes('/') && pathShaped(literal.text))
+					loose.push({ text: literal.text, frame: literal.frame });
+			}
+
+	return { words, unreadable, inlineCode, lookup, commands, loose };
 }
 
 /**
@@ -1418,7 +1457,7 @@ function siteWords(literals, execPath) {
  * Those sites are carried by the disclosure's reason, which is what it is for.
  */
 function siteRepositoryTargets(file, literals, base, execPath) {
-	const { words, unreadable, inlineCode, lookup, commands } = siteWords(literals, execPath);
+	const { words, unreadable, inlineCode, lookup, commands, loose } = siteWords(literals, execPath);
 	const fileFrame = resolve(root, dirname(file));
 	const processFrame =
 		base.from === 'file'
@@ -1497,6 +1536,23 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 		if (!ran && opaque && pathShaped(command.text)) undeterminedCommands.add(command.text);
 	}
 
+	// A LOOKUP PATH IS WRITTEN FOR A CHILD THAT SEARCHES IT, and the child this
+	// reading placed is not always the one that does. A wrapper this table does not
+	// model — `ionice`, `sudo`, anything a site reaches for — runs its own operand,
+	// and that operand is a bare name searched on the path the site wrote. The
+	// modelled wrappers are answered above; for the rest, which file the word opens
+	// is decided by a search this walk cannot follow to its end, so it is reported.
+	// A word that resolves to a repository file in its own frame is already bound and
+	// is not this case; a site that writes no lookup path leaves the search to the
+	// environment, which is the bare-command rule above rather than this one.
+	const undeterminedOperands = new Set();
+	if (lookup.length)
+		for (const word of loose) {
+			const named = frames.get(word.frame);
+			if (named && repositoryFile(named, word.text)) continue;
+			undeterminedOperands.add(word.text);
+		}
+
 	// Only for a word whose frame has no directory: a word that names a file under
 	// the root this site may or may not be resolving in, and a word shaped like a
 	// path that names no file under it — which is what a path under a run-time
@@ -1511,7 +1567,7 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 		else if (!named && pathShaped(word.text)) undetermined.add(word.text);
 	}
 
-	return { runs, undetermined, unreadable, inlineCode, undeterminedCommands };
+	return { runs, undetermined, unreadable, inlineCode, undeterminedCommands, undeterminedOperands };
 }
 
 /**
@@ -1685,8 +1741,14 @@ function executableClosure() {
 				// Which files those are is decided by the base the site writes, so a
 				// target it names in a directory this reading cannot read is neither:
 				// it is reported as undetermined rather than resolved by guess.
-				const { runs, undetermined, unreadable, inlineCode, undeterminedCommands } =
-					siteRepositoryTargets(path, literals, base, execPath);
+				const {
+					runs,
+					undetermined,
+					unreadable,
+					inlineCode,
+					undeterminedCommands,
+					undeterminedOperands,
+				} = siteRepositoryTargets(path, literals, base, execPath);
 				for (const command of undeterminedCommands)
 					findings.push(
 						`${path}:${line}: ${expression} runs the bare command ${JSON.stringify(command)}, which ` +
@@ -1697,6 +1759,16 @@ function executableClosure() {
 							'rather than by this repository; spell the path to the file, or write an `env.PATH` ' +
 							'whose entries are directories in this tree, the first of them holding what the ' +
 							'child is meant to run'
+					);
+				for (const operand of undeterminedOperands)
+					findings.push(
+						`${path}:${line}: ${expression} writes its child a lookup path and hands ` +
+							`${JSON.stringify(operand)} to a command this reading cannot place. A program that ` +
+							'runs its own operand — a wrapper outside the ones modelled here — searches that ' +
+							'path for the name beside it, and from here an operand and an argument are the ' +
+							'same word. Which file the child opens is decided by that search rather than by ' +
+							'this repository; spell the path to the file at the call, or write the command as ' +
+							'one whose operand this reading can follow'
 					);
 				// An environment this reading cannot open is the same hole as a `cwd` it
 				// cannot read, one channel over: a `NODE_OPTIONS` assembled elsewhere
