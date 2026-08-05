@@ -208,6 +208,32 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
  * reason. That is the "bind or report" the review asked for, with the choice
  * written down where a reviewer reads it rather than inferred from silence.
  *
+ * AND WHAT A `binds` HAS TO BE ABOUT, which is round 9. The list was admitted at
+ * its word: whatever it named was pinned, and nothing asked whether the site ran
+ * it. So a declaration bound a pinned file while `spawnSync(process.execPath,
+ * ['scripts/lib/decoy.mjs'])` on the very line it declared executed a different,
+ * unpinned one — and this control was green with that decoy rewritten wholesale.
+ * A pin pointed away from the file that runs is round 7's failure exactly, moved
+ * out of the resolver and into the contract, and it reads as coverage more loudly
+ * there because a human wrote the path down.
+ *
+ * So the declaration is now held to the site's own text, both ways. The reading
+ * reports the literals each call is written to hand its facility; this control
+ * resolves them (`siteRepositoryTargets`) and requires the repository files among
+ * them to be exactly what `binds` names. A file the site runs and the declaration
+ * misses is a finding, and a file the declaration names and the site does not run
+ * is a finding too.
+ *
+ * WHAT A `binds` CANNOT DO, stated because the rule above has an edge and silence
+ * about it would be the same defect one level up: it cannot excuse a target no
+ * reading can see. Where a site's path is an argv element, a module-level constant
+ * or a name assembled from pieces, there is no literal to check a declaration
+ * against — so a `binds` there would be an unverifiable claim of coverage, and it
+ * is refused as one. Such a site is carried by its REASON, which is a sentence a
+ * reviewer reads, rather than by a pin nothing compares to anything. The practical
+ * consequence is a discipline rather than a prohibition: a site that means to bind
+ * what it runs writes the path where it runs it.
+ *
  * WHY DECLARED RATHER THAN IGNORED. This control's claim is that every file a
  * guarded command executes is bound by a content hash. A load the walk cannot
  * follow is a hole in exactly that claim, and the previous reader did not merely
@@ -322,6 +348,25 @@ const disclosedLoads = (() => {
 
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const repoRelative = (path) => relative(root, path).split(sep).join(posix.sep);
+
+/**
+ * One repository-relative spelling of a path, whatever spelling it arrived in.
+ *
+ * IT IS A CONTROL, not tidiness. Everything this walk compares — a closure member
+ * against a pin, a declared `binds` against an unpinned root, a bound path against
+ * the target its site names — is compared as TEXT, and `./scripts/lib/helper.mjs`,
+ * `scripts/lib/helper.mjs` and `scripts/lib/../lib/helper.mjs` are three texts for
+ * one file. Round 9's review found the consequence in the `binds` list, where a
+ * leading `./` walked straight past `underUnpinnedRoot` — so `binds:
+ * ["./build/server/handler.mjs"]` declared a binding on generated output the rule
+ * beside it exists to refuse — and the same spelling admitted a second closure
+ * member for a file already in it, which then failed as an unpinned target while
+ * its real pin failed as a pin nothing reaches. Two findings, both about
+ * punctuation, neither about the tree. So every path entering the closure or being
+ * matched against one comes through here first.
+ */
+const normalizePath = (path) => repoRelative(resolve(root, path));
+
 const underUnpinnedRoot = (path) =>
 	unpinnedRoots.some((prefix) => path === prefix.replace(/\/$/, '') || path.startsWith(prefix));
 
@@ -568,6 +613,40 @@ function resolveRelativeImport(fromFile, specifier, kind) {
 }
 
 /**
+ * The repository files a disclosed site is WRITTEN to run: each literal at the
+ * call, resolved against every base a site can plausibly mean it in, keeping the
+ * ones that name a file inside this tree.
+ *
+ * TWO BASES, because a path argument is written in two frames and the text does
+ * not say which. A `spawn` argument is resolved by the child against its `cwd`,
+ * which for every guarded command is the repository root — `spawnSync(node,
+ * ['scripts/audit-renderer-authority.mjs'])`. A path a file computes for itself is
+ * resolved against the file — `new URL('../gov-infra/verifiers/x.mjs',
+ * import.meta.url)`, `join(__dirname, 'lib/helper.mjs')`. Asking both and keeping
+ * every hit is deliberately over-inclusive: the cost of a wrong hit is that a
+ * declaration has to name a file its site mentions, and the cost of a miss is the
+ * decoy this check exists to catch. It fails toward naming more.
+ *
+ * A path that leaves the tree is dropped, and so is one under a declared unpinned
+ * root — not because either is safe, but because neither is something `binds` may
+ * name: the shape check refuses `..` and absolute paths outright, and a `binds`
+ * under an unpinned root is refused a few lines below as a binding that pins no
+ * bytes. Requiring a declaration to name a path the same file would then reject is
+ * a rule with no repair, and a rule with no repair is how a gate gets weakened.
+ * Those sites are carried by the disclosure's reason, which is what it is for.
+ */
+function siteRepositoryTargets(file, literals) {
+	const found = new Set();
+	for (const literal of literals)
+		for (const base of [root, resolve(root, dirname(file))]) {
+			const candidate = repoRelative(resolve(base, literal));
+			if (candidate.startsWith('..') || underUnpinnedRoot(candidate)) continue;
+			if (isFile(resolve(root, candidate))) found.add(candidate);
+		}
+	return found;
+}
+
+/**
  * Everything the guarded commands execute, as repository-relative paths. Starts
  * at each `node` invocation's targets and closes over their relative imports.
  */
@@ -608,10 +687,10 @@ function executableClosure() {
 						findings.push(`${CONTRACT}: glob ${JSON.stringify(token)} is unsupported — ${error}`);
 						continue;
 					}
-					for (const match of matches) admit(match, `${name} -> ${token}`);
+					for (const match of matches) admit(normalizePath(match), `${name} -> ${token}`);
 					continue;
 				}
-				admit(token.split(sep).join(posix.sep), name);
+				admit(normalizePath(token), name);
 			}
 		}
 	}
@@ -648,11 +727,26 @@ function executableClosure() {
 			continue;
 		}
 
-		for (const { expression, line, kind, detail } of unfollowable) {
+		for (const { expression, line, kind, detail, literals } of unfollowable) {
 			const declaration = disclosedLoads.take(path, line, expression);
 			if (declaration.status === 'declared') {
+				// The reading has to still be answering the question this check asks.
+				// A release of the shared reader that stopped reporting a site's
+				// literals would silently turn every `binds` back into an unchecked
+				// claim, and a check that disappears quietly is the shape this whole
+				// control exists to refuse — so its absence is a finding, not a default.
+				if (!Array.isArray(literals)) {
+					findings.push(
+						`${path}:${line}: the reading no longer reports the literals ${expression} is written to ` +
+							'hand its facility, so a `binds` here cannot be checked against its own site; this ' +
+							'control cannot tell a bound target from a declared one until that is re-bound'
+					);
+					continue;
+				}
+				const bound = new Set();
 				for (const target of declaration.binds) {
-					if (underUnpinnedRoot(target)) {
+					const normalized = normalizePath(target);
+					if (underUnpinnedRoot(normalized)) {
 						findings.push(
 							`${CONTRACT}: the disclosure of ${expression} at ${path}:${line} binds ${target}, which ` +
 								'is under a declared unpinned root and so is bound by nothing; a `binds` that pins ' +
@@ -660,8 +754,32 @@ function executableClosure() {
 						);
 						continue;
 					}
-					admit(target, `${path}:${line}, declared`);
+					bound.add(normalized);
+					admit(normalized, `${path}:${line}, declared`);
 				}
+
+				// A `binds` is a claim about the target the site NAMES, so the two are
+				// held to each other in both directions. A repository file the site is
+				// written to run and the declaration does not bind is the hole this
+				// list exists to close, wearing a declaration; a file the declaration
+				// binds and the site is not written to run is a pin pointed away from
+				// the thing that runs — round 7's decoy, moved into the contract.
+				const runs = siteRepositoryTargets(path, literals);
+				for (const target of runs)
+					if (!bound.has(target))
+						findings.push(
+							`${path}:${line}: ${expression} runs ${target}, which its disclosure does not bind; ` +
+								'name it in `binds` so the bytes it executes are pinned, or the declaration ' +
+								'describes a site other than this one'
+						);
+				for (const target of bound)
+					if (!runs.has(target))
+						findings.push(
+							`${CONTRACT}: the disclosure of ${expression} at ${path}:${line} binds ${target}, which ` +
+								'this site is not written to run; a `binds` is a claim about a target the site ' +
+								'names, and a target no reading can see is carried by the reason rather than by a ' +
+								'pin nothing can be checked against'
+						);
 				continue;
 			}
 			if (declaration.status === 'repeated') {

@@ -134,6 +134,13 @@
  *      residue it leaves is the one `process.binding` is in — measured, and stated
  *      where the residue is stated.
  *
+ * WHAT A SITE IS WRITTEN TO RUN is the third half, and it is here rather than in
+ * the caller because the answer is in the syntax. CON-5 lets an execution site
+ * DECLARE the repository paths it runs, and nothing checked the declaration against
+ * the site: a fixture bound a pinned file while `spawnSync` literally ran an
+ * unpinned one. So every finding now carries the literals its call is written to
+ * hand its facility, and the caller can hold a declaration to them.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -848,6 +855,59 @@ function inTypePosition(node) {
 	return false;
 }
 
+/**
+ * The call a reported node HEADS, or null where it heads none — the call itself
+ * for `import(x)` and `require(x)`, and the parent for the identifier or member in
+ * `spawnSync(…)`, `new Worker(…)` and `process.dlopen(…)`.
+ */
+function headedCall(node) {
+	if (ts.isCallExpression(node) || ts.isNewExpression(node)) return node;
+	const parent = node.parent;
+	if (!parent || !(ts.isCallExpression(parent) || ts.isNewExpression(parent))) return null;
+	return parent.expression === node ? parent : null;
+}
+
+/**
+ * Every string a load or an execution site is WRITTEN to hand its facility, taken
+ * as the statically readable literals anywhere inside the call's arguments.
+ *
+ * WHY THE CALLER NEEDS THEM, which is round 9's third finding. CON-5 lets a
+ * disclosure NAME the repository paths its site executes, in `binds`, and admits
+ * each of them to the closure to be pinned and walked. Nothing checked that the
+ * paths named were the paths run: codex's fixture bound a pinned file while
+ * `spawnSync(process.execPath, ['scripts/lib/decoy.mjs'])` literally executed a
+ * different, unpinned one, and the control was green with the decoy rewritten
+ * wholesale. A `binds` that names other files than the site's own text names is
+ * the pin-a-decoy failure of round 7 moved into the declaration, and it reads as
+ * coverage exactly as loudly.
+ *
+ * ANY DEPTH, because a path is written in more shapes than an argument slot.
+ * `spawnSync(node, ['scripts/x.mjs'])` puts it in an array; `execFileSync(node,
+ * [join(root, 'scripts/x.mjs')])` puts it inside another call; `new URL('../x.mjs',
+ * import.meta.url)` puts it inside a constructor. All three are text at the site,
+ * and the caller can resolve each against the bases it knows. What this cannot see
+ * is a path that is not written here at all — a module-level constant, an argv
+ * element, a name assembled from pieces — and the caller's rule for that is stated
+ * where it is enforced: a `binds` is a claim about a target the site names, and a
+ * target this reading cannot see is carried by the disclosure's REASON rather than
+ * by a pin that cannot be checked against anything.
+ *
+ * The strings come back exactly as written, unresolved. Which file `'./x.mjs'`
+ * names depends on the base the site resolves it against, and that is the caller's
+ * question — the same division `runtimeLoads` draws for a specifier and its loader.
+ */
+function siteLiterals(node) {
+	const call = headedCall(node);
+	if (!call?.arguments) return [];
+	const literals = new Set();
+	for (const argument of call.arguments)
+		eachNode(argument, (inner) => {
+			const text = staticSpecifier(inner);
+			if (text !== null) literals.add(text);
+		});
+	return [...literals];
+}
+
 /** A callee this grammar can name, which is the condition for reading the call. */
 function nameableCallee(callee) {
 	if (!callee) return false;
@@ -871,8 +931,10 @@ function nameableCallee(callee) {
  * Every load in this source that the reading above cannot follow to a file —
  * because the TARGET is computed, because the LOADER is a construction this
  * grammar does not model, or because the code does not run in this process at all
- * — as `{ expression, line, kind, detail }`, where kind is `'computed'`,
- * `'loader'` or `'execution'`.
+ * — as `{ expression, line, kind, detail, literals }`, where kind is `'computed'`,
+ * `'loader'` or `'execution'` and `literals` is every string the site is written to
+ * hand its facility (see `siteLiterals`), so a caller that lets a site DECLARE what
+ * it runs can check the declaration against the site's own text.
  *
  * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
  * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
@@ -966,6 +1028,7 @@ export function unfollowableLoads(source) {
 			line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
 			kind,
 			detail,
+			literals: siteLiterals(node),
 		});
 
 	/**

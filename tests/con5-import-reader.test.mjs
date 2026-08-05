@@ -1482,3 +1482,273 @@ test('the second door to a builtin module has the same name and the same rule', 
 	});
 	assert.equal(clean.status, 0, clean.output);
 });
+
+test('a binds is checked against the file its own site is written to run', () => {
+	// THE REPRO. `binds` was admitted at its word: whatever it named was pinned, and
+	// nothing asked whether the site ran it. So a declaration bound a pinned file
+	// while the `spawnSync` on the very line it declared executed a different,
+	// unpinned one — and the control was green with that decoy rewritten wholesale.
+	// A pin pointed away from the file that runs is round 7's failure in the
+	// contract, and it reads as coverage more loudly there because a human wrote the
+	// path down.
+	const decoy = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync(process.execPath, ['scripts/lib/decoy.mjs']);\n",
+		'scripts/lib/bound.mjs': "export const value = 'the file the disclosure binds';\n",
+		'scripts/lib/decoy.mjs': "export const value = 'the file the site actually runs';\n",
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	const pointed = runCon5({
+		files: decoy,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/bound.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: ['scripts/lib/bound.mjs'] }],
+		},
+	});
+	assert.equal(pointed.status, 1, 'a binds that names another file binds nothing here');
+	assert.match(
+		pointed.output,
+		/spawnSync runs scripts\/lib\/decoy\.mjs, which its disclosure does not bind/
+	);
+	assert.match(
+		pointed.output,
+		/binds scripts\/lib\/bound\.mjs, which this site is not written to run/
+	);
+
+	// The honest form of the same site, and the pairing that proves it BINDS rather
+	// than merely satisfies: rewriting the file the site runs turns the control red.
+	const named = {
+		unfollowable_loads_disclosed: [{ ...declaration, binds: ['scripts/lib/decoy.mjs'] }],
+	};
+	const bound = runCon5({
+		files: decoy,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/decoy.mjs'],
+		contract: named,
+	});
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files: decoy,
+		pinned: ['scripts/gate.mjs', 'scripts/lib/decoy.mjs'],
+		contract: named,
+		corrupt: 'scripts/lib/decoy.mjs',
+	});
+	assert.equal(moved.status, 1);
+	assert.match(moved.output, /scripts\/lib\/decoy\.mjs: content does not match its pin/);
+
+	// A site that runs a repository file and declares NO binds is the same hole with
+	// the declaration left blank. "Bind or report" is enforced now rather than
+	// trusted: reporting alone is for a site that runs nothing this repository holds.
+	const silent = runCon5({
+		files: decoy,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(silent.status, 1, 'a declared site still has to bind what it runs');
+	assert.match(
+		silent.output,
+		/spawnSync runs scripts\/lib\/decoy\.mjs, which its disclosure does not bind/
+	);
+});
+
+test('a binds cannot excuse a target no reading can see', () => {
+	// The edge of the rule above, made to bite rather than left stated. Where the
+	// path is an argv element, a constant declared elsewhere or a name assembled
+	// from pieces, there is no literal to check the declaration against — so a
+	// `binds` there is an unverifiable claim of coverage and is refused as one. The
+	// site is carried by its REASON, which is a sentence a reviewer reads.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			'spawnSync(process.execPath, [process.argv[2]]);\n',
+		[HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	const claimed = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] },
+	});
+	assert.equal(claimed.status, 1, 'a pin nothing can be checked against is not coverage');
+	assert.match(
+		claimed.output,
+		/binds scripts\/lib\/helper\.mjs, which this site is not written to run/
+	);
+
+	// And the same site declared honestly — a reason and no `binds` — passes, which
+	// is what keeps this a rule about claims rather than a ban on the shape.
+	const honest = runCon5({
+		files: { 'scripts/gate.mjs': files['scripts/gate.mjs'] },
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(honest.status, 0, honest.output);
+});
+
+test('a path is one path however the spelling arrives', () => {
+	// The second half of the same finding: everything here is compared as TEXT, and
+	// `./x`, `x` and `a/../x` are three texts for one file. A leading `./` walked
+	// straight past the unpinned-root refusal, and admitted a second closure member
+	// for a file already in it — which then failed as an unpinned target while its
+	// real pin failed as a pin nothing reaches. Two findings about punctuation.
+	const spelled = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['scripts/lib/helper.mjs']);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the same file, spelled with a leading dot segment',
+					binds: ['./scripts/lib/./helper.mjs'],
+				},
+			],
+		},
+	});
+	assert.equal(spelled.status, 0, `a dot segment addresses the same file\n${spelled.output}`);
+
+	// And the refusal it used to walk past: an unpinned root is an unpinned root in
+	// every spelling, so a `binds` cannot reach generated output by punctuation.
+	const dressed = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['build/server/handler.mjs']);\n",
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unpinned_import_roots: ['build/'],
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+					binds: ['./build/server/handler.mjs'],
+				},
+			],
+		},
+	});
+	assert.equal(dressed.status, 1);
+	assert.match(dressed.output, /which is under a declared unpinned root/);
+
+	// The same rule at the other end of the walk: a guarded command's own target.
+	const entry = runCon5({
+		files: { 'scripts/gate.mjs': "console.log('the entry, spelled with a dot segment');\n" },
+		entry: './scripts/gate.mjs',
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(entry.status, 0, entry.output);
+});
+
+test('a site that runs a file it computes for itself binds it too', () => {
+	// The shape this control's own probe is written in, and the reason a literal is
+	// resolved against the file as well as against the repository root: a path a
+	// file computes for itself — `new URL('../lib/x.mjs', import.meta.url)`,
+	// `join(__dirname, 'lib/x.mjs')` — is written in the file's own frame, while a
+	// `spawn` argument is resolved by the child against its cwd. Both are text at
+	// the site, so both are checked.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"import { fileURLToPath } from 'node:url';\n" +
+			'spawnSync(process.execPath, [\n' +
+			"\tfileURLToPath(new URL('./lib/helper.mjs', import.meta.url)),\n" +
+			']);\n',
+		[HELPER]: HELPER_SOURCE,
+	};
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 3,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+
+	const undeclared = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(undeclared.status, 1, 'a computed-for-itself path is still written down');
+	assert.match(
+		undeclared.output,
+		/spawnSync runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/
+	);
+
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] },
+	});
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] },
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'binding it means rewriting it turns this red');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+});
+
+test('a literal that names no repository file demands nothing', () => {
+	// The pairing for the whole rule, because a check that fires on every string is
+	// a check nobody can satisfy. Only a literal that names a file THIS repository
+	// holds is a target a `binds` could pin: an executable on PATH, a subcommand,
+	// a flag and a file under a declared unpinned root are all carried by the reason.
+	const cases = {
+		'a system binary and its arguments': [
+			"import { execFileSync } from 'node:child_process';\nexecFileSync('git', ['status', '-z']);\n",
+			{},
+		],
+		'a target under a declared unpinned root': [
+			"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['build/server/handler.mjs']);\n",
+			{ unpinned_import_roots: ['build/'] },
+		],
+		'a path that leaves the tree': [
+			"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['../elsewhere/helper.mjs']);\n",
+			{},
+		],
+	};
+
+	for (const [what, [source, extra]] of Object.entries(cases)) {
+		const clean = runCon5({
+			files: { 'scripts/gate.mjs': source },
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				...extra,
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: source.includes('execFileSync') ? 'execFileSync' : 'spawnSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(clean.status, 0, `${what} is carried by the reason\n${clean.output}`);
+	}
+});
