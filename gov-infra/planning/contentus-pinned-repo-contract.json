@@ -140,7 +140,7 @@
     "unfollowable_loads_disclosed": [
       {
         "file": "scripts/render-routes.mjs",
-        "line": 145,
+        "line": 150,
         "expression": "import(pathToFileURL(handlerPath).href)",
         "reason": "Loads build/server/handler.mjs, the SSR entry the build just produced. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and its path is assembled at run time rather than written."
       },
@@ -164,7 +164,7 @@
       },
       {
         "file": "scripts/audit-seam-graph.mjs",
-        "line": 850,
+        "line": 856,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary to list the tracked files under the face directory, which is what makes the walked set what the repository CARRIES rather than what is on the disk beside a concurrent probe. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system installation, outside anything a repo-local hash can bind."
       },
@@ -217,15 +217,16 @@
       "gov-infra/verifiers/check-package-scripts.mjs": "55e2bb2d2661048050817071bc5d3407b7fe74612f27eafd3caa491d5bb26919",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
-      "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
-      "scripts/audit-seam-graph.mjs": "cf3568bd22c0c3a23be27add83619ac28f9ebc2869a85d8e6d4d725f8c17efee",
-      "scripts/build-stylesheet.mjs": "5776f7250e94ec03944ace3b02a52b883d302f38b6e8d5a349c04a6dccc38a2a",
+      "scripts/audit-renderer-authority.mjs": "b2274a6bf373fdf53112717919c3c1940ccba0502fef0ddfdb068796d416c52a",
+      "scripts/audit-seam-graph.mjs": "ad9a54dff7facf374bee4495e4b661d68a51a40627f65d43f4fb3b3552dc06f7",
+      "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
+      "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/module-imports.mjs": "458e6e1b34da52be022722122d44ef250d0576b4c5077a1900bf77300985c211",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
-      "scripts/render-routes.mjs": "332823b287f559249b9e831bd42406deae2cddff55d5884dd0659a897fd0432f",
+      "scripts/render-routes.mjs": "33d6ebcc481453c0392d2d9feb95618a4b4ae5ffce10ce6b033937c8dbaeeeb4",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
       "tests/agents-mobile.test.mjs": "197973ced90dff1d1d20700b8d2850ab430888f8c60cd697ea675c371efd9608",
       "tests/agents-roster.test.mjs": "639c3cbbff67e5f1595c20648c59f29fa6930c9a802873e0249ea141990a63ef",
@@ -233,6 +234,9 @@
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
+      "tests/drone-seams.test.mjs": "e3c721943e3deee16182604b1dc0fd76656c8e438e0780854fd99e44a46db4b1",
+      "tests/drones-mobile.test.mjs": "e6d153c03bf942c04113bcceffdedf84cc8028b95570f10071f02e44425d9fc4",
+      "tests/drones-roster.test.mjs": "8e71c8fd7405b9e2eff15058f6cc66667034a4a6c4ef1a63f7636a588c312bef",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
