@@ -1,6 +1,21 @@
 /**
  * What a source file actually imports, read with the PARSERS THE TOOLCHAIN
- * ALREADY RUNS rather than with a pattern over its text. PROBE-ONLY.
+ * ALREADY RUNS rather than with a pattern over its text.
+ *
+ * WHY IT LIVES IN `scripts/lib/` AND NOT IN `tests/helpers/`, where it was
+ * written. The callers stopped being only probes. A GATE reads source the same
+ * way they do — CON-5 (`gov-infra/verifiers/check-package-scripts.mjs`) walks the
+ * executable closure of every guarded package.json script — and a verifier that
+ * reaches into `tests/helpers/` for its reading has the dependency backwards:
+ * `tests/` is code that gate JUDGES, and one of the closure members it hashes.
+ * `scripts/lib/` is where this repository already keeps a reading a gate and a
+ * probe share — `strip-comments.mjs` is read by
+ * `scripts/audit-renderer-authority.mjs` and two probes, `agent-seams.mjs` by
+ * `scripts/audit-seam-graph.mjs` and two more. The mirror placement,
+ * `gov-infra/verifiers/`, was rejected for the mirror reason: the probes would
+ * then read source through the governance genome, and the genome would carry a
+ * dependency on `svelte` and `typescript` that belongs to this repository rather
+ * than to the rubric.
  *
  * WHY A PARSER AND NOT A FIFTH PATTERN. Two probes assert the face-6 swap seams
  * — `tests/agents-mobile.test.mjs` for the whole face and

@@ -15,17 +15,17 @@ import {
 } from '../src/lib/agents/contract.ts';
 import { hasActiveFilters, resolveAgentFilters } from '../src/lib/agents/filters.ts';
 import {
+	computedImports,
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+} from '../scripts/lib/module-imports.mjs';
+import {
 	AUDIT_ROUTES,
 	loadHandler,
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
-import {
-	computedImports,
-	liveScript,
-	modulePath,
-	moduleSpecifiers,
-} from './helpers/module-imports.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -259,7 +259,7 @@ const INTERIM = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
  * prose-versus-code confusion `tests/vendored-runes.test.mjs` had to resolve.
  * What breaks the seam is a module depending on one, and that is an import.
  *
- * THE READING IS THE SHARED ONE (`./helpers/module-imports.mjs`) and that is the
+ * THE READING IS THE SHARED ONE (`../scripts/lib/module-imports.mjs`) and that is the
  * point. This probe used to carry its own line-anchored regex, which is the same
  * scan `tests/agents-mobile.test.mjs` carried and the same one round 3 of this
  * pull request's review compiled four legal files past — and round 4 compiled
@@ -408,7 +408,7 @@ test('a query on a specifier does not hide the interim piece it addresses', () =
 	// `endsWith('/AgentCard.svelte')` against a string that ends in `?raw`. A query
 	// crosses the seam: the bundler resolves the same path and reads the same file,
 	// and what it alters is what the importer receives rather than which file the
-	// swap replaces. `./helpers/module-imports.mjs` carries the reasoning.
+	// swap replaces. `../scripts/lib/module-imports.mjs` carries the reasoning.
 	//
 	// The fixtures address the face as `$lib/…` rather than the `../src/…` used
 	// above because CON-5 fails on a RELATIVE specifier resolving to no file, and a

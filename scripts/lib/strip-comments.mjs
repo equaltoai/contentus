@@ -49,7 +49,7 @@
  * SCRIPT text CONCATENATES the tokens it separated, so `import/* … *\/X` becomes
  * `importX` and the statement disappears from exactly the scan that was supposed
  * to find it. That is not a bug in the stripper — it is what stripping means.
- * Script is read by `typescript` now, in `tests/helpers/module-imports.mjs`,
+ * Script is read by `typescript` now, in `./module-imports.mjs`,
  * where comments are trivia the tokenizer already accounts for.
  *
  * What survives here is the template reading, which has no such failure mode:

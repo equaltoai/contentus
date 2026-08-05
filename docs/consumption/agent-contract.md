@@ -180,7 +180,7 @@ which steered the block-extracting pattern from inside the comment through the
 real closing tag.
 
 Three rounds of patching one scan is the evidence that the scan was the problem,
-so there is no scan. `tests/helpers/module-imports.mjs` asks the SVELTE COMPILER
+so there is no scan. `scripts/lib/module-imports.mjs` asks the SVELTE COMPILER
 where a component's script is and the TYPESCRIPT COMPILER what an import is —
 both are already in this repository's dependency tree, and both are already what
 judges these files at build time. Comment placement is no longer a question the

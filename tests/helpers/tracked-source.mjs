@@ -56,7 +56,7 @@ import { join } from 'node:path';
  *
  * It lives here, exported, because BOTH walks need it and two copies of one
  * pattern is how the second survives the fix to the first — the same reason the
- * reading itself is shared (`./module-imports.mjs`).
+ * reading itself is shared (`../../scripts/lib/module-imports.mjs`).
  */
 export const MODULE_SOURCE = /\.(svelte|[cm]?[jt]s)$/;
 

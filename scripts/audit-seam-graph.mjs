@@ -233,7 +233,7 @@ const WORKER_REFERENCE = /__VITE_WORKER_ASSET__[a-z\d]{8}__/;
  * import from outside the face and still a finding.
  *
  * The query and fragment are removed, because `…/CopyBlock.svelte?raw` is the
- * same FILE a swap would replace — the reasoning `tests/helpers/module-imports.mjs`
+ * same FILE a swap would replace — the reasoning `scripts/lib/module-imports.mjs`
  * carries for the reading probes, held here for the same reason.
  *
  * WHICH MAKES THIS THE ANSWER TO ONE OF TWO QUESTIONS, and round 12 is the other

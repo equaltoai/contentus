@@ -10,17 +10,17 @@ import { compile } from 'svelte/compiler';
 
 import { DECLARED, SEAMS, SHARED, ownerOf } from '../scripts/lib/agent-seams.mjs';
 import {
+	computedImports,
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+} from '../scripts/lib/module-imports.mjs';
+import {
 	AUDIT_ROUTES,
 	loadHandler,
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
-import {
-	computedImports,
-	liveScript,
-	modulePath,
-	moduleSpecifiers,
-} from './helpers/module-imports.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -173,7 +173,7 @@ test('the accordion marker respects reduced motion', () => {
  * edges the BUILD resolves rather than from the imports source reading can see,
  * and two copies of a graph is how the second copy keeps passing after the first
  * is corrected — the same argument that put the reading itself in
- * `./helpers/module-imports.mjs` when this file and
+ * `../scripts/lib/module-imports.mjs` when this file and
  * `tests/agents-roster.test.mjs` were carrying one regex each.
  */
 
@@ -181,7 +181,7 @@ const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
 
 /**
  * The readings this file's walks are built on live in
- * `./helpers/module-imports.mjs`, imported above, and its header carries the
+ * `../scripts/lib/module-imports.mjs`, imported above, and its header carries the
  * reasoning: `liveScript` is the script a file executes, `moduleSpecifiers` and
  * `computedImports` are what that script depends on.
  *
