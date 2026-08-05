@@ -169,6 +169,34 @@ test('dry-run prints the resolved plan without executing any command', async () 
 	assert.match(lines.join('\n'), /dry-run complete; no commands executed/);
 });
 
+test('dry-run supports a fresh clone unless build reuse is requested', async (context) => {
+	const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-fresh-'));
+	const stubBin = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-bin-'));
+	context.after(() => rm(repoRoot, { recursive: true, force: true }));
+	context.after(() => rm(stubBin, { recursive: true, force: true }));
+	for (const executable of ['lesser', 'curl', 'pnpm']) {
+		const stub = path.join(stubBin, executable);
+		await writeFile(stub, '#!/bin/sh\nexit 0\n');
+		await chmod(stub, 0o755);
+	}
+
+	await writeFile(path.join(repoRoot, 'facetheory.lesser.json'), '{}\n');
+	const plan = buildPlan(parseCliArgs([...required, '--state', './receipt.json', '--dry-run']), {
+		cwd: repoRoot,
+	});
+	await writeFile(plan.statePath, `${JSON.stringify(receipt(plan))}\n`);
+	await assert.doesNotReject(() => preflight(plan, { repoRoot, envPath: stubBin }));
+
+	const reusePlan = buildPlan(
+		parseCliArgs([...required, '--state', './receipt.json', '--dry-run', '--skip-build']),
+		{ cwd: repoRoot }
+	);
+	await assert.rejects(
+		() => preflight(reusePlan, { repoRoot, envPath: stubBin }),
+		/Required build artifact build\/server\/handler\.mjs is missing or unreadable/
+	);
+});
+
 test('preflight fails clearly when lesser, state, or artifacts are absent', async (context) => {
 	const plan = buildPlan(parseCliArgs([...required, '--dry-run']), { home: '/operator' });
 	await assert.rejects(

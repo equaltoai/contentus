@@ -320,7 +320,7 @@ export async function preflight(
 		path.join(repoRoot, 'facetheory.lesser.json'),
 		'Required build artifact facetheory.lesser.json'
 	);
-	if (plan.dryRun || plan.skipBuild) await assertBuildArtifacts(repoRoot);
+	if (plan.skipBuild) await assertBuildArtifacts(repoRoot);
 }
 
 function run(command, args, { cwd = REPO_ROOT } = {}) {
