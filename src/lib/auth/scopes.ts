@@ -8,6 +8,13 @@
  */
 export const DEFAULT_OAUTH_SCOPE = 'read write follow push';
 
+/**
+ * lesser's optional public-client classification. An omitted class receives
+ * ordinary non-CLI treatment, but contentus sends `web` explicitly so the
+ * browser-client intent is self-documenting at the registration boundary.
+ */
+export const CLIENT_CLASS = 'web';
+
 /** Human-facing client name shown on lesser's authorization screen. */
 export const CLIENT_NAME = 'Contentus';
 

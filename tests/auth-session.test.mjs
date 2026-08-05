@@ -115,6 +115,7 @@ test("sign-in registers through /api/v1/apps with exactly lesser's public app fi
 			['client_name', 'Contentus'],
 			['redirect_uris', 'https://contentus.example/l/auth/callback'],
 			['scopes', 'follow push read write'],
+			['client_class', 'web'],
 			['token_endpoint_auth_method', 'none'],
 			['website', 'https://contentus.example'],
 		]
@@ -152,6 +153,95 @@ test('a cached clientSecret is discarded and replaced with a public client', asy
 	const cached = JSON.parse(localStorage.getItem('contentus:oauth_client'));
 	assert.equal(cached.clientId, 'replacement-client');
 	assert.equal('clientSecret' in cached, false);
+});
+
+test('registration refuses a response that carries a client secret', async () => {
+	globalThis.fetch = async () =>
+		response({
+			client_id: 'confidential-client',
+			client_secret: 'must-not-be-accepted',
+			token_endpoint_auth_method: 'client_secret_post',
+		});
+
+	await assert.rejects(
+		() => startLogin(),
+		/Refusing a confidential OAuth client: contentus registers as a public client\./
+	);
+	assert.equal(localStorage.getItem('contentus:oauth_client'), null);
+	assert.equal(assigned.length, 0);
+});
+
+test('registration rejects empty and null client ids before authorization', async () => {
+	for (const clientId of ['', null]) {
+		globalThis.fetch = async () =>
+			response({ client_id: clientId, token_endpoint_auth_method: 'none' });
+
+		await assert.rejects(() => startLogin(), /OAuth app registration failed \(200\)/);
+	}
+
+	assert.equal(localStorage.getItem('contentus:oauth_client'), null);
+	assert.equal(assigned.length, 0);
+});
+
+test("an omitted auth-method response uses lesser's default without fabricating a cache claim", async () => {
+	let registrations = 0;
+	globalThis.fetch = async () => {
+		registrations += 1;
+		return response({ client_id: 'default-public-client' });
+	};
+
+	await startLogin();
+	const cached = JSON.parse(localStorage.getItem('contentus:oauth_client'));
+	assert.equal(cached.clientId, 'default-public-client');
+	assert.equal('tokenEndpointAuthMethod' in cached, false);
+
+	await startLogin();
+	assert.equal(registrations, 1, 'the honest default-shaped cache remains reusable');
+});
+
+test('a returned non-public auth method is refused rather than normalized to none', async () => {
+	globalThis.fetch = async () =>
+		response({
+			client_id: 'confidential-client',
+			token_endpoint_auth_method: 'client_secret_post',
+		});
+
+	await assert.rejects(
+		() => startLogin(),
+		/Refusing an OAuth client whose token endpoint requires authentication\./
+	);
+	assert.equal(localStorage.getItem('contentus:oauth_client'), null);
+});
+
+test('a cached non-public auth method is discarded and re-registered', async () => {
+	localStorage.setItem(
+		'contentus:oauth_client',
+		JSON.stringify({
+			clientId: 'confidential-client',
+			redirectUri: 'https://contentus.example/l/auth/callback',
+			createdAt: Date.now(),
+			tokenEndpointAuthMethod: 'client_secret_post',
+		})
+	);
+
+	let registrations = 0;
+	globalThis.fetch = async () => {
+		registrations += 1;
+		return response({ client_id: 'replacement-client', token_endpoint_auth_method: 'none' });
+	};
+
+	await startLogin();
+
+	assert.equal(registrations, 1);
+	const cached = JSON.parse(localStorage.getItem('contentus:oauth_client'));
+	assert.equal(cached.clientId, 'replacement-client');
+	assert.equal(cached.tokenEndpointAuthMethod, 'none');
+});
+
+test('registration surfaces lesser's error field when error_description is absent', async () => {
+	globalThis.fetch = async () => response({ error: 'redirect_uris must be absolute' }, 422);
+
+	await assert.rejects(() => startLogin(), /redirect_uris must be absolute/);
 });
 
 test('authorize and token requests never carry an MCP resource parameter', async () => {
