@@ -1948,3 +1948,137 @@ test('a cwd this reading cannot read is reported rather than guessed', () => {
 		assert.match(corrupted.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
 	}
 });
+
+test('a target inside a string the child parses is a target', () => {
+	// The rest of the options class, swept in one place because it is one fact:
+	// a repository file can be named somewhere other than an argument slot, and
+	// every one of these was green with the helper rewritten wholesale.
+	//
+	//   - `exec` and `execSync` take a COMMAND LINE rather than a file and an
+	//     argument list, and so does any spawn with `shell: true`, so the whole
+	//     invocation arrives as one string that names no file when it is asked as
+	//     a path;
+	//   - a `NODE_OPTIONS` value loads a repository module into the child through
+	//     a flag, which is a command line by another name;
+	//   - an `env.PATH` written at the site is a lookup root, and a bare command
+	//     resolved through it opens a repository file.
+	//
+	// The reading is the tokenizer this control already applies to the guarded
+	// package.json commands, plus the rule that a word naming a directory in this
+	// tree is a base the site's other words may be resolved in. Neither is a rule
+	// about `exec` or about PATH: enumerating the options one at a time is the
+	// fifth pattern that waits for a sixth.
+	const sites = {
+		'a command line handed to execSync': [
+			"import { execSync } from 'node:child_process';\n" +
+				"execSync('node scripts/lib/helper.mjs');\n",
+			'execSync',
+		],
+		'a command line a shell parses': [
+			"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('node scripts/lib/helper.mjs', { shell: true });\n",
+			'spawnSync',
+		],
+		'a module loaded into the child by a flag': [
+			"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['-e', ''], { env: { NODE_OPTIONS: '--import ./scripts/lib/helper.mjs' } });\n",
+			'spawnSync',
+		],
+		'a lookup root written beside a bare command': [
+			"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync('helper.mjs', [], { env: { PATH: 'scripts/lib' } });\n",
+			'spawnSync',
+		],
+	};
+
+	for (const [what, [source, expression]] of Object.entries(sites)) {
+		const files = { 'scripts/gate.mjs': source, [HELPER]: HELPER_SOURCE };
+		const declaration = {
+			file: 'scripts/gate.mjs',
+			line: 2,
+			expression,
+			reason: 'the fixture’s point',
+		};
+
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} runs a repository file and must name it`);
+		assert.match(
+			silent.output,
+			/runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/,
+			`${what} must be read`
+		);
+
+		const bound = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+		const named = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: bound,
+		});
+		assert.equal(named.status, 0, `${what} binds once it is named\n${named.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: bound,
+			corrupt: HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+	}
+});
+
+test('the arguments are read whoever is written to run them', () => {
+	// The interpreter position, which is the half of the options class that needed
+	// no change and is regressed so that it keeps needing none. `process.execPath`
+	// is not a literal, a bare `node` is a name resolved on PATH, and an absolute
+	// binary is outside any tree a hash can bind — so none of the three is a target
+	// this control can pin, and all three leave the ARGUMENTS exactly where they
+	// were. A fix for the base that stopped reading them would be this round's
+	// false negative.
+	for (const [what, command] of Object.entries({
+		'the running interpreter': 'process.execPath',
+		'a bare name resolved on PATH': "'node'",
+		'an absolute binary outside the tree': "'/usr/bin/node'",
+	})) {
+		const files = {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				`spawnSync(${command}, ['scripts/lib/helper.mjs']);\n`,
+			[HELPER]: HELPER_SOURCE,
+		};
+		const declaration = {
+			file: 'scripts/gate.mjs',
+			line: 2,
+			expression: 'spawnSync',
+			reason: 'the fixture’s point',
+		};
+
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} still runs a repository file`);
+		assert.match(
+			silent.output,
+			/runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/
+		);
+
+		const named = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: {
+				unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }],
+			},
+		});
+		assert.equal(named.status, 0, `${what} binds its argument\n${named.output}`);
+
+		// And the interpreter itself is not demanded, in any of the three spellings:
+		// a `binds` may only name a repository file, and none of these is one.
+		assert.doesNotMatch(named.output, /usr\/bin\/node|which its disclosure does not bind/);
+	}
+});

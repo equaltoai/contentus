@@ -214,7 +214,7 @@
       }
     ],
     "sha256": {
-      "gov-infra/verifiers/check-package-scripts.mjs": "69ac3566d101b15af5cb7be6232adea58763288a14cc61b9679bf9beb9cd57da",
+      "gov-infra/verifiers/check-package-scripts.mjs": "f8138a1548bbca66fa3f590553df05fa2b3b76311f347ce65e8e293782f2da06",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
@@ -232,7 +232,7 @@
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
-      "tests/con5-import-reader.test.mjs": "e77bece7a008edc650868c4bc28be94a2aa909fd78135c59d68c6839e9c5d255",
+      "tests/con5-import-reader.test.mjs": "00369081d44f784386dd696b3318372780c853c9afad60c70d3c598d3d19e842",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",

@@ -637,6 +637,35 @@ function resolveRelativeImport(fromFile, specifier, kind) {
 }
 
 /**
+ * A literal as the words a site can hand a program: the string itself, and — since
+ * a shell is one of the things a site may hand it to — each token of it.
+ *
+ * WHY THE SPLIT. `exec`, `execSync` and any `spawn` with `shell: true` take a
+ * COMMAND LINE rather than a file and an argument list, so the whole invocation is
+ * one string: `execSync('node scripts/lib/helper.mjs')` names a repository
+ * executable that resolves to no file when the literal is asked as a path, and this
+ * control was green with that helper rewritten wholesale. The tokenizer that reads
+ * the guarded package.json commands is exactly the reading a shell applies here, so
+ * it is applied here, and a command line stops being a place a target can hide.
+ *
+ * IT ALSO CATCHES THE OTHER STRING A CHILD PARSES: `{ env: { NODE_OPTIONS: '--import
+ * ./scripts/lib/helper.mjs' } }` is a repository file loaded into the child by a
+ * flag, and it is a token of a literal like any other. Asking every literal both
+ * ways is over-inclusive by construction — a word that happens to name a file
+ * becomes a target a declaration must name — and that is the direction this check
+ * fails in, because the other direction is the decoy it exists to catch.
+ */
+function siteWords(literals) {
+	const words = new Set();
+	for (const literal of literals) {
+		words.add(literal);
+		for (const segment of shellSegments(literal))
+			for (const token of shellTokens(segment)) words.add(token);
+	}
+	return words;
+}
+
+/**
  * The repository files a disclosed site is WRITTEN to run: each word at the call,
  * resolved in the bases that site names, keeping the ones that name a file inside
  * this tree — and, separately, the ones whose file cannot be determined at all.
@@ -658,6 +687,14 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * writes, in which frame; the FILE frame is unmoved by any `cwd`, because the
  * parent computes it before the child exists.
  *
+ * A LOOKUP ROOT WRITTEN AT THE SITE IS A BASE TOO. `{ env: { PATH: 'scripts/lib' } }`
+ * beside `'helper.mjs'` runs a repository file through a directory the site named,
+ * and so does `git -C <dir>` and every other flag that means "look in here". This
+ * reading does not model PATH, `-C` or any other option one at a time — it takes
+ * every word that names a directory in this tree as a base the site's other words
+ * may be resolved in. That is over-inclusive on purpose and closed by construction,
+ * where an option-by-option list would be a fifth pattern waiting for a sixth.
+ *
  * WHAT IS NOT DETERMINED IS REPORTED, NOT GUESSED. Where the `cwd` is written but
  * unreadable — a variable, a call, an options bag this reading cannot open — the
  * process frame has no value, so a word that names a repository file under the root
@@ -676,7 +713,7 @@ function resolveRelativeImport(fromFile, specifier, kind) {
  * Those sites are carried by the disclosure's reason, which is what it is for.
  */
 function siteRepositoryTargets(file, literals, base) {
-	const words = new Set(literals);
+	const words = siteWords(literals);
 	const fileFrame = resolve(root, dirname(file));
 	const processFrame =
 		base.from === 'file'
@@ -686,6 +723,12 @@ function siteRepositoryTargets(file, literals, base) {
 				: null;
 
 	const bases = [fileFrame, ...(processFrame ? [processFrame] : [])];
+	for (const named of [...bases])
+		for (const word of words) {
+			const candidate = resolve(named, word);
+			if (repoRelative(candidate).startsWith('..')) continue;
+			if (isDirectory(candidate) && !bases.includes(candidate)) bases.push(candidate);
+		}
 
 	const repositoryFile = (from, word) => {
 		const candidate = repoRelative(resolve(from, word));
