@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785896235389 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785896235392 COMPLETED 859 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785899618334 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785899618340 COMPLETED 859 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -25,12 +25,12 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-DIaTzgif.js                665.78 kB │ gzip: 202.88 kB
 
+✓ built in 1.11s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
 - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
-✓ built in 1.03s
 
 > @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build --ssr src/facetheory/entry-server.ts
