@@ -928,6 +928,182 @@ test('a declaration written twice is rejected rather than collapsed', () => {
 	assert.match(repeated.output, /declares import\(target\) at scripts\/gate\.mjs:2 twice/);
 });
 
+/* -------------------------------------------------------------------------
+ * Round 8 — the three shapes that walked past the closed grammar
+ * ---------------------------------------------------------------------- */
+
+test('an aliased createRequire is the same loader under a different name', () => {
+	// THE REPRO. The two halves of one model were reading two different names.
+	// `unfollowableLoads` ACCEPTS `import { createRequire as cr }` — it asks which
+	// EXPORT the specifier names, and an alias does not change that — while
+	// `requireLike` asked whether a callee is spelled `createRequire`, which `cr`
+	// is not. So the import was modelled, the binding it produced was invisible,
+	// and `cr(import.meta.url)('./lib/helper.cjs')` ran an unpinned file green.
+	const files = {
+		'scripts/gate.mjs':
+			"import { createRequire as cr } from 'node:module';\n" +
+			'const load = cr(import.meta.url);\n' +
+			"const { value } = load('./lib/helper.cjs');\nconsole.log(value);\n",
+		[CJS_HELPER]: CJS_HELPER_SOURCE,
+	};
+
+	// Accepting the form means CARRYING it: the helper is an edge, not a finding.
+	const unpinned = runCon5({ files, pinned: ['scripts/gate.mjs'] });
+	assert.equal(unpinned.status, 1, 'a load through an aliased factory is a load');
+	assert.match(unpinned.output, /scripts\/lib\/helper\.cjs has no pinned sha256/);
+
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', CJS_HELPER] });
+	assert.equal(bound.status, 0, bound.output);
+
+	// The pairing, and the whole consequence: a name is not a binding. Rewriting the
+	// helper the alias opens must turn this control red on its CONTENT.
+	const rewritten = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', CJS_HELPER],
+		corrupt: CJS_HELPER,
+	});
+	assert.equal(rewritten.status, 1);
+	assert.match(rewritten.output, /scripts\/lib\/helper\.cjs: content does not match its pin/);
+});
+
+test('a loader is modelled only where it resolves the way this walk resolves', () => {
+	// The base is part of the model, for the reason round 7 established about
+	// `require`: a loader resolves against a BASE, and a reading that ignores the
+	// base pins a file the loader never opens. `createRequire('/elsewhere/x.js')`
+	// opens `/elsewhere/lib/helper.cjs` while this walk would pin the helper beside
+	// the GATE — round 7's decoy in a new spelling — so an unmodellable base leaves
+	// the factory call unmodelled, which reports it.
+	const elsewhere = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { createRequire } from 'node:module';\n" +
+				"const load = createRequire('/elsewhere/x.js');\n" +
+				"load('./lib/helper.cjs');\n",
+			[CJS_HELPER]: CJS_HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(elsewhere.status, 1, 'a loader with a base elsewhere resolves elsewhere');
+	assert.match(elsewhere.output, /scripts\/gate\.mjs:2: createRequire builds a CommonJS loader/);
+
+	// And the bite check in the other direction, because a fix for a false positive
+	// is where the false negative gets introduced: the base that names this file is
+	// still modelled, in both dialects.
+	for (const [entry, base] of [
+		['scripts/gate.mjs', 'import.meta.url'],
+		['scripts/gate.cjs', '__filename'],
+	]) {
+		const modelled = runCon5({
+			files: {
+				[entry]:
+					"import { createRequire } from 'node:module';\n" +
+					`const load = createRequire(${base});\n` +
+					"const { value } = load('./lib/helper.cjs');\nconsole.log(value);\n",
+				[CJS_HELPER]: CJS_HELPER_SOURCE,
+			},
+			entry,
+			pinned: [entry, CJS_HELPER],
+		});
+		assert.equal(modelled.status, 0, `${base} names this file\n${modelled.output}`);
+	}
+});
+
+test('a loader taken out of an object by destructuring is a read of it', () => {
+	// THE REPRO. `namesRatherThanReferences` is right that a property key is a name
+	// rather than a reference — `{ require: r }` refers to nothing called `require`.
+	// It is a READ of that property off the object being destructured, which is the
+	// same fact as `module.require` with different punctuation, and the grammar
+	// reports that one. A BindingElement is neither a property access nor an element
+	// access, so `const { require: r } = module; r.call(module, './lib/helper.cjs')`
+	// ran an unpinned helper green.
+	const shapes = {
+		'a renamed binding': [
+			'scripts/gate.cjs',
+			'const { require: r } = module;\n' +
+				"const { value } = r.call(module, './lib/helper.cjs');\nconsole.log(value);\n",
+			/scripts\/gate\.cjs:1: require: r takes require out of an object/,
+		],
+		'a shorthand binding': [
+			'scripts/gate.cjs',
+			'const { require: outer } = module;\nconst { createRequire } = outer("node:module");\n',
+			/scripts\/gate\.cjs:1: require: outer takes require out of an object/,
+		],
+		'a nested binding': [
+			'scripts/gate.cjs',
+			'const { constructor: { require: r } } = module;\nconsole.log(r);\n',
+			/scripts\/gate\.cjs:1: constructor: \{ require: r \} takes constructor out of an object/,
+		],
+		'a binding with a default': [
+			'scripts/gate.cjs',
+			'const { require: r = null } = module;\nconsole.log(r);\n',
+			/scripts\/gate\.cjs:1: require: r = null takes require out of an object/,
+		],
+		'a quoted key': [
+			'scripts/gate.cjs',
+			"const { 'require': r } = module;\nconsole.log(r);\n",
+			/takes require out of an object/,
+		],
+		'a computed key spelled as a literal': [
+			'scripts/gate.cjs',
+			"const { ['require']: r } = module;\nconsole.log(r);\n",
+			/takes require out of an object/,
+		],
+		'a destructuring ASSIGNMENT rather than a declaration': [
+			'scripts/gate.cjs',
+			'let r;\n({ require: r } = module);\nconsole.log(r);\n',
+			/scripts\/gate\.cjs:2: require: r takes require out of an object/,
+		],
+		'a destructuring assignment nested in an array pattern': [
+			'scripts/gate.cjs',
+			'let r;\n[{ require: r }] = [module];\nconsole.log(r);\n',
+			/scripts\/gate\.cjs:2: require: r takes require out of an object/,
+		],
+		'a createRequire lifted off a namespace': [
+			'scripts/gate.cjs',
+			'const { createRequire: make } = someNamespace;\nconsole.log(make);\n',
+			/scripts\/gate\.cjs:1: createRequire: make takes createRequire out of an object/,
+		],
+		'an evaluator lifted off a realm': [
+			'scripts/gate.cjs',
+			'const { eval: run } = globalThis;\nconsole.log(run);\n',
+			/scripts\/gate\.cjs:1: eval: run takes eval out of an object/,
+		],
+	};
+
+	for (const [what, [entry, source, expected]] of Object.entries(shapes)) {
+		const found = runCon5({
+			files: { [entry]: source, [CJS_HELPER]: CJS_HELPER_SOURCE },
+			entry,
+			pinned: [entry],
+		});
+		assert.equal(found.status, 1, `${what} must not reach a loader past this control`);
+		assert.match(found.output, expected, `${what} must be named where it sits`);
+	}
+
+	// THE OTHER DIRECTION, because excusing a case excuses every rule and a fix for
+	// a false positive is where the false negative gets introduced. A destructuring
+	// that reads an ordinary key is ordinary; so is an object literal BUILT with one
+	// of these names as a key, where the key hands out nothing and the interesting
+	// half is the value the identifier rules already read.
+	const ordinary = {
+		'an unrelated key': 'const { value } = process.env;\nconsole.log(value);\n',
+		'an array pattern, which reads no key at all':
+			'const [first] = process.argv;\nconsole.log(first);\n',
+		'an object literal built as a value':
+			'const options = { require: false };\nconsole.log(options);\n',
+		'a method named for one of them':
+			'const it = { require() { return 1; } };\nconsole.log(it.require);\n',
+	};
+	for (const [what, source] of Object.entries(ordinary)) {
+		const clean = runCon5({ files: { 'scripts/gate.mjs': source }, pinned: ['scripts/gate.mjs'] });
+		assert.equal(
+			clean.status,
+			what === 'a method named for one of them' ? 1 : 0,
+			`${what}\n${clean.output}`
+		);
+	}
+});
+
 test('a disclosure without the line it sits on is not a disclosure', () => {
 	// The shape check, which is a hard stop rather than a finding: a contract this
 	// control cannot read is not a contract it may read halfway.
