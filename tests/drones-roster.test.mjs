@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { compile } from 'svelte/compiler';
 
+import { sourceIdentifiers } from '../scripts/lib/module-imports.mjs';
 import {
 	DRONE_WORKFLOW_QUERY,
 	delegateToDrone,
@@ -20,6 +22,19 @@ import {
 } from '../scripts/render-routes.mjs';
 
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
+
+const PERSISTENCE_SINKS = new Set(['localStorage', 'pushState', 'sessionStorage', 'setItem']);
+
+function persistenceSinks(file, source) {
+	const executable = compile(source, { filename: file, generate: 'client' }).js.code;
+	return sourceIdentifiers(executable)
+		.filter((name) => PERSISTENCE_SINKS.has(name))
+		.toSorted();
+}
+
+function assertNoPersistenceSinks(file, source) {
+	assert.deepEqual(persistenceSinks(file, source), [], `${file} contains a persistence sink`);
+}
 
 function agent(overrides = {}) {
 	return {
@@ -320,8 +335,21 @@ test('the client renders policy-disabled and one-time credential states without 
 	assert.match(policy, /This instance is not accepting new drones/);
 	assert.match(credentials, /only time Contentus will show the OAuth tokens/);
 	assert.match(credentials, /dismiss permanently/);
-	const executable = `${flow}\n${credentials}`.replace(/<!--[\s\S]*?-->/g, '');
-	assert.doesNotMatch(executable, /localStorage|setItem\(|pushState\(/);
+	assertNoPersistenceSinks('DroneCreationFlow.svelte', flow);
+	assertNoPersistenceSinks('DroneCredentials.svelte', credentials);
 	assert.match(flow, /credentials = null/);
 	assert.match(flow, /scope\.holds\(stamp\)/);
+});
+
+test('the persistence check sees a live sink between HTML-comment-shaped strings', () => {
+	const fixture = `<script>
+		const opener = '<!--';
+		sessionStorage.setItem('drone_tokens', 'must-be-detected');
+		const closer = '-->';
+	</script>`;
+
+	assert.throws(
+		() => assertNoPersistenceSinks('PersistenceFixture.svelte', fixture),
+		/sessionStorage.*setItem/s
+	);
 });

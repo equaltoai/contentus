@@ -386,6 +386,43 @@ function eachNode(node, visit) {
 	ts.forEachChild(node, (child) => eachNode(child, visit));
 }
 
+/**
+ * The identifier and statically named element-access tokens in executable
+ * TypeScript source.
+ *
+ * This is deliberately a syntax-tree reading, not source text with comments
+ * removed. A string containing `<!--` cannot erase the live nodes before a
+ * later string containing `-->`, and names written only in comments never
+ * become nodes. Callers that start with a Svelte component should hand this
+ * function the compiler's client JavaScript so expressions in markup event
+ * handlers are included as well as the component's script blocks.
+ *
+ * Static element-access names are included so `storage['setItem']()` is the
+ * same structural name as `storage.setItem()`. The result is unique in source
+ * order; the caller decides which names matter to its claim.
+ */
+export function sourceIdentifiers(source) {
+	const identifiers = [];
+	const seen = new Set();
+	const add = (name) => {
+		if (seen.has(name)) return;
+		seen.add(name);
+		identifiers.push(name);
+	};
+
+	eachNode(parsed(source), (node) => {
+		if (ts.isIdentifier(node)) add(node.text);
+		else if (
+			(ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+			ts.isElementAccessExpression(node.parent) &&
+			node.parent.argumentExpression === node
+		)
+			add(node.text);
+	});
+
+	return identifiers;
+}
+
 /** The text of a specifier a static read can name, or null when it cannot. */
 function staticSpecifier(node) {
 	if (!node) return null;
