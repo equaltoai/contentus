@@ -37,7 +37,15 @@ const OWNED_DIR = 'src/lib/compose';
 
 function runAudit() {
 	const result = spawnSync(process.execPath, ['scripts/audit-renderer-authority.mjs'], {
-		cwd: repoRoot,
+		// SPELLED HERE rather than taken from `repoRoot` above, and that is a control
+		// rather than a duplication. The audit's path is written as a literal at this
+		// call so CON-5 can check the disclosure that BINDS it against the site — and
+		// which file `'scripts/audit-renderer-authority.mjs'` names is decided by the
+		// directory this child resolves it in. A cwd held in a constant declared far
+		// above is a base no reading can see at the call, exactly as a target held in
+		// one is, so the walk would have to guess the base to check the target. Both
+		// halves of "the site names what it runs" are written where the child starts.
+		cwd: fileURLToPath(new URL('..', import.meta.url)),
 		encoding: 'utf8',
 	});
 	return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };

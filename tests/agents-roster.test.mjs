@@ -15,17 +15,17 @@ import {
 } from '../src/lib/agents/contract.ts';
 import { hasActiveFilters, resolveAgentFilters } from '../src/lib/agents/filters.ts';
 import {
+	computedImports,
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+} from '../scripts/lib/module-imports.mjs';
+import {
 	AUDIT_ROUTES,
 	loadHandler,
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
-import {
-	computedImports,
-	liveScript,
-	modulePath,
-	moduleSpecifiers,
-} from './helpers/module-imports.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -259,7 +259,7 @@ const INTERIM = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
  * prose-versus-code confusion `tests/vendored-runes.test.mjs` had to resolve.
  * What breaks the seam is a module depending on one, and that is an import.
  *
- * THE READING IS THE SHARED ONE (`./helpers/module-imports.mjs`) and that is the
+ * THE READING IS THE SHARED ONE (`../scripts/lib/module-imports.mjs`) and that is the
  * point. This probe used to carry its own line-anchored regex, which is the same
  * scan `tests/agents-mobile.test.mjs` carried and the same one round 3 of this
  * pull request's review compiled four legal files past — and round 4 compiled
@@ -271,7 +271,7 @@ const INTERIM = ['AgentCard', 'AgentTrustBadge', 'AgentRosterFilters'];
 function interimImports(source, path) {
 	const live = liveScript(path, source);
 	const offenders = computedImports(live).map(
-		(expression) => `${path} → import(${expression.trim()}) (a dependency no static read can name)`
+		(call) => `${path} → ${call.trim()} (a dependency no static read can name)`
 	);
 	for (const specifier of moduleSpecifiers(live))
 		for (const name of INTERIM)
@@ -305,9 +305,10 @@ test('the seam check can still see an import, in every form a comment can hide i
 	// comment that MERGES `import` into the token beside it when it is stripped,
 	// and a markup comment carrying a fake `<script>` opener.
 	//
-	// The specifiers resolve from this file on purpose. CON-5 reads every gate
-	// file's raw text and fails on a relative specifier resolving to no file, and a
-	// fixture that trips the gate it is testing beside is not a fixture.
+	// The specifiers resolve from this file, which CON-5 once required of every
+	// gate file — its reader was raw text and a fixture that trips the gate it is
+	// testing beside is not a fixture. It reads with the parser now, and the form
+	// is kept as the convention it became.
 	const target = '../src/lib/agents/AgentCard.svelte';
 	const route = 'src/lib/routes/Agents.svelte';
 	for (const body of [
@@ -408,11 +409,12 @@ test('a query on a specifier does not hide the interim piece it addresses', () =
 	// `endsWith('/AgentCard.svelte')` against a string that ends in `?raw`. A query
 	// crosses the seam: the bundler resolves the same path and reads the same file,
 	// and what it alters is what the importer receives rather than which file the
-	// swap replaces. `./helpers/module-imports.mjs` carries the reasoning.
+	// swap replaces. `../scripts/lib/module-imports.mjs` carries the reasoning.
 	//
 	// The fixtures address the face as `$lib/…` rather than the `../src/…` used
-	// above because CON-5 fails on a RELATIVE specifier resolving to no file, and a
-	// path with `?raw` on the end is one — the same defect, one gate over.
+	// above because CON-5 read a path with `?raw` on the end as a relative
+	// specifier resolving to no file — the same defect, one gate over, since
+	// repaired by pointing its reader at `modulePath` too.
 	const route = 'src/lib/routes/Agents.svelte';
 
 	for (const query of ['?raw', '?url', '?raw&inline', '#anchor']) {

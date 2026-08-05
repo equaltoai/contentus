@@ -10,17 +10,18 @@ import { compile } from 'svelte/compiler';
 
 import { DECLARED, SEAMS, SHARED, ownerOf } from '../scripts/lib/agent-seams.mjs';
 import {
+	computedImports,
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+	runtimeSpecifiers,
+} from '../scripts/lib/module-imports.mjs';
+import {
 	AUDIT_ROUTES,
 	loadHandler,
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
-import {
-	computedImports,
-	liveScript,
-	modulePath,
-	moduleSpecifiers,
-} from './helpers/module-imports.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -173,7 +174,7 @@ test('the accordion marker respects reduced motion', () => {
  * edges the BUILD resolves rather than from the imports source reading can see,
  * and two copies of a graph is how the second copy keeps passing after the first
  * is corrected — the same argument that put the reading itself in
- * `./helpers/module-imports.mjs` when this file and
+ * `../scripts/lib/module-imports.mjs` when this file and
  * `tests/agents-roster.test.mjs` were carrying one regex each.
  */
 
@@ -181,7 +182,7 @@ const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
 
 /**
  * The readings this file's walks are built on live in
- * `./helpers/module-imports.mjs`, imported above, and its header carries the
+ * `../scripts/lib/module-imports.mjs`, imported above, and its header carries the
  * reasoning: `liveScript` is the script a file executes, `moduleSpecifiers` and
  * `computedImports` are what that script depends on.
  *
@@ -198,21 +199,20 @@ const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
  * asserts the same property over the same tree, and one of two copies being
  * fixed is how a gate goes green while the hole it names is still open.
  *
- * THE PROSE RULE IN THIS FILE IS NOT GONE, and the reason is narrower than it
- * used to be stated. The walker that objects to `from '<a relative path>'` in a
- * comment here is CON-5, which reads every GATE file's raw text — comments
- * included — and fails on a relative specifier resolving to no file. That is a
- * real gate and a fixture must not trip it, so the planted fixtures below still
- * address the face as `../src/lib/agents/…`.
+ * THE PROSE RULE IN THIS FILE IS RETIRED, and what retired it is the same
+ * change. CON-5 objected to `from '<a relative path>'` in a comment because its
+ * reader was a raw-text scan of every gate file; it now reads with this module,
+ * so a specifier in prose is trivia and a specifier in a fixture string is a
+ * value in an expression. The planted fixtures below still address the face as
+ * `../src/lib/agents/…` — the form costs nothing, resolves, and is what the rest
+ * of the file uses — but they no longer have to.
  *
- * WHAT CON-5 IS NOT is a fail-closed backstop for THIS scan, and an earlier
- * version of this comment implied it was. Its reader
- * (`gov-infra/verifiers/check-package-scripts.mjs:251`) is itself a raw-text
- * regex, and moving a comment INSIDE an import statement — `from /* … *\/ '…'` —
- * makes it miss the edge entirely. It reads more than live code in one direction
- * and less than the file executes in the other, so nothing here may lean on it
- * to catch what this module misses. That gap is pre-existing verifier behaviour,
- * outside this pull request's write scope, and reported for its own fix.
+ * WHAT CON-5 IS STILL NOT is a fail-closed backstop for THIS scan, and an
+ * earlier version of this comment implied it was. It walks the closure of the
+ * guarded package.json scripts, which is gate code; `src/` is declared outside
+ * that closure precisely because the probe is the gate and the application is
+ * what it judges. A cross-seam import in application source is invisible to it
+ * whatever it reads with, so nothing here may lean on it.
  */
 
 /**
@@ -270,10 +270,8 @@ function faceDependencies(file, files, seen = new Set()) {
 	seen.add(file);
 
 	const source = liveScript(file, files[file] ?? '');
-	for (const expression of computedImports(source))
-		unresolved.push(
-			`${file} → import(${expression.trim()}) (a dependency no static read can name)`
-		);
+	for (const call of computedImports(source))
+		unresolved.push(`${file} → ${call.trim()} (a dependency no static read can name)`);
 
 	for (const specifier of moduleSpecifiers(source)) {
 		if (!pointsIntoTheFace(specifier)) continue;
@@ -368,11 +366,11 @@ function importsBehindASeam(outside, face) {
 
 	for (const [path, raw] of Object.entries(outside)) {
 		const source = liveScript(path, raw);
-		for (const expression of computedImports(source))
+		for (const call of computedImports(source))
 			offenders.push(
-				/\bagents\b/.test(expression)
-					? `${path} → import(${expression.trim()}) (a computed import into the face)`
-					: `${path} → import(${expression.trim()}) (a dependency no static read can name)`
+				/\bagents\b/.test(call)
+					? `${path} → ${call.trim()} (a computed import into the face)`
+					: `${path} → ${call.trim()} (a dependency no static read can name)`
 			);
 
 		for (const specifier of moduleSpecifiers(source)) {
@@ -479,13 +477,13 @@ test('the cross-seam check can still see a violation', () => {
 	// Both directions, on planted sources, so the green above is a result rather
 	// than a property of a check that cannot fail.
 	//
-	// THE PLANTED SPECIFIERS RESOLVE FROM THIS FILE on purpose, which is why they
-	// read `../src/lib/agents/…` rather than the `./…` a component would write.
-	// CON-5 reads every gate file's raw text and fails on a relative specifier
-	// resolving to nothing, so a fixture written the way the component writes it
-	// would trip the rubric beside the check it is testing.
-	// `tests/agents-roster.test.mjs` learned the same thing. What the checker reads
-	// is the file name, so the two forms are the same input to it.
+	// THE PLANTED SPECIFIERS RESOLVE FROM THIS FILE, which is why they read
+	// `../src/lib/agents/…` rather than the `./…` a component would write. That
+	// was once required — CON-5 read every gate file's raw text and failed on a
+	// relative specifier resolving to nothing, so a fixture written the way the
+	// component writes it tripped the rubric beside the check it was testing — and
+	// it is now only a convention. What the checker reads is the file name, so the
+	// two forms are the same input to it.
 	assert.deepEqual(
 		crossSeamImports({
 			'AgentRoster.svelte': component(
@@ -672,12 +670,12 @@ test('a query on a specifier does not hide the file it addresses', () => {
 	// file is the only thing a seam check is about. `modulePath` carries the rest.
 	//
 	// THESE FIXTURES ADDRESS THE FACE AS `$lib/…` rather than the `../src/…` the
-	// fixtures above use, for the same reason those use it: CON-5 reads this file's
-	// raw text and fails on a RELATIVE specifier resolving to no file, and
-	// `../src/lib/agents/CopyBlock.svelte?raw` is a path with no file at the end of
-	// it. That its reader stops at the query rather than at the path is this very
-	// defect one gate over — pre-existing verifier behaviour, outside this pull
-	// request's write scope, and reported for its own fix.
+	// fixtures above use, and the reason has been repaired rather than worked
+	// around: CON-5 stopped at the query rather than at the path, so
+	// `../src/lib/agents/CopyBlock.svelte?raw` read to it as a path with no file at
+	// the end of it — this very defect, one gate over. Its reader now asks the same
+	// `modulePath` question this one does. The `$lib/…` form stays because it is
+	// what a route writes, which is what these fixtures are.
 	const offence =
 		'AgentRoster.svelte → CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from AgentRoster.svelte)';
 
@@ -964,8 +962,9 @@ test('a component the compiler cannot read is a red gate, not an empty scan', ()
 	// FAIL CLOSED ON THE READING ITSELF. Returning nothing for a file that cannot be
 	// parsed makes "unreadable" and "clean" the same green, which is the hole this
 	// whole line of review has been about, one level further back.
-	// The specifier resolves for CON-5's sake even though this file never parses —
-	// CON-5 reads raw text, so it sees the specifier the Svelte compiler rejects.
+	// The specifier resolves even though the fixture never parses, which is now
+	// belt and braces: CON-5 reads this file as TypeScript, where the fixture is a
+	// template literal rather than an import position.
 	assert.throws(
 		() =>
 			liveScript(
@@ -1041,11 +1040,16 @@ test('a class member named import is not a computed import', () => {
 	assert.deepEqual(computedImports(`const url = import.meta.url;`), []);
 
 	// And the shapes that ARE calls, including the one that has a colon in it.
-	// The specifiers resolve from this file for CON-5's sake, as everywhere else here.
+	// The specifiers resolve from this file, as everywhere else here.
+	// What comes back is the CALL, not its argument: `require(x)` belongs to the
+	// same class and an offender line assembled around the text `import(` would
+	// print the wrong keyword for half of it.
 	const a = '../src/lib/agents/AgentCard.svelte';
 	const b = '../src/lib/agents/CopyBlock.svelte';
-	assert.deepEqual(computedImports(`import(target);`), ['target']);
-	assert.deepEqual(computedImports(`import(ok ? '${a}' : '${b}');`), [`ok ? '${a}' : '${b}'`]);
+	assert.deepEqual(computedImports(`import(target);`), ['import(target)']);
+	assert.deepEqual(computedImports(`import(ok ? '${a}' : '${b}');`), [
+		`import(ok ? '${a}' : '${b}')`,
+	]);
 	assert.deepEqual(computedImports(`import('${a}');`), []);
 	// An un-interpolated template names its module as plainly as a quoted string.
 	assert.deepEqual(computedImports('import(`' + a + '`);'), []);
@@ -1055,7 +1059,51 @@ test('a class member named import is not a computed import', () => {
 	// from a file the Svelte compiler accepts — but the reading answers for it
 	// anyway rather than falling through to a pass, because "the argument is
 	// missing" is the same unreadable as "the argument is a variable".
-	assert.deepEqual(computedImports(`import();`), ['']);
+	assert.deepEqual(computedImports(`import();`), ['import()']);
+});
+
+test('require is read as the import it is, in both directions', () => {
+	// CON-5 resolves `.cjs` among its module extensions and its previous raw-text
+	// scan matched `require(`, so a parser that dropped the form would have closed
+	// symptom A by opening a hole beside it. The probes inherit it, and round 6's
+	// literal `require()` in a `.cjs` is the reason they should: it compiled past
+	// both of them.
+	const a = '../src/lib/agents/AgentCard.svelte';
+	assert.deepEqual(moduleSpecifiers(`const X = require('${a}');`), [a]);
+	assert.deepEqual(runtimeSpecifiers(`const X = require('${a}');`), [a]);
+	assert.deepEqual(computedImports(`const X = require(name);`), ['require(name)']);
+
+	// The callee must be the identifier itself. A method call named `require` and a
+	// member access are other people's functions, not CommonJS.
+	assert.deepEqual(moduleSpecifiers(`module.require('${a}');`), []);
+	assert.deepEqual(computedImports(`module.require(name);`), []);
+	assert.deepEqual(computedImports(`class P { require(json: string) { return json; } }`), []);
+});
+
+test('a type-only declaration is a dependency to a seam and not to CON-5', () => {
+	// THE JUDGEMENT, and the reason it differs by caller. `import type … from` is
+	// erased by `--experimental-strip-types` and by `tsc` before anything runs, so
+	// the file it names is not code a guarded command executes and CON-5 must not
+	// pin its bytes. A swap behind a seam breaks a type that names a component
+	// exactly as it breaks a value, so the seam walks must still see it.
+	const a = '../src/lib/agents/AgentCard.svelte';
+	for (const line of [
+		`import type X from '${a}';`,
+		`import type { X } from '${a}';`,
+		`export type { X } from '${a}';`,
+		`import type X = require('${a}');`,
+		`type Y = import('${a}').X;`,
+	]) {
+		assert.deepEqual(moduleSpecifiers(line), [a], `the seam reading must see ${line}`);
+		assert.deepEqual(runtimeSpecifiers(line), [], `CON-5's reading must not see ${line}`);
+	}
+
+	// A type-only SPECIFIER inside a value import is not a type-only DECLARATION:
+	// the module is still loaded, and dropping it would unpin a file that runs.
+	assert.deepEqual(runtimeSpecifiers(`import { type X, y } from '${a}';`), [a]);
+	assert.deepEqual(runtimeSpecifiers(`import { type X } from '${a}';`), [a]);
+	assert.deepEqual(runtimeSpecifiers(`import '${a}';`), [a]);
+	assert.deepEqual(runtimeSpecifiers(`export * from '${a}';`), [a]);
 });
 
 test('the reading cannot be made to swallow live code by a string', () => {

@@ -91,16 +91,16 @@ import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/au
  * `node --test` runs test files concurrently and another probe plants fixtures
  * inside `src/lib/compose`, and `pnpm build` may be running beside this.
  *
- * WHY EVERY SPECIFIER IS A CONSTANT INTERPOLATED INTO THE FIXTURE. CON-5 reads
- * every gate file's RAW TEXT and fails on a relative specifier that resolves to
- * no file, so a fixture with its specifier spelled out beside an import keyword
- * would be read as this file importing something in `tests/` — this very header
- * tripped it once, in a sentence that named the offending shape outright. Held in
- * a constant and interpolated, the same string is a value the fixture computes
- * rather than an import position CON-5 reads, which is the convention the sibling
- * probes already use (`tests/agents-roster.test.mjs`). That its reader cannot
- * tell a fixture from an import is pre-existing verifier behaviour, recorded
- * rather than leaned on.
+ * WHY EVERY SPECIFIER IS A CONSTANT INTERPOLATED INTO THE FIXTURE. It began as a
+ * workaround: CON-5 read every gate file's RAW TEXT and failed on a relative
+ * specifier that resolved to no file, so a fixture with its specifier spelled out
+ * beside an import keyword was read as this file importing something in `tests/`
+ * — this very header tripped it once, in a sentence that named the offending
+ * shape outright. Its reader now parses, and a string literal is a value rather
+ * than an import position to it, so the workaround is no longer load-bearing. The
+ * convention stays for the reason it is worth keeping: one constant is one place
+ * for the plant and its assertion to agree, and two spellings of a specifier is
+ * how they drift.
  */
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -118,8 +118,7 @@ const ALSO_BEHIND_SEAM = './Accordion.svelte';
  * A DIFFERENT MODULE from the component, which is round 12's whole point: the
  * bundler resolves and loads `X.svelte?raw` on its own, its code is a string
  * literal, and it carries none of the component's dependencies. Composed from the
- * specifier above rather than spelled out, so the two can never drift apart and so
- * CON-5's raw-text reader has no import position to mistake this for.
+ * specifier above rather than spelled out, so the two can never drift apart.
  */
 const BEHIND_SEAM_TEXT = `${BEHIND_SEAM}?raw`;
 const FACE_COMPONENT = 'src/lib/agents/CopyBlock.svelte';
