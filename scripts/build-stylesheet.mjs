@@ -212,6 +212,10 @@ function stylesheetLayers() {
 			label: 'contentus agents theme — face 6 roster and MCP detail',
 			css: readRepoFile('src/lib/brand/agents.css'),
 		},
+		{
+			label: 'contentus drones theme — face 7 roster and creation',
+			css: readRepoFile('src/lib/brand/drones.css'),
+		},
 	];
 }
 

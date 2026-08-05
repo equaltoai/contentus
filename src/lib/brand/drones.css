@@ -1,0 +1,156 @@
+/* Face 7 — owned drone roster and creation surface. */
+
+.contentus-drones__toolbar {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: var(--tc-space-4);
+}
+
+.contentus-drones__grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+	gap: var(--tc-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-drones__grid > li {
+	min-width: 0;
+}
+
+.contentus-drones__notice,
+.contentus-drone-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-4);
+}
+
+.contentus-drones__notice h2,
+.contentus-drones__notice p,
+.contentus-drones__status,
+.contentus-drones__error {
+	margin: 0;
+}
+
+.contentus-drones__status {
+	color: var(--tc-fg-muted);
+}
+
+.contentus-drones__error {
+	color: var(--tc-error);
+}
+
+.contentus-drone-card {
+	height: 100%;
+	padding: var(--tc-space-5);
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+}
+
+.contentus-drone-card__header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+}
+
+.contentus-drone-card__title,
+.contentus-drone-card__handle,
+.contentus-drone-card__bio {
+	margin: 0;
+}
+
+.contentus-drone-card__title {
+	font-size: 1.125rem;
+}
+
+.contentus-drone-card__title a {
+	color: var(--tc-fg);
+	text-decoration: none;
+}
+
+.contentus-drone-card__title a:hover,
+.contentus-drone-card__title a:focus-visible {
+	color: var(--tc-accent);
+	text-decoration: underline;
+}
+
+.contentus-drone-card__handle,
+.contentus-drone-card__bio {
+	color: var(--tc-fg-muted);
+}
+
+.contentus-drone-card__handle {
+	font-family: var(--tc-font-mono);
+	font-size: 0.8125rem;
+}
+
+.contentus-drone-pill {
+	padding: 3px var(--tc-space-2);
+	border: 1px solid var(--tc-accent);
+	border-radius: var(--tc-radius-pill);
+	color: var(--tc-accent);
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+}
+
+.contentus-drone-card__facts {
+	display: grid;
+	gap: var(--tc-space-3);
+	margin: 0;
+}
+
+.contentus-drone-card__facts div {
+	display: grid;
+	gap: 2px;
+}
+
+.contentus-drone-card__facts dt {
+	color: var(--tc-fg-muted);
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.contentus-drone-card__facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.contentus-drone-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	color: var(--tc-fg);
+	background: transparent;
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.contentus-drone-action:hover,
+.contentus-drone-action:focus-visible {
+	color: var(--tc-accent);
+	border-color: var(--tc-accent);
+}
+
+.contentus-drone-action--primary {
+	color: var(--tc-midnight);
+	background: var(--tc-accent);
+	border-color: var(--tc-accent);
+}
+
+@media (max-width: 960px) {
+	.contentus-drones__grid {
+		grid-template-columns: 1fr;
+	}
+}

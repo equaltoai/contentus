@@ -19,9 +19,9 @@ export const FACETHEORY_BASE_PATH = APP_BASE_PATH;
  * `/l/*`, so every route here must server-render on a cold request. A route
  * that is not in this table and not matched by the catch-all does not exist.
  *
- * Faces 4-7 (timelines, messages, agents, drones) land in later milestones and
- * are deliberately absent rather than stubbed — a nav entry pointing at a route
- * that 404s is worse than one that is not there.
+ * Faces 4-7 (timelines, messages, agents, drones) are registered only as their
+ * milestones land — a nav entry pointing at a route that 404s is worse than one
+ * that is not there.
  *
  * `/compose` (face 3) and the `/review` pair (face 2) require an authenticated
  * caller, but they are still fully server-rendered routes: the session lives in
@@ -155,6 +155,15 @@ const PAGE_DEFINITIONS: Record<AppPageKey, AppPageDescriptor> = {
 		// belongs in the server's paint.
 		requiresAuth: false,
 	},
+	drones: {
+		key: 'drones',
+		path: '/drones',
+		title: 'Your drones',
+		eyebrow: 'Drone creation',
+		summary: 'Create and track the unsouled agents owned by your Lesser account.',
+		surface: 'mcp',
+		requiresAuth: true,
+	},
 	profile: {
 		key: 'profile',
 		path: '/profiles',
@@ -198,6 +207,7 @@ export const ROUTE_PATTERNS = [
 	'/messages/{conversationId}',
 	'/agents',
 	'/agents/{username}',
+	'/drones',
 	'/profiles/{username}',
 	'/auth/callback',
 	'/{proxy+}',
@@ -253,6 +263,7 @@ export function resolvePage(pathname: string): AppPageDescriptor {
 	// the roster above rather than as not-found — the same resolution
 	// `/messages/` takes, and the better of the two answers.
 	if (segmentAfter(route, '/agents/')) return PAGE_DEFINITIONS['agent-detail'];
+	if (route === '/drones') return PAGE_DEFINITIONS.drones;
 	// `/profiles` with no username names no actor, so it is not the profile
 	// surface: it falls through to not-found rather than rendering an empty one.
 	// Same rule as `/review/drafts` above.
