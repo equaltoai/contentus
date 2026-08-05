@@ -63,15 +63,17 @@ An operator supplies its four values at invocation time:
 - `--stage`: `dev`, `staging`, or `live`
 - `--aws-profile`: the AWS profile that can update that instance
 
-The instance must already have a lesser deployment receipt with the selected
-stage's stack outputs. By default the entrypoint reads
-`~/.lesser/<app>/<base-domain>/state.json`; pass `--state <path>` for a receipt
-stored elsewhere. The current `lesser` binary, receipt, checked-in manifest,
-and (when `--skip-build` reuses a build) all required artifacts are validated
-before any AWS operation. A missing prerequisite stops with its path or binary
-name. A dry run from a fresh clone does not require build artifacts because the
-real plan would create them; adding `--skip-build` makes those artifacts a
-preflight requirement.
+The instance must already have a lesser deployment receipt whose selected
+stage includes `FrontendDistributionId`. `ClientBucketName`,
+`ClientArtifactBucketName`, and `ClientInstallManifestKey` are advisory: the
+entrypoint reports their absence and lesser derives them. By default the
+entrypoint reads `~/.lesser/<app>/<base-domain>/state.json`; pass
+`--state <path>` for a receipt stored elsewhere. The current `lesser` binary,
+receipt, checked-in manifest, and (when `--skip-build` reuses a build) all
+required artifacts are validated before any AWS operation. A missing
+prerequisite stops with its path or binary name. A dry run from a fresh clone
+does not require build artifacts because the real plan would create them;
+adding `--skip-build` makes those artifacts a preflight requirement.
 
 Preview the exact commands and derived stage origin without executing pnpm,
 lesser, curl, AWS calls, or other network work:
@@ -93,8 +95,8 @@ automated availability check; continue with the smoke test below for the CMS,
 auth, GraphQL, CSP, and renderer-authority evidence of record.
 
 Adding an instance therefore costs only the same four CLI values and an
-already-deployed lesser instance with stack outputs: no target map, package
-script, manifest, or runbook edit.
+already-deployed lesser instance with `FrontendDistributionId`: no target map,
+package script, manifest, or runbook edit.
 
 ## Post-install verification (the smoke test of record)
 

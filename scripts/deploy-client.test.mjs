@@ -134,7 +134,7 @@ test('skip flags remove only local preparation commands', () => {
 	);
 });
 
-test('validates that the receipt targets the requested instance and carries stage outputs', () => {
+test('validates the receipt target and follows lesser stack-output fallbacks', () => {
 	const plan = buildPlan(parseCliArgs([...required, '--dry-run']), { home: '/operator' });
 	assert.doesNotThrow(() => validateReceipt(receipt(plan), plan, plan.statePath));
 	assert.throws(
@@ -144,6 +144,23 @@ test('validates that the receipt targets the requested instance and carries stag
 	const incomplete = receipt(plan);
 	delete incomplete.stages.dev.stack_outputs.FrontendDistributionId;
 	assert.throws(() => validateReceipt(incomplete, plan, plan.statePath), /FrontendDistributionId/);
+	const derived = receipt(plan);
+	for (const output of [
+		'ClientBucketName',
+		'ClientArtifactBucketName',
+		'ClientInstallManifestKey',
+	]) {
+		delete derived.stages.dev.stack_outputs[output];
+	}
+	const warnings = [];
+	const originalWarn = console.warn;
+	console.warn = (warning) => warnings.push(warning);
+	try {
+		assert.doesNotThrow(() => validateReceipt(derived, plan, plan.statePath));
+	} finally {
+		console.warn = originalWarn;
+	}
+	assert.match(warnings.join('\n'), /lesser will derive these values/);
 	assert.throws(
 		() => validateReceipt({ ...receipt(plan), stages: {} }, plan, plan.statePath),
 		/is missing stage dev/

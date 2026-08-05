@@ -15,11 +15,11 @@ const REQUIRED_ARTIFACTS = [
 	'build/client/.vite/manifest.json',
 	'facetheory.lesser.json',
 ];
-const REQUIRED_STACK_OUTPUTS = [
+const REQUIRED_STACK_OUTPUTS = ['FrontendDistributionId'];
+const ADVISORY_STACK_OUTPUTS = [
 	'ClientBucketName',
 	'ClientArtifactBucketName',
 	'ClientInstallManifestKey',
-	'FrontendDistributionId',
 ];
 const VALUE_OPTIONS = new Set(['--app', '--base-domain', '--stage', '--aws-profile', '--state']);
 const BOOLEAN_OPTIONS = new Set(['--dry-run', '--skip-install', '--skip-check', '--skip-build']);
@@ -289,6 +289,14 @@ export function validateReceipt(receipt, plan, statePath) {
 	if (missingOutputs.length) {
 		throw new Error(
 			`Deployment receipt ${statePath} stage ${plan.stage} is missing stack outputs: ${missingOutputs.join(', ')}`
+		);
+	}
+	const missingAdvisoryOutputs = ADVISORY_STACK_OUTPUTS.filter(
+		(name) => !String(outputs[name] ?? '').trim()
+	);
+	if (missingAdvisoryOutputs.length) {
+		console.warn(
+			`Deployment receipt ${statePath} stage ${plan.stage} is missing advisory stack outputs: ${missingAdvisoryOutputs.join(', ')}; lesser will derive these values`
 		);
 	}
 }
