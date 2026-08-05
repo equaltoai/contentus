@@ -2017,14 +2017,17 @@ test('a target inside a string the child parses is a target', () => {
 				"spawnSync(process.execPath, ['--version'], { env: { NODE_OPTIONS: '--import ./scripts/lib/helper.mjs' } });\n",
 			'spawnSync',
 		],
+		// The one site here whose helper is reached by a SEARCH rather than named as a
+		// path, so it is the one that has to be executable for the child to run it.
 		'a lookup root written beside a bare command': [
 			"import { spawnSync } from 'node:child_process';\n" +
 				"spawnSync('helper.mjs', [], { env: { PATH: 'scripts/lib' } });\n",
 			'spawnSync',
+			[HELPER],
 		],
 	};
 
-	for (const [what, [source, expression]] of Object.entries(sites)) {
+	for (const [what, [source, expression, executable = []]] of Object.entries(sites)) {
 		const files = { 'scripts/gate.mjs': source, [HELPER]: HELPER_SOURCE };
 		const declaration = {
 			file: 'scripts/gate.mjs',
@@ -2037,6 +2040,7 @@ test('a target inside a string the child parses is a target', () => {
 			files,
 			pinned: ['scripts/gate.mjs'],
 			contract: { unfollowable_loads_disclosed: [declaration] },
+			executable,
 		});
 		assert.equal(silent.status, 1, `${what} runs a repository file and must name it`);
 		assert.match(
@@ -2050,6 +2054,7 @@ test('a target inside a string the child parses is a target', () => {
 			files,
 			pinned: ['scripts/gate.mjs', HELPER],
 			contract: bound,
+			executable,
 		});
 		assert.equal(named.status, 0, `${what} binds once it is named\n${named.output}`);
 
@@ -2058,6 +2063,7 @@ test('a target inside a string the child parses is a target', () => {
 			pinned: ['scripts/gate.mjs', HELPER],
 			contract: bound,
 			corrupt: HELPER,
+			executable,
 		});
 		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
 		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
@@ -2723,12 +2729,18 @@ test('a lookup path is read as the list of directories it is', () => {
 		files,
 		pinned: ['scripts/gate.mjs'],
 		contract: { unfollowable_loads_disclosed: [declaration] },
+		executable: [HELPER],
 	});
 	assert.equal(silent.status, 1, 'a path with two entries is searched at both of them');
 	assert.match(silent.output, /runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/);
 
 	const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
-	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: named });
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: named,
+		executable: [HELPER],
+	});
 	assert.equal(bound.status, 0, bound.output);
 
 	const moved = runCon5({
@@ -2736,6 +2748,7 @@ test('a lookup path is read as the list of directories it is', () => {
 		pinned: ['scripts/gate.mjs', HELPER],
 		contract: named,
 		corrupt: HELPER,
+		executable: [HELPER],
 	});
 	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
 	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
@@ -2759,6 +2772,7 @@ test('a lookup path is read as the list of directories it is', () => {
 			},
 			pinned: ['scripts/gate.mjs', HELPER],
 			contract: named,
+			executable: [HELPER],
 		});
 		assert.equal(searched.status, 0, `${path} searches scripts/lib\n${searched.output}`);
 	}
@@ -2885,6 +2899,9 @@ test('a bare command searched on a path this file does not write is reported', (
 				'scripts/gate.mjs': "import { spawnSync } from 'node:child_process';\n" + call,
 				[HELPER]: HELPER_SOURCE,
 			},
+			// A path spelled at the call is opened by the child; a name on a lookup path
+			// is searched for by execvp, which runs what it can execute.
+			executable: [HELPER],
 			pinned: ['scripts/gate.mjs', HELPER],
 			contract: {
 				unfollowable_loads_disclosed: [
@@ -3622,7 +3639,7 @@ test('a shell reads what a shell is handed, and binds the file that line runs', 
 	// a ban: a command line whose words are all written down is read, wherever it
 	// sits — at argument 0, inside a `-c`, or after the variable assignments that
 	// decide where the command word is looked for.
-	for (const [what, call, binds] of [
+	for (const [what, call, binds, executable = []] of [
 		[
 			'a shell handed a line of literals',
 			"execFileSync('/bin/sh', ['-c', 'node scripts/lib/helper.mjs']);\n",
@@ -3631,6 +3648,9 @@ test('a shell reads what a shell is handed, and binds the file that line runs', 
 		[
 			'a lookup path assigned in front of the command',
 			"execSync('PATH=scripts/lib helper.mjs');\n",
+			[HELPER],
+			// The only one of the three reached by a SEARCH, which answers with a file
+			// the child can execute.
 			[HELPER],
 		],
 		[
@@ -3654,6 +3674,7 @@ test('a shell reads what a shell is handed, and binds the file that line runs', 
 			files,
 			pinned: ['scripts/gate.mjs'],
 			contract: { unfollowable_loads_disclosed: [declaration] },
+			executable,
 		});
 		assert.equal(silent.status, 1, `${what} runs a repository file`);
 		assert.match(
@@ -3662,7 +3683,12 @@ test('a shell reads what a shell is handed, and binds the file that line runs', 
 		);
 
 		const contract = { unfollowable_loads_disclosed: [{ ...declaration, binds }] };
-		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', ...binds], contract });
+		const bound = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', ...binds],
+			contract,
+			executable,
+		});
 		assert.equal(bound.status, 0, `${what} binds once it is named\n${bound.output}`);
 
 		const moved = runCon5({
@@ -3670,6 +3696,7 @@ test('a shell reads what a shell is handed, and binds the file that line runs', 
 			pinned: ['scripts/gate.mjs', ...binds],
 			contract,
 			corrupt: HELPER,
+			executable,
 		});
 		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
 		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
@@ -3723,7 +3750,12 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		[ROOT_HELPER]: ROOT_HELPER_SOURCE,
 	};
 	const honest = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
-	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: honest });
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		executable: [HELPER],
+	});
 	assert.equal(bound.status, 0, `the file on the path is the file that runs\n${bound.output}`);
 
 	const moved = runCon5({
@@ -3731,6 +3763,7 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		pinned: ['scripts/gate.mjs', HELPER],
 		contract: honest,
 		corrupt: HELPER,
+		executable: [HELPER],
 	});
 	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
 	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
@@ -3741,6 +3774,7 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		contract: {
 			unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER, ROOT_HELPER] }],
 		},
+		executable: [HELPER, ROOT_HELPER],
 	});
 	assert.equal(both.status, 1, 'the file beside the site is not searched for at all');
 	assert.match(both.output, /binds helper\.mjs, which this site is not written to run/);
@@ -3758,6 +3792,7 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		},
 		pinned: ['scripts/gate.mjs', HELPER],
 		contract: honest,
+		executable: [HELPER],
 	});
 	assert.equal(outside.status, 1, 'an entry ahead of this tree decides before this tree does');
 	assert.match(outside.output, /runs the bare command "helper\.mjs"/);
@@ -3781,6 +3816,7 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		contract: {
 			unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }],
 		},
+		executable: [BESIDE_GATE, HELPER],
 	});
 	assert.equal(first.status, 0, `the first entry holding the name is the one\n${first.output}`);
 
@@ -3802,6 +3838,7 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		files: emptyFirst,
 		pinned: ['scripts/gate.mjs', ROOT_HELPER],
 		contract: cwdFirst,
+		executable: [ROOT_HELPER, HELPER],
 	});
 	assert.equal(searched.status, 0, `an empty entry is the working directory\n${searched.output}`);
 
@@ -3810,6 +3847,7 @@ test('a lookup path is searched in order, and an empty entry is the working dire
 		pinned: ['scripts/gate.mjs', ROOT_HELPER],
 		contract: cwdFirst,
 		corrupt: ROOT_HELPER,
+		executable: [ROOT_HELPER, HELPER],
 	});
 	assert.equal(rewritten.status, 1, 'and it BINDS what it found there');
 	assert.match(rewritten.output, /helper\.mjs: content does not match its pin/);
@@ -4107,4 +4145,113 @@ test('a nesting this reading stops following is reported rather than passed over
 	});
 	assert.equal(moved.status, 1, 'and it BINDS rather than merely passing');
 	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+});
+
+test('a lookup path answers with a file the child can execute', () => {
+	// THE REPRO. execvp does not stop at the first entry that HOLDS the name; it
+	// stops at the first candidate it can EXECUTE, keeping the EACCES and carrying on
+	// past one it cannot. This walk stopped at existence — so a non-executable file
+	// of the same name in an earlier entry ended the search here while the child ran
+	// the executable further along. The disclosure bound the decoy, this control
+	// exited 0, and the file that really runs was bound by nothing.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawnSync } from 'node:child_process';\n" +
+			"spawnSync('helper.mjs', [], { env: { PATH: 'scripts:scripts/lib' } });\n",
+		[BESIDE_GATE]: BESIDE_GATE_SOURCE,
+		[HELPER]: HELPER_SOURCE,
+	};
+
+	// The decoy is there and is not executable, so the file that runs is the one
+	// after it.
+	const honest = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+	const bound = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		executable: [HELPER],
+	});
+	assert.equal(bound.status, 0, `the search runs what it can run\n${bound.output}`);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		corrupt: HELPER,
+		executable: [HELPER],
+	});
+	assert.equal(moved.status, 1, 'and it BINDS, rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	const pinnedDecoy = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', BESIDE_GATE],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }] },
+		executable: [HELPER],
+	});
+	assert.equal(pinnedDecoy.status, 1, 'a file the child cannot execute is not what it runs');
+	assert.match(
+		pinnedDecoy.output,
+		/binds scripts\/helper\.mjs, which this site is not written to run/
+	);
+
+	// THE OTHER DIRECTION, and the reason this is execvp's rule rather than a
+	// preference for the later file: the same tree with the decoy made executable is
+	// a search that stops at the first entry, and the answer moves back.
+	const stops = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', BESIDE_GATE],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }] },
+		executable: [BESIDE_GATE, HELPER],
+	});
+	assert.equal(stops.status, 0, `an executable first entry answers\n${stops.output}`);
+
+	const first = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', BESIDE_GATE],
+		contract: { unfollowable_loads_disclosed: [{ ...declaration, binds: [BESIDE_GATE] }] },
+		corrupt: BESIDE_GATE,
+		executable: [BESIDE_GATE, HELPER],
+	});
+	assert.equal(first.status, 1, 'and THAT one binds');
+	assert.match(first.output, /scripts\/helper\.mjs: content does not match its pin/);
+
+	const later = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		executable: [BESIDE_GATE, HELPER],
+	});
+	assert.equal(later.status, 1, 'the entry after the one that answered is never reached');
+	assert.match(
+		later.output,
+		/binds scripts\/lib\/helper\.mjs, which this site is not written to run/
+	);
+
+	// AND A CANDIDATE THIS READING CANNOT READ ENDS THE SEARCH UNDETERMINED, which is
+	// the rule an unreadable ENTRY already carried, asked of the file the entry
+	// holds: it might be what the child runs, and stepping over it answers with a
+	// file further along the child may never reach.
+	const unreadable = runCon5({
+		files: {
+			'scripts/gate.mjs': files['scripts/gate.mjs'],
+			[HELPER]: HELPER_SOURCE,
+		},
+		links: { [BESIDE_GATE]: 'scripts/loop.mjs', 'scripts/loop.mjs': BESIDE_GATE },
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract: honest,
+		executable: [HELPER],
+	});
+	assert.equal(unreadable.status, 1, 'a candidate this walk cannot read decides before it does');
+	assert.match(unreadable.output, /runs the bare command "helper\.mjs"/);
+	assert.match(
+		unreadable.output,
+		/binds scripts\/lib\/helper\.mjs, which this site is not written to run/
+	);
 });

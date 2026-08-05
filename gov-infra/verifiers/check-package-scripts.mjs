@@ -82,7 +82,11 @@
  * way. `runChain` walks the exec chain through the wrappers it models, reads a
  * `-c` by where a shell's NAME stands rather than by which word came first, and
  * reports the wrapper option it cannot place instead of guessing which word the
- * operand is.
+ * operand is. The same round found the two ways this walk still answered a
+ * question it had not asked: a nesting cap that stopped following a `-c` without
+ * saying so, and a lookup search that stopped at the first entry HOLDING the name
+ * where execvp stops at the first candidate it can EXECUTE. Both are decoys of
+ * round 7's shape — a pin on a file that does not run — and both are reported now.
  *
  * What no static reading can follow is a load whose TARGET is computed, or whose
  * LOADER is a construction the reading does not model — an aliased `require`,
@@ -100,7 +104,15 @@
  * composes with is the cross-client adversarial review of the gov-infra diff.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+	accessSync,
+	constants,
+	existsSync,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+} from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 
 import {
@@ -738,6 +750,50 @@ const NEVER_ADDED = ['.mjs', '.cjs', '.mts', '.cts', '.ts', '.tsx', '.jsx'];
 
 const isFile = (path) => existsSync(path) && statSync(path).isFile();
 const isDirectory = (path) => existsSync(path) && statSync(path).isDirectory();
+
+/**
+ * What execvp makes of ONE candidate on a lookup path: the file it runs, a name
+ * that is not there, a file it cannot execute, or a candidate this reading cannot
+ * read at all.
+ *
+ * HOLDING THE NAME IS NOT ANSWERING, which is round 13's third finding and round
+ * 12's ordered search from the other end. execvp does not stop at the first entry
+ * that HOLDS the name; it stops at the first candidate it can EXECUTE, keeping the
+ * EACCES and carrying on past one it cannot. This walk stopped at existence — so a
+ * non-executable file of the same name in an earlier entry ended the search here
+ * while the child ran the executable further along: the disclosure bound the
+ * decoy, this control exited 0, and the file that really runs was bound by
+ * nothing. That is round 7's decoy arrived through the search rather than through
+ * the resolver. So `absent` and `unexecutable` both carry the search on, and only
+ * a candidate the child could execute ends it.
+ *
+ * AND WHAT CANNOT BE DETERMINED ENDS IT UNDETERMINED, which is the rule round 12
+ * set for an entry this walk cannot see into, now asked of the candidate as well:
+ * a directory this process cannot search, a link that resolves to nothing
+ * readable, a mode it cannot ask about. Each might be what the child runs, and
+ * stepping over it answers with a file further along the child may never reach —
+ * which is the same defect one entry over.
+ *
+ * WHOSE EXECUTE BIT. The child's, which is this process's: a spawn inherits the
+ * credentials of the process that writes it, so `X_OK` asked here is the question
+ * that child's own execve asks. A site that hands its child different credentials
+ * is not something the shared reader reports, and it is outside this answer.
+ */
+const searchCandidate = (path) => {
+	let stats;
+	try {
+		stats = statSync(path, { throwIfNoEntry: false });
+	} catch {
+		return 'unreadable';
+	}
+	if (!stats || !stats.isFile()) return 'absent';
+	try {
+		accessSync(path, constants.X_OK);
+		return 'runs';
+	} catch (error) {
+		return error?.code === 'EACCES' ? 'unexecutable' : 'unreadable';
+	}
+};
 const siblings = (base, names) => names.map((name) => `${base}${name}`).filter(isFile);
 
 /**
@@ -1402,7 +1458,11 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 	// tree — ends the search as UNDETERMINED rather than being skipped over, because
 	// what it holds decides everything after it. A site that writes no lookup path
 	// at all leaves the search to the environment it inherits, which is the same
-	// answer for the same reason.
+	// answer for the same reason. What ANSWERS an entry is `searchCandidate`, and it
+	// is round 13's third finding: execvp stops at the first candidate it can
+	// EXECUTE rather than at the first one that exists, so a non-executable file of
+	// the same name earlier on the path is stepped past here exactly as the child
+	// steps past it.
 	const undeterminedCommands = new Set();
 	for (const command of commands) {
 		let ran = false;
@@ -1418,8 +1478,17 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 				opaque = true;
 				break;
 			}
-			if (!isFile(resolve(root, candidate))) continue;
-			// The search is over at the first entry that holds the name, whether or
+			const held = searchCandidate(resolve(root, candidate));
+			// A name that is not here and a file the child cannot execute are the same
+			// answer to execvp, which keeps the error and carries on looking; a
+			// candidate this reading cannot read is neither, and ends the search the
+			// way an entry it cannot see into does.
+			if (held === 'absent' || held === 'unexecutable') continue;
+			if (held === 'unreadable') {
+				opaque = true;
+				break;
+			}
+			// The search is over at the first candidate the child can run, whether or
 			// not the file it found is one a `binds` may name.
 			if (!underUnpinnedRoot(candidate)) runs.add(candidate);
 			ran = true;
@@ -1623,7 +1692,8 @@ function executableClosure() {
 						`${path}:${line}: ${expression} runs the bare command ${JSON.stringify(command)}, which ` +
 							'is searched for on a lookup path this reading cannot follow to the file it opens — ' +
 							'the site writes none, or an entry ahead of this repository’s own is a directory ' +
-							'this walk cannot see into. Which file the child runs is decided by the environment ' +
+							'this walk cannot see into, or one of them holds a candidate it cannot read. ' +
+							'Which file the child runs is decided by the environment ' +
 							'rather than by this repository; spell the path to the file, or write an `env.PATH` ' +
 							'whose entries are directories in this tree, the first of them holding what the ' +
 							'child is meant to run'
