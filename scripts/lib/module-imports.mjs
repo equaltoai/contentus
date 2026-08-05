@@ -114,6 +114,26 @@
  *      stated rather than closed is the reflective class — a loader assembled out
  *      of `Reflect.get` and string pieces, which has no name to watch.
  *
+ * WHERE A NAME LEFT THE FILE, AND WHERE A SECOND DOOR HAD THE SAME NAME, which is
+ * round 9. Both halves are the round-8 defect again: a grammar over names is closed
+ * only while it watches every place a watched name can be written.
+ *
+ *   1. `export { cr }` hands a tracked `createRequire` binding — or a tracked
+ *      `spawnSync` — to every importer of the file, and the importer's own walk sees
+ *      an ordinary local it has never heard of. The identifier was classified as a
+ *      NAME, which is right for every other clause TypeScript builds with a `name`
+ *      slot and wrong for this one: an export specifier's local is a reference, and
+ *      it sits in `propertyName` the moment an alias is written. `exportedLocal`
+ *      asks that question, and the class closes at the ORIGIN — the file that first
+ *      obtained the binding — so a barrel, a rename and a chain of them need no
+ *      rules of their own.
+ *
+ *   2. `process.getBuiltinModule('node:child_process')` returns the same module
+ *      object the import form returns, and every import form of it was watched while
+ *      this one was not. It is a property with a name, so it is watched now, and the
+ *      residue it leaves is the one `process.binding` is in — measured, and stated
+ *      where the residue is stated.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -355,8 +375,30 @@ const isImportCall = (node) =>
  * one list rather than at two copies of it.
  * ---------------------------------------------------------------------- */
 
-/** Names that hand out a loader or an evaluator when they appear as a PROPERTY. */
-const LOADER_PROPERTIES = new Set(['require', 'createRequire', 'eval', 'constructor']);
+/**
+ * Names that hand out a loader, an evaluator, or the module object holding them,
+ * when they appear as a PROPERTY.
+ *
+ * `getBuiltinModule` is the round-9 addition and the widest of them:
+ * `process.getBuiltinModule('node:child_process')` returns the same module object
+ * the import form does, and codex's fixture spawned and rewrote a helper straight
+ * through it with this control green. The import form of every module in this
+ * grammar is watched — `node:module`, `node:vm`, `node:child_process`,
+ * `node:worker_threads` — and a second, equally named way of asking for exactly
+ * those modules cannot be the one that is not. Which module it returns is not
+ * modelled, for the reason the namespace import is not modelled: the local it
+ * produces is an object whose members this reading would then have to track
+ * through arbitrary access. So it is reported wherever it is reached, and the
+ * caller discloses the site — the same repair `import cp from 'node:child_process'`
+ * already has.
+ */
+const LOADER_PROPERTIES = new Set([
+	'require',
+	'createRequire',
+	'getBuiltinModule',
+	'eval',
+	'constructor',
+]);
 
 /** Identifiers that turn text into running code. */
 const EVALUATORS = new Set(['eval', 'Function']);
@@ -730,6 +772,50 @@ function keyText(node) {
 }
 
 /**
+ * The LOCAL binding an `export { … }` clause hands out, or null where the node is
+ * not one — the third place a tracked name is read without being referred to, and
+ * the defect round 9's review demonstrated.
+ *
+ * WHY A RE-EXPORT IS A READ. `export { cr }` in a file that binds `cr` from
+ * `createRequire` hands that loader to every importer of the file. It is the same
+ * fact as `const alias = cr` — a tracked binding leaving this file for somewhere
+ * this reading does not go — and the grammar reports that one. It did not report
+ * this one, because an `ExportSpecifier` puts its local in the `name` slot, which
+ * `namesRatherThanReferences` correctly classifies as a name for every OTHER
+ * clause TypeScript builds that way. So `export { cr }` beside `import { cr } from
+ * './lib/loader.mjs'; cr(import.meta.url)('./lib/helper.cjs')` in the importer ran
+ * an unpinned helper with the gate green in both directions, and the same hole
+ * carried `spawnSync` out of a file that had imported it legally.
+ *
+ * WHERE THE LOCAL SITS, which is the opposite of where an IMPORT puts it. For
+ * `export { cr as makeLoader }` TypeScript records `propertyName: cr` — the local
+ * binding, a genuine reference — and `name: makeLoader`, which is the name the
+ * module hands out and refers to nothing. `import { a as b }` is the mirror: `a`
+ * is the exported name of another module and `b` is a declaration. So this reads
+ * `propertyName ?? name`, and only that one of the two.
+ *
+ * A CLAUSE WITH A MODULE SPECIFIER IS NOT THIS. `export { createRequire } from
+ * 'node:module'` binds nothing locally — it is a load, and `loaderModule` already
+ * reports it against the specifier, as it does `export * from 'node:module'`. That
+ * is what closes the class at its origin rather than at each hop: a file can only
+ * hand out a watched binding it first obtained, and every way of obtaining one is
+ * either tracked here or reported there. A barrel that re-exports the re-exporter
+ * needs no rule of its own, because the file underneath it is already red.
+ *
+ * A TYPE-ONLY EXPORT IS NOT THIS EITHER, in either spelling: `export type { cr }`
+ * and `export { type cr }` are erased before anything runs, and a binding no
+ * loader receives is not a binding handed anywhere.
+ */
+function exportedLocal(node) {
+	if (!ts.isExportSpecifier(node.parent)) return null;
+	const specifier = node.parent;
+	const declaration = specifier.parent.parent;
+	if (!ts.isExportDeclaration(declaration) || declaration.moduleSpecifier) return null;
+	if (specifier.isTypeOnly || declaration.isTypeOnly) return null;
+	return specifier.propertyName ?? specifier.name;
+}
+
+/**
  * An identifier that NAMES something rather than referring to a value: every
  * declaration's own name, every `x.NAME`, every `{ NAME: local }` key, every
  * label. TypeScript puts all of them in the parent's `name`, `propertyName` or
@@ -739,12 +825,18 @@ function keyText(node) {
  *
  * A key is still a name here, and `destructuredKey` above is what asks the second
  * question a DESTRUCTURING key raises: whether that name is also a read.
+ * `exportedLocal` asks the third, for the clause where the `name` slot holds a
+ * local binding on its way out of the file.
  */
 function namesRatherThanReferences(node) {
 	const parent = node.parent;
 	if (!parent) return true;
 	// `{ require }` is the one shorthand where the NAME slot is also a reference.
 	if (ts.isShorthandPropertyAssignment(parent)) return false;
+	// `export { cr }` and `export { cr as make }` REFER to a local binding, and it
+	// is the propertyName wherever one is written and the name where none is.
+	const exported = exportedLocal(node);
+	if (exported !== null) return exported !== node;
 	if (parent.name === node || parent.propertyName === node || parent.label === node) return true;
 	return ts.isQualifiedName(parent) && parent.right === node;
 }
@@ -798,12 +890,17 @@ function nameableCallee(callee) {
  *
  *   - a `require`-like name used anywhere but as a call or as `<name>.resolve`,
  *     which covers every alias, every hand-off and every stashed loader;
- *   - a PROPERTY named `require`, `createRequire`, `eval` or `constructor`, which
- *     covers `module.require`, `globalThis.eval` and the `.constructor.constructor`
- *     route to `Function`;
+ *   - a PROPERTY named `require`, `createRequire`, `getBuiltinModule`, `eval` or
+ *     `constructor`, which covers `module.require`, `globalThis.eval`, the
+ *     `.constructor.constructor` route to `Function`, and `process.getBuiltinModule`
+ *     — the second, equally named way of asking for the very modules above;
  *   - a DESTRUCTURING of any of those names — `const { require: r } = module`,
  *     `({ createRequire: c } = m)`, and every nesting and default of them, which is
  *     the same read as the property access written with other punctuation;
+ *   - a RE-EXPORT of any tracked binding — `export { cr }`, `export { cr as make }`,
+ *     `export { spawnSync }` — which hands a loader or an execution facility to
+ *     every importer of the file, and `export … from` or `export * from` a watched
+ *     module, which is the same hand-off without the local hop;
  *   - `eval` and `Function` as identifiers, in any position;
  *   - `globalThis` or `global` reached other than as `globalThis.<name>`, which
  *     covers `globalThis[key]` and `const g = globalThis` alike;
@@ -834,13 +931,23 @@ function nameableCallee(callee) {
  * assembled without ever writing one of those names — `Reflect.get(x, key)`, a
  * member reached through an alias of an alias, a name built from string pieces and
  * applied to something that is not `globalThis`. That class is genuinely unbounded
- * and stays stated rather than closed. `process.binding` is left out of the named
- * group deliberately and not silently: `binding` is a word this repository uses
- * fifteen times for something else entirely, a rule that must first ask WHICH
- * object carries the property is the object-tracking this reading does not do, and
- * the deprecated internal it reaches is inside the reflective residue above. What
- * backs that residue is not this function: it is that every file CON-5 walks is
- * bound by a content hash, so any of those shapes has to arrive in a governance
+ * and stays stated rather than closed.
+ *
+ * `process.binding` STAYS OUT, and round 9's review was right to ask whether
+ * admitting `getBuiltinModule` had made that exclusion stale. It has not, and the
+ * difference between the two is measurable rather than rhetorical. This grammar
+ * watches NAMES, so the only cost that matters is what else in this tree is
+ * spelled that way: `getBuiltinModule` appears nowhere in it, while `binding`
+ * appears as a property access 33 times and as an object key 5 more — a probe's
+ * `probe.binding` in `tests/messaging-realtime.test.mjs`, a file inside this
+ * closure. A rule on that name is not a rule about Node's deprecated internal; it
+ * is 38 findings about something else, with a disclosure as the only repair, which
+ * is how a list of declarations stops being read. Telling those apart means asking
+ * WHICH object carries the property, and that is the object-tracking this reading
+ * does not do. The facility itself is inside the reflective residue above.
+ *
+ * What backs that residue is not this function: it is that every file CON-5 walks
+ * is bound by a content hash, so any of those shapes has to arrive in a governance
  * diff, where the review is the control. That is the same argument the disclosure
  * list rests on, and it is not a claim that the class is closed.
  *

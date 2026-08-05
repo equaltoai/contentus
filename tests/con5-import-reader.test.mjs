@@ -1297,3 +1297,188 @@ test('a disclosure without the line it sits on is not a disclosure', () => {
 		/must carry a non-empty file, expression and reason, and the positive/
 	);
 });
+
+/* -------------------------------------------------------------------------
+ * Round 9 — a name that left the file, a second door with the same name, and a
+ * declaration that named the wrong file
+ * ---------------------------------------------------------------------- */
+
+test('a re-exported loader is a finding where the file hands it out', () => {
+	// THE REPRO. A file may take `createRequire` legally — a named import of the one
+	// modelled export is the shape this grammar accepts — and then hand the binding
+	// to every importer with `export { cr }`. The importer's own walk then sees an
+	// ordinary local it has never heard of, so `cr(import.meta.url)('./lib/helper.cjs')`
+	// ran an unpinned helper with the control green in BOTH directions.
+	//
+	// The class closes at the ORIGIN rather than at each hop: a file can only hand
+	// out a watched binding it first obtained, and every way of obtaining one is
+	// either tracked in the file that does it or reported at the specifier. So a
+	// rename, a barrel and a chain of them need no rules of their own — the file
+	// underneath is already red.
+	const importer =
+		"import { cr } from './lib/loader.mjs';\n" +
+		'const load = cr(import.meta.url);\n' +
+		"const { value } = load('./lib/helper.cjs');\nconsole.log(value);\n";
+
+	const files = {
+		'scripts/gate.mjs': importer,
+		'scripts/lib/loader.mjs':
+			"import { createRequire as cr } from 'node:module';\nexport { cr };\n",
+		[CJS_HELPER]: CJS_HELPER_SOURCE,
+	};
+	const pinned = ['scripts/gate.mjs', 'scripts/lib/loader.mjs'];
+
+	const found = runCon5({ files, pinned });
+	assert.equal(found.status, 1, 'a re-export carries the loader out of this reading');
+	assert.match(found.output, /scripts\/lib\/loader\.mjs:2: cr builds a CommonJS loader/);
+
+	// THE CONSEQUENCE, which is what makes it a hole rather than a wording problem:
+	// the helper it opens is unbound, so rewriting it wholesale changed nothing.
+	const rewritten = runCon5({
+		files: { ...files, [CJS_HELPER]: "module.exports = { value: 'something else' };\n" },
+		pinned,
+	});
+	assert.equal(rewritten.status, 1);
+	assert.equal(rewritten.output, found.output, 'the finding is about the hand-off, not the helper');
+
+	// THE SWEEP. Every spelling of the same hand-off, each named where it sits.
+	const shapes = {
+		'a renamed re-export': [
+			"import { createRequire as cr } from 'node:module';\nexport { cr as makeLoader };\n",
+			/scripts\/lib\/loader\.mjs:2: cr builds a CommonJS loader/,
+		],
+		'a re-exported execution facility': [
+			"import { spawnSync } from 'node:child_process';\nexport { spawnSync };\n",
+			/scripts\/lib\/loader\.mjs:2: spawnSync hands out a way to run code/,
+		],
+		'a renamed re-exported execution facility': [
+			"import { spawnSync } from 'node:child_process';\nexport { spawnSync as run };\n",
+			/scripts\/lib\/loader\.mjs:2: spawnSync hands out a way to run code/,
+		],
+		'a re-export straight off the watched module': [
+			"export { createRequire as cr } from 'node:module';\n",
+			/takes node:module in a form that hands out a loader/,
+		],
+		'a wildcard re-export of the watched module': [
+			"export * from 'node:module';\n",
+			/takes node:module in a form that hands out a loader/,
+		],
+		'a wildcard re-export of the watched execution module': [
+			"export * from 'node:child_process';\n",
+			/takes node:child_process in a form whose bindings this reading cannot name/,
+		],
+	};
+
+	for (const [what, [loader, expected]] of Object.entries(shapes)) {
+		const caught = runCon5({
+			files: { ...files, 'scripts/lib/loader.mjs': loader },
+			pinned,
+		});
+		assert.equal(caught.status, 1, `${what} must not carry a loader past this control`);
+		assert.match(caught.output, expected, `${what} must be named where it sits`);
+	}
+
+	// A BARREL adds a hop and no cover, because the hop is not where the rule is.
+	const barrel = runCon5({
+		files: {
+			'scripts/gate.mjs': importer.replace('./lib/loader.mjs', './lib/barrel.mjs'),
+			'scripts/lib/barrel.mjs': "export * from './loader.mjs';\n",
+			'scripts/lib/loader.mjs':
+				"import { createRequire as cr } from 'node:module';\nexport { cr };\n",
+			[CJS_HELPER]: CJS_HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', 'scripts/lib/barrel.mjs', 'scripts/lib/loader.mjs'],
+	});
+	assert.equal(barrel.status, 1, 'an intermediate file is not a place the rule stops');
+	assert.match(barrel.output, /scripts\/lib\/loader\.mjs:2: cr builds a CommonJS loader/);
+});
+
+test('an ordinary re-export is ordinary, and a type-only one runs nothing', () => {
+	// THE OTHER DIRECTION, because excusing a case excuses every rule and a fix for a
+	// false negative is where the false positive gets introduced. The rule bites on
+	// the tracked NAME leaving the file, not on the export clause: a module that
+	// re-exports its own helpers is what every barrel in this repository is.
+	const ordinary = {
+		'a local of its own': 'export const value = 1;\nconst other = 2;\nexport { other };\n',
+		'a renamed local of its own': 'const other = 2;\nexport { other as value };\n',
+		'a binding from an unwatched module':
+			"import { readFileSync } from 'node:fs';\nexport { readFileSync };\n",
+		'a re-export from an unwatched module': "export { readFileSync } from 'node:fs';\n",
+		'a wildcard re-export of an unwatched module': "export * from 'node:fs';\n",
+	};
+	for (const [what, source] of Object.entries(ordinary)) {
+		const clean = runCon5({ files: { 'scripts/gate.mjs': source }, pinned: ['scripts/gate.mjs'] });
+		assert.equal(clean.status, 0, `${what} hands out no loader\n${clean.output}`);
+	}
+
+	// And a TYPE-only re-export is erased before anything runs, in both spellings, so
+	// the binding it names reaches no loader — the same judgement `import type` gets.
+	for (const clause of ['export type { cr };', 'export { type cr };']) {
+		const erased = runCon5({
+			files: {
+				'scripts/gate.mts': `import { createRequire as cr } from 'node:module';\n${clause}\n`,
+			},
+			entry: 'scripts/gate.mts',
+			pinned: ['scripts/gate.mts'],
+		});
+		assert.equal(erased.status, 0, `${clause} hands out nothing at run time: ${erased.output}`);
+	}
+});
+
+test('the second door to a builtin module has the same name and the same rule', () => {
+	// THE REPRO. `process.getBuiltinModule('node:child_process')` returns the module
+	// object the import form returns, and every import form of it was watched while
+	// this one was not — so the fixture spawned a helper and rewrote it with the
+	// control green. Which module comes back is not modelled, for the reason the
+	// namespace import is not: the local is an object whose members this reading
+	// would have to track through arbitrary access.
+	const files = {
+		'scripts/gate.mjs':
+			"const cp = process.getBuiltinModule('node:child_process');\n" +
+			"cp.spawnSync(process.execPath, ['scripts/lib/helper.mjs']);\n",
+		[HELPER]: HELPER_SOURCE,
+	};
+
+	const found = runCon5({ files, pinned: ['scripts/gate.mjs'] });
+	assert.equal(found.status, 1, 'a named door to node:child_process is a named door');
+	assert.match(
+		found.output,
+		/scripts\/gate\.mjs:1: process\.getBuiltinModule reaches getBuiltinModule/
+	);
+
+	const rewritten = runCon5({
+		files: { ...files, [HELPER]: "console.log('something else entirely');\n" },
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(rewritten.status, 1);
+	assert.equal(rewritten.output, found.output, 'the helper is unbound either way');
+
+	// THE SWEEP, which is every way this grammar already reads a watched property.
+	const shapes = {
+		'destructured off process': [
+			'const { getBuiltinModule } = process;\ngetBuiltinModule("node:vm");\n',
+			/takes getBuiltinModule out of an object/,
+		],
+		'reached by key': [
+			"const cp = process['getBuiltinModule']('node:child_process');\nconsole.log(cp);\n",
+			/reaches getBuiltinModule by key/,
+		],
+		'reached through the realm': [
+			"const cp = globalThis.process.getBuiltinModule('node:child_process');\nconsole.log(cp);\n",
+			/reaches getBuiltinModule as a property/,
+		],
+	};
+	for (const [what, [source, expected]] of Object.entries(shapes)) {
+		const caught = runCon5({ files: { 'scripts/gate.mjs': source }, pinned: ['scripts/gate.mjs'] });
+		assert.equal(caught.status, 1, `${what} must be named`);
+		assert.match(caught.output, expected, `${what} must be named where it sits`);
+	}
+
+	// The pairing. The rule bites on the facility's name and not on reaching
+	// `process` at all, which a gate file does for ordinary reasons.
+	const clean = runCon5({
+		files: { 'scripts/gate.mjs': 'console.log(process.execPath, process.argv, process.cwd());\n' },
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(clean.status, 0, clean.output);
+});
