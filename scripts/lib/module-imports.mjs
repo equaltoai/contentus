@@ -165,6 +165,17 @@
  * inside a composition this walk cannot name land in the `unknown` frame rather than
  * in the child's.
  *
+ * THE OTHER TWO HALVES OF ROUND 12 are the same defect in the environment channel.
+ * A write into `INHERITED_EXECUTION` was read for two operators when JavaScript has
+ * a dozen — `??=`, `||=` and `&&=` each loaded an unpinned preload into every child
+ * with the gate green — and the target was looked for only at the top of the
+ * assignment, so a destructuring wrote the same variable invisibly. Both are direct
+ * writes to a channel this reading watches, and both are reported now. And an `env`
+ * was read only inside object literals, so an options bag held in a NAME answered
+ * the same green as a site that writes no environment — while `siteBase`, reading
+ * the identical argument for a `cwd`, has always called it unknown. One shape may
+ * not have two answers, and the permissive one may not be the unchecked one.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -1087,10 +1098,13 @@ function siteWords(node, composers) {
 	};
 
 	// A write into this process's own environment is a site with one string in it:
-	// the value, read as the variable it is written into.
+	// the value, read as the variable it is written into — or no string at all,
+	// where the write is one this reading cannot follow to a value (see
+	// `assignedExecutionVariable`). Such a site is reported by `opensEnvironment`
+	// whatever is declared for it, so it has nothing to hand a `binds`.
 	const assigned = assignedExecutionVariable(node);
 	if (assigned) {
-		walk(assigned.value, 'env', assigned.name);
+		if (assigned.value) walk(assigned.value, 'env', assigned.name);
 		return words;
 	}
 
@@ -1155,21 +1169,48 @@ const isProcessEnv = (node) =>
  * which is how a list of disclosures stops being read. The line is the same one
  * `process.binding` sits on: a rule about a NAME costs whatever else in the tree is
  * spelled that way, and these five names are spelled nowhere else in it.
+ *
+ * EVERY OPERATOR THAT WRITES, which is round 12's fourth finding. This read two of
+ * them — `=` and `+=` — and `??=`, `||=` and `&&=` are the same write with a
+ * condition in front of it. Each ran an unpinned preload with the gate green, and
+ * each is a direct write to the channel this function exists to watch. The set is
+ * TypeScript's own assignment-operator range now rather than a list of two: a
+ * spelling this reading has not thought of is a write it still reports, which is
+ * the direction a rule about a channel has to fail in.
+ *
+ * A DESTRUCTURING IS THE SAME WRITE with the target moved inside a pattern —
+ * `[process.env.NODE_OPTIONS] = flags`, `({ x: process.env.NODE_OPTIONS } = bag)` —
+ * and the top of the assignment is then an array or object literal that names no
+ * variable at all. So the target is looked for where it sits, and what it receives
+ * is reported as UNREADABLE rather than guessed: which element of a pattern lands
+ * in which target is a question about a value at run time, and answering it is the
+ * flow-tracking this reading does not do. `opensEnvironment` turns that into a
+ * finding the site cannot declare its way out of, which is the fail-closed answer
+ * the review authorised for exactly this shape.
  */
-function assignedExecutionVariable(node) {
-	if (!ts.isBinaryExpression(node)) return null;
-	const operator = node.operatorToken.kind;
-	if (operator !== ts.SyntaxKind.EqualsToken && operator !== ts.SyntaxKind.PlusEqualsToken)
-		return null;
-	const left = node.left;
-	if (isProcessEnv(left)) return { name: null, value: node.right };
-	const named = ts.isPropertyAccessExpression(left)
-		? left.name.text
-		: ts.isElementAccessExpression(left) && isLiteralKey(left.argumentExpression)
-			? left.argumentExpression.text
+function executionVariableTarget(node) {
+	if (isProcessEnv(node)) return { name: null };
+	const named = ts.isPropertyAccessExpression(node)
+		? node.name.text
+		: ts.isElementAccessExpression(node) && isLiteralKey(node.argumentExpression)
+			? node.argumentExpression.text
 			: null;
-	if (named === null || !isProcessEnv(left.expression)) return null;
-	return INHERITED_EXECUTION.has(named) ? { name: named, value: node.right } : null;
+	if (named === null || !isProcessEnv(node.expression)) return null;
+	return INHERITED_EXECUTION.has(named) ? { name: named } : null;
+}
+
+function assignedExecutionVariable(node) {
+	if (ts.isBinaryExpression(node)) {
+		if (!ts.isAssignmentExpression(node)) return null;
+		const written = executionVariableTarget(node.left);
+		return written ? { ...written, value: node.right } : null;
+	}
+	// The same write with its target inside a pattern. The direct left of an
+	// assignment is excluded because the branch above has already reported it, and
+	// reporting one write twice puts two findings behind one disclosure key.
+	const written = executionVariableTarget(node);
+	if (!written || !node.parent || ts.isBinaryExpression(node.parent)) return null;
+	return isAssignmentTarget(node) ? { ...written, value: null } : null;
 }
 
 /**
@@ -1207,6 +1248,17 @@ function mutatesEnvironment(node) {
  * A SITE THAT WRITES NO ENVIRONMENT is open by construction: the child inherits
  * this process's, which is the world rather than the tree, and the boundary this
  * grammar draws is at what the repository WRITES.
+ *
+ * AN ENVIRONMENT IS ONLY AS OPEN AS THE BAG IT ARRIVES IN, which is round 12's
+ * fifth finding and the same defect one container out. This asked about `env`
+ * inside object literals and walked past every other argument, so `const opts = {
+ * env: { NODE_OPTIONS: '--import=./scripts/lib/preload.mjs' } }; spawn(child, [],
+ * opts)` answered the same green as a site that writes no environment at all —
+ * while `siteBase`, reading the identical argument for a `cwd`, has always called
+ * it UNKNOWN. One shape, two answers, and the permissive one is the one nothing
+ * checked. So the bag is held to the same test in both readings: an argument whose
+ * shape cannot be options says nothing about the environment, and anything else
+ * this reading cannot open leaves it unopened.
  */
 function readableEnvironment(object) {
 	if (!object || !ts.isObjectLiteralExpression(object)) return false;
@@ -1228,9 +1280,14 @@ function opensEnvironment(node) {
 	if (!call?.arguments) return true;
 	if (mutatesEnvironment(call)) return call.arguments.slice(1).every(readableEnvironment);
 	for (const argument of call.arguments.slice(1)) {
-		if (!ts.isObjectLiteralExpression(argument)) continue;
+		if (notAnOptionsBag(argument)) continue;
+		if (!ts.isObjectLiteralExpression(argument)) return false;
 		for (const property of argument.properties) {
-			if (!ts.isPropertyAssignment(property) || optionKey(property) !== 'env') continue;
+			if (ts.isSpreadAssignment(property)) return false;
+			const key = optionKey(property);
+			if (key === null) return false;
+			if (key !== 'env') continue;
+			if (!ts.isPropertyAssignment(property)) return false;
 			if (!readableEnvironment(property.initializer)) return false;
 		}
 	}

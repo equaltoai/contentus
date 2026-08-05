@@ -3308,3 +3308,212 @@ test('a path composer is one this file took from node:path, or the frame is unkn
 	});
 	assert.equal(ordinary.status, 0, `a one-argument join names nothing\n${ordinary.output}`);
 });
+
+/* -------------------------------------------------------------------------
+ * Round 12 — the operators that write an execution variable
+ * ---------------------------------------------------------------------- */
+
+test('every operator that writes an execution variable is a write', () => {
+	// The class rather than the two spellings this read. `??=`, `||=` and `&&=` are
+	// an assignment with a condition in front of it, and each loaded a repository
+	// file into every child with this control green and green again with that file
+	// rewritten wholesale.
+	for (const [what, statement] of Object.entries({
+		'a default': "process.env.NODE_OPTIONS ??= '--import=./scripts/lib/helper.mjs';\n",
+		'a falsy default': "process.env.NODE_OPTIONS ||= '--import=./scripts/lib/helper.mjs';\n",
+		'a conditional write': "process.env.NODE_OPTIONS &&= '--import=./scripts/lib/helper.mjs';\n",
+		'a subscripted default':
+			"process.env['NODE_OPTIONS'] ??= '--import=./scripts/lib/helper.mjs';\n",
+	})) {
+		const files = { 'scripts/gate.mjs': statement, [HELPER]: HELPER_SOURCE };
+		const declaration = {
+			file: 'scripts/gate.mjs',
+			line: 1,
+			expression: statement.trimEnd().replace(/;$/, ''),
+			reason: 'the fixture’s point',
+		};
+
+		const silent = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: { unfollowable_loads_disclosed: [declaration] },
+		});
+		assert.equal(silent.status, 1, `${what} loads a repository file into every child`);
+		assert.match(
+			silent.output,
+			/runs scripts\/lib\/helper\.mjs, which its disclosure does not bind/,
+			`${what} must name what it loads`
+		);
+
+		const named = { unfollowable_loads_disclosed: [{ ...declaration, binds: [HELPER] }] };
+		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract: named });
+		assert.equal(bound.status, 0, `${what} binds once it is named\n${bound.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', HELPER],
+			contract: named,
+			corrupt: HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+	}
+
+	// A DESTRUCTURING writes the same variable with the target moved inside a
+	// pattern, and which element lands in it is a question about a value at run time.
+	// So the site is reported and stays reported: a declaration carries it by its
+	// reason, and a `binds` cannot claim what no reading here can check.
+	for (const [what, statement] of Object.entries({
+		'an array pattern': "[process.env.NODE_OPTIONS] = ['--import=./scripts/lib/helper.mjs'];\n",
+		'an object pattern':
+			"({ flags: process.env.NODE_OPTIONS } = { flags: '--import=./scripts/lib/helper.mjs' });\n",
+		'a subscripted pattern':
+			"[process.env['NODE_OPTIONS']] = ['--import=./scripts/lib/helper.mjs'];\n",
+	})) {
+		const files = { 'scripts/gate.mjs': statement, [HELPER]: HELPER_SOURCE };
+		const undeclared = runCon5({ files, pinned: ['scripts/gate.mjs'] });
+		assert.equal(undeclared.status, 1, `${what} is a write into every child`);
+		assert.match(undeclared.output, /writes NODE_OPTIONS into this process's environment/);
+
+		const declared = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 1,
+						expression: statement.includes("['NODE_OPTIONS']")
+							? "process.env['NODE_OPTIONS']"
+							: 'process.env.NODE_OPTIONS',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(declared.status, 1, `${what} writes a value this reading cannot follow`);
+		assert.match(declared.output, /writes its child an environment this reading cannot open/);
+	}
+
+	// THE OTHER DIRECTION, unchanged: an ordinary variable starts no code, whichever
+	// operator writes it, and a read is not a write in any spelling.
+	for (const [what, statement] of Object.entries({
+		'a flag a gate defaults for itself': "process.env.CI ??= 'true';\n",
+		'a logical read': "const flags = process.env.NODE_OPTIONS ?? '';\nconsole.log(flags);\n",
+		'a value handed to something else': 'console.log({ x: process.env.NODE_OPTIONS });\n',
+		'a destructured read': 'const { NODE_OPTIONS } = process.env;\nconsole.log(NODE_OPTIONS);\n',
+	})) {
+		const ordinary = runCon5({
+			files: { 'scripts/gate.mjs': statement, [HELPER]: HELPER_SOURCE },
+			pinned: ['scripts/gate.mjs'],
+		});
+		assert.equal(ordinary.status, 0, `${what} starts no code\n${ordinary.output}`);
+	}
+});
+
+/* -------------------------------------------------------------------------
+ * Round 12 — the bag an environment arrives in
+ * ---------------------------------------------------------------------- */
+
+test('an options bag this reading cannot open leaves the environment unopened', () => {
+	// THE REPRO. The environment check read `env` inside object literals and walked
+	// past every other argument, so a bag held in a NAME answered the same green as a
+	// site that writes no environment at all — while the base check, reading the very
+	// same argument for a `cwd`, has always called it unknown. One shape, two
+	// answers, and the permissive one is the one nothing checked: the preload ran and
+	// rewriting it changed the child's output with this control green.
+	for (const [what, source] of Object.entries({
+		'a bag held in a name':
+			"const opts = { env: { NODE_OPTIONS: '--import=./scripts/lib/helper.mjs' } };\n" +
+			'spawn(process.execPath, [], opts);\n',
+		'a bag built by a call': 'spawn(process.execPath, [], options());\n',
+		'a bag spread from elsewhere': 'spawn(process.execPath, [], { ...options });\n',
+		'a key at the options level this reading cannot name':
+			'spawn(process.execPath, [], { [key]: 1 });\n',
+		'an argument list held in a name': 'spawn(process.execPath, args);\n',
+	})) {
+		const reported = runCon5({
+			files: {
+				'scripts/gate.mjs':
+					"import { spawn } from 'node:child_process';\n" +
+					'const [options, key, args] = process.argv;\n' +
+					source,
+				[HELPER]: HELPER_SOURCE,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: source.split('\n').length === 3 ? 4 : 3,
+						expression: 'spawn',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(reported.status, 1, `${what} may carry an environment this file never wrote`);
+		assert.match(
+			reported.output,
+			/writes its child an environment this reading cannot open/,
+			`${what} must be named`
+		);
+	}
+
+	// THE PAIRING, both ways. The repair is to write the bag where the child starts,
+	// which makes the watched variable readable and BINDS what it loads; and the
+	// shapes that cannot be an options bag at all still say nothing about the
+	// environment, so an ordinary argument list stays ordinary.
+	const files = {
+		'scripts/gate.mjs':
+			"import { spawn } from 'node:child_process';\n" +
+			"spawn(process.execPath, ['--version'], { env: { NODE_OPTIONS: '--import=./scripts/lib/helper.mjs' } });\n",
+		[HELPER]: HELPER_SOURCE,
+	};
+	const contract = {
+		unfollowable_loads_disclosed: [
+			{
+				file: 'scripts/gate.mjs',
+				line: 2,
+				expression: 'spawn',
+				reason: 'the fixture’s point',
+				binds: [HELPER],
+			},
+		],
+	};
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', HELPER], contract });
+	assert.equal(bound.status, 0, `a bag written at the call is open\n${bound.output}`);
+
+	const moved = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs', HELPER],
+		contract,
+		corrupt: HELPER,
+	});
+	assert.equal(moved.status, 1, 'and it BINDS rather than merely passing');
+	assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+
+	for (const [what, call] of Object.entries({
+		'an array of literals': "spawn(process.execPath, ['--version']);\n",
+		'a callback': "spawn(process.execPath, ['--version'], () => {});\n",
+		'a flag': "spawn(process.execPath, ['--version'], true);\n",
+	})) {
+		const quiet = runCon5({
+			files: {
+				'scripts/gate.mjs': "import { spawn } from 'node:child_process';\n" + call,
+			},
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'spawn',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(quiet.status, 0, `${what} cannot be an options bag\n${quiet.output}`);
+	}
+});
