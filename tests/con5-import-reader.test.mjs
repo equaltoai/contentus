@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -57,6 +57,10 @@ const VERIFIER = fileURLToPath(
 const HELPER = 'scripts/lib/helper.mjs';
 const HELPER_SOURCE = "export const value = 'the helper as written';\n";
 
+/** The same helper in the dialect `require` can open. */
+const CJS_HELPER = 'scripts/lib/helper.cjs';
+const CJS_HELPER_SOURCE = "module.exports = { value: 'the helper as written' };\n";
+
 /**
  * Run CON-5 over a synthetic tree.
  *
@@ -64,7 +68,8 @@ const HELPER_SOURCE = "export const value = 'the helper as written';\n";
  * fails a pin no command reaches as well as a target no pin binds, so a test
  * cannot quietly over-pin its way to green. `corrupt` moves one pin off the
  * file's real content, which is how a case proves the walk REACHED a file rather
- * than merely tolerating it.
+ * than merely tolerating it. `links` plants a symlink, which is the one member of
+ * a closure whose path and content can be parted without an edit to either.
  */
 function runCon5({
 	files,
@@ -72,6 +77,7 @@ function runCon5({
 	pinned = [],
 	corrupt = null,
 	contract = {},
+	links = {},
 }) {
 	const directory = mkdtempSync(join(tmpdir(), 'contentus-con5-'));
 	try {
@@ -87,6 +93,11 @@ function runCon5({
 			JSON.stringify({ name: 'con5-fixture', private: true, scripts }, null, 2)
 		);
 		for (const [path, source] of Object.entries(files)) write(path, source);
+		for (const [path, target] of Object.entries(links)) {
+			const absolute = join(directory, path);
+			mkdirSync(dirname(absolute), { recursive: true });
+			symlinkSync(join(directory, target), absolute);
+		}
 
 		const sha256 = {};
 		for (const path of pinned)
@@ -339,26 +350,44 @@ test('a load no static read can name is a finding unless it is disclosed', () =>
 		files: computed,
 		pinned: ['scripts/gate.mjs'],
 		contract: {
-			computed_imports_disclosed: [
-				{ file: 'scripts/gate.mjs', expression: 'import(target)', reason: 'the fixture’s point' },
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'import(target)',
+					reason: 'the fixture’s point',
+				},
 			],
 		},
 	});
 	assert.equal(disclosed.status, 0, disclosed.output);
 
-	// A disclosure is exact on both sides: the file, and the call as written.
-	const mismatched = runCon5({
-		files: computed,
-		pinned: ['scripts/gate.mjs'],
-		contract: {
-			computed_imports_disclosed: [
-				{ file: 'scripts/gate.mjs', expression: 'import(other)', reason: 'not this call' },
-			],
-		},
-	});
-	assert.equal(mismatched.status, 1);
-	assert.match(mismatched.output, /import\(target\) loads a module no static read can name/);
-	assert.match(mismatched.output, /declares import\(other\) in scripts\/gate\.mjs/);
+	// A disclosure is exact on every side: the file, the line, and the call as
+	// written. Each of the three alone is enough to leave the site undeclared.
+	for (const [what, entry] of [
+		['the call', { expression: 'import(other)' }],
+		['the line', { line: 3 }],
+		['the file', { file: 'scripts/other.mjs' }],
+	]) {
+		const mismatched = runCon5({
+			files: computed,
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 2,
+						expression: 'import(target)',
+						reason: 'not this call',
+						...entry,
+					},
+				],
+			},
+		});
+		assert.equal(mismatched.status, 1, `a disclosure that misses ${what} declares nothing`);
+		assert.match(mismatched.output, /scripts\/gate\.mjs:2: import\(target\) loads a module/);
+		assert.match(mismatched.output, /which the closure does not contain/);
+	}
 
 	// `require(<expression>)` is the same class and reports as itself, rather than
 	// as an `import(` line assembled around someone else's argument.
@@ -378,15 +407,20 @@ test('a disclosure of nothing is a finding, like a pin of nothing', () => {
 		files: { 'scripts/gate.mjs': "console.log('nothing computed here');\n" },
 		pinned: ['scripts/gate.mjs'],
 		contract: {
-			computed_imports_disclosed: [
-				{ file: 'scripts/gate.mjs', expression: 'import(gone)', reason: 'removed last week' },
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 1,
+					expression: 'import(gone)',
+					reason: 'removed last week',
+				},
 			],
 		},
 	});
 	assert.equal(stale.status, 1);
 	assert.match(
 		stale.output,
-		/declares import\(gone\) in scripts\/gate\.mjs, which the closure does not/
+		/declares import\(gone\) at scripts\/gate\.mjs:1, which the closure does not/
 	);
 });
 
@@ -430,4 +464,485 @@ test('a specifier inside a string is a value, not an import', () => {
 		pinned: ['scripts/gate.mjs'],
 	});
 	assert.equal(prose.status, 0, prose.output);
+});
+
+/* -------------------------------------------------------------------------
+ * Which file a specifier opens, which is the loader's answer and not the text's
+ * ---------------------------------------------------------------------- */
+
+test('an extensionless require is resolved the way CommonJS resolves it', () => {
+	// THE REPRO, from round 7. A gate that requires `./lib/helper` beside BOTH a
+	// `helper.mjs` and a `helper.js`. The walk applied one invented extension order
+	// to every load, beginning at `.mjs`, so it pinned the `.mjs` — a file `require`
+	// cannot open at all — while Node executed the `.js` that no pin bound.
+	// Rewriting that `.js` wholesale left the control green.
+	const gate = "const { value } = require('./lib/helper');\nconsole.log(value);\n";
+	const js = "module.exports = { value: 'the .js CommonJS opens' };\n";
+	const mjs = "export const value = 'the .mjs require cannot open';\n";
+
+	const decoy = runCon5({
+		files: { 'scripts/gate.cjs': gate, 'scripts/lib/helper.js': js, 'scripts/lib/helper.mjs': mjs },
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs'],
+	});
+	assert.equal(decoy.status, 1, 'two files under one stem is a decoy whichever one is pinned');
+	assert.match(decoy.output, /names more than one file/);
+	assert.match(decoy.output, /require\(\) opens scripts\/lib\/helper\.js/);
+	assert.match(decoy.output, /scripts\/lib\/helper\.mjs sits under the same stem/);
+
+	// Alone, the `.js` is the file CommonJS opens — and it is bound, which is what
+	// pinning the `.mjs` never was. The pairing runs both directions: unpinned it
+	// must be named, pinned it must pass, and moved off its content it must fail on
+	// the CONTENT, which is what proves the walk opened this file and not another.
+	const files = { 'scripts/gate.cjs': gate, 'scripts/lib/helper.js': js };
+	const unpinned = runCon5({ files, entry: 'scripts/gate.cjs', pinned: ['scripts/gate.cjs'] });
+	assert.equal(unpinned.status, 1);
+	assert.match(unpinned.output, /scripts\/lib\/helper\.js has no pinned sha256/);
+
+	const pinned = ['scripts/gate.cjs', 'scripts/lib/helper.js'];
+	const bound = runCon5({ files, entry: 'scripts/gate.cjs', pinned });
+	assert.equal(bound.status, 0, bound.output);
+
+	const moved = runCon5({
+		files,
+		entry: 'scripts/gate.cjs',
+		pinned,
+		corrupt: 'scripts/lib/helper.js',
+	});
+	assert.equal(moved.status, 1);
+	assert.match(moved.output, /scripts\/lib\/helper\.js: content does not match its pin/);
+
+	// And alone, the `.mjs` is not reachable by that specifier at all: `require`
+	// adds `.js`, `.json` and `.node`, and Node answers MODULE_NOT_FOUND. Reporting
+	// it as an edge would pin a file the command never opens.
+	const unreachable = runCon5({
+		files: { 'scripts/gate.cjs': gate, 'scripts/lib/helper.mjs': mjs },
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs'],
+	});
+	assert.equal(unreachable.status, 1);
+	assert.match(unreachable.output, /require\(\) adds only \.js, \.json and \.node/);
+});
+
+test('a required directory is its index, and an imported one is nothing', () => {
+	// CommonJS reads `<dir>/index.js`; ES module resolution reads no directory at
+	// all and answers ERR_UNSUPPORTED_DIR_IMPORT. One walk cannot answer both.
+	const index = "module.exports = { value: 'the index CommonJS opens' };\n";
+
+	const required = {
+		'scripts/gate.cjs': "const { value } = require('./lib');\nconsole.log(value);\n",
+		'scripts/lib/index.js': index,
+	};
+	const unpinned = runCon5({
+		files: required,
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs'],
+	});
+	assert.equal(unpinned.status, 1);
+	assert.match(unpinned.output, /scripts\/lib\/index\.js has no pinned sha256/);
+
+	const bound = runCon5({
+		files: required,
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs', 'scripts/lib/index.js'],
+	});
+	assert.equal(bound.status, 0, bound.output);
+
+	// A directory carrying a package.json resolves through its "main", which this
+	// walk does not model — and an unmodelled resolution is a finding, not a guess.
+	const packaged = runCon5({
+		files: {
+			...required,
+			'scripts/lib/package.json': JSON.stringify({ main: 'index.js' }),
+		},
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs'],
+	});
+	assert.equal(packaged.status, 1);
+	assert.match(packaged.output, /resolution through its "main" is not modelled/);
+
+	// The ESM half. Neither the directory nor an extensionless file resolves, and
+	// the pairing is the explicit specifier beside it, which does.
+	for (const [specifier, expected] of [
+		['./lib', /no directory index/],
+		['./lib/helper', /adds no extension/],
+	]) {
+		const missing = runCon5({
+			files: { 'scripts/gate.mjs': `import '${specifier}';\n`, [HELPER]: HELPER_SOURCE },
+			pinned: ['scripts/gate.mjs'],
+		});
+		assert.equal(missing.status, 1, `${specifier} is not a module ESM opens`);
+		assert.match(missing.output, expected);
+	}
+
+	const explicit = runCon5({
+		files: { 'scripts/gate.mjs': `import '${'./lib/helper.mjs'}';\n`, [HELPER]: HELPER_SOURCE },
+		pinned: ['scripts/gate.mjs', HELPER],
+	});
+	assert.equal(explicit.status, 0, explicit.output);
+});
+
+test('a specifier that names the wrong extension resolves to nothing', () => {
+	// The confirmed-good direction of the same rule, kept under regression because
+	// a fix for a false negative is where the false positive gets introduced.
+	// `./lib/helper.js` beside a `helper.mjs` is TypeScript's habit and Node's
+	// error: no loader rewrites one extension into another.
+	const mismatch = runCon5({
+		files: { 'scripts/gate.mjs': "import './lib/helper.js';\n", [HELPER]: HELPER_SOURCE },
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(mismatch.status, 1);
+	assert.match(mismatch.output, /relative import "\.\/lib\/helper\.js" resolves to no file/);
+
+	// Dot segments are normalised, because they address the same file.
+	const roundabout = runCon5({
+		files: {
+			'scripts/gate.mjs': "import { value } from './lib/../lib/helper.mjs';\nconsole.log(value);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', HELPER],
+	});
+	assert.equal(roundabout.status, 0, roundabout.output);
+});
+
+test('a symlinked target fails closed, however it was reached', () => {
+	// The one closure member whose path and content can be parted without editing
+	// either: the pin binds the path, and the link re-points it somewhere else.
+	const linked = runCon5({
+		files: {
+			'scripts/gate.mjs': "import { value } from './lib/helper.mjs';\nconsole.log(value);\n",
+			'scripts/lib/real.mjs': HELPER_SOURCE,
+		},
+		links: { [HELPER]: 'scripts/lib/real.mjs' },
+		pinned: ['scripts/gate.mjs'],
+	});
+	assert.equal(linked.status, 1);
+	assert.match(
+		linked.output,
+		/scripts\/lib\/helper\.mjs: executable target reached from .* is a symlink/
+	);
+});
+
+/* -------------------------------------------------------------------------
+ * Which loader, which is a question about the file rather than about a call
+ * ---------------------------------------------------------------------- */
+
+test('the loader shapes round 7 executed are each a finding', () => {
+	// FIVE SHAPES, each demonstrated loading a real helper at run time while the
+	// reader saw neither an edge nor a finding — the same green as a file that
+	// loads nothing. A grammar that knows only the `import` keyword and a bare
+	// `require(…)` is not closed, and an unclosed grammar is silence sold as
+	// permission. Each fixture below is executable: `node` runs it and the helper
+	// prints. The control must name the site.
+	const shapes = {
+		'an aliased require': [
+			'scripts/gate.cjs',
+			"const r = require;\nconst { value } = r('./lib/helper.cjs');\nconsole.log(value);\n",
+			/scripts\/gate\.cjs:1: require hands a CommonJS loader/,
+		],
+		'a require reached as a property': [
+			'scripts/gate.cjs',
+			"const { value } = module.require('./lib/helper.cjs');\nconsole.log(value);\n",
+			/scripts\/gate\.cjs:1: module\.require reaches require as a property/,
+		],
+		'a require inside eval': [
+			'scripts/gate.cjs',
+			'const { value } = eval("require(\'./lib/helper.cjs\')");\nconsole.log(value);\n',
+			/scripts\/gate\.cjs:1: eval turns text into running code/,
+		],
+		'a require through new Function': [
+			'scripts/gate.cjs',
+			"const load = new Function('require', \"return require('./lib/helper.cjs')\");\n" +
+				'const { value } = load(require);\nconsole.log(value);\n',
+			/scripts\/gate\.cjs:1: Function turns text into running code/,
+		],
+		'a createRequire handed straight to a call': [
+			'scripts/gate.mjs',
+			"import { createRequire } from 'node:module';\n" +
+				"const { value } = createRequire(import.meta.url)('./lib/helper.cjs');\nconsole.log(value);\n",
+			/scripts\/gate\.mjs:2: createRequire builds a CommonJS loader/,
+		],
+	};
+
+	for (const [what, [entry, source, expected]] of Object.entries(shapes)) {
+		const found = runCon5({
+			files: { [entry]: source, [CJS_HELPER]: CJS_HELPER_SOURCE },
+			entry,
+			pinned: [entry],
+		});
+		assert.equal(found.status, 1, `${what} must not load a helper past this control`);
+		assert.match(found.output, expected, `${what} must be named where it sits`);
+	}
+
+	// The pairing, and the reason this is a grammar rather than a blocklist: the
+	// modelled spelling of the same load is FOLLOWED, so the helper it opens is
+	// bound rather than merely mentioned.
+	const modelled = {
+		'scripts/gate.cjs': "const { value } = require('./lib/helper.cjs');\nconsole.log(value);\n",
+		[CJS_HELPER]: CJS_HELPER_SOURCE,
+	};
+	const unpinned = runCon5({
+		files: modelled,
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs'],
+	});
+	assert.equal(unpinned.status, 1);
+	assert.match(unpinned.output, /scripts\/lib\/helper\.cjs has no pinned sha256/);
+
+	const bound = runCon5({
+		files: modelled,
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs', CJS_HELPER],
+	});
+	assert.equal(bound.status, 0, bound.output);
+});
+
+test('a createRequire binding is read as the loader it is', () => {
+	// The one loader construction this grammar MODELS, because an ESM file that
+	// needs a package's own resolution has no other spelling of it and
+	// `scripts/build-stylesheet.mjs` is such a file. Modelling it means the edge is
+	// followed: the helper the binding opens must be pinned like any other, which a
+	// disclosure would never have achieved.
+	const files = {
+		'scripts/gate.mjs':
+			"import { createRequire } from 'node:module';\n" +
+			'const require_ = createRequire(import.meta.url);\n' +
+			"const { value } = require_('./lib/helper.cjs');\n" +
+			"console.log(value, require_.resolve('some-package'));\n",
+		[CJS_HELPER]: CJS_HELPER_SOURCE,
+	};
+
+	const unpinned = runCon5({ files, pinned: ['scripts/gate.mjs'] });
+	assert.equal(unpinned.status, 1, 'a load through the binding is a load');
+	assert.match(unpinned.output, /scripts\/lib\/helper\.cjs has no pinned sha256/);
+
+	const bound = runCon5({ files, pinned: ['scripts/gate.mjs', CJS_HELPER] });
+	assert.equal(bound.status, 0, bound.output);
+
+	// `resolve` on either spelling names a path without opening it, so it binds
+	// nothing — the confirmed-good behaviour of the previous round, kept.
+	const resolves = runCon5({
+		files: {
+			'scripts/gate.cjs': "console.log(require.resolve('./lib/helper.cjs'));\n",
+			[CJS_HELPER]: CJS_HELPER_SOURCE,
+		},
+		entry: 'scripts/gate.cjs',
+		pinned: ['scripts/gate.cjs'],
+	});
+	assert.equal(resolves.status, 0, resolves.output);
+});
+
+test('the module loader and the evaluator are reached by name or not at all', () => {
+	// The rest of the grammar, each case paired with the spelling that passes. A
+	// rule that only ever says no is not a rule about syntax; it is a ban.
+	const cases = [
+		[
+			"import module from 'node:module';\nconsole.log(module);\n",
+			"import { createRequire } from 'node:module';\n" +
+				'const require_ = createRequire(import.meta.url);\n' +
+				"console.log(require_.resolve('some-package'));\n",
+			/takes node:module in a form that hands out a loader/,
+		],
+		[
+			"import { registerHooks } from 'node:module';\nconsole.log(registerHooks);\n",
+			"import { createRequire } from 'node:module';\n" +
+				'const require_ = createRequire(import.meta.url);\n' +
+				"console.log(require_.resolve('some-package'));\n",
+			/takes node:module in a form that hands out a loader/,
+		],
+		[
+			"import vm from 'node:vm';\nconsole.log(vm);\n",
+			"import { readFileSync } from 'node:fs';\nconsole.log(readFileSync);\n",
+			/imports node:vm, which evaluates text as code/,
+		],
+		[
+			'const name = process.argv[2];\nconsole.log(globalThis[name]);\n',
+			'console.log(globalThis.fetch);\n',
+			/globalThis is reached other than by name/,
+		],
+		[
+			'const realm = globalThis;\nconsole.log(realm);\n',
+			'console.log(globalThis.fetch);\n',
+			/globalThis is reached other than by name/,
+		],
+		[
+			'const handlers = {};\nconst key = process.argv[2];\nhandlers[key]();\n',
+			'const handlers = [() => 1];\nhandlers[0]();\n',
+			/calls something this reading cannot name/,
+		],
+		[
+			'const make = () => () => 1;\nmake()();\n',
+			'const make = () => 1;\nmake();\n',
+			/calls something this reading cannot name/,
+		],
+		[
+			'const it = {};\nconsole.log(it.constructor.constructor);\n',
+			'const it = {};\nconsole.log(Object.getPrototypeOf(it));\n',
+			/reaches constructor as a property/,
+		],
+		[
+			"console.log(globalThis['eval']);\n",
+			'console.log(globalThis.fetch);\n',
+			/reaches eval by key/,
+		],
+	];
+
+	for (const [rejected, accepted, expected] of cases) {
+		const found = runCon5({
+			files: { 'scripts/gate.mjs': rejected },
+			pinned: ['scripts/gate.mjs'],
+		});
+		assert.equal(found.status, 1, `an unmodelled loader shape must be named: ${rejected}`);
+		assert.match(found.output, expected);
+
+		const clean = runCon5({
+			files: { 'scripts/gate.mjs': accepted },
+			pinned: ['scripts/gate.mjs'],
+		});
+		assert.equal(clean.status, 0, `the modelled spelling must pass: ${accepted}\n${clean.output}`);
+	}
+});
+
+test('an unmodelled loader is disclosable, on its line, with its reason', () => {
+	// The repair. A grammar with no repair but a weakening teaches the next author
+	// to weaken it, so the same channel the computed loads use is open to these —
+	// and it is exact in the same way, which is what keeps it from becoming a
+	// blanket permission.
+	const files = {
+		'scripts/gate.mjs':
+			"// a probe that needs a resolve hook\nimport { registerHooks } from 'node:module';\n",
+	};
+	const entry = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: "import { registerHooks } from 'node:module';",
+		reason: 'the fixture’s point',
+	};
+
+	const disclosed = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [entry] },
+	});
+	assert.equal(disclosed.status, 0, disclosed.output);
+
+	const wrongLine = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [{ ...entry, line: 1 }] },
+	});
+	assert.equal(wrongLine.status, 1);
+	assert.match(wrongLine.output, /scripts\/gate\.mjs:2: import \{ registerHooks \}/);
+	assert.match(wrongLine.output, /which the closure does not contain/);
+});
+
+/* -------------------------------------------------------------------------
+ * One declaration, one load
+ * ---------------------------------------------------------------------- */
+
+test('a disclosure binds one occurrence and not the next one like it', () => {
+	// THE REPRO. Two computed loads, identical text, one declaration — and the
+	// declarations were a SET, so the second site was covered by the first site's
+	// reason. The second call can name a different module for a different reason
+	// behind identical text, and a reader of the contract sees one hole where the
+	// tree has two.
+	const files = {
+		'scripts/gate.mjs':
+			'const target = process.argv[2];\nawait import(target);\nawait import(target);\n',
+	};
+	const first = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'import(target)',
+		reason: 'the first site',
+	};
+
+	const half = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [first] },
+	});
+	assert.equal(half.status, 1, 'one declaration cannot excuse two loads');
+	assert.match(half.output, /scripts\/gate\.mjs:3: import\(target\) loads a module/);
+
+	const both = runCon5({
+		files,
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [first, { ...first, line: 3, reason: 'the second site' }],
+		},
+	});
+	assert.equal(both.status, 0, both.output);
+	assert.match(both.output, /disclosed one by one with a reason: 2/);
+});
+
+test('two identical loads on one line cannot hide behind one declaration', () => {
+	// The corner the line does not tell apart. It fails closed rather than
+	// quietly covering both, and the repair is a newline.
+	const crowded = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				'const target = process.argv[2];\nawait import(target); await import(target);\n',
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'import(target)',
+					reason: 'the first of two',
+				},
+			],
+		},
+	});
+	assert.equal(crowded.status, 1);
+	assert.match(crowded.output, /a second import\(target\) shares this line with a disclosed one/);
+});
+
+test('a declaration written twice is rejected rather than collapsed', () => {
+	// A Map keyed by the declaration silently discarded the second reason, so a
+	// contract could carry two reasons for one load and a reader could believe
+	// either. The control refuses to start instead.
+	const repeated = runCon5({
+		files: { 'scripts/gate.mjs': 'const target = process.argv[2];\nawait import(target);\n' },
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'import(target)',
+					reason: 'the reason a reader would read',
+				},
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'import(target)',
+					reason: 'the reason that used to win in silence',
+				},
+			],
+		},
+	});
+	assert.equal(repeated.status, 1);
+	assert.match(repeated.output, /declares import\(target\) at scripts\/gate\.mjs:2 twice/);
+});
+
+test('a disclosure without the line it sits on is not a disclosure', () => {
+	// The shape check, which is a hard stop rather than a finding: a contract this
+	// control cannot read is not a contract it may read halfway.
+	const shapeless = runCon5({
+		files: { 'scripts/gate.mjs': 'const target = process.argv[2];\nawait import(target);\n' },
+		pinned: ['scripts/gate.mjs'],
+		contract: {
+			unfollowable_loads_disclosed: [
+				{ file: 'scripts/gate.mjs', expression: 'import(target)', reason: 'no line' },
+			],
+		},
+	});
+	assert.equal(shapeless.status, 1);
+	assert.match(
+		shapeless.output,
+		/must carry a non-empty file, expression and reason, and the positive/
+	);
 });

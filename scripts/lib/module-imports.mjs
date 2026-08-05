@@ -64,6 +64,27 @@
  * is not a load at all is outside any static reach and outside this module's
  * claim.
  *
+ * WHICH LOADER, NOT JUST WHICH TEXT. Round 7's review took the specifier
+ * `'./lib/helper'` out of a `require(…)` and pointed out that the reading had
+ * thrown away the only thing that decides which FILE it names: CommonJS adds
+ * `.js`, `.json` and `.node` and reads a directory's index, ES module resolution
+ * adds nothing and reads no directory. A consumer handed only the text has to
+ * invent an order, CON-5 invented one starting at `.mjs`, and the gate pinned a
+ * file `require` cannot open while Node executed the unpinned `.js` beside it. So
+ * `runtimeLoads` reports the loader with the specifier, and the resolution
+ * belongs to whoever knows the loader's rules rather than to whoever is holding
+ * the string.
+ *
+ * WHICH LOADERS EXIST AT ALL is the other half of the same round, and the reason
+ * `unfollowableLoads` is a closed grammar rather than a list of two call shapes.
+ * `const r = require`, `module.require(…)`, `eval("require('…')")`, `new
+ * Function('require', …)(require)` and a `createRequire(…)` binding all load a
+ * file at run time; a reader that knows only the `import` keyword and a bare
+ * `require(…)` answered the same green for all five as for a file that loads
+ * nothing. Anything that reaches the module loader or the evaluator is now
+ * reported unless this module can follow it, and that function's header states
+ * exactly where its reach stops.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -306,16 +327,59 @@ const isImportCall = (node) =>
  * it, which is correct for them too: round 6 compiled a literal `require()` in a
  * `.cjs` past both of them, and the build-reading gate had to catch it alone.
  *
- * The callee must be the IDENTIFIER `require`, so `module.require(x)` and a
- * method named `require` are not this node. A locally defined function called
- * `require` still is, and that over-inclusion is deliberate: a specifier it
- * yields resolves to a real file or is reported as unresolvable, and neither
- * outcome is worse than the alternative of trusting a name.
+ * The callee must be the IDENTIFIER `require` or one BOUND FROM `createRequire`
+ * — see `requireLike` — so `module.require(x)` and a method named `require` are
+ * not this node. Those are not silently dropped either; they are rejected by the
+ * loader grammar below, which is the half of this that round 7 was missing. A
+ * locally defined function called `require` is read as a require call, and that
+ * over-inclusion is deliberate: a specifier it yields resolves to a real file or
+ * is reported as unresolvable, and neither outcome is worse than trusting a name.
  */
-const isRequireCall = (node) =>
-	ts.isCallExpression(node) &&
-	ts.isIdentifier(node.expression) &&
-	node.expression.escapedText === 'require';
+const isRequireCall = (node, names) =>
+	ts.isCallExpression(node) && ts.isIdentifier(node.expression) && names.has(node.expression.text);
+
+/**
+ * The names that hold a CommonJS loader in this file: `require` itself, and every
+ * identifier a `createRequire(…)` call is bound to.
+ *
+ * WHY `createRequire` IS MODELLED RATHER THAN REJECTED. An ESM file that must
+ * read a package's own resolution has no other spelling of it, and this
+ * repository has one: `scripts/build-stylesheet.mjs` binds
+ * `createRequire(import.meta.url)` and uses it only as `require_.resolve(…)` to
+ * locate two vendored stylesheets. Rejecting the form outright would leave a real
+ * gate file red with no repair but a disclosure, and a disclosure is what this
+ * module asks for when nothing better exists — not when the shape can simply be
+ * read. So a `const <name> = createRequire(…)` binding makes `<name>(…)` a
+ * require call like any other: a literal argument is an edge the closure follows,
+ * a computed one is a finding.
+ *
+ * ALIASING `require` ITSELF IS NOT MODELLED and is a finding, and the asymmetry
+ * is a judgement about necessity rather than about difficulty. `const r =
+ * require` adds nothing a file needs — `require` is already in scope wherever the
+ * alias is legal — so the shape appears when someone is walking around a reader,
+ * which is exactly codex's probe. `createRequire` appears when a file needs a
+ * loader it cannot otherwise have.
+ *
+ * The set is file-wide rather than scope-aware, which over-includes: a `require`
+ * shadowed inside one function marks calls elsewhere too. That direction reports
+ * more edges and more findings, which is the direction this reading fails in.
+ */
+function requireLike(file) {
+	const names = new Set(['require']);
+	const modelled = new Set();
+
+	eachNode(file, (node) => {
+		if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name)) return;
+		const initializer = node.initializer;
+		if (!initializer || !ts.isCallExpression(initializer)) return;
+		if (!ts.isIdentifier(initializer.expression) || initializer.expression.text !== 'createRequire')
+			return;
+		names.add(node.name.text);
+		modelled.add(initializer.expression);
+	});
+
+	return { names, modelled };
+}
 
 /**
  * Every module specifier a source references, in every form that reaches a file:
@@ -327,7 +391,7 @@ const isRequireCall = (node) =>
  * it is given, and what it is given must be script.
  */
 export function moduleSpecifiers(source) {
-	return collect(source, false);
+	return [...new Set(collect(source, false).map((load) => load.specifier))];
 }
 
 /**
@@ -351,43 +415,304 @@ export function moduleSpecifiers(source) {
  * dropped here.
  */
 export function runtimeSpecifiers(source) {
+	return [...new Set(collect(source, true).map((load) => load.specifier))];
+}
+
+/**
+ * The same runtime reading with the LOADER each specifier is handed to kept
+ * beside it: `{ specifier, kind }`, where kind is `'esm'` or `'cjs'`.
+ *
+ * WHY THE KIND SURVIVES THE PROJECTION NOW. It used not to, and dropping it was
+ * a hole rather than a simplification. The two loaders resolve the same text to
+ * DIFFERENT FILES: CommonJS adds `.js`, `.json` and `.node` to an extensionless
+ * specifier, in that order, and reads `<dir>/index.js` for a directory; ES module
+ * resolution adds nothing and reads no directory at all — Node answers
+ * `ERR_MODULE_NOT_FOUND` and `ERR_UNSUPPORTED_DIR_IMPORT`. A consumer handed only
+ * the text has to invent an order, and CON-5's invented one began with `.mjs`. So
+ * `require('./lib/helper')` with `helper.mjs` and `helper.js` both present pinned
+ * the `.mjs` — a file `require` cannot even open — while Node executed the
+ * unpinned `.js`, and rewriting that `.js` wholesale left the gate green. The
+ * kind is not a nicety; it is which file runs.
+ *
+ * A static `import`, an `export … from` and a dynamic `import()` are `'esm'`. A
+ * `require(…)` call — including one through a `createRequire` binding — and
+ * `import x = require('…')`, which TypeScript emits as one, are `'cjs'`.
+ */
+export function runtimeLoads(source) {
 	return collect(source, true);
 }
 
 /**
  * The shared walk. `runtimeOnly` drops the declarations that are erased before
  * execution; everything else about the reading is identical, which is the
- * property that keeps the two exports from drifting into two readings.
+ * property that keeps the exports from drifting into several readings.
  */
 function collect(source, runtimeOnly) {
-	const specifiers = new Set();
-	const add = (node, typeOnly) => {
+	const file = parsed(source);
+	const { names } = requireLike(file);
+	const loads = [];
+	const seen = new Set();
+	const add = (node, typeOnly, kind) => {
 		if (runtimeOnly && typeOnly) return;
 		const specifier = staticSpecifier(node);
-		if (specifier) specifiers.add(specifier);
+		if (specifier === null) return;
+		const key = `${kind} ${specifier}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		loads.push({ specifier, kind });
 	};
 
-	eachNode(parsed(source), (node) => {
+	eachNode(file, (node) => {
 		if (ts.isImportDeclaration(node))
-			add(node.moduleSpecifier, node.importClause?.isTypeOnly === true);
-		else if (ts.isExportDeclaration(node)) add(node.moduleSpecifier, node.isTypeOnly === true);
+			add(node.moduleSpecifier, node.importClause?.isTypeOnly === true, 'esm');
+		else if (ts.isExportDeclaration(node))
+			add(node.moduleSpecifier, node.isTypeOnly === true, 'esm');
 		else if (
 			ts.isImportEqualsDeclaration(node) &&
 			ts.isExternalModuleReference(node.moduleReference)
 		)
-			add(node.moduleReference.expression, node.isTypeOnly === true);
+			add(node.moduleReference.expression, node.isTypeOnly === true, 'cjs');
 		else if (ts.isImportTypeNode(node) && node.argument && ts.isLiteralTypeNode(node.argument))
-			add(node.argument.literal, true);
-		else if (isImportCall(node) || isRequireCall(node)) add(node.arguments[0], false);
+			add(node.argument.literal, true, 'esm');
+		else if (isImportCall(node)) add(node.arguments[0], false, 'esm');
+		else if (isRequireCall(node, names)) add(node.arguments[0], false, 'cjs');
 	});
 
-	return [...specifiers];
+	return loads;
+}
+
+/** Names that hand out a loader or an evaluator when they appear as a PROPERTY. */
+const LOADER_PROPERTIES = new Set(['require', 'createRequire', 'eval', 'constructor']);
+
+/** Identifiers that turn text into running code. */
+const EVALUATORS = new Set(['eval', 'Function']);
+
+/** The global object, whose members this grammar insists are reached BY NAME. */
+const REALMS = new Set(['globalThis', 'global']);
+
+/** Modules that hand out a loader, and the one export of them this reading models. */
+const LOADER_MODULES = new Set(['module', 'node:module']);
+const MODELLED_LOADER_EXPORTS = new Set(['createRequire']);
+
+/** Modules that evaluate text as code. */
+const EVALUATOR_MODULES = new Set(['vm', 'node:vm']);
+
+const isLiteralKey = (node) =>
+	Boolean(node) &&
+	(ts.isStringLiteral(node) ||
+		ts.isNumericLiteral(node) ||
+		ts.isNoSubstitutionTemplateLiteral(node));
+
+/**
+ * An identifier that NAMES something rather than referring to a value: every
+ * declaration's own name, every `x.NAME`, every `{ NAME: local }` key, every
+ * label. TypeScript puts all of them in the parent's `name`, `propertyName` or
+ * `label` slot, so one shape test replaces the list of twenty node types the
+ * first draft of this carried — and cannot fall behind a TypeScript release that
+ * adds a twenty-first.
+ */
+function namesRatherThanReferences(node) {
+	const parent = node.parent;
+	if (!parent) return true;
+	// `{ require }` is the one shorthand where the NAME slot is also a reference.
+	if (ts.isShorthandPropertyAssignment(parent)) return false;
+	if (parent.name === node || parent.propertyName === node || parent.label === node) return true;
+	return ts.isQualifiedName(parent) && parent.right === node;
+}
+
+/** True where the identifier sits inside a type, which no loader ever reads. */
+function inTypePosition(node) {
+	for (let parent = node.parent; parent; parent = parent.parent)
+		if (ts.isTypeNode(parent)) return true;
+	return false;
+}
+
+/** A callee this grammar can name, which is the condition for reading the call. */
+function nameableCallee(callee) {
+	if (!callee) return false;
+	if (ts.isParenthesizedExpression(callee) || ts.isNonNullExpression(callee))
+		return nameableCallee(callee.expression);
+	if (ts.isAsExpression(callee) || ts.isSatisfiesExpression(callee))
+		return nameableCallee(callee.expression);
+	return (
+		ts.isIdentifier(callee) ||
+		ts.isPropertyAccessExpression(callee) ||
+		(ts.isElementAccessExpression(callee) && isLiteralKey(callee.argumentExpression)) ||
+		ts.isFunctionExpression(callee) ||
+		ts.isArrowFunction(callee) ||
+		callee.kind === ts.SyntaxKind.ImportKeyword ||
+		callee.kind === ts.SyntaxKind.SuperKeyword ||
+		callee.kind === ts.SyntaxKind.ThisKeyword
+	);
+}
+
+/**
+ * Every load in this source that the reading above cannot follow to a file —
+ * both because the TARGET is computed and because the LOADER is a construction
+ * this grammar does not model — as `{ expression, line, kind, detail }`.
+ *
+ * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
+ * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
+ * require; r('./lib/helper')`, `module.require(…)`, `eval("require('…')")`, `new
+ * Function('require', …)(require)`, and a `createRequire(…)` binding. Each loaded
+ * a real file at run time, and each produced neither an edge nor a finding — the
+ * same green as a file that loads nothing. That is symptom A again with a
+ * different spelling: silence and permission are indistinguishable from outside,
+ * and a gate may not have that property. So the grammar is CLOSED. A load this
+ * reading models is followed; anything else that reaches the module loader or the
+ * evaluator is reported, and the caller decides whether a declared reason exists
+ * for it.
+ *
+ * WHAT IT REJECTS, by construction rather than by example:
+ *
+ *   - a `require`-like name used anywhere but as a call or as `<name>.resolve`,
+ *     which covers every alias, every hand-off and every stashed loader;
+ *   - a PROPERTY named `require`, `createRequire`, `eval` or `constructor`, which
+ *     covers `module.require`, `globalThis.eval` and the `.constructor.constructor`
+ *     route to `Function`;
+ *   - `eval` and `Function` as identifiers, in any position;
+ *   - `globalThis` or `global` reached other than as `globalThis.<name>`, which
+ *     covers `globalThis[key]` and `const g = globalThis` alike;
+ *   - a call whose CALLEE this grammar cannot name — `handlers[key]()`, `f()()`,
+ *     `(cond ? a : b)()` — since a callee it cannot name is a loader it cannot
+ *     rule out;
+ *   - importing `node:vm`, or `node:module` in any form but a named import of
+ *     `createRequire`, which is the one loader construction modelled above.
+ *
+ * WHERE IT STOPS, said plainly, because a closed grammar over NAMES is not a
+ * closed grammar over BEHAVIOUR. It reads syntax, so it cannot see a loader
+ * assembled without ever writing one of those names — `Reflect.get(x, key)`,
+ * a member reached through an alias of an alias, a name built from string pieces
+ * and applied to something that is not `globalThis`. It is scoped to code this
+ * process runs, so `node:child_process` and `node:worker_threads` are outside it:
+ * a probe that spawns `node` is ordinary here, and the code that child runs is
+ * the child's own closure rather than this file's. `process.dlopen` and
+ * WebAssembly are outside it for the same reason as the first group — no name it
+ * watches appears. What backs the residue is not this function: it is that every
+ * file CON-5 walks is bound by a content hash, so any of those shapes has to
+ * arrive in a governance diff, where the review is the control. That is the same
+ * argument the disclosure list rests on, and it is not a claim that the class is
+ * closed.
+ *
+ * LINES ARE 1-BASED and are counted in the SOURCE THIS IS GIVEN. For a component
+ * that is the script the caller extracted, not the file on disk; CON-5, which is
+ * the caller that uses them, walks plain modules where the two are the same.
+ */
+export function unfollowableLoads(source) {
+	const file = parsed(source);
+	const { names, modelled } = requireLike(file);
+	const found = [];
+	const report = (node, kind, detail) =>
+		found.push({
+			expression: node.getText(file),
+			line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+			kind,
+			detail,
+		});
+
+	const loaderModule = (node, specifier) => {
+		if (EVALUATOR_MODULES.has(specifier))
+			return report(node, 'loader', `imports ${specifier}, which evaluates text as code`);
+		if (!LOADER_MODULES.has(specifier)) return;
+		const clause = ts.isImportDeclaration(node) ? node.importClause : null;
+		const bindings = clause?.namedBindings;
+		const modelledOnly =
+			clause &&
+			!clause.name &&
+			bindings &&
+			ts.isNamedImports(bindings) &&
+			bindings.elements.every((element) =>
+				MODELLED_LOADER_EXPORTS.has((element.propertyName ?? element.name).text)
+			);
+		if (!modelledOnly)
+			report(
+				node,
+				'loader',
+				`takes ${specifier} in a form that hands out a loader this reading cannot follow`
+			);
+	};
+
+	eachNode(file, (node) => {
+		if (isImportCall(node) || isRequireCall(node, names)) {
+			const specifier = staticSpecifier(node.arguments[0]);
+			if (specifier === null) report(node, 'computed', 'loads a module no static read can name');
+			else loaderModule(node, specifier);
+			return;
+		}
+
+		if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+			const specifier = staticSpecifier(node.moduleSpecifier);
+			if (specifier !== null) loaderModule(node, specifier);
+			return;
+		}
+
+		if (ts.isPropertyAccessExpression(node) && LOADER_PROPERTIES.has(node.name.text)) {
+			report(
+				node,
+				'loader',
+				`reaches ${node.name.text} as a property, which no static read follows`
+			);
+			return;
+		}
+
+		if (ts.isElementAccessExpression(node)) {
+			const key = node.argumentExpression;
+			if (isLiteralKey(key) && LOADER_PROPERTIES.has(key.text))
+				report(node, 'loader', `reaches ${key.text} by key, which no static read follows`);
+			return;
+		}
+
+		if (
+			(ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+			!nameableCallee(node.expression)
+		) {
+			report(node, 'loader', 'calls something this reading cannot name, so it cannot be ruled out');
+			return;
+		}
+
+		if (!ts.isIdentifier(node) || namesRatherThanReferences(node) || inTypePosition(node)) return;
+
+		const parent = node.parent;
+		const name = node.text;
+		if (names.has(name)) {
+			const called = ts.isCallExpression(parent) && parent.expression === node;
+			const resolves =
+				ts.isPropertyAccessExpression(parent) &&
+				parent.expression === node &&
+				parent.name.text === 'resolve';
+			if (!called && !resolves)
+				report(node, 'loader', 'hands a CommonJS loader somewhere this reading cannot follow');
+			return;
+		}
+		if (name === 'createRequire') {
+			if (!modelled.has(node))
+				report(node, 'loader', 'builds a CommonJS loader this reading cannot follow to its uses');
+			return;
+		}
+		if (EVALUATORS.has(name)) {
+			report(node, 'loader', 'turns text into running code');
+			return;
+		}
+		if (REALMS.has(name) && !(ts.isPropertyAccessExpression(parent) && parent.expression === node))
+			report(node, 'loader', 'is reached other than by name, so its members cannot be read');
+	});
+
+	return found;
 }
 
 /**
  * A load whose target no static read can name — `import(<anything but a readable
  * literal>)` and the same shape spelled `require(…)` — returned as the CALL's
  * source text, so a finding quotes what is in the file.
+ *
+ * THE SEAM PROBES' PROJECTION of `unfollowableLoads`, and the narrower half of
+ * it. They ask which components a file depends on, over every tracked source file
+ * including vendored greater-components source this repository may not edit; a
+ * loader-grammar finding there would be a rule about code whose only available
+ * repair is an edit upstream. Their unfollowable-load question is answered a
+ * second way besides, by `scripts/audit-seam-graph.mjs` reading the edges the
+ * real Vite build resolves. CON-5 has no such second reading — its closure is
+ * exactly this walk — so it takes the whole grammar.
  *
  * Taken by SUBTRACTION, as it was before: every such call that is not a plain
  * string or an un-interpolated template is unreadable. `import('$lib/agents/' +
@@ -409,14 +734,7 @@ function collect(source, runtimeOnly) {
  * this walker is clever.
  */
 export function computedImports(source) {
-	const file = parsed(source);
-	const computed = [];
-
-	eachNode(file, (node) => {
-		if (!isImportCall(node) && !isRequireCall(node)) return;
-		if (staticSpecifier(node.arguments[0]) !== null) return;
-		computed.push(node.getText(file));
-	});
-
-	return computed;
+	return unfollowableLoads(source)
+		.filter((load) => load.kind === 'computed')
+		.map((load) => load.expression);
 }

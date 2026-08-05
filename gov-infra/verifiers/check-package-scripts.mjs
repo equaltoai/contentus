@@ -40,12 +40,24 @@
  * ADDRESSES rather than of the text it is written as. `relativeImports` carries
  * the detail.
  *
- * The one thing no static reading can follow is a load whose target is computed,
- * and this control now says so out loud: an `import(<expression>)` or
- * `require(<expression>)` inside the closure must be declared in the contract
- * with its reason, or it is a finding. Three exist, all loading a build artifact
- * or a file a probe has just written; what binds them is that the files holding
- * them are pinned, so the call cannot appear or move without a governance edit.
+ * A reading that names a file still has to name the RIGHT file, and which file a
+ * specifier names is the loader's answer rather than the text's. CommonJS adds
+ * `.js`, `.json` and `.node` to an extensionless specifier and reads a
+ * directory's index; ES module resolution adds nothing and reads no directory.
+ * This walk used to apply one invented order to both, beginning at `.mjs` — so a
+ * `require('./lib/helper')` beside a `helper.mjs` and a `helper.js` pinned the
+ * `.mjs`, which `require` cannot open, while Node executed the unpinned `.js`.
+ * The load's KIND now travels with its specifier and `resolveRelativeImport`
+ * resolves by the rules of the loader that opens it.
+ *
+ * What no static reading can follow is a load whose TARGET is computed, or whose
+ * LOADER is a construction the reading does not model — an aliased `require`,
+ * `module.require`, `eval`, `new Function`, a `node:vm` import. This control says
+ * so out loud in both directions: the grammar of loads it follows is closed, and
+ * anything outside it inside the closure must be declared in the contract, on its
+ * line, with its reason, or it is a finding. What binds the declared ones is that
+ * the files holding them are pinned, so a load cannot appear or move without a
+ * governance edit.
  *
  * What this is still not: a cryptographic binding of the *pin*. An author who
  * edits both an artifact and its hash still moves the gate. What it buys is that
@@ -57,11 +69,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 
-import {
-	computedImports,
-	modulePath,
-	runtimeSpecifiers,
-} from '../../scripts/lib/module-imports.mjs';
+import { modulePath, runtimeLoads, unfollowableLoads } from '../../scripts/lib/module-imports.mjs';
 import { readStrictJson } from './strict-json.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
@@ -167,18 +175,24 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
 }
 
 /**
- * The `import(<expression>)` and `require(<expression>)` sites inside the closure
- * whose target no static read can name, declared with the reason each one is
- * there.
+ * The loads inside the closure this walk cannot follow to a file, declared one by
+ * one with the reason each is there.
+ *
+ * TWO KINDS SHARE THE LIST because they are one fact. A COMPUTED target —
+ * `import(<expression>)`, `require(<expression>)` — is a load whose file no
+ * static read can name. An unmodelled LOADER — an aliased `require`,
+ * `module.require`, `eval`, `new Function`, a `node:vm` import — is a load whose
+ * mechanism this reading does not follow. Either way the walk stops, and nothing
+ * beyond it is pinned. `unfollowableLoads` in the shared reader draws the line
+ * and its header states exactly where the grammar's reach ends.
  *
  * WHY DECLARED RATHER THAN IGNORED. This control's claim is that every file a
- * guarded command executes is bound by a content hash. A computed load is a hole
- * in exactly that claim — the walk cannot follow it, so nothing downstream of it
- * is pinned — and the previous reader did not merely permit them, it could not
- * see them at all. Silence and permission look identical from the outside, which
- * is the property a gate may not have.
+ * guarded command executes is bound by a content hash. A load the walk cannot
+ * follow is a hole in exactly that claim, and the previous reader did not merely
+ * permit them — it could not see them at all. Silence and permission look
+ * identical from the outside, which is the property a gate may not have.
  *
- * WHY NOT SIMPLY A FINDING. Three legitimate sites exist and none can be written
+ * WHY NOT SIMPLY A FINDING. Legitimate sites exist that cannot be written
  * statically: they load a build artifact, or a file the probe itself has just
  * written to a temp directory. Failing on them would leave the control red with
  * no repair available, which teaches the next author to weaken the rule rather
@@ -187,46 +201,74 @@ if (!Array.isArray(allowedGlobs) || !Array.isArray(unpinnedRoots)) {
  * `pnpmfile_disclosed`, `only_built_dependencies_disclosed`: state it, with the
  * reason, where a reviewer reads it.
  *
+ * ONE DECLARATION BINDS ONE OCCURRENCE, which is the half round 7's review found
+ * missing. The declarations were a SET keyed by file and expression TEXT, and a
+ * set answers "is this permitted" rather than "how many of these did we agree
+ * to": two `await import(target)` calls in one file shared a key, so one entry
+ * excused both — and the second call can name a different module, for a different
+ * reason, behind identical text. Two identical entries collapsed the same way,
+ * and the second reason was discarded in silence. So a declaration carries the
+ * LINE its load sits on, a repeated declaration is rejected outright, and a
+ * declaration is consumed by the first occurrence that matches it: a second load
+ * with the same file, line and text is undeclared, like any other. The line costs
+ * nothing the pin does not already cost — the file's own hash has to move in the
+ * same diff whenever the line does.
+ *
  * The declaration is exact on both sides. An undisclosed site is a finding, and a
  * disclosure that matches no site in the closure is a finding too, so this list
  * stays the truth about the tree instead of drifting into a blanket permission.
- * It is not a hash: what binds these three is that the files containing them are
- * themselves pinned, so the call cannot appear, move or change without a
- * governance edit in the same diff.
+ * It is not a hash: what binds these sites is that the files containing them are
+ * themselves pinned, so a load cannot appear, move or change without a governance
+ * edit in the same diff.
  */
-const computedDisclosures = targets.computed_imports_disclosed ?? [];
-if (!Array.isArray(computedDisclosures)) {
-	console.error(`${CONTRACT}: executable_targets.computed_imports_disclosed must be an array`);
+const loadDisclosures = targets.unfollowable_loads_disclosed ?? [];
+if (!Array.isArray(loadDisclosures)) {
+	console.error(`${CONTRACT}: executable_targets.unfollowable_loads_disclosed must be an array`);
 	process.exit(1);
 }
-const disclosedComputed = (() => {
+const disclosedLoads = (() => {
 	const declared = new Map();
-	const matched = new Set();
-	for (const entry of computedDisclosures) {
+	const consumed = new Set();
+	const identify = (file, line, expression) => `${file}\u0000${line}\u0000${expression}`;
+	for (const entry of loadDisclosures) {
 		const shaped =
 			entry &&
 			typeof entry === 'object' &&
 			!Array.isArray(entry) &&
 			['file', 'expression', 'reason'].every(
 				(key) => typeof entry[key] === 'string' && entry[key].length > 0
-			);
+			) &&
+			Number.isInteger(entry.line) &&
+			entry.line > 0;
 		if (!shaped) {
 			console.error(
-				`${CONTRACT}: every executable_targets.computed_imports_disclosed entry must carry a ` +
-					'non-empty file, expression and reason'
+				`${CONTRACT}: every executable_targets.unfollowable_loads_disclosed entry must carry a ` +
+					'non-empty file, expression and reason, and the positive integer line it sits on'
 			);
 			process.exit(1);
 		}
-		declared.set(`${entry.file}\u0000${entry.expression}`, entry);
+		const key = identify(entry.file, entry.line, entry.expression);
+		if (declared.has(key)) {
+			console.error(
+				`${CONTRACT}: executable_targets.unfollowable_loads_disclosed declares ${entry.expression} ` +
+					`at ${entry.file}:${entry.line} twice. One declaration binds one load, so a repeat adds no ` +
+					'permission and discards a reason.'
+			);
+			process.exit(1);
+		}
+		declared.set(key, entry);
 	}
 	return {
-		take(file, expression) {
-			const key = `${file}\u0000${expression}`;
-			if (!declared.has(key)) return false;
-			matched.add(key);
-			return true;
+		// `declared` the first time a site matches; `repeated` for a second load
+		// with the same file, line and text; `undeclared` for anything else.
+		take(file, line, expression) {
+			const key = identify(file, line, expression);
+			if (!declared.has(key)) return 'undeclared';
+			if (consumed.has(key)) return 'repeated';
+			consumed.add(key);
+			return 'declared';
 		},
-		unmatched: () => [...declared].filter(([key]) => !matched.has(key)).map(([, entry]) => entry),
+		unmatched: () => [...declared].filter(([key]) => !consumed.has(key)).map(([, entry]) => entry),
 		count: declared.size,
 	};
 })();
@@ -365,30 +407,117 @@ function expandGlob(pattern) {
  * removed. A specifier is still REPORTED as written; a query is not part of the
  * path and is part of what the next reader has to find in the file.
  *
- * `runtimeSpecifiers` rather than `moduleSpecifiers` is the projection this
- * control wants: `import type … from './x'` is erased by
+ * `runtimeLoads` rather than `moduleSpecifiers` is the projection this control
+ * wants, for two reasons. `import type … from './x'` is erased by
  * `--experimental-strip-types` and by `tsc` before anything runs, so the file it
  * names is not code any guarded command executes, and pinning its bytes would
- * bind content no command opens. A type-only SPECIFIER inside a value import
- * still loads the module and still binds. The seam probes ask the other
+ * bind content no command opens; a type-only SPECIFIER inside a value import
+ * still loads the module and still binds. And each load arrives with the LOADER
+ * it is handed to, which is what decides the file an extensionless or directory
+ * specifier opens — see `resolveRelativeImport`. The seam probes ask the other
  * projection of the same walk, for reasons their own header states.
  */
 function relativeImports(source) {
-	return runtimeSpecifiers(source).filter((specifier) => {
+	return runtimeLoads(source).filter(({ specifier }) => {
 		const target = modulePath(specifier);
 		return target.startsWith('./') || target.startsWith('../');
 	});
 }
 
-const moduleExtensions = ['', '.mjs', '.js', '.mts', '.ts', '.cjs', '/index.mjs', '/index.js'];
+/**
+ * What each loader adds to a specifier that does not name a file outright.
+ * CommonJS tries `.js`, `.json` and `.node`, in that order, and then a
+ * directory's `index` in the same three; ES module resolution adds NOTHING and
+ * reads no directory — Node answers `ERR_MODULE_NOT_FOUND` and
+ * `ERR_UNSUPPORTED_DIR_IMPORT` rather than guessing. `.mjs` and `.cjs` are in
+ * neither list: both loaders require those to be spelled out.
+ */
+const CJS_EXTENSIONS = ['.js', '.json', '.node'];
+const CJS_INDEXES = ['index.js', 'index.json', 'index.node'];
 
-function resolveRelativeImport(fromFile, specifier) {
+/** Extensions a loader never adds, and so a stem that carries one is not loaded. */
+const NEVER_ADDED = ['.mjs', '.cjs', '.mts', '.cts', '.ts', '.tsx', '.jsx'];
+
+const isFile = (path) => existsSync(path) && statSync(path).isFile();
+const isDirectory = (path) => existsSync(path) && statSync(path).isDirectory();
+const siblings = (base, names) => names.map((name) => `${base}${name}`).filter(isFile);
+
+/**
+ * The file a specifier opens, resolved BY THE LOADER THAT OPENS IT.
+ *
+ * THIS USED TO BE ONE INVENTED ORDER for both loaders — `''`, `.mjs`, `.js`,
+ * `.mts`, `.ts`, `.cjs`, `/index.mjs`, `/index.js` — and round 7's review walked
+ * an executable straight through the gap between that list and Node's. A
+ * `gate.cjs` doing `require('./lib/helper')` beside both a `helper.mjs` and a
+ * `helper.js` was pinned to the `.mjs`: a file CommonJS cannot open at all, since
+ * `require` adds `.js`, `.json` and `.node` and never `.mjs`. Node executed the
+ * `.js`, which no pin bound, and rewriting it wholesale left CON-5 green. The pin
+ * named a decoy — precisely the failure this control exists to prevent, dressed
+ * as coverage.
+ *
+ * So resolution asks the loader. `kind` comes from the reading rather than from
+ * the file's extension, because the syntax is what selects the loader: a
+ * `require(…)` resolves as CommonJS wherever it is written, and a static or
+ * dynamic `import` resolves as ESM.
+ *
+ * AMBIGUITY FAILS CLOSED, on top of resolving correctly. Where an extensionless
+ * CommonJS specifier resolves to one file while a same-stem sibling the loader
+ * never reaches sits beside it, this reports rather than picks: two files under
+ * one stem, one executed and one not, is a decoy in the tree whether or not this
+ * gate resolves it correctly today, and the repair — spell the extension — costs
+ * a keystroke. Nothing in this repository's closure writes an extensionless
+ * relative specifier at all.
+ */
+function resolveRelativeImport(fromFile, specifier, kind) {
 	const base = resolve(root, dirname(fromFile), specifier);
-	for (const extension of moduleExtensions) {
-		const candidate = `${base}${extension}`;
-		if (existsSync(candidate) && statSync(candidate).isFile()) return repoRelative(candidate);
+
+	if (kind !== 'cjs') {
+		if (isFile(base)) return { path: repoRelative(base) };
+		if (isDirectory(base))
+			return {
+				error:
+					'ES module resolution has no directory index — Node answers ERR_UNSUPPORTED_DIR_IMPORT',
+			};
+		return {
+			error: `ES module resolution adds no extension, so ${repoRelative(base)} is what Node opens and it is not there`,
+		};
 	}
-	return null;
+
+	if (isFile(base)) return { path: repoRelative(base) };
+
+	if (isDirectory(base)) {
+		if (existsSync(join(base, 'package.json')))
+			return {
+				error:
+					'this directory carries a package.json, and resolution through its "main" is not modelled',
+			};
+		const [index, ...also] = CJS_INDEXES.map((name) => join(base, name)).filter(isFile);
+		if (!index)
+			return { error: 'a required directory resolves through index.js, index.json or index.node' };
+		if (also.length)
+			return {
+				conflict:
+					`require() opens ${repoRelative(index)}, while ${also.map(repoRelative).join(' and ')} sits ` +
+					'beside it; name the file so the pin cannot bind the index that does not run',
+			};
+		return { path: repoRelative(index) };
+	}
+
+	const [found, ...shadowed] = siblings(base, CJS_EXTENSIONS);
+	const unreachable = siblings(base, NEVER_ADDED).map(repoRelative);
+	if (!found)
+		return {
+			error: unreachable.length
+				? `require() adds only .js, .json and .node, so ${unreachable.join(' and ')} beside this stem is not what Node opens`
+				: 'require() adds .js, .json and .node, and none of them is there',
+		};
+	if (shadowed.length || unreachable.length)
+		return {
+			conflict:
+				`require() opens ${repoRelative(found)}, while ${[...shadowed.map(repoRelative), ...unreachable].join(' and ')} ` +
+				'sits under the same stem; spell the extension so the pin cannot name the file that does not run',
+		};
+	return { path: repoRelative(found) };
 }
 
 /**
@@ -456,12 +585,12 @@ function executableClosure() {
 		}
 		if (!statSync(absolute).isFile()) continue;
 
-		let specifiers;
-		let computed;
+		let loads;
+		let unfollowable;
 		try {
 			const source = readFileSync(absolute, 'utf8');
-			specifiers = relativeImports(source);
-			computed = computedImports(source);
+			loads = relativeImports(source);
+			unfollowable = unfollowableLoads(source);
 		} catch (error) {
 			// A file the reading cannot parse is not a file with no imports, and
 			// answering the same green for both is the fail-open direction. The gate
@@ -472,22 +601,39 @@ function executableClosure() {
 			continue;
 		}
 
-		for (const call of computed) {
-			if (disclosedComputed.take(path, call)) continue;
+		for (const { expression, line, kind, detail } of unfollowable) {
+			const declaration = disclosedLoads.take(path, line, expression);
+			if (declaration === 'declared') continue;
+			if (declaration === 'repeated') {
+				findings.push(
+					`${path}:${line}: a second ${expression} shares this line with a disclosed one, and one ` +
+						'declaration binds one load; put them on separate lines so each carries its own reason'
+				);
+				continue;
+			}
 			findings.push(
-				`${path}: ${call} loads a module no static read can name, and it is not disclosed in ` +
-					`${CONTRACT}; a target this walk cannot reach is a target no hash binds`
+				`${path}:${line}: ${expression} ${detail}, and it is not disclosed in ${CONTRACT}; ` +
+					(kind === 'computed'
+						? 'a target this walk cannot reach is a target no hash binds'
+						: 'a loader this walk cannot follow reaches targets no hash binds')
 			);
 		}
 
-		for (const specifier of specifiers) {
+		for (const { specifier, kind } of loads) {
 			const target = modulePath(specifier);
 			const lexical = repoRelative(resolve(root, dirname(path), target));
 			if (underUnpinnedRoot(lexical)) continue;
-			const resolved = resolveRelativeImport(path, target);
+			const { path: resolved, error, conflict } = resolveRelativeImport(path, target, kind);
+			if (conflict) {
+				findings.push(
+					`${path}: relative import ${JSON.stringify(specifier)} names more than one file — ${conflict}; ` +
+						'a pin on the wrong one of them reads as coverage and is not'
+				);
+				continue;
+			}
 			if (!resolved) {
 				findings.push(
-					`${path}: relative import ${JSON.stringify(specifier)} resolves to no file; ` +
+					`${path}: relative import ${JSON.stringify(specifier)} resolves to no file — ${error}; ` +
 						'an unresolvable import in a gate is an unscanned one'
 				);
 				continue;
@@ -545,13 +691,13 @@ for (const path of Object.keys(pinnedHashes))
 		);
 
 // The same rule for the other declaration. A disclosure whose site is gone reads
-// as a permission the tree still needs, and the next computed load written into
-// that file would land on it silently.
-for (const entry of disclosedComputed.unmatched())
+// as a permission the tree still needs, and the next unfollowable load written
+// into that file would land on it silently.
+for (const entry of disclosedLoads.unmatched())
 	findings.push(
-		`${CONTRACT}: executable_targets.computed_imports_disclosed declares ${entry.expression} in ` +
-			`${entry.file}, which the closure does not contain; a disclosure of nothing reads as ` +
-			'coverage and is not'
+		`${CONTRACT}: executable_targets.unfollowable_loads_disclosed declares ${entry.expression} at ` +
+			`${entry.file}:${entry.line}, which the closure does not contain; a disclosure of nothing ` +
+			'reads as coverage and is not'
 	);
 
 if (printHashes) {
@@ -582,7 +728,9 @@ for (const path of verified)
 console.log('');
 console.log(`Outside the closure by declaration: ${unpinnedRoots.join(', ') || 'nothing'}`);
 console.log(
-	`Computed loads inside it, disclosed with a reason: ${disclosedComputed.count || 'none'}`
+	`Loads inside it this walk cannot follow, disclosed one by one with a reason: ${
+		disclosedLoads.count || 'none'
+	}`
 );
 console.log('PASS here means the rubric is invoking the commands it believes it is invoking,');
 console.log('and those commands are running the code this repository pinned.');
