@@ -53,7 +53,6 @@
 
 import type { Account, MediaAttachment, Mention, Status, Tag } from '../types.ts';
 import { fromLesserVisibility, normalizeVisibility } from '../cms/visibility.ts';
-import type { GraphQLError } from '../cms/graphql.ts';
 
 /* -------------------------------------------------------------------------
  * Timeline types
@@ -571,10 +570,13 @@ const UNSUPPORTED_MARKERS = ['unsupported timeline', 'is required for'];
  * error this list does not recognise becomes `unavailable`, which is the
  * honest "something went wrong and we cannot say what".
  */
-export function classifyTimelineFailure(errors: readonly GraphQLError[]): TimelineFailure | null {
+export function classifyTimelineFailure(errors: readonly unknown[]): TimelineFailure | null {
 	if (!errors.length) return null;
 
-	const messages = errors.map((error) => String(error.message ?? '').toLowerCase());
+	const messages = errors.map((error) => {
+		const entry = isRecord(error) ? error : null;
+		return typeof entry?.['message'] === 'string' ? entry['message'].toLowerCase() : '';
+	});
 	const any = (markers: string[]) =>
 		messages.some((message) => markers.some((marker) => message.includes(marker)));
 

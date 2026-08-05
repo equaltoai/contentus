@@ -230,7 +230,7 @@ export async function withStubbedGraphql(respond, body) {
 
 		const envelope = respond({ operation, variables }) ?? { data: null };
 		return new Response(JSON.stringify(envelope), {
-			status: 200,
+			status: envelope.httpStatus ?? 200,
 			headers: { 'content-type': 'application/json' },
 		});
 	};

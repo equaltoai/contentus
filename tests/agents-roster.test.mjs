@@ -529,3 +529,44 @@ test('an instance with agents switched off says so rather than erroring', async 
 	assert.equal(value.status, 200);
 	assert.ok(value.html.includes('does not offer an agent surface'));
 });
+
+test('malformed errors, HTTP failures, and empty data degrade to an agents page with HTTP 200', async () => {
+	const handler = await loadHandler();
+	const cases = [
+		['non-object error entries', { data: null, errors: [null, 42, 'broken'] }],
+		['a non-GraphQL HTTP failure', { httpStatus: 503 }],
+		['an answer with no agents connection', { data: { agents: null } }],
+	];
+
+	for (const [name, envelope] of cases) {
+		const { value } = await withStubbedGraphql(
+			({ operation }) => (operation === 'ContentusAgents' ? envelope : { data: null }),
+			() => renderRoute(handler, route('agents'))
+		);
+
+		assert.equal(value.status, 200, `${name} must render the route, not FaceTheory's 500 page`);
+		assert.match(
+			value.html,
+			/(?:could not|did not) answer the agent query/i,
+			`${name} must explain the failure`
+		);
+	}
+});
+
+test('a degenerate agents connection remains renderable', async () => {
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusAgents'
+				? {
+						data: {
+							agents: { edges: [null, 42, { node: null }], pageInfo: 'not-an-object' },
+						},
+					}
+				: { data: null },
+		() => renderRoute(handler, route('agents'))
+	);
+
+	assert.equal(value.status, 200);
+	assert.ok(value.html.length > 1000, 'the route must render a complete degraded document');
+});

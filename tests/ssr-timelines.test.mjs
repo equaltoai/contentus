@@ -568,6 +568,25 @@ test('an unreachable instance renders a designed state, never a blank or a 500',
 	}
 });
 
+test('malformed errors, HTTP failures, and empty data degrade to a timeline page with HTTP 200', async () => {
+	const handler = await loadHandler();
+	const cases = [
+		['non-object error entries', { data: null, errors: [null, 42, 'broken'] }],
+		['a non-GraphQL HTTP failure', { httpStatus: 503 }],
+		['an answer with no timeline connection', { data: { timeline: null } }],
+	];
+
+	for (const [name, envelope] of cases) {
+		const { value } = await withStubbedGraphql(
+			({ operation }) => (operation === 'ContentusTimeline' ? envelope : { data: null }),
+			() => renderRoute(handler, route('timelines-instance'))
+		);
+
+		assert.equal(value.status, 200, `${name} must render the route, not FaceTheory's 500 page`);
+		assert.match(value.html, /Timeline unavailable|try again/i, `${name} must explain the failure`);
+	}
+});
+
 test('every face-4 route renders its tabs, so the surface is navigable with no script', async () => {
 	const handler = await loadHandler();
 	const rendered = await renderRoute(handler, route('timelines-instance'));
