@@ -1112,6 +1112,57 @@ function mutatesEnvironment(node) {
 	return isProcessEnv(node.arguments[0]);
 }
 
+/**
+ * Whether every execution variable a site writes for its child is one this reading
+ * can name AND read.
+ *
+ * WHY THE QUESTION EXISTS AT ALL. Reporting the WRITE closes the channel only where
+ * the write is legible. `spawnSync(node, args, { env: buildEnv() })` hands the child
+ * an environment assembled somewhere else — which may carry a `NODE_OPTIONS` naming
+ * a repository file — and every part of that is invisible here: the options bag is
+ * readable, `cwd` is absent so the base is fine, and the site's literals contain no
+ * path. Silence and permission are the same green, which is the property this whole
+ * control exists to refuse, so an environment this reading cannot open is reported
+ * rather than assumed empty. `{ env: { CI: 'true' } }` is fully open and says so.
+ *
+ * A KEY IS NOT ENOUGH FOR A WATCHED VARIABLE. `{ env: { NODE_OPTIONS: options } }`
+ * names the channel and hides its value, which is exactly the case a `binds` cannot
+ * be checked against. So a watched key whose value is not a readable string leaves
+ * the environment unopened, while an unwatched key's value may be anything.
+ *
+ * A SITE THAT WRITES NO ENVIRONMENT is open by construction: the child inherits
+ * this process's, which is the world rather than the tree, and the boundary this
+ * grammar draws is at what the repository WRITES.
+ */
+function readableEnvironment(object) {
+	if (!object || !ts.isObjectLiteralExpression(object)) return false;
+	return object.properties.every((property) => {
+		if (!ts.isPropertyAssignment(property)) return false;
+		const key = optionKey(property);
+		if (key === null) return false;
+		return !INHERITED_EXECUTION.has(key) || staticSpecifier(property.initializer) !== null;
+	});
+}
+
+function opensEnvironment(node) {
+	const assigned = assignedExecutionVariable(node);
+	if (assigned)
+		return assigned.name === null
+			? readableEnvironment(assigned.value)
+			: staticSpecifier(assigned.value) !== null;
+	const call = headedCall(node);
+	if (!call?.arguments) return true;
+	if (mutatesEnvironment(call)) return call.arguments.slice(1).every(readableEnvironment);
+	for (const argument of call.arguments.slice(1)) {
+		if (!ts.isObjectLiteralExpression(argument)) continue;
+		for (const property of argument.properties) {
+			if (!ts.isPropertyAssignment(property) || optionKey(property) !== 'env') continue;
+			if (!readableEnvironment(property.initializer)) return false;
+		}
+	}
+	return true;
+}
+
 function runsThisInterpreter(node) {
 	const first = headedCall(node)?.arguments?.[0];
 	if (!first) return false;
@@ -1334,15 +1385,17 @@ function nameableCallee(callee) {
  * Every load in this source that the reading above cannot follow to a file —
  * because the TARGET is computed, because the LOADER is a construction this
  * grammar does not model, or because the code does not run in this process at all
- * — as `{ expression, line, kind, detail, literals, base, execPath }`, where kind
- * is `'computed'`, `'loader'` or `'execution'`, `literals` is every string the site
- * is written to hand its facility WITH THE FRAME AND ROLE OF EACH (see `siteWords`),
- * `base` is the working directory it is written to resolve the child's own words in
- * (see `siteBase`), and `execPath` says whether the child is this process's own
- * interpreter (see `runsThisInterpreter`) — so a caller that lets a site DECLARE
- * what it runs can check the declaration against the site's own text, against the
- * right file, which is what the frame and the base decide together, and with the
- * grammar the child itself applies to each string.
+ * — as `{ expression, line, kind, detail, literals, base, execPath, environment }`,
+ * where kind is `'computed'`, `'loader'` or `'execution'`, `literals` is every
+ * string the site is written to hand its facility WITH THE FRAME AND ROLE OF EACH
+ * (see `siteWords`), `base` is the working directory it is written to resolve the
+ * child's own words in (see `siteBase`), `execPath` says whether the child is this
+ * process's own interpreter (see `runsThisInterpreter`), and `environment` says
+ * whether the execution variables it writes are ones this reading can read (see
+ * `opensEnvironment`) — so a caller that lets a site DECLARE what it runs can check
+ * the declaration against the site's own text, against the right file, which is
+ * what the frame and the base decide together, and with the grammar the child
+ * itself applies to each string.
  *
  * WHY THE SECOND HALF EXISTS. Round 7's review executed five helpers past a
  * reader that knew only the `import` keyword and a bare `require(…)`: `const r =
@@ -1443,6 +1496,7 @@ export function unfollowableLoads(source) {
 			literals: siteWords(node),
 			base: siteBase(node),
 			execPath: runsThisInterpreter(node),
+			environment: opensEnvironment(node),
 		});
 
 	/**

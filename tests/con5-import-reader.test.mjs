@@ -3063,3 +3063,95 @@ test('every spelling of the write is the same write, and an ordinary one is not'
 		assert.equal(ordinary.status, 0, `${what} starts no code\n${ordinary.output}`);
 	}
 });
+
+test('an environment this reading cannot open is reported, not assumed empty', () => {
+	// The residue of the rule above, and the same defect one channel over. Reporting
+	// the WRITE closes `process.env.NODE_OPTIONS = '…'` only where the write is
+	// legible; `{ env: buildEnv() }` hands the child an environment assembled
+	// somewhere else, which may carry a `NODE_OPTIONS` naming a repository file, and
+	// every part of that is invisible here — the options bag reads fine, no `cwd` is
+	// written, and the site's literals contain no path at all.
+	const closed = {
+		'an env built by a call': 'spawnSync(process.execPath, [], { env: buildEnv() });\n',
+		'an env spread from elsewhere':
+			'spawnSync(process.execPath, [], { env: { ...inherited, CI: "1" } });\n',
+		'a watched variable whose value is a name':
+			'spawnSync(process.execPath, [], { env: { NODE_OPTIONS: options } });\n',
+		'a watched variable assembled from pieces':
+			'spawnSync(process.execPath, [], { env: { NODE_OPTIONS: `--import=${entry}` } });\n',
+		'a key this reading cannot name':
+			'spawnSync(process.execPath, [], { env: { [name]: "--import=./x.mjs" } });\n',
+	};
+
+	for (const [what, call] of Object.entries(closed)) {
+		const source =
+			"import { spawnSync } from 'node:child_process';\n" +
+			'const [buildEnv, inherited, options, entry, name] = process.argv;\n' +
+			call;
+		const reported = runCon5({
+			files: { 'scripts/gate.mjs': source },
+			pinned: ['scripts/gate.mjs'],
+			contract: {
+				unfollowable_loads_disclosed: [
+					{
+						file: 'scripts/gate.mjs',
+						line: 3,
+						expression: 'spawnSync',
+						reason: 'the fixture’s point',
+					},
+				],
+			},
+		});
+		assert.equal(reported.status, 1, `${what} is an environment with no reading`);
+		assert.match(
+			reported.output,
+			/writes its child an environment this reading cannot open/,
+			`${what} must be named`
+		);
+	}
+
+	// THE PAIRING, both ways. An `env` written as literals is open — including a
+	// watched variable, whose value then BINDS what it loads — and a site that
+	// writes no `env` at all inherits this process's, which is the world rather
+	// than the tree and is not something this control reports.
+	const open = {
+		'no env at all': ["spawnSync(process.execPath, ['scripts/lib/helper.mjs']);\n", [HELPER]],
+		'an env of ordinary literals': [
+			"spawnSync(process.execPath, ['scripts/lib/helper.mjs'], { env: { CI: 'true' } });\n",
+			[HELPER],
+		],
+		'a watched variable written as a literal': [
+			"spawnSync(process.execPath, ['--version'], { env: { NODE_OPTIONS: '--import=./scripts/lib/helper.mjs' } });\n",
+			[HELPER],
+		],
+	};
+
+	for (const [what, [call, binds]] of Object.entries(open)) {
+		const files = {
+			'scripts/gate.mjs': "import { spawnSync } from 'node:child_process';\n" + call,
+			[HELPER]: HELPER_SOURCE,
+		};
+		const contract = {
+			unfollowable_loads_disclosed: [
+				{
+					file: 'scripts/gate.mjs',
+					line: 2,
+					expression: 'spawnSync',
+					reason: 'the fixture’s point',
+					binds,
+				},
+			],
+		};
+		const bound = runCon5({ files, pinned: ['scripts/gate.mjs', ...binds], contract });
+		assert.equal(bound.status, 0, `${what} is an environment this reading opens\n${bound.output}`);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', ...binds],
+			contract,
+			corrupt: HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
+	}
+});

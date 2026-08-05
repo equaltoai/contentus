@@ -1105,7 +1105,16 @@ function executableClosure() {
 			continue;
 		}
 
-		for (const { expression, line, kind, detail, literals, base, execPath } of unfollowable) {
+		for (const {
+			expression,
+			line,
+			kind,
+			detail,
+			literals,
+			base,
+			execPath,
+			environment,
+		} of unfollowable) {
 			const declaration = disclosedLoads.take(path, line, expression);
 			if (declaration.status === 'declared') {
 				// The reading has to still be answering the question this check asks.
@@ -1115,6 +1124,7 @@ function executableClosure() {
 				// control exists to refuse — so its absence is a finding, not a default.
 				if (
 					typeof execPath !== 'boolean' ||
+					typeof environment !== 'boolean' ||
 					!Array.isArray(literals) ||
 					!literals.every(
 						(word) =>
@@ -1183,6 +1193,18 @@ function executableClosure() {
 							'is searched for on a lookup path this site does not write, so which file it opens ' +
 							'is decided by the environment rather than by this repository; spell the path to the ' +
 							'file, or write the `env.PATH` the child is meant to search'
+					);
+				// An environment this reading cannot open is the same hole as a `cwd` it
+				// cannot read, one channel over: a `NODE_OPTIONS` assembled elsewhere
+				// loads a repository file into the child, and nothing at this site says
+				// so. Reporting the write closes the channel only where the write is
+				// legible, and silence about the rest would be permission.
+				if (!environment)
+					findings.push(
+						`${path}:${line}: ${expression} writes its child an environment this reading cannot ` +
+							'open, so the execution variables it sets — and the repository files they load ' +
+							'before the child reaches its own entry point — are not in this file; write the ' +
+							'`env` as an object literal whose watched variables carry literal values'
 					);
 				for (const construct of unreadable)
 					findings.push(
