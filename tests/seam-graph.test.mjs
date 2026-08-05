@@ -749,12 +749,14 @@ test('a module the build never loads is not a module this gate failed to read', 
 
 test('a face component the build externalizes is a file this gate cannot judge', async () => {
 	// THE OTHER HALF OF ROUND 10, and the reason the silence above is not a hole.
-	// Excusing an external from the reading rule must not excuse it from the
-	// CONTAINMENT rule: a tracked file in the face that no pass loads is a file this
-	// gate has nothing to say about, and externalizing one is a way to arrange that
-	// from the outside. So a module the build never loaded is not counted as reached
-	// either, and the face's own rule reports it — rather than a green resting on a
-	// module the gate never saw the inside of.
+	// Excusing an external from the READING rule must not excuse it from the
+	// CONTAINMENT rule: a module of a tracked face file that a pass resolves and
+	// never loads is a module that pass cannot judge, and externalizing one is a way
+	// to arrange that from the outside. So each pass records what it resolved and
+	// what it loaded as two facts, and the face's own rule names every module a pass
+	// resolved and did not load — rather than a green resting on a module the gate
+	// never saw the inside of. Neither the other pass having loaded it nor another
+	// module of the same file having been loaded answers for it: rounds 11 and 12.
 	//
 	// No overlay at all: the tree the repository carries, with one component
 	// externalized through the gate's own injection. A predicate that ignores the
