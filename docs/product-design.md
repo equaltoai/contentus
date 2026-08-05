@@ -131,10 +131,15 @@ rawHead: false`). lesser does not inject CSP on `/l` routes; the SSR host's
   the wallet/auth exception. Realtime via `wss://ws.<domain>`
   (`graphql-transport-ws`, token in `connection_init`).
 - **Auth**: lesser `auth-ui` at `/auth/*` + OAuth Authorization Code + PKCE
-  (`/oauth/register` dynamic registration, `/oauth/authorize`,
-  `/oauth/token`; scopes `read write follow push`; tokens in sessionStorage).
-  Copy sim's `src/lib/auth/session.ts` + `pkce.ts` pattern unchanged. No
-  client-local auth anywhere.
+	(`/api/v1/apps` public app registration, `/oauth/authorize`, `/oauth/token`;
+	scopes `read write follow push`; tokens in sessionStorage). Copy sim's
+	`src/lib/auth/session.ts` + `pkce.ts` pattern unchanged. No client-local auth
+	anywhere. The earlier issue #6 choice of RFC 7591 `/oauth/register` was not
+	conformant for app sign-in: lesser records that path as dynamic registration
+	and requires an RFC 8707 `resource` for its remote-MCP authorization lane.
+	Contentus is an ordinary browser app, so it uses the same manual public-client
+	registration source as simulacrum and never sends an MCP `resource` during
+	app authorization or token exchange.
 - **No hard-coded domains**: GraphQL, WS, MCP, and OAuth URLs derive from the
   request Host header / `window.location.origin`. There is no config
   injection from lesser — `LESSER_CLIENT_BASE_PATH=/l` is the only relevant

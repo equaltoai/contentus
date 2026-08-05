@@ -158,6 +158,12 @@
         "reason": "Loads a rewritten copy of a vendored module the probe has just written to a temp directory, so the real component runs against stubbed imports. The bytes are produced by this pinned probe from vendored source; there is no repository file to hash."
       },
       {
+        "file": "tests/auth-session.test.mjs",
+        "line": 3,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs a resolve hook that maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims, and resolves the TypeScript source extensions Vite supplies but Node does not. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probe drives the real auth session module. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
         "file": "tests/vendored-messaging-render.test.mjs",
         "line": 40,
         "expression": "import { registerHooks } from 'node:module';",
@@ -235,12 +241,14 @@
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/module-imports.mjs": "f5017ffef9f51f3717919c7842c3791191a78e8c46d3ef1c8e954d9c2a70f4ad",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
-      "scripts/render-routes.mjs": "33d6ebcc481453c0392d2d9feb95618a4b4ae5ffce10ce6b033937c8dbaeeeb4",
+      "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
       "tests/agents-mobile.test.mjs": "197973ced90dff1d1d20700b8d2850ab430888f8c60cd697ea675c371efd9608",
-      "tests/agents-roster.test.mjs": "639c3cbbff67e5f1595c20648c59f29fa6930c9a802873e0249ea141990a63ef",
+      "tests/agents-roster.test.mjs": "6002314de1ff5b907fe6e7b22c74b8016aae58b2f7a2fdf5f55fcd79e86b7183",
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
+      "tests/auth-session.test.mjs": "3fcc115d66f1fa22f9cb2c950b096bbf23b54e24a8ec0ea4e16c86ccfb1d7ff2",
+      "tests/cms-graphql.test.mjs": "c2871c4297c15decfd9c149dd4cbfff511359dd74b9ea206ce050a3f67b9056c",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
       "tests/drone-seams.test.mjs": "e3c721943e3deee16182604b1dc0fd76656c8e438e0780854fd99e44a46db4b1",
@@ -264,7 +272,7 @@
       "tests/ssr-messages.test.mjs": "46215833f4c74951839b9f500dec57dad3e709d5cc7601a9a10c2ab188c4b823",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
       "tests/ssr-routes.test.mjs": "6670a40d1ff2df197d85a6bb4d8ebccf10bcce7d3b6e3caa44815c308079b10c",
-      "tests/ssr-timelines.test.mjs": "ff0cfb0de196137533cd310205966d644847ba1b5f6f5ab21e722a27231d5e96",
+      "tests/ssr-timelines.test.mjs": "270adc5c9af38efb1acceb6ee1c8967fa6138c46df5111b2b766ca420cc030cc",
       "tests/stylesheet.test.mjs": "a9b08c7db5c8ad6dbdf8ccaf2ea5677cb19f4ea577ed8a0bb43ce0738aea3d2a",
       "tests/timeline-adapters.test.mjs": "679d8db67a7a67d8550eb44d9fcceb65c7818c6722b5bcb5b5dbc6f8236ede1b",
       "tests/timeline-contract.test.mjs": "4f76bba4fb27e9ab8b6708007d64a9db403d7d1140b7dcfd9364d0d0c9f710fb",
@@ -311,8 +319,8 @@
     "expected": [
       {
         "file": "tests/ssr-probe.test.mjs",
-        "min_test_points": 16,
-        "sha256": "266cb3a605a3a190350a5ba1311f088d0f6a3584b510d237b16039b6083bf34b"
+        "min_test_points": 18,
+        "sha256": "68c2ece1c2080813a1454708779681396348ba5855c2b325df9244a66937015d"
       },
       {
         "file": "tests/origin.test.mjs",

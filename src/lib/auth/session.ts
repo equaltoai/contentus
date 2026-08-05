@@ -8,10 +8,9 @@ import { notifySessionChange } from './session-events';
 /**
  * OAuth Authorization Code + PKCE against lesser's auth surface.
  *
- * Adapted from the proven simulacrum session module. Contentus differs in one
- * deliberate way: it registers through RFC 7591 dynamic registration at
- * `/oauth/register` (JSON) rather than the Mastodon-compatible
- * `/api/v1/apps` form endpoint, per product design §3 and issue #6.
+ * Adapted from the proven simulacrum session module, including its public
+ * client registration through lesser's Mastodon-compatible `/api/v1/apps`
+ * endpoint.
  *
  * Invariants this file exists to keep:
  *
@@ -20,8 +19,11 @@ import { notifySessionChange } from './session-events';
  *     and contentus only ever handles the resulting authorization code.
  *   - Tokens live in `sessionStorage`, never in cookies and never in
  *     `localStorage`. They die with the tab.
- *   - The client is public: `token_endpoint_auth_method: "none"`, no client
- *     secret is requested, stored, or accepted.
+ *   - The client is public: registration explicitly requests
+ *     `client_class: "web"` and `token_endpoint_auth_method: "none"`; no
+ *     client secret is requested, stored, or accepted. Lesser may omit its
+ *     optional auth-method response field, which means its contract default —
+ *     the client never fills that omission with a claim of its own.
  *   - Every URL is same-origin and relative. No instance domain appears here.
  */
 
@@ -33,6 +35,15 @@ interface StoredOAuthClient {
 	clientId: string;
 	redirectUri: string;
 	createdAt: number;
+	tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+}
+
+interface OAuthRegistrationResponse {
+	client_id?: unknown;
+	client_secret?: unknown;
+	token_endpoint_auth_method?: unknown;
+	error?: unknown;
+	error_description?: unknown;
 }
 
 export interface AuthSession {
@@ -111,7 +122,7 @@ export function accessTokenOrNull(): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic client registration (RFC 7591)
+// Public client registration
 // ---------------------------------------------------------------------------
 
 function getRedirectUri(): string {
@@ -136,54 +147,58 @@ async function digestClientBinding(state: string, clientId: string): Promise<str
 }
 
 async function registerOAuthClient(redirectUri: string, scope: string): Promise<StoredOAuthClient> {
-	// Only fields present in lesser's registration model are sent: the handler
-	// decodes with DisallowUnknownFields, so an extra key fails the request.
-	const body = {
+	const body = new URLSearchParams({
 		client_name: CLIENT_NAME,
-		redirect_uris: [redirectUri],
-		scope,
-		grant_types: ['authorization_code'],
-		response_types: ['code'],
-		token_endpoint_auth_method: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD,
-		application_type: 'web',
-		client_uri: window.location.origin,
+		redirect_uris: redirectUri,
+		scopes: scope,
 		client_class: CLIENT_CLASS,
-	};
-
-	const response = await fetch('/oauth/register', {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
+		token_endpoint_auth_method: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD,
+		website: window.location.origin,
 	});
 
-	const data = (await response.json().catch(() => null)) as {
-		client_id?: string;
-		client_secret?: string;
-		error_description?: string;
-		error?: string;
-	} | null;
+	const response = await fetch('/api/v1/apps', {
+		method: 'POST',
+		headers: { 'content-type': 'application/x-www-form-urlencoded' },
+		body,
+	});
 
-	if (!response.ok || !data?.client_id) {
-		throw new Error(
-			data?.error_description ??
-				data?.error ??
-				`OAuth client registration failed (${response.status})`
-		);
+	const data = (await response.json().catch(() => null)) as OAuthRegistrationResponse | null;
+	const registrationError = () => {
+		for (const candidate of [data?.error_description, data?.error]) {
+			if (typeof candidate === 'string' && candidate.trim()) return candidate;
+		}
+		return `OAuth app registration failed (${response.status})`;
+	};
+
+	if (!response.ok || !data) throw new Error(registrationError());
+	if (typeof data.client_id !== 'string' || !data.client_id.trim()) {
+		throw new Error(registrationError());
 	}
 
 	// A public client must never be issued a secret. If the instance returns
-	// one, the registration was not the public flow we asked for — fail closed
-	// rather than proceed with credentials we would have to store.
-	if (data.client_secret) {
+	// the field at all, the response is not the public-client shape contentus
+	// requested, so fail closed rather than accept credentials it cannot keep.
+	if (data.client_secret !== undefined) {
 		throw new Error(
 			'Refusing a confidential OAuth client: contentus registers as a public client.'
 		);
+	}
+
+	const returnedAuthMethod = data.token_endpoint_auth_method;
+	if (
+		returnedAuthMethod !== undefined &&
+		returnedAuthMethod !== PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD
+	) {
+		throw new Error('Refusing an OAuth client whose token endpoint requires authentication.');
 	}
 
 	const client: StoredOAuthClient = {
 		clientId: data.client_id,
 		redirectUri,
 		createdAt: Date.now(),
+		...(returnedAuthMethod === PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD
+			? { tokenEndpointAuthMethod: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD }
+			: {}),
 	};
 	localStorage.setItem(STORAGE_KEYS.oauthClient, JSON.stringify(client));
 	return client;
@@ -196,16 +211,36 @@ function readCachedClient(redirectUri: string): StoredOAuthClient | null {
 	if (!raw) return null;
 
 	try {
-		const parsed = JSON.parse(raw) as Partial<StoredOAuthClient> & { clientSecret?: unknown };
-		if (!parsed?.clientId || parsed.redirectUri !== redirectUri) return null;
-		if (parsed.clientSecret) {
+		const parsed = JSON.parse(raw) as Partial<
+			StoredOAuthClient & { clientSecret?: unknown; tokenEndpointAuthMethod?: unknown }
+		>;
+		if (
+			typeof parsed?.clientId !== 'string' ||
+			!parsed.clientId.trim() ||
+			parsed.redirectUri !== redirectUri
+		) {
+			return null;
+		}
+		if (Object.prototype.hasOwnProperty.call(parsed, 'clientSecret')) {
 			localStorage.removeItem(STORAGE_KEYS.oauthClient);
 			return null;
 		}
+
+		if (
+			parsed.tokenEndpointAuthMethod !== undefined &&
+			parsed.tokenEndpointAuthMethod !== PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD
+		) {
+			localStorage.removeItem(STORAGE_KEYS.oauthClient);
+			return null;
+		}
+
 		return {
 			clientId: parsed.clientId,
 			redirectUri: parsed.redirectUri,
 			createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
+			...(parsed.tokenEndpointAuthMethod === PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD
+				? { tokenEndpointAuthMethod: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD }
+				: {}),
 		};
 	} catch {
 		localStorage.removeItem(STORAGE_KEYS.oauthClient);

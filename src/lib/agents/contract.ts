@@ -31,7 +31,7 @@
 // loaded straight off disk by `node --test --experimental-strip-types` so the
 // shipped adapters can be driven against a stubbed `fetch`, and Node's ESM
 // resolver neither guesses extensions nor knows the `$lib` alias.
-import { graphqlRequest, GraphQLTransportError, type GraphQLError } from '../cms/graphql.ts';
+import { graphqlRequest, GraphQLTransportError } from '../cms/graphql.ts';
 
 /** lesser `enum AgentType`. */
 export const AGENT_TYPES = [
@@ -391,13 +391,18 @@ export function toAgentRosterPage(raw: unknown, viewerIsOwner = false): AgentRos
  * than the CMS helper's substring net, which would also claim any message
  * containing "disabled" — including a quarantine one.
  */
-export function isAgentsDisabledError(errors: GraphQLError[]): boolean {
-	return errors.some((error) => error.message.toLowerCase().includes('agents are disabled'));
+function graphQLErrorMessage(error: unknown): string {
+	const entry = record(error);
+	return typeof entry?.message === 'string' ? entry.message.toLowerCase() : '';
 }
 
-function isAuthError(errors: GraphQLError[]): boolean {
+export function isAgentsDisabledError(errors: readonly unknown[]): boolean {
+	return errors.some((error) => graphQLErrorMessage(error).includes('agents are disabled'));
+}
+
+function isAuthError(errors: readonly unknown[]): boolean {
 	return errors.some((error) => {
-		const message = error.message.toLowerCase();
+		const message = graphQLErrorMessage(error);
 		return (
 			message.includes('authentication required') ||
 			message.includes('unauthenticated') ||
@@ -406,14 +411,14 @@ function isAuthError(errors: GraphQLError[]): boolean {
 	});
 }
 
-function isForbiddenError(errors: GraphQLError[]): boolean {
+function isForbiddenError(errors: readonly unknown[]): boolean {
 	return errors.some((error) => {
-		const message = error.message.toLowerCase();
+		const message = graphQLErrorMessage(error);
 		return message.includes('not authorized') || message.includes('forbidden');
 	});
 }
 
-export function agentUnavailableFromErrors(errors: GraphQLError[]): AgentUnavailable | null {
+export function agentUnavailableFromErrors(errors: readonly unknown[]): AgentUnavailable | null {
 	if (!errors.length) return null;
 	if (isAgentsDisabledError(errors)) {
 		return {
@@ -500,9 +505,20 @@ export async function fetchAgentRoster(
 		);
 
 		const failure = agentUnavailableFromErrors(result.errors);
-		if (failure && !result.data?.agents) return { ok: false, failure };
+		const agents = record(result.data?.agents);
+		if (!agents) {
+			return {
+				ok: false,
+				failure:
+					failure ??
+					({
+						reason: 'transport',
+						message: 'This instance could not answer the agent query.',
+					} satisfies AgentUnavailable),
+			};
+		}
 
-		return { ok: true, page: toAgentRosterPage(result.data?.agents) };
+		return { ok: true, page: toAgentRosterPage(agents) };
 	} catch (error) {
 		return { ok: false, failure: agentUnavailableFromFailure(error) };
 	}

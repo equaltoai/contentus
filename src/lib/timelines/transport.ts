@@ -14,7 +14,7 @@
  * and becomes `unavailable`, which is what it looks like to a reader.
  */
 
-import { graphqlRequest, GraphQLTransportError, type GraphQLError } from '../cms/graphql.ts';
+import { graphqlRequest } from '../cms/graphql.ts';
 import {
 	ACTOR_QUERY,
 	TIMELINE_QUERY,
@@ -88,9 +88,6 @@ export async function fetchTimelinePage(request: TimelineRequest): Promise<Timel
 		return { ok: false, failure: 'unsupported' };
 	}
 
-	let data: { timeline?: unknown } | null;
-	let errors: GraphQLError[];
-
 	try {
 		const result = await graphqlRequest<{ timeline?: unknown }>(
 			TIMELINE_QUERY,
@@ -108,33 +105,33 @@ export async function fetchTimelinePage(request: TimelineRequest): Promise<Timel
 				...(request.signal ? { signal: request.signal } : {}),
 			}
 		);
-		data = result.data;
-		errors = result.errors;
-	} catch (cause) {
-		if (cause instanceof GraphQLTransportError) return { ok: false, failure: 'unavailable' };
-		throw cause;
+
+		// A partial failure that still carried a connection is rendered as the data
+		// it carried — losing eight of twenty objects is not the same event as
+		// losing the timeline, and reporting the whole read as failed would be the
+		// false-empty M2d settled against. Only a MISSING connection is fatal.
+		//
+		// But the errors are NOT discarded with the decision to render. They are
+		// carried as `partial`, because a nullable field that failed comes back
+		// looking exactly like a nullable field that was legitimately null, and only
+		// the errors tell the two apart. Keeping the objects and dropping the errors
+		// would turn "we could not read this post's boost" into "this post is not a
+		// boost" — a claim the client would be making up.
+		const failure = classifyTimelineFailure(result.errors);
+		if (failure && !result.data?.timeline) return { ok: false, failure };
+		if (!result.data?.timeline) return { ok: false, failure: 'unavailable' };
+
+		return {
+			ok: true,
+			page: toTimelinePage(result.data.timeline, { viewerAuthenticated }),
+			partial: result.errors.length > 0,
+		};
+	} catch {
+		// Loaders are render boundaries. A malformed envelope or projection must
+		// become the same designed unavailable state as a failed request, never a
+		// FaceTheory 500 page.
+		return { ok: false, failure: 'unavailable' };
 	}
-
-	// A partial failure that still carried a connection is rendered as the data
-	// it carried — losing eight of twenty objects is not the same event as
-	// losing the timeline, and reporting the whole read as failed would be the
-	// false-empty M2d settled against. Only a MISSING connection is fatal.
-	//
-	// But the errors are NOT discarded with the decision to render. They are
-	// carried as `partial`, because a nullable field that failed comes back
-	// looking exactly like a nullable field that was legitimately null, and only
-	// the errors tell the two apart. Keeping the objects and dropping the errors
-	// would turn "we could not read this post's boost" into "this post is not a
-	// boost" — a claim the client would be making up.
-	const failure = classifyTimelineFailure(errors);
-	if (failure && !data?.timeline) return { ok: false, failure };
-	if (!data?.timeline) return { ok: false, failure: 'unavailable' };
-
-	return {
-		ok: true,
-		page: toTimelinePage(data.timeline, { viewerAuthenticated }),
-		partial: errors.length > 0,
-	};
 }
 
 export type ActorResult =
@@ -171,8 +168,7 @@ export async function fetchActor(
 		if (actor) return { ok: true, actor, partial: result.errors.length > 0 };
 
 		return { ok: false, failure: classifyTimelineFailure(result.errors) ?? 'not-found' };
-	} catch (cause) {
-		if (cause instanceof GraphQLTransportError) return { ok: false, failure: 'unavailable' };
-		throw cause;
+	} catch {
+		return { ok: false, failure: 'unavailable' };
 	}
 }
