@@ -49,10 +49,6 @@ import { fileURLToPath } from 'node:url';
  * removed or corrupted, and the gate must name the file.
  */
 
-const VERIFIER = fileURLToPath(
-	new URL('../gov-infra/verifiers/check-package-scripts.mjs', import.meta.url)
-);
-
 /** The helper every fixture reaches, and the executable symptom A left unbound. */
 const HELPER = 'scripts/lib/helper.mjs';
 const HELPER_SOURCE = "export const value = 'the helper as written';\n";
@@ -123,7 +119,20 @@ function runCon5({
 			)
 		);
 
-		const run = spawnSync(process.execPath, [VERIFIER], { cwd: directory, encoding: 'utf8' });
+		// THE VERIFIER'S PATH IS SPELLED AT THE CALL, and that is a control rather
+		// than a style. This site is disclosed in the pinned contract, and its
+		// declaration BINDS the verifier — so those bytes are pinned like every
+		// other file a guarded command executes. What makes the declaration
+		// checkable is that the path is a literal here: CON-5 resolves the literals
+		// a site is written to hand `spawnSync` and requires `binds` to name exactly
+		// those repository files. A path held in a constant declared far above is a
+		// path no reading can see at the call, and a `binds` beside it would be an
+		// unverifiable claim of coverage — the decoy shape the rule refuses.
+		const run = spawnSync(
+			process.execPath,
+			[fileURLToPath(new URL('../gov-infra/verifiers/check-package-scripts.mjs', import.meta.url))],
+			{ cwd: directory, encoding: 'utf8' }
+		);
 		return { status: run.status, output: `${run.stdout}${run.stderr}` };
 	} finally {
 		rmSync(directory, { recursive: true, force: true });

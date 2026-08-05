@@ -74,6 +74,19 @@
       "`node gov-infra/verifiers/check-package-scripts.mjs --print-hashes` prints this map",
       "for the current tree, so a legitimate move is mechanical rather than hand-computed.",
       "",
+      "TWO gov-infra FILES ARE PINNED HERE, which is a governance decision rather than an",
+      "oversight. `tests/con5-import-reader.test.mjs` runs this control's own verifier over",
+      "a synthetic tree, so that verifier — and `strict-json.mjs`, which it imports — are",
+      "code a guarded command executes, and this map's whole claim is that such code is",
+      "bound. They were exempted until round 9 on the ground that the parent stages gov-infra",
+      "and `packDigest` in `gov-infra/pack.json` binds it; the review established that no",
+      "local control verifies that digest and that this verifier's bytes moved in this pull",
+      "request while `pack.json` did not. Recomputing `packDigest` needs the pack's inventory",
+      "and algorithm, which this repository does not hold — that control belongs to the",
+      "parent's staging discipline and is routed there. The accepted cost of the local one:",
+      "a parent restage turns CON-5 red until these two pins move, which is a recorded event",
+      "being re-acknowledged rather than a gate breaking.",
+      "",
       "`unfollowable_loads_disclosed` is the third boundary, and the one no reading can",
       "close. Three shapes land here. A load whose TARGET is an expression —",
       "`import(pathToFileURL(x).href)` — names a module nothing static can follow. A load",
@@ -181,9 +194,10 @@
       },
       {
         "file": "tests/con5-import-reader.test.mjs",
-        "line": 126,
+        "line": 131,
         "expression": "spawnSync",
-        "reason": "Runs this control's own verifier, `gov-infra/verifiers/check-package-scripts.mjs`, over a synthetic three-file repository in a temp directory — which is the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The target is deliberately NOT bound here: gov-infra is genome content staged by the parent and bound by `packDigest` in `gov-infra/pack.json` under `managedBy: namespace_mcp`, so a second repo-local pin on those bytes would go red the moment the parent restages the pack, and a pin that breaks for a reason unrelated to the change teaches the next author to weaken it."
+        "reason": "Runs this control's own verifier over a synthetic three-file repository in a temp directory — the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The verifier IS bound: `binds` names it, so it is pinned, hashed and walked for its own imports like any other file a guarded command executes, and the path is spelled as a literal at the call so that claim is checkable against the site. The previous entry exempted it instead, on the ground that gov-infra is genome content the parent stages and `packDigest` in `gov-infra/pack.json` binds. Round 9's review refuted that: `packDigest` appears nowhere in this repository but in the file that declares it, no local control recomputes or verifies it, and the pack's file inventory and digest algorithm are not available here to build one — so this verifier's bytes changed in this very pull request while `pack.json` did not move. Verifying `packDigest` belongs to the parent's staging discipline and is routed there; the strongest LOCAL control is the one every other executable in this closure already has, and it is applied here. The cost is real and accepted: a parent restage of the pack turns CON-5 red until this pin moves. A restage is a recorded event, and a pin that forces it to be re-acknowledged is the honest behaviour — an exemption resting on a digest nothing checks is not.",
+        "binds": ["gov-infra/verifiers/check-package-scripts.mjs"]
       },
       {
         "file": "tests/renderer-authority-audit.test.mjs",
@@ -200,6 +214,8 @@
       }
     ],
     "sha256": {
+      "gov-infra/verifiers/check-package-scripts.mjs": "7c848cddd3e52b140637853d338e321d0a18f1970a0bca280f1e8dc1fccd297a",
+      "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-renderer-authority.mjs": "8f5bcfb8eaf9af527dd968109a96972d37bc7239ab8a1abedc041c9ab1f2a21f",
       "scripts/audit-seam-graph.mjs": "cf3568bd22c0c3a23be27add83619ac28f9ebc2869a85d8e6d4d725f8c17efee",
@@ -216,7 +232,7 @@
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
-      "tests/con5-import-reader.test.mjs": "bb0717198d5d2d353898b942176968c57503e322bbb1ec2502fa00b9c2224159",
+      "tests/con5-import-reader.test.mjs": "20b02c3db4e60033366fd67e99acf33e1ce92c9c24290097b26c0caf66a44ce8",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
