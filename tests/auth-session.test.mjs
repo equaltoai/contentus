@@ -238,7 +238,7 @@ test('a cached non-public auth method is discarded and re-registered', async () 
 	assert.equal(cached.tokenEndpointAuthMethod, 'none');
 });
 
-test('registration surfaces lesser's error field when error_description is absent', async () => {
+test("registration surfaces lesser's error field when error_description is absent", async () => {
 	globalThis.fetch = async () => response({ error: 'redirect_uris must be absolute' }, 422);
 
 	await assert.rejects(() => startLogin(), /redirect_uris must be absolute/);
