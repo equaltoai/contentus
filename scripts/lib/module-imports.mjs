@@ -152,6 +152,19 @@
  * unreadable rather than defaulted — because defaulting it is the guess that put a
  * pin on the decoy.
  *
+ * AND WHOSE NAME DECIDES THAT BASE, which is round 12 and the fourth arrival of the
+ * same lesson. `join(import.meta.dirname, 'ignored')` names a directory only where
+ * `join` IS `node:path`'s, and this reading asked no such question: it read any
+ * two-argument call or member spelled that way, so `['sub'].join(…)` — which returns
+ * `sub` at run time — named a file-framed directory the call never composes, and a
+ * declaration bound the pinned helper sitting in it while the child ran an unpinned
+ * one somewhere else entirely. So a composer must be PROVEN: bound in this file from
+ * `node:path` or `node:url`, and not bound anywhere else in it, which is what
+ * `pathComposers` answers and `writtenPath` now requires. The loose reading stays
+ * exactly where it belongs — `pathComposer` still recognises the SHAPE, so the words
+ * inside a composition this walk cannot name land in the `unknown` frame rather than
+ * in the child's.
+ *
  * WHERE THE READING IS WIDER THAN THE MODULE SYSTEM, and where it is not. A
  * type-only import and an `import('…')` in type position are not runtime edges.
  * `moduleSpecifiers` reports them, because swapping a component behind a seam
@@ -589,13 +602,18 @@ function requireLike(file) {
 	for (const local of importedLocals(file, LOADER_MODULES, MODELLED_LOADER_EXPORTS))
 		factories.add(local);
 
+	// Read only where a factory call is actually found, which is almost nowhere: the
+	// seam probes run this walk over every tracked source file in the repository.
+	let bound = null;
+	const declarations = () => (bound ??= boundNames(file));
+
 	eachNode(file, (node) => {
 		if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name)) return;
 		const initializer = node.initializer;
 		if (!initializer || !ts.isCallExpression(initializer)) return;
 		if (!ts.isIdentifier(initializer.expression) || !factories.has(initializer.expression.text))
 			return;
-		if (!namesThisFile(initializer.arguments[0])) return;
+		if (!namesThisFile(initializer.arguments[0], declarations())) return;
 		names.add(node.name.text);
 		modelled.add(initializer.expression);
 	});
@@ -636,13 +654,69 @@ const importMeta = (node, name) =>
 	node.expression.keywordToken === ts.SyntaxKind.ImportKeyword;
 
 /**
+ * True where an identifier BINDS the name it is written as — a declaration this
+ * file makes — rather than referring to a value or naming a property.
+ *
+ * ONE SHAPE TEST, for the reason `namesRatherThanReferences` gives: TypeScript puts
+ * every declaration's own name in its parent's `name` slot, and so does every
+ * member of an object, a class, an interface and an enum. The members are the ones
+ * that bind nothing in scope — `{ join: 1 }` and `class C { join() {} }` declare a
+ * property OF something — so they are subtracted and the rest is the class,
+ * including the ones a list would have to be extended for.
+ */
+function bindsName(node) {
+	const parent = node.parent;
+	if (!parent || parent.name !== node) return false;
+	return !(
+		ts.isPropertyAccessExpression(parent) ||
+		ts.isObjectLiteralElementLike(parent) ||
+		ts.isClassElement(parent) ||
+		ts.isTypeElement(parent) ||
+		ts.isEnumMember(parent) ||
+		ts.isExportSpecifier(parent)
+	);
+}
+
+/**
+ * Every name this file DECLARES, each with the declarations that declare it.
+ *
+ * WHY A MODEL OVER NAMES OWES ITSELF THIS, which is round 12's first finding. A
+ * name this reading models is only that model's while nothing else in the file is
+ * spelled the same way. `import { join } from 'node:path'` makes `join(a, b)` a
+ * composition; `const join = (a, b) => a` two scopes down makes the identical text
+ * something else entirely, and a reading that answers the first for the second
+ * names a directory the call does not — which is the decoy this whole control
+ * exists to refuse, arriving through a local rather than through a resolver.
+ *
+ * So a modelled name is dropped where the file binds it anywhere BUT at the
+ * declaration the model came from: the count is what says so, since the modelled
+ * import is itself one binding. Dropping it costs the site its frame and leaves the
+ * words in it `unknown`, which is the direction this reading fails in.
+ */
+function boundNames(file) {
+	const bound = new Map();
+	eachNode(file, (node) => {
+		if (!ts.isIdentifier(node) || !bindsName(node)) return;
+		const declarations = bound.get(node.text) ?? [];
+		declarations.push(node);
+		bound.set(node.text, declarations);
+	});
+	return bound;
+}
+
+/**
  * `import.meta.url` or `__filename` — the two spellings of "the file this is
  * written in", and the only bases under which a loader built here resolves a
  * relative specifier the way this walk resolves it.
+ *
+ * `__filename` IS A NAME LIKE ANY OTHER, and a file that binds one of its own has
+ * said the word means something else here. `import.meta.url` cannot be bound at
+ * all — it is syntax rather than an identifier — which is why only one of the two
+ * is asked about.
  */
-function namesThisFile(node) {
+function namesThisFile(node, bound) {
 	if (!node) return false;
-	if (ts.isIdentifier(node)) return node.text === '__filename';
+	if (ts.isIdentifier(node)) return node.text === '__filename' && !bound.has('__filename');
 	return importMeta(node, 'url');
 }
 
@@ -977,7 +1051,7 @@ function headedCall(node) {
  * stands for, and what a child does with a variable, is the caller's question —
  * the same division `runtimeLoads` draws for a specifier and its loader.
  */
-function siteWords(node) {
+function siteWords(node, composers) {
 	const words = [];
 	const seen = new Set();
 	const add = (text, frame, role, key) => {
@@ -990,7 +1064,7 @@ function siteWords(node) {
 		// A path expression this reading CAN name is taken whole, in its own frame:
 		// `new URL('./lib/x.mjs', import.meta.url)` is one word written in the file's
 		// frame rather than a literal floating in the child's.
-		const written = writtenPath(inner);
+		const written = writtenPath(inner, composers);
 		if (written) return add(written.path, written.from, role, key);
 		// A path expression it cannot name puts every literal inside it in a frame
 		// with no value, which is the fail-closed answer rather than a default.
@@ -1190,6 +1264,147 @@ const PROCESS_BASE = Object.freeze({ from: 'process', path: '.' });
 const UNKNOWN_BASE = Object.freeze({ from: 'unknown' });
 
 /**
+ * The modules that hand out a path composer, and the exports of each this reading
+ * models. `node:path` builds a directory out of pieces; `node:url` turns the URL a
+ * module knows itself by into one.
+ *
+ * The dialect sub-objects are the same module wearing a member's name: `path.posix`
+ * and `path.win32` export the same two composers, and a reading that knew only the
+ * bare namespace would answer `unknown` for a call that composes exactly as the
+ * plain one does.
+ */
+const COMPOSER_MODULES = Object.freeze({
+	path: new Set([
+		'path',
+		'node:path',
+		'path/posix',
+		'node:path/posix',
+		'path/win32',
+		'node:path/win32',
+	]),
+	url: new Set(['url', 'node:url']),
+});
+const MODELLED_COMPOSERS = Object.freeze({
+	path: new Set(['join', 'resolve']),
+	url: new Set(['fileURLToPath']),
+});
+const PATH_DIALECTS = new Set(['posix', 'win32']);
+
+/** Which of the modules above a specifier names, or null for anything else. */
+function composerModule(specifier) {
+	if (specifier === null) return null;
+	for (const [module_, specifiers] of Object.entries(COMPOSER_MODULES))
+		if (specifiers.has(specifier)) return module_;
+	return null;
+}
+
+/**
+ * The names this file binds to the path composers above — `{ names, namespaces }`,
+ * where `names` maps a local to the export it names and `namespaces` maps a local
+ * to the module it holds — with `bound` beside them, so the reading below can ask
+ * about `__dirname` and `__filename` the same way.
+ *
+ * WHY A CALLEE HAS TO BE PROVEN, which is round 12's first finding and the fourth
+ * arrival of round 7's lesson: A LOADER'S BASE IS PART OF ITS MODEL, and here the
+ * base IS the answer. `writtenPath` read any two-argument call or member spelled
+ * `join` or `resolve` as `node:path`, and two things wear that name that are not it.
+ * `['sub'].join(import.meta.dirname, 'ignored')` is `Array.prototype.join` — it
+ * returns `sub` at run time, and the child ran `sub/helper.mjs` while this reading
+ * named a file-framed `scripts/ignored`, bound the pinned `scripts/ignored/helper.mjs`
+ * beside it and exited 0 with the real child rewritten wholesale. A locally declared
+ * `join` does the same thing with a shorter fixture. Both are the decoy this control
+ * exists to refuse, reached through a NAME rather than through a resolver.
+ *
+ * WHICH FORMS BIND ONE. A named import with or without an alias, a default or
+ * namespace import, a `require('node:path')` held in a name, and the destructuring
+ * of that require. What is deliberately NOT modelled is every form that hands the
+ * module out through something this reading would then have to track — `import
+ * path = require('node:path')`, a member reached off an object, a namespace passed
+ * to a function — because an unproven composer is not a finding here: it is a frame
+ * of `unknown`, which reports the words inside it and costs the site a `binds` it
+ * can no longer check. Fail-closed is cheap, so the model may be small.
+ */
+function pathComposers(file) {
+	const names = new Map();
+	const namespaces = new Map();
+	const declared = new Set();
+
+	const bindNamespace = (name, module_) => {
+		namespaces.set(name.text, module_);
+		declared.add(name);
+	};
+	const bindExport = (local, exported, module_) => {
+		if (exported === null || !MODELLED_COMPOSERS[module_].has(exported)) return;
+		names.set(local.text, exported);
+		declared.add(local);
+	};
+
+	eachNode(file, (node) => {
+		if (ts.isImportDeclaration(node)) {
+			const module_ = composerModule(staticSpecifier(node.moduleSpecifier));
+			const clause = module_ && node.importClause;
+			if (!clause) return;
+			if (clause.name) bindNamespace(clause.name, module_);
+			const bindings = clause.namedBindings;
+			if (!bindings) return;
+			if (ts.isNamespaceImport(bindings)) return bindNamespace(bindings.name, module_);
+			for (const element of bindings.elements)
+				if (ts.isIdentifier(element.name))
+					bindExport(element.name, (element.propertyName ?? element.name).text, module_);
+			return;
+		}
+		// `const path = require('node:path')`, which is how a CommonJS gate file spells
+		// the same import — and its destructuring, which reads the same exports.
+		if (!ts.isVariableDeclaration(node) || !node.initializer) return;
+		const call = node.initializer;
+		if (!ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) return;
+		if (call.expression.text !== 'require') return;
+		const module_ = composerModule(staticSpecifier(call.arguments[0]));
+		if (!module_) return;
+		if (ts.isIdentifier(node.name)) return bindNamespace(node.name, module_);
+		if (!ts.isObjectBindingPattern(node.name)) return;
+		for (const element of node.name.elements) {
+			if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+			const key = element.propertyName ? keyText(element.propertyName) : element.name.text;
+			bindExport(element.name, key, module_);
+		}
+	});
+
+	// A name the file binds anywhere else is a name that means something else there,
+	// and this reading has no scopes to tell where. The modelled import is itself one
+	// binding, so a second one is the shadow.
+	const bound = boundNames(file);
+	for (const map of [names, namespaces])
+		for (const name of [...map.keys()]) {
+			const declarations = bound.get(name) ?? [];
+			if (declarations.some((identifier) => !declared.has(identifier))) map.delete(name);
+		}
+
+	return { names, namespaces, bound };
+}
+
+/** The module a namespace expression holds, through the dialect members of it. */
+function namespaceModule(expression, composers) {
+	if (ts.isIdentifier(expression)) return composers.namespaces.get(expression.text) ?? null;
+	if (!ts.isPropertyAccessExpression(expression) || !PATH_DIALECTS.has(expression.name.text))
+		return null;
+	return namespaceModule(expression.expression, composers) === 'path' ? 'path' : null;
+}
+
+/**
+ * The composer a callee NAMES, proven to be an export of a module this file took
+ * it from — or null, which is every other call in the tree.
+ */
+function composerCalled(callee, composers) {
+	if (ts.isIdentifier(callee)) return composers.names.get(callee.text) ?? null;
+	if (!ts.isPropertyAccessExpression(callee)) return null;
+	const module_ = namespaceModule(callee.expression, composers);
+	if (module_ === null) return null;
+	const exported = callee.name.text;
+	return MODELLED_COMPOSERS[module_].has(exported) ? exported : null;
+}
+
+/**
  * The path an expression NAMES, in the frame it is written in, or null where this
  * reading cannot name one.
  *
@@ -1215,17 +1430,23 @@ const UNKNOWN_BASE = Object.freeze({ from: 'unknown' });
  * being closed. The discipline is the same in both directions: a site that means
  * its child's directory to be checkable writes it where the child is started.
  *
- * `join`/`resolve` NEED A SECOND ARGUMENT to be read as composing a path at all.
- * `parts.join('/')` is `Array.prototype.join` wearing the same name, and reading
- * it as `path.join` would name the directory `/` at a site that names no directory
- * — a base invented out of punctuation. One argument is not a composition, so it
- * is not read as one.
+ * `join`/`resolve` NEED A SECOND ARGUMENT to be read as composing a path at all,
+ * AND A CALLEE THIS FILE TOOK FROM `node:path`. `parts.join('/')` is
+ * `Array.prototype.join` wearing the same name, and reading it as `path.join` would
+ * name the directory `/` at a site that names no directory — a base invented out of
+ * punctuation. One argument is not a composition, so it is not read as one; and a
+ * two-argument call this file cannot show came from a path module is not one
+ * either, which is what `pathComposers` above proves and what round 12's first
+ * finding walked a child through. `__dirname` and `__filename` are held to the same
+ * rule from the other side: a file that binds one of those names has said the word
+ * means something else in it.
  */
-function writtenPath(node) {
+function writtenPath(node, composers) {
 	if (!node) return null;
 	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
 		return { from: 'process', path: node.text };
-	if (ts.isIdentifier(node) && node.text === '__dirname') return { from: 'file', path: '.' };
+	if (ts.isIdentifier(node) && node.text === '__dirname')
+		return composers.bound.has('__dirname') ? null : { from: 'file', path: '.' };
 	if (importMeta(node, 'dirname')) return { from: 'file', path: '.' };
 	if (
 		ts.isNewExpression(node) &&
@@ -1234,18 +1455,16 @@ function writtenPath(node) {
 	) {
 		const [specifier, base] = node.arguments ?? [];
 		const written = staticSpecifier(specifier);
-		return written !== null && namesThisFile(base) ? { from: 'file', path: written } : null;
+		return written !== null && namesThisFile(base, composers.bound)
+			? { from: 'file', path: written }
+			: null;
 	}
 	if (!ts.isCallExpression(node)) return null;
-	const callee = ts.isIdentifier(node.expression)
-		? node.expression.text
-		: ts.isPropertyAccessExpression(node.expression)
-			? node.expression.name.text
-			: null;
-	if (callee === 'fileURLToPath') return writtenPath(node.arguments[0]);
-	if ((callee !== 'join' && callee !== 'resolve') || node.arguments.length < 2) return null;
+	const callee = composerCalled(node.expression, composers);
+	if (callee === 'fileURLToPath') return writtenPath(node.arguments[0], composers);
+	if (callee === null || node.arguments.length < 2) return null;
 	const [first, ...rest] = node.arguments;
-	const head = writtenPath(first);
+	const head = writtenPath(first, composers);
 	if (!head) return null;
 	const tail = rest.map((argument) => staticSpecifier(argument));
 	// An absolute segment DISCARDS everything before it in `path.resolve`, so a
@@ -1265,6 +1484,17 @@ function writtenPath(node) {
  * reading has no value for, and taking them as bare child arguments would resolve
  * them in a directory the call does not name. So this recognises the shape by its
  * callee, and `siteWords` puts what is inside it in the `unknown` frame.
+ *
+ * WHICH IS WHY THIS ONE STAYS NAME-ONLY while `writtenPath` above stopped being.
+ * The two answer opposite questions. A callee this reading cannot prove came from
+ * `node:path` may not NAME a directory — that was round 12's decoy — but it may
+ * very well BE a composition, and the words inside one are written against a base
+ * that is not the child's working directory. Proving the callee here would move
+ * those words back into the child's frame and resolve them there, which is the
+ * guess this function exists to stop. So the strict reading decides what may be
+ * named and the loose one decides what may not be assumed: `['sub'].join(dir, 'x')`
+ * names nothing and puts `x` in the `unknown` frame, and both halves are the
+ * fail-closed answer.
  */
 function pathComposer(node) {
 	if (
@@ -1341,7 +1571,7 @@ function optionKey(property) {
  * literal this reading opens. Two bags carrying a `cwd`, a spread, a key it cannot
  * read, a shorthand and a value `writtenPath` cannot name all answer UNKNOWN.
  */
-function siteBase(node) {
+function siteBase(node, composers) {
 	const call = headedCall(node);
 	if (!call?.arguments) return PROCESS_BASE;
 	let written = null;
@@ -1354,7 +1584,7 @@ function siteBase(node) {
 			if (key === null) return UNKNOWN_BASE;
 			if (key !== 'cwd') continue;
 			if (!ts.isPropertyAssignment(property)) return UNKNOWN_BASE;
-			const directory = writtenPath(property.initializer);
+			const directory = writtenPath(property.initializer, composers);
 			if (!directory || written) return UNKNOWN_BASE;
 			written = directory;
 		}
@@ -1486,6 +1716,7 @@ export function unfollowableLoads(source) {
 	const file = parsed(source);
 	const { names, factories, modelled } = requireLike(file);
 	const running = importedLocals(file, EXECUTION_MODULES, MODELLED_EXECUTION_EXPORTS);
+	const composers = pathComposers(file);
 	const found = [];
 	const report = (node, kind, detail) =>
 		found.push({
@@ -1493,8 +1724,8 @@ export function unfollowableLoads(source) {
 			line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
 			kind,
 			detail,
-			literals: siteWords(node),
-			base: siteBase(node),
+			literals: siteWords(node, composers),
+			base: siteBase(node, composers),
 			execPath: runsThisInterpreter(node),
 			environment: opensEnvironment(node),
 		});

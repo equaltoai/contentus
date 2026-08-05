@@ -75,6 +75,13 @@ const BELOW_GATE = 'sub/helper.mjs';
 const BELOW_GATE_SOURCE = "export const value = 'the child that really runs';\n";
 
 /**
+ * The file a frame decided by an unproven composer names — real, pinnable, and
+ * never executed, which is what a decoy is.
+ */
+const IGNORED_HELPER = 'scripts/ignored/helper.mjs';
+const IGNORED_SOURCE = "export const value = 'the file the wrong frame names';\n";
+
+/**
  * Run CON-5 over a synthetic tree.
  *
  * `pinned` is the exact set of paths the contract binds — exact because CON-5
@@ -3160,4 +3167,144 @@ test('an environment this reading cannot open is reported, not assumed empty', (
 		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
 		assert.match(moved.output, /scripts\/lib\/helper\.mjs: content does not match its pin/);
 	}
+});
+
+/* -------------------------------------------------------------------------
+ * Round 12 — the composer that decides a site's frame
+ * ---------------------------------------------------------------------- */
+
+test('a path composer is one this file took from node:path, or the frame is unknown', () => {
+	// THE REPRO. The reading named a path out of any two-argument call or member
+	// SPELLED `join` or `resolve`, and two things wear that name that are not
+	// `node:path`'s. `['sub'].join(import.meta.dirname, 'ignored')` is
+	// `Array.prototype.join`: it returns `sub` at run time, so the child ran in `sub`
+	// while this walk named a file-framed `scripts/ignored`, found the pinned helper
+	// sitting in it, and exited 0 — with the file that really runs unpinned and
+	// freely editable. A pin on a file that does not run is round 7's decoy, reached
+	// here through a NAME rather than through a resolver.
+	const declaration = {
+		file: 'scripts/gate.mjs',
+		line: 2,
+		expression: 'spawnSync',
+		reason: 'the fixture’s point',
+	};
+	const decoyed = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, ['helper.mjs'], { cwd: ['sub'].join(import.meta.dirname, 'ignored') });\n",
+			[IGNORED_HELPER]: IGNORED_SOURCE,
+			[BELOW_GATE]: BELOW_GATE_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', IGNORED_HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, binds: [IGNORED_HELPER] }],
+		},
+	});
+	assert.equal(decoyed.status, 1, 'a composer this file never imported names no directory');
+	assert.match(
+		decoyed.output,
+		/hands "helper\.mjs" to a child whose working directory this reading cannot determine/
+	);
+	assert.match(
+		decoyed.output,
+		/binds scripts\/ignored\/helper\.mjs, which this site is not written to run/
+	);
+
+	// A `join` the file declares for itself is the same fact with a shorter fixture,
+	// and an import of the real one two lines up does not make it the real one here.
+	const shadowed = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"import { join } from 'node:path';\n" +
+				'function run() {\n' +
+				'\tconst join = (parts) => parts;\n' +
+				"\treturn spawnSync(process.execPath, ['helper.mjs'], { cwd: join(import.meta.dirname, 'ignored') });\n" +
+				'}\n' +
+				'run();\n',
+			[IGNORED_HELPER]: IGNORED_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs', IGNORED_HELPER],
+		contract: {
+			unfollowable_loads_disclosed: [{ ...declaration, line: 5, binds: [IGNORED_HELPER] }],
+		},
+	});
+	assert.equal(shadowed.status, 1, 'a name this file binds twice is not the one modelled');
+	assert.match(
+		shadowed.output,
+		/hands "helper\.mjs" to a child whose working directory this reading cannot determine/
+	);
+
+	// THE PAIRING, in every form that PROVES the composer. The frame is named
+	// exactly as it always was, the file in it binds, and rewriting that file turns
+	// this red — which is the property the whole control exists for.
+	for (const [what, header, composed] of [
+		[
+			'a named import',
+			"import { join } from 'node:path';\n",
+			"join(import.meta.dirname, 'ignored')",
+		],
+		[
+			'an alias of one',
+			"import { join as under } from 'node:path';\n",
+			"under(import.meta.dirname, 'ignored')",
+		],
+		['a namespace', "import path from 'node:path';\n", "path.join(import.meta.dirname, 'ignored')"],
+		[
+			'a dialect of one',
+			"import * as path from 'node:path';\n",
+			"path.posix.resolve(import.meta.dirname, 'ignored')",
+		],
+		[
+			'a require of the same module',
+			"const path = require('node:path');\n",
+			"path.resolve(import.meta.dirname, 'ignored')",
+		],
+	]) {
+		const files = {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				header +
+				`spawnSync(process.execPath, ['helper.mjs'], { cwd: ${composed} });\n`,
+			[IGNORED_HELPER]: IGNORED_SOURCE,
+		};
+		const contract = {
+			unfollowable_loads_disclosed: [{ ...declaration, line: 3, binds: [IGNORED_HELPER] }],
+		};
+		const bound = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', IGNORED_HELPER],
+			contract,
+		});
+		assert.equal(
+			bound.status,
+			0,
+			`${what} composes a directory this reading names\n${bound.output}`
+		);
+
+		const moved = runCon5({
+			files,
+			pinned: ['scripts/gate.mjs', IGNORED_HELPER],
+			contract,
+			corrupt: IGNORED_HELPER,
+		});
+		assert.equal(moved.status, 1, `${what} must BIND rather than merely pass`);
+		assert.match(moved.output, /scripts\/ignored\/helper\.mjs: content does not match its pin/);
+	}
+
+	// The other direction, where a rule about names goes wrong: an ordinary
+	// `Array.prototype.join` at a site is not a finding about anything, because a
+	// site that names no directory writes no `cwd` and its words are the child's.
+	const ordinary = runCon5({
+		files: {
+			'scripts/gate.mjs':
+				"import { spawnSync } from 'node:child_process';\n" +
+				"spawnSync(process.execPath, [['scripts', 'lib', 'helper.mjs'].join('/')]);\n",
+			[HELPER]: HELPER_SOURCE,
+		},
+		pinned: ['scripts/gate.mjs'],
+		contract: { unfollowable_loads_disclosed: [declaration] },
+	});
+	assert.equal(ordinary.status, 0, `a one-argument join names nothing\n${ordinary.output}`);
 });
