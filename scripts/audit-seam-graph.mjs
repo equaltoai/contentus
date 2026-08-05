@@ -951,7 +951,7 @@ export function seamFindings(sink, tracked) {
 
 	const seen = new Set();
 	for (const { importer, target } of sink.edges) {
-		const key = `${importer} ${target}`;
+		const key = `${importer}\0${target}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
 		const offence = seamOffence(importer, target);
