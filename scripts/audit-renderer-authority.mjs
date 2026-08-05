@@ -105,6 +105,7 @@ const OWNED_SOURCE_DIRS = [
 	// any business owning a renderer. An `{@html}` or a Markdown import appearing
 	// in this directory would be a defect wherever it came from.
 	'src/lib/agents',
+	'src/lib/drones',
 	'src/lib/auth',
 	'src/lib/brand',
 	'src/lib/build',

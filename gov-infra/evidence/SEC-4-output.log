@@ -4,8 +4,8 @@
 
 # CSP Audit — contentus SSR output
 
-- Routes rendered from build/server/handler.mjs: 21
-- Documents scanned: 20
+- Routes rendered from build/server/handler.mjs: 23
+- Documents scanned: 22
 - Ship-blocking findings: 0
 - Off-origin script/style references: 0
 - Route status mismatches: 0
@@ -28,7 +28,9 @@
 - agents           200    5550 bytes  findings=0
 - agents-filtered  200    5608 bytes  findings=0
 - agent-detail     200    5630 bytes  findings=0
-- profile          200    5260 bytes  findings=0
+- drones           200    5745 bytes  findings=0
+- drone-new        200    5783 bytes  findings=0
+- profile          200    5261 bytes  findings=0
 - auth-callback    200    5064 bytes  findings=0
 - not-found        404    5064 bytes  findings=0
 - hydration-data   200     557 bytes  findings=0

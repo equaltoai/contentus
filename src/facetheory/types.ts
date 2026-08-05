@@ -21,6 +21,8 @@ export type AppPageKey =
 	| 'message-thread'
 	| 'agents'
 	| 'agent-detail'
+	| 'drones'
+	| 'drone-new'
 	| 'profile'
 	| 'auth-callback'
 	| 'not-found';

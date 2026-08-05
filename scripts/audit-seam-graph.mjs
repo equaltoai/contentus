@@ -191,6 +191,12 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
 import { DECLARED, FACE_DIR, faceName, seamOffence } from './lib/agent-seams.mjs';
+import {
+	DECLARED as DRONE_DECLARED,
+	FACE_DIR as DRONE_FACE_DIR,
+	faceName as droneFaceName,
+	seamOffence as droneSeamOffence,
+} from './lib/drone-seams.mjs';
 
 /**
  * The two passes `pnpm build` runs, named the way the package scripts name them.
@@ -846,8 +852,8 @@ export async function seamGraph({
 }
 
 /** The files the repository carries inside the face, asked of git. */
-export function trackedFaceFiles(root = process.cwd()) {
-	return execFileSync('git', ['-C', root, 'ls-files', '-z', '--', FACE_DIR], {
+export function trackedFaceFiles(root = process.cwd(), faceDir = FACE_DIR) {
+	return execFileSync('git', ['-C', root, 'ls-files', '-z', '--', faceDir], {
 		encoding: 'utf8',
 		maxBuffer: 1024 * 1024 * 16,
 	})
@@ -871,7 +877,16 @@ export function trackedFaceFiles(root = process.cwd()) {
  *   - Does any edge cross a seam? `seamOffence` in `./lib/agent-seams.mjs` is the
  *     rule, shared with the reading probes so that one graph answers both.
  */
-export function seamFindings(sink, tracked) {
+function findingsForDeclaration(
+	sink,
+	tracked,
+	{
+		faceDir = FACE_DIR,
+		declaredComponents = DECLARED,
+		nameOf = faceName,
+		offenceFor = seamOffence,
+	} = {}
+) {
 	const findings = [...sink.findings];
 
 	for (const pass of PASSES)
@@ -881,14 +896,14 @@ export function seamFindings(sink, tracked) {
 			);
 
 	if (tracked.length === 0)
-		findings.push(`${FACE_DIR} has no tracked files; this gate would assert nothing`);
+		findings.push(`${faceDir} has no tracked files; this gate would assert nothing`);
 
-	const components = tracked.filter((path) => path.endsWith('.svelte')).map(faceName);
-	const declared = [...DECLARED].sort();
+	const components = tracked.filter((path) => path.endsWith('.svelte')).map(nameOf);
+	const declared = [...declaredComponents].sort();
 	for (const name of components)
-		if (!DECLARED.includes(name))
+		if (!declaredComponents.includes(name))
 			findings.push(
-				`${FACE_DIR}/${name} is a component in the face and no seam declaration names it`
+				`${faceDir}/${name} is a component in the face and no seam declaration names it`
 			);
 	for (const name of declared)
 		if (!components.includes(name))
@@ -896,7 +911,7 @@ export function seamFindings(sink, tracked) {
 				`${name} is declared behind a seam and no such component is tracked in the face`
 			);
 	for (const name of declared)
-		if (DECLARED.filter((entry) => entry === name).length > 1)
+		if (declaredComponents.filter((entry) => entry === name).length > 1)
 			findings.push(`${name} is named in more than one place in the seam declaration`);
 
 	// Every MODULE a pass resolved, indexed by the file it is a request for, so the
@@ -954,11 +969,24 @@ export function seamFindings(sink, tracked) {
 		const key = `${importer}\0${target}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
-		const offence = seamOffence(importer, target);
+		const offence = offenceFor(importer, target);
 		if (offence) findings.push(offence);
 	}
 
 	return [...new Set(findings)].sort();
+}
+
+export function seamFindings(sink, tracked) {
+	return findingsForDeclaration(sink, tracked);
+}
+
+export function droneSeamFindings(sink, tracked) {
+	return findingsForDeclaration(sink, tracked, {
+		faceDir: DRONE_FACE_DIR,
+		declaredComponents: DRONE_DECLARED,
+		nameOf: droneFaceName,
+		offenceFor: droneSeamOffence,
+	});
 }
 
 /** Run the gate as `pnpm run validate:seam-graph` runs it. */
@@ -967,18 +995,31 @@ export async function auditSeamGraph({ root = process.cwd(), overlay = {}, blind
 	return { sink, findings: seamFindings(sink, trackedFaceFiles(root)) };
 }
 
+export async function auditAllSeams({ root = process.cwd(), overlay = {}, blind, external } = {}) {
+	const sink = await seamGraph({ root, overlay, blind, external });
+	return {
+		sink,
+		findings: [
+			...new Set([
+				...seamFindings(sink, trackedFaceFiles(root)),
+				...droneSeamFindings(sink, trackedFaceFiles(root, DRONE_FACE_DIR)),
+			]),
+		],
+	};
+}
+
 async function main() {
 	const root = process.cwd();
-	const { sink, findings } = await auditSeamGraph({ root });
+	const { sink, findings } = await auditAllSeams({ root });
 
 	const intoTheFace = new Map();
 	for (const { importer, target, channel } of sink.edges) {
-		if (!faceName(target)) continue;
+		if (!faceName(target) && !droneFaceName(target)) continue;
 		const key = `${importer} → ${target}`;
 		intoTheFace.set(key, (intoTheFace.get(key) ?? new Set()).add(channel));
 	}
 
-	console.log('# Seam graph audit — face 6 (%s)\n', FACE_DIR);
+	console.log('# Seam graph audit — faces 6–7 (%s, %s)\n', FACE_DIR, DRONE_FACE_DIR);
 	console.log(`- Build passes recorded: ${sink.passes.join(', ') || 'none'}`);
 	// Per pass, and resolved beside loaded, because the difference between the two
 	// numbers is what this gate cannot judge in that pass.
