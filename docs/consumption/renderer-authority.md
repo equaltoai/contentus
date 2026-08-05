@@ -91,10 +91,12 @@ would be an invented operation, so it was not done.
 
 **GraphQL depth.** `GRAPHQL_MAX_DEPTH` defaults to 12 for ordinary callers;
 the depth-3 cap in `cmd/graphql/main.go` applies only to agent and CLI-class
-tokens. Contentus registers as `client_class: web` deliberately — a Relay
-connection query (`articles → edges → node → field`) is depth 4 at minimum and
-cannot be expressed under a cap of 3 at all. This is worth knowing for
-lesser-body, which exposes CMS operations to agent tokens.
+tokens. Contentus registers its public browser client through `/api/v1/apps`,
+the same ordinary app-registration path simulacrum uses; it does not send the
+RFC 7591-only `client_class` metadata. A Relay connection query
+(`articles → edges → node → field`) is depth 4 at minimum and cannot be
+expressed under a cap of 3 at all. This is worth knowing for lesser-body, which
+exposes CMS operations to agent tokens.
 
 ## greater-components
 
