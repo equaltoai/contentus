@@ -28,9 +28,7 @@
     "reviewer reads and a different value a control enforces."
   ],
   "package_scripts": {
-    "rubric_items": [
-      "CON-5"
-    ],
+    "rubric_items": ["CON-5"],
     "$comment": [
       "Exact expected text of every script the rubric's exit-code trust depends on,",
       "including the transitive closure reached through `pnpm run`. CON-5 asserts each",
@@ -54,9 +52,7 @@
     }
   },
   "executable_targets": {
-    "rubric_items": [
-      "CON-5"
-    ],
+    "rubric_items": ["CON-5"],
     "$comment": [
       "The content of everything the guarded scripts above actually execute. CON-5 walks",
       "the closure — each `node <path>` target, each file a listed glob expands to, and",
@@ -140,14 +136,8 @@
       "to anything. The practical rule for an author is short: write the path where you run",
       "it, and then bind it."
     ],
-    "unpinned_import_roots": [
-      "src/",
-      "build/"
-    ],
-    "allowed_globs": [
-      "tests/*.test.mjs",
-      "scripts/*.test.mjs"
-    ],
+    "unpinned_import_roots": ["src/", "build/"],
+    "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
     "unfollowable_loads_disclosed": [
       {
         "file": "scripts/deploy-client.mjs",
@@ -214,18 +204,14 @@
         "line": 168,
         "expression": "spawnSync",
         "reason": "Runs this control's own verifier over a synthetic three-file repository in a temp directory — the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The verifier IS bound: `binds` names it, so it is pinned, hashed and walked for its own imports like any other file a guarded command executes, and the path is spelled as a literal at the call so that claim is checkable against the site. The previous entry exempted it instead, on the ground that gov-infra is genome content the parent stages and `packDigest` in `gov-infra/pack.json` binds. Round 9's review refuted that: `packDigest` appears nowhere in this repository but in the file that declares it, no local control recomputes or verifies it, and the pack's file inventory and digest algorithm are not available here to build one — so this verifier's bytes changed in this very pull request while `pack.json` did not move. Verifying `packDigest` belongs to the parent's staging discipline and is routed there; the strongest LOCAL control is the one every other executable in this closure already has, and it is applied here. The cost is real and accepted: a parent restage of the pack turns CON-5 red until this pin moves. A restage is a recorded event, and a pin that forces it to be re-acknowledged is the honest behaviour — an exemption resting on a digest nothing checks is not.",
-        "binds": [
-          "gov-infra/verifiers/check-package-scripts.mjs"
-        ]
+        "binds": ["gov-infra/verifiers/check-package-scripts.mjs"]
       },
       {
         "file": "tests/renderer-authority-audit.test.mjs",
         "line": 39,
         "expression": "spawnSync",
         "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how this probe asserts the audit’s exit code and output rather than its internals. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
-        "binds": [
-          "scripts/audit-renderer-authority.mjs"
-        ]
+        "binds": ["scripts/audit-renderer-authority.mjs"]
       },
       {
         "file": "tests/helpers/tracked-source.mjs",
@@ -290,10 +276,7 @@
     }
   },
   "install_manifest": {
-    "rubric_items": [
-      "CON-3",
-      "COM-1"
-    ],
+    "rubric_items": ["CON-3", "COM-1"],
     "$comment": [
       "`build.command` is what `lesser client install` executes. An allowlist of exact",
       "invocations is the only form of this check that means anything: any non-empty",
@@ -303,21 +286,12 @@
       "pinned, so the layout can move without a governance edit while containment holds."
     ],
     "allowed_build_commands": [
-      [
-        "pnpm",
-        "build"
-      ],
-      [
-        "pnpm",
-        "run",
-        "build"
-      ]
+      ["pnpm", "build"],
+      ["pnpm", "run", "build"]
     ]
   },
   "security_tests": {
-    "rubric_items": [
-      "SEC-6"
-    ],
+    "rubric_items": ["SEC-6"],
     "$comment": [
       "SEC-6's inventory. `node --test <files>` exits 0 on a file containing no tests,",
       "so existence is not coverage. Each file below must be present and must report at",
@@ -348,9 +322,7 @@
     ]
   },
   "supply_chain": {
-    "rubric_items": [
-      "SEC-3"
-    ],
+    "rubric_items": ["SEC-3"],
     "$comment": [
       "The hard boundary is that no install in this rubric or in CI runs lifecycle",
       "scripts: every `pnpm install` carries `--ignore-scripts`. The scans below are",
@@ -366,10 +338,7 @@
     "pnpmfile_disclosed": []
   },
   "greater": {
-    "rubric_items": [
-      "CON-4",
-      "SEC-7"
-    ],
+    "rubric_items": ["CON-4", "SEC-7"],
     "$comment": [
       "Binds the two greater channels to each other and to a named release, rather than",
       "to a shape. A 40-hex-shaped ref is not evidence of anything: every commit in every",
@@ -416,9 +385,7 @@
     }
   },
   "workflows": {
-    "rubric_items": [
-      "SEC-3"
-    ],
+    "rubric_items": ["SEC-3"],
     "$comment": [
       "Least-privilege GitHub Actions permissions. Every workflow must declare an",
       "explicit top-level `permissions:` block, and every scope in it — top-level or",
@@ -450,13 +417,9 @@
       "comparisons and DCO's commit walk are now content-bound here rather than matched as",
       "command text, while MAI-4 still binds the exact invocation in the workflow."
     ],
-    "allowed_install_invocations": [
-      "pnpm install --frozen-lockfile --ignore-scripts"
-    ],
+    "allowed_install_invocations": ["pnpm install --frozen-lockfile --ignore-scripts"],
     "pinned_run_scripts": {
-      "rubric_items": [
-        "SEC-3"
-      ],
+      "rubric_items": ["SEC-3"],
       "sha256": {
         "scripts/dco-check.mjs": "9774468f7f40852c34c6903870cd4fb18323e8e7ebde611aa24d43e71bb505e8",
         "scripts/main-guard-check.mjs": "37a68ec6fc26fb17b7bbac3362b14a25548b6dadea3fb820dc036f9ea0a93639"
