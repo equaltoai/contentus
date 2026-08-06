@@ -2,109 +2,109 @@ TAP version 13
 # Subtest: a spoofed forwarding header never becomes the server-side fetch target
 ok 1 - a spoofed forwarding header never becomes the server-side fetch target
   ---
-  duration_ms: 18.004744
+  duration_ms: 18.879349
   type: 'test'
   ...
 # Subtest: a spoofed forwarding header never reaches the advertised identity
 ok 2 - a spoofed forwarding header never reaches the advertised identity
   ---
-  duration_ms: 1.044525
+  duration_ms: 1.094699
   type: 'test'
   ...
 # Subtest: with no trusted host at all, no viewer-supplied host is substituted
 ok 3 - with no trusted host at all, no viewer-supplied host is substituted
   ---
-  duration_ms: 1.468021
+  duration_ms: 1.468132
   type: 'test'
   ...
 # Subtest: an ambient Host never becomes the server-side fetch target
 ok 4 - an ambient Host never becomes the server-side fetch target
   ---
-  duration_ms: 0.87749
+  duration_ms: 0.863816
   type: 'test'
   ...
 # Subtest: the trusted header still wins when an ambient Host disagrees with it
 ok 5 - the trusted header still wins when an ambient Host disagrees with it
   ---
-  duration_ms: 0.853064
+  duration_ms: 0.866811
   type: 'test'
   ...
 # Subtest: with no trusted host the page degrades on a real fetch, not just a stubbed one
 ok 6 - with no trusted host the page degrades on a real fetch, not just a stubbed one
   ---
-  duration_ms: 1.066386
+  duration_ms: 1.107884
   type: 'test'
   ...
 # Subtest: a loaded article renders rather than 500ing on its own canonical tag
 ok 7 - a loaded article renders rather than 500ing on its own canonical tag
   ---
-  duration_ms: 0.725264
+  duration_ms: 0.687223
   type: 'test'
   ...
 # Subtest: article index keeps partial data when the GraphQL error envelope contains null
 ok 8 - article index keeps partial data when the GraphQL error envelope contains null
   ---
-  duration_ms: 1.102945
+  duration_ms: 1.139253
   type: 'test'
   ...
 # Subtest: category loader keeps partial data when its GraphQL error envelope contains null
 ok 9 - category loader keeps partial data when its GraphQL error envelope contains null
   ---
-  duration_ms: 0.747777
+  duration_ms: 0.727508
   type: 'test'
   ...
 # Subtest: an HTML article renders its body through the vendored blog face
 ok 10 - an HTML article renders its body through the vendored blog face
   ---
-  duration_ms: 11.799172
+  duration_ms: 12.382917
   type: 'test'
   ...
 # Subtest: a withheld body is absent from the public hydration payload
 ok 11 - a withheld body is absent from the public hydration payload
   ---
-  duration_ms: 0.388401
+  duration_ms: 0.383862
   type: 'test'
   ...
 # Subtest: a withheld body is absent from the SSR document too
 ok 12 - a withheld body is absent from the SSR document too
   ---
-  duration_ms: 0.816686
+  duration_ms: 0.805706
   type: 'test'
   ...
 # Subtest: a displayable body still reaches hydration, since the page shows it
 ok 13 - a displayable body still reaches hydration, since the page shows it
   ---
-  duration_ms: 0.30335
+  duration_ms: 0.318068
   type: 'test'
   ...
 # Subtest: a missing article is a real 404, not a 200 that says "not found"
 ok 14 - a missing article is a real 404, not a 200 that says "not found"
   ---
-  duration_ms: 0.697111
+  duration_ms: 0.696581
   type: 'test'
   ...
 # Subtest: a missing series or category is a real 404 too
 ok 15 - a missing series or category is a real 404 too
   ---
-  duration_ms: 1.60039
+  duration_ms: 1.719585
   type: 'test'
   ...
 # Subtest: an instance with long-form off is a 200 product state, not a 404
 ok 16 - an instance with long-form off is a 200 product state, not a 404
   ---
-  duration_ms: 0.589108
+  duration_ms: 0.704004
   type: 'test'
   ...
 # Subtest: canonical identity is advertised in both forms lesser expects
 ok 17 - canonical identity is advertised in both forms lesser expects
   ---
-  duration_ms: 0.59017
+  duration_ms: 0.578068
   type: 'test'
   ...
 # Subtest: a cross-origin canonical is left to og:url rather than mis-stated
 ok 18 - a cross-origin canonical is left to og:url rather than mis-stated
   ---
-  duration_ms: 0.5318
+  duration_ms: 0.510541
   type: 'test'
   ...
 1..18
@@ -115,72 +115,72 @@ ok 18 - a cross-origin canonical is left to og:url rather than mis-stated
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 96.896698
+# duration_ms 103.847735
 TAP version 13
 # Subtest: origin derives from the edge-injected host
 ok 1 - origin derives from the edge-injected host
   ---
-  duration_ms: 0.511402
+  duration_ms: 0.565394
   type: 'test'
   ...
 # Subtest: an ambient Host header is not a trusted host
 ok 2 - an ambient Host header is not a trusted host
   ---
-  duration_ms: 0.075642
+  duration_ms: 0.072707
   type: 'test'
   ...
 # Subtest: the trusted host wins over every host a caller can set
 ok 3 - the trusted host wins over every host a caller can set
   ---
-  duration_ms: 0.093656
+  duration_ms: 0.089809
   type: 'test'
   ...
 # Subtest: scheme honours the edge-injected proto but defaults to https
 ok 4 - scheme honours the edge-injected proto but defaults to https
   ---
-  duration_ms: 0.065042
+  duration_ms: 0.071565
   type: 'test'
   ...
 # Subtest: a malformed or injected trusted host is rejected rather than guessed
 ok 5 - a malformed or injected trusted host is rejected rather than guessed
   ---
-  duration_ms: 0.076343
+  duration_ms: 0.083116
   type: 'test'
   ...
 # Subtest: a malformed trusted host fails closed rather than reaching for another
 ok 6 - a malformed trusted host fails closed rather than reaching for another
   ---
-  duration_ms: 0.044404
+  duration_ms: 0.044353
   type: 'test'
   ...
 # Subtest: a forwarded host list collapses to its first entry, lower-cased
 ok 7 - a forwarded host list collapses to its first entry, lower-cased
   ---
-  duration_ms: 0.04282
+  duration_ms: 0.044674
   type: 'test'
   ...
 # Subtest: a missing trusted host yields null rather than a fabricated origin
 ok 8 - a missing trusted host yields null rather than a fabricated origin
   ---
-  duration_ms: 0.057899
+  duration_ms: 0.056507
   type: 'test'
   ...
 # Subtest: canonical article identity follows lesser, not the contentus route
 ok 9 - canonical article identity follows lesser, not the contentus route
   ---
-  duration_ms: 0.06401
+  duration_ms: 0.067507
   type: 'test'
   ...
 # Subtest: a slug is encoded into the canonical URL
 ok 10 - a slug is encoded into the canonical URL
   ---
-  duration_ms: 0.086363
+  duration_ms: 0.092163
   type: 'test'
   ...
 # Subtest: the GraphQL endpoint is derived, never hard-coded
 ok 11 - the GraphQL endpoint is derived, never hard-coded
   ---
-  duration_ms: 0.046057
+  duration_ms: 0.048841
   type: 'test'
   ...
 1..11
@@ -191,7 +191,7 @@ ok 11 - the GraphQL endpoint is derived, never hard-coded
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 54.575919
+# duration_ms 64.689224
 
 SEC-6 inventory complete: 2 pinned probe file(s), all passing.
   = tests/ssr-probe.test.mjs: 18 passing test points (minimum 18), content aa536dc71a169016…
