@@ -10,10 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
-Getting Svelte diagnostics...
-
-svelte-check found 0 errors and 0 warnings
+1785986140550 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785986140553 COMPLETED 869 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -22,12 +20,12 @@ vite v8.2.0 building client environment for production...
 [2Ktransforming...✓ 801 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-DPM3MTCX.js                687.98 kB │ gzip: 209.06 kB
+build/client/assets/entry-client-Dub0d_Wu.js                689.92 kB │ gzip: 209.54 kB
 
-✓ built in 1.26s
+✓ built in 1.08s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -42,9 +40,9 @@ vite v8.2.0 building ssr environment for production...
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 1,073.43 kB │ gzip: 264.20 kB
+build/server/handler.mjs                 1,075.42 kB │ gzip: 264.77 kB
 
-✓ built in 1.08s
+✓ built in 995ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -120,7 +118,7 @@ CSP audit: clean.
 - Build passes recorded: client, server
 - Modules the client build resolved / loaded: 800 / 800
 - Modules the server build resolved / loaded: 783 / 776
-- Dependency edges recorded: 4484
+- Dependency edges recorded: 4488
 - Distinct edges into the face: 33
 - Findings: 0
 
