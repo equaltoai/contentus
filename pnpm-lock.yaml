@@ -68,8 +68,8 @@ importers:
         specifier: ^24.0.0
         version: 24.13.3
       graphql:
-        specifier: 17.0.2
-        version: 17.0.2
+        specifier: 16.14.2
+        version: 16.14.2
       prettier:
         specifier: ^3.3.0
         version: 3.9.6
@@ -562,10 +562,6 @@ packages:
   graphql@16.14.2:
     resolution: {integrity: sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
-
-  graphql@17.0.2:
-    resolution: {integrity: sha512-FRWbddMxfkjiB7z+aQDWIR+E34xo9I8c9mtK2RPv8PmMzKRvrdsreHL/Ui/TmwHJfhHChEtsFPyMHKI+xuarQQ==}
-    engines: {node: ^22.0.0 || ^24.0.0 || ^25.0.0 || >=26.0.0}
 
   hast-util-embedded@3.0.0:
     resolution: {integrity: sha512-naH8sld4Pe2ep03qqULEtvYr7EjrLK2QHY8KJR6RJkTUjPGObe1vnx585uzem2hGra+s1q08DZZpfgDVYRbaXA==}
@@ -1062,7 +1058,7 @@ snapshots:
 
   '@apollo/client-react-streaming@0.14.5(@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2))(@types/react@19.2.17)(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
     dependencies:
-      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@17.0.2)(ws@8.21.0))(graphql@17.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@types/react-dom': 19.2.3(@types/react@19.2.17)
       '@wry/equality': 0.5.7
       graphql: 16.14.2
@@ -1072,13 +1068,13 @@ snapshots:
     transitivePeerDependencies:
       - '@types/react'
 
-  '@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@17.0.2)(ws@8.21.0))(graphql@17.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
+  '@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
     dependencies:
       '@graphql-typed-document-node/core': 3.2.0(graphql@16.14.2)
       '@wry/caches': 1.0.1
       '@wry/equality': 0.5.7
       '@wry/trie': 0.5.0
-      graphql: 17.0.2
+      graphql: 16.14.2
       graphql-tag: 2.12.7(graphql@16.14.2)
       optimism: 0.18.1
       rxjs: 7.8.2
@@ -1106,7 +1102,7 @@ snapshots:
 
   '@equaltoai/greater-components-adapters@https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/equaltoai-greater-components-adapters-0.13.0.tgz(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)(svelte@5.56.8)(typescript@5.9.3)(ws@8.21.0)':
     dependencies:
-      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@17.0.2)(ws@8.21.0))(graphql@17.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@apollo/client': 4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@apollo/client-react-streaming': 0.14.5(@apollo/client@4.2.9(graphql-ws@6.2.0(graphql@16.14.2)(ws@8.21.0))(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2))(@types/react@19.2.17)(graphql@16.14.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@graphql-typed-document-node/core': 3.2.0(graphql@16.14.2)
       graphql: 16.14.2
@@ -1436,8 +1432,6 @@ snapshots:
       ws: 8.21.0
 
   graphql@16.14.2: {}
-
-  graphql@17.0.2: {}
 
   hast-util-embedded@3.0.0:
     dependencies:
