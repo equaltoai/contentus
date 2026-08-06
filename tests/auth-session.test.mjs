@@ -299,11 +299,24 @@ const refreshBearingKeys = keysMatching(/refresh/i);
  * same process cannot prove an absence there. These five are what the client
  * controls, so these five are what is asserted.
  */
-function credentialAbsentEverywhere(credential, label, { keyProbe } = {}) {
-	for (const [store, name] of [
-		[localStorage, 'localStorage'],
-		[sessionStorage, 'sessionStorage'],
-	]) {
+function liveChannels() {
+	return {
+		stores: [
+			[localStorage, 'localStorage'],
+			[sessionStorage, 'sessionStorage'],
+		],
+		requests,
+		redirects: assigned,
+		logs: consoleCalls,
+	};
+}
+
+function credentialAbsentEverywhere(
+	credential,
+	label,
+	{ keyProbe, channels = liveChannels() } = {}
+) {
+	for (const [store, name] of channels.stores) {
 		for (const [key, value] of store.entries()) {
 			assert.ok(!value.includes(credential), `${name}[${key}] retained the ${label}: ${value}`);
 
@@ -322,7 +335,7 @@ function credentialAbsentEverywhere(credential, label, { keyProbe } = {}) {
 		}
 	}
 
-	for (const { url, init } of requests) {
+	for (const { url, init } of channels.requests) {
 		const body = init.body ? [...init.body.entries()] : [];
 		for (const [key, value] of body) {
 			assert.ok(!value.includes(credential), `${url} sent the ${label} in ${key}`);
@@ -333,11 +346,11 @@ function credentialAbsentEverywhere(credential, label, { keyProbe } = {}) {
 		);
 	}
 
-	for (const redirect of assigned) {
+	for (const redirect of channels.redirects) {
 		assert.ok(!redirect.includes(credential), `authorization redirect leaked the ${label}`);
 	}
 
-	for (const args of consoleCalls) {
+	for (const args of channels.logs) {
 		assert.ok(!consoleText(args).includes(credential), `a console call carried the ${label}`);
 	}
 }
@@ -346,10 +359,13 @@ function credentialAbsentEverywhere(credential, label, { keyProbe } = {}) {
  * The absence assertion this whole file exists for: the secret lesser handed
  * back reaches no storage value, no request, no redirect, and no log line.
  */
-function noSecretAnywhere() {
-	credentialAbsentEverywhere(CLIENT_SECRET, 'client secret', { keyProbe: secretBearingKeys });
+function noSecretAnywhere(channels = liveChannels()) {
+	credentialAbsentEverywhere(CLIENT_SECRET, 'client secret', {
+		keyProbe: secretBearingKeys,
+		channels,
+	});
 
-	for (const { url, init } of requests) {
+	for (const { url, init } of channels.requests) {
 		for (const [key] of init.body ? [...init.body.entries()] : []) {
 			assert.notEqual(key, 'client_secret', `${url} sent a client_secret parameter`);
 		}
@@ -363,8 +379,36 @@ function noSecretAnywhere() {
  * token is a seven-day one it has no call for, so the only correct amount to
  * keep is none — and "none" is a sweep, not a comment.
  */
-function noRefreshTokenAnywhere() {
-	credentialAbsentEverywhere(REFRESH_TOKEN, 'refresh token', { keyProbe: refreshBearingKeys });
+function noRefreshTokenAnywhere(channels = liveChannels()) {
+	credentialAbsentEverywhere(REFRESH_TOKEN, 'refresh token', {
+		keyProbe: refreshBearingKeys,
+		channels,
+	});
+}
+
+/**
+ * A channel set carrying one planted value, for bite-checking the reading.
+ *
+ * NOTHING HERE TOUCHES REAL STORAGE, and that is the point rather than a
+ * convenience. Writing a credential into `sessionStorage` to prove a sweep can
+ * see it creates, inside the probe, the exact clear-text-storage shape the
+ * sweep exists to forbid — a true finding about the test, raised by CodeQL
+ * (`js/clear-text-storage-of-sensitive-data`) against the first version of this
+ * file. The store here is a plain object with an `entries()` method, so the
+ * planted value is data the reading walks, never something written anywhere.
+ * The live channels are proven separately, with a value that is not a
+ * credential.
+ */
+function plantedChannels({ store, request, redirect, log } = {}) {
+	return {
+		stores: store === undefined ? [] : [[{ entries: () => [['planted', store]] }, 'plantedStore']],
+		requests:
+			request === undefined
+				? []
+				: [{ url: '/oauth/token', init: { body: new URLSearchParams({ x: request }) } }],
+		redirects: redirect === undefined ? [] : [`/auth/login?leak=${redirect}`],
+		logs: log === undefined ? [] : [['registered client', log]],
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -409,36 +453,89 @@ test('the secret probe bites on a planted secret and not on an auth-method name'
 	);
 });
 
-test('the sweeps bite on a planted store, request, redirect, and log line', async () => {
-	// Each of the five channels the sweeps cover, planted one at a time. A sweep
-	// that cannot fail is not evidence that anything passed it.
-	sessionStorage.setItem('planted', CLIENT_SECRET);
-	assert.throws(noSecretAnywhere, /retained the client secret/);
-	sessionStorage.clear();
+test('the sweeps bite on a planted store, request, redirect, and log line', () => {
+	// THE READING, against channels carrying one planted value each. A sweep that
+	// cannot fail is not evidence that anything passed it.
+	assert.throws(
+		() => noSecretAnywhere(plantedChannels({ store: CLIENT_SECRET })),
+		/retained the client secret/
+	);
+	assert.throws(
+		() => noSecretAnywhere(plantedChannels({ store: JSON.stringify({ clientSecret: 'x' }) })),
+		/retained a client secret-bearing field/
+	);
+	assert.throws(
+		() => noSecretAnywhere(plantedChannels({ request: CLIENT_SECRET })),
+		/sent the client secret in x/
+	);
+	assert.throws(
+		() => noSecretAnywhere(plantedChannels({ redirect: CLIENT_SECRET })),
+		/redirect leaked the client secret/
+	);
+	assert.throws(
+		() => noSecretAnywhere(plantedChannels({ log: { client_secret: CLIENT_SECRET } })),
+		/console call carried the client secret/
+	);
+	assert.throws(
+		() =>
+			noRefreshTokenAnywhere(
+				plantedChannels({ store: JSON.stringify({ refreshToken: REFRESH_TOKEN }) })
+			),
+		/retained the refresh token/
+	);
+	assert.throws(
+		() => noRefreshTokenAnywhere(plantedChannels({ request: REFRESH_TOKEN })),
+		/sent the refresh token in x/
+	);
 
-	sessionStorage.setItem('planted', JSON.stringify({ clientSecret: 'other-value' }));
-	assert.throws(noSecretAnywhere, /retained a client secret-bearing field/);
-	sessionStorage.clear();
-
-	localStorage.setItem('planted', JSON.stringify({ refreshToken: REFRESH_TOKEN }));
-	assert.throws(noRefreshTokenAnywhere, /retained the refresh token/);
-	localStorage.clear();
-
-	requests.push({ url: '/oauth/token', init: { body: new URLSearchParams({ x: REFRESH_TOKEN }) } });
-	assert.throws(noRefreshTokenAnywhere, /sent the refresh token in x/);
-	requests.length = 0;
-
-	assigned.push(`/auth/login?leak=${CLIENT_SECRET}`);
-	assert.throws(noSecretAnywhere, /redirect leaked the client secret/);
-	assigned.length = 0;
-
-	consoleCalls.push(['registered client', { client_secret: CLIENT_SECRET }]);
-	assert.throws(noSecretAnywhere, /console call carried the client secret/);
-	consoleCalls.length = 0;
-
-	// And, with nothing planted, both sweeps are silent.
+	// And with nothing planted, silent.
+	noSecretAnywhere(plantedChannels());
 	noSecretAnywhere();
 	noRefreshTokenAnywhere();
+});
+
+test('the sweeps read the live channels, not a stand-in for them', () => {
+	// THE WIRING, which the injected channels above deliberately do not prove.
+	// The planted value is a MARKER, not a credential: a probe that writes a
+	// secret into `sessionStorage` to make a point has built the clear-text
+	// storage its own sweep exists to forbid.
+	const MARKER = 'planted-marker-value-which-is-not-a-credential';
+	const plants = [
+		[
+			'localStorage',
+			() => localStorage.setItem('planted', MARKER),
+			/localStorage\[planted\] retained the marker/,
+		],
+		[
+			'sessionStorage',
+			() => sessionStorage.setItem('planted', MARKER),
+			/sessionStorage\[planted\] retained the marker/,
+		],
+		[
+			'request',
+			() =>
+				requests.push({ url: '/api/v1/apps', init: { body: new URLSearchParams({ x: MARKER }) } }),
+			/sent the marker in x/,
+		],
+		['redirect', () => assigned.push(`/auth/login?x=${MARKER}`), /redirect leaked the marker/],
+		['console', () => consoleCalls.push([MARKER]), /console call carried the marker/],
+	];
+
+	for (const [channel, plant, expected] of plants) {
+		localStorage.clear();
+		sessionStorage.clear();
+		requests.length = 0;
+		assigned.length = 0;
+		consoleCalls.length = 0;
+
+		credentialAbsentEverywhere(MARKER, 'marker');
+		plant();
+		assert.throws(
+			() => credentialAbsentEverywhere(MARKER, 'marker'),
+			expected,
+			`the live ${channel} channel must be one the sweep reads`
+		);
+	}
 });
 
 // ---------------------------------------------------------------------------
