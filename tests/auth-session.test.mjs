@@ -205,6 +205,19 @@ function lesserRegistrationResponse(overrides = {}) {
 }
 
 /**
+ * The lifetime lesser puts on the token contentus actually asks for.
+ *
+ * Not a round number this suite liked: `oauthTokenExpiresInSeconds = 3600` is a
+ * constant in lesser (`cmd/api/handlers/oauth.go:53`), and the
+ * `authorization_code` grant — the only one this client drives, via
+ * `grant_type: 'authorization_code'` in `completeLogin` — writes that constant
+ * into `ExpiresIn` verbatim (`handleOAuthAuthorizationCodeGrant`,
+ * `cmd/api/handlers/oauth.go:972` and `:1026`). The refresh grant emits the same
+ * constant (`:1075`).
+ */
+const LESSER_EXPIRES_IN_SECONDS = 3600;
+
+/**
  * `models.OAuthTokenResponse` as lesser issues it, INCLUDING a live `created_at`.
  *
  * That field used to be the literal `1_780_000_000`, and the literal was the
@@ -214,12 +227,24 @@ function lesserRegistrationResponse(overrides = {}) {
  * `created_at` to get a conformant response, and `completeLogin` reported
  * `ok: true` for the ones that did not. A fixture that only characterizes lesser
  * when the caller corrects it is not characterizing lesser.
+ *
+ * `expires_in` was the same species of defect one field over. It read `7200`,
+ * which lesser never sends on this grant, under a docblock that says this is the
+ * response "as lesser issues it" — so every assertion downstream pinned an exact
+ * lifetime the instance does not emit, and the suite would have gone on agreeing
+ * with itself if lesser's real 3600 had started arriving. A fixture is a claim
+ * about the server; a number nobody checked against the server is not one. It is
+ * now the constant above, and the exact-lifetime assertions read `3600`
+ * literally so changing the constant alone cannot quietly satisfy them.
+ *
+ * The runtime is deliberately NOT pinned to this value — see the non-canonical
+ * lifetime test below.
  */
 function lesserTokenResponse(overrides = {}) {
 	return {
 		access_token: 'lesser-access-token',
 		token_type: 'Bearer',
-		expires_in: 7200,
+		expires_in: LESSER_EXPIRES_IN_SECONDS,
 		refresh_token: REFRESH_TOKEN,
 		scope: 'read write follow push',
 		created_at: Math.floor(Date.now() / 1000),
@@ -1052,11 +1077,60 @@ test('the session is written to sessionStorage only, with lesser’s stated life
 	const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
 	assert.equal(stored.accessToken, 'lesser-access-token');
 	assert.equal(stored.tokenType, 'Bearer');
-	assert.equal(stored.expiresIn, 7200);
+	// 3600 written out, not derived from the fixture constant: this is the
+	// assertion that claims to know what lesser emits, so it states the number
+	// and fails if the fixture drifts off it.
+	assert.equal(stored.expiresIn, 3600);
 	assert.equal(stored.createdAt, createdAtSeconds * 1000);
-	assert.equal(stored.expiresAt, createdAtSeconds * 1000 + 7200 * 1000);
+	assert.equal(stored.expiresAt, createdAtSeconds * 1000 + 3600 * 1000);
 
 	assert.notEqual(readSession(), null, 'the stored session must survive its own reader');
+});
+
+test('a positive expires_in that is NOT lesser’s 3600 is stored exactly as stated', async () => {
+	// EXPLICITLY NOT A CLAIM ABOUT WHAT LESSER EMITS. The canonical fixture and
+	// the exact-lifetime assertions above are that claim, and they say 3600.
+	// This test is about the parser: `expires_in` is a per-response field, and
+	// `completeLogin` refuses a lifetime for being non-positive, non-finite, or
+	// unstorable — never for disagreeing with a number this client baked in.
+	//
+	// Worth pinning rather than assuming, for two reasons. It is the coverage
+	// that correcting the fixture from 7200 to 3600 would otherwise have
+	// removed: every accepted-lifetime assertion in this file now serves 3600,
+	// so without this one, a runtime that hardcoded 3600 would pass the whole
+	// suite. And a non-3600 positive lifetime is a real shape on lesser's own
+	// token endpoint — the device-code grant emits a computed
+	// `int(accessTTL.Seconds())` (`cmd/api/handlers/oauth.go:1338`) rather than
+	// the constant. contentus does not drive that grant, which is exactly why
+	// its lifetime is not this suite's to assert as "what lesser sends".
+	//
+	// Every row is comfortably longer than this test can take. How SHORT a live
+	// lifetime may be is the elapsed-refusal boundary, which is a race against
+	// the wall clock and is asserted from the other side in the refusal tests
+	// below; pinning it here would only buy a flake.
+	for (const expiresIn of [
+		60,
+		900,
+		7200, // the value this fixture used to claim lesser sent
+		86_400,
+		3600.5, // fractional, and still an exactly storable instant
+	]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+
+		const createdAtSeconds = Math.floor(Date.now() / 1000);
+		serveLesser({ token: { created_at: createdAtSeconds, expires_in: expiresIn } });
+
+		const result = await signIn();
+		assert.equal(result.ok, true, `expires_in ${expiresIn} must still sign in`);
+
+		const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
+		assert.equal(stored.expiresIn, expiresIn, 'the stated lifetime is stored, not normalized');
+		assert.equal(stored.expiresAt, createdAtSeconds * 1000 + expiresIn * 1000);
+		assert.notEqual(readSession(), null, 'the stored session must survive its own reader');
+		assert.equal(isAuthenticated(), true);
+	}
 });
 
 test("lesser's seven-day refresh token is neither modelled nor stored", async () => {
@@ -1169,7 +1243,11 @@ test('a token whose stated lifetime has already elapsed is refused, not stored',
 		{ created_at: 0 }, // the epoch
 		{ created_at: -1_000_000 }, // before it
 		{ created_at: 1_780_000_000 }, // the constant this fixture used to pin
-		{ created_at: Math.floor(Date.now() / 1000) - 7200 - 60 }, // expired a minute ago
+		// Expired a minute ago, and it has to be computed from the SERVED
+		// lifetime to stay that: with a hardcoded 7200 against a 3600 fixture
+		// this row was expired by an hour and one minute, still refused, and no
+		// longer the boundary case its comment claimed.
+		{ created_at: Math.floor(Date.now() / 1000) - LESSER_EXPIRES_IN_SECONDS - 60 },
 		{ expires_in: Number.MIN_VALUE }, // a lifetime too small to reach the next ms
 	]) {
 		sessionStorage.clear();
@@ -1212,7 +1290,7 @@ test('an extreme but exactly storable future lifetime is accepted, not swept up'
 
 		const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
 		assert.equal(stored.createdAt, createdAtSeconds * 1000);
-		assert.equal(stored.expiresAt, createdAtSeconds * 1000 + 7200 * 1000);
+		assert.equal(stored.expiresAt, createdAtSeconds * 1000 + LESSER_EXPIRES_IN_SECONDS * 1000);
 		assert.notEqual(readSession(), null, 'the stored session must survive its own reader');
 		assert.equal(isAuthenticated(), true);
 	}
@@ -1304,7 +1382,7 @@ test('completeLogin never reports success for a session readSession rejects', as
 		{ created_at: 0 },
 		{ created_at: -1_000_000 },
 		{ created_at: 1_780_000_000 },
-		{ created_at: Math.floor(Date.now() / 1000) - 7200 - 60 },
+		{ created_at: Math.floor(Date.now() / 1000) - LESSER_EXPIRES_IN_SECONDS - 60 },
 		{ expires_in: Number.MIN_VALUE },
 
 		// Finite, exactly storable, and still running — the accepted side.
