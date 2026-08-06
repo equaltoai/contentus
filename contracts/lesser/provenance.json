@@ -1,0 +1,86 @@
+{
+  "$comment": [
+    "Provenance for the lesser GraphQL schema contentus validates its documents against.",
+    "",
+    "WHY A PINNED COPY AND NOT INTROSPECTION. A client that asks the instance what its",
+    "schema is can only ever discover that it agreed with whatever it was pointed at.",
+    "The question this repository needs answered at BUILD time is different: do the",
+    "documents contentus sends match the contract lesser publishes? That contract is a",
+    "file in the lesser repository at a known ref, so it is pinned here by digest and",
+    "the answer is deterministic, offline, and identical on every machine.",
+    "",
+    "WHAT THE DIGEST IS FOR. Not tamper-proofing — an author who edits the schema can",
+    "edit the digest in the same commit. It is for making that edit VISIBLE: moving the",
+    "pin is a change to contracts/, in the diff, with a ref to check it against, rather",
+    "than a silent edit to a large SDL file nobody re-reads. The control it composes",
+    "with is cross-client adversarial review, not this field alone.",
+    "",
+    "MOVING THE PIN. Copy the file from lesser at the new ref, update `ref`, `sha256`",
+    "and `bytes` together, and run `pnpm run validate:graphql`. Every document is",
+    "re-validated against the new schema, so a field lesser removed fails the build in",
+    "the same commit that adopts the removal — which is the entire point of pinning it",
+    "rather than trusting it.",
+    "",
+    "This file is READ BY A GATE. `gov-infra/verifiers/strict-json.mjs` semantics apply:",
+    "a duplicate key is a value the reviewer reads and a different value the control",
+    "enforces, so duplicates are rejected rather than last-wins."
+  ],
+  "schema": {
+    "repository": "https://github.com/equaltoai/lesser",
+    "branch": "staging",
+    "ref": "e710ffb31a983b2ad993845dca7d3263b81de100",
+    "upstream_path": "docs/contracts/graphql-schema.graphql",
+    "pinned_path": "contracts/lesser/graphql-schema.graphql",
+    "sha256": "62390f0608fa09d496b9c75c4729bdbdf060c6115fce9332de66a1502147c373",
+    "bytes": 108653,
+    "$comment": [
+      "The canonical schema is one self-contained SDL document: `type Query` plus the",
+      "`extend type Query` blocks that carry the CMS, messaging, agent and drone",
+      "surfaces. graphql-js merges extensions when building, so the CMS fields",
+      "contentus reads (`articles`, `articleBySlug`, `draftPreview`, `myDrafts`,",
+      "`sharedDraftReviews`) resolve from the same build as the core schema."
+    ]
+  },
+  "document_roots": {
+    "$comment": [
+      "Where the gate looks for documents. `src` is walked whole — every TypeScript",
+      "module AND every Svelte component, because a component's <script> can declare",
+      "and send a document exactly as a module can, and a walk keyed on `.ts` would",
+      "have been a file-set assumption dressed up as coverage."
+    ],
+    "paths": ["src"],
+    "extensions": [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs", ".svelte"]
+  },
+  "upstream_trees": [
+    {
+      "path": "src/lib/greater/",
+      "$comment": [
+        "Vendored greater-components source, managed by the `greater` CLI and never",
+        "hand-edited. Its adapter layer carries GraphQL documents written against",
+        "GREATER's own projection of a fediverse server — `Account`, `Post`, `Status` —",
+        "and lesser's schema has no such types at all (`type Account` does not exist;",
+        "the equivalent is `type Actor`). Validating them against lesser's contract",
+        "does not report a contract defect, it reports that they answer a different",
+        "contract.",
+        "",
+        "THIS IS A DISCLOSURE, NOT A PERMISSION. The counts below are asserted exactly:",
+        "a vendored document appearing, disappearing, or changing shape fails the gate",
+        "and has to be re-declared deliberately. And the reason the exclusion is SAFE is",
+        "checked rather than asserted — `boundary` below is the control, and",
+        "tests/graphql-contract.test.mjs re-proves it against the real build, where a",
+        "module that is loaded is a module that can execute."
+      ],
+      "reason": "greater-components adapter documents target greater's own schema (Account/Post/Status), which lesser does not define; contentus does not import or execute them",
+      "boundary": "no module outside this tree may reach a document-bearing module inside it",
+      "documents": {
+        "src/lib/greater/adapters/graphql/LesserGraphQLAdapter.ts": {
+          "documents": 0,
+          "unresolved": 22
+        },
+        "src/lib/greater/adapters/graphql/optimistic.ts": { "documents": 1, "unresolved": 0 },
+        "src/lib/greater/adapters/mappers/lesser/types.d.ts": { "documents": 3, "unresolved": 0 },
+        "src/lib/greater/adapters/mappers/lesser/types.ts": { "documents": 3, "unresolved": 0 }
+      }
+    }
+  ]
+}

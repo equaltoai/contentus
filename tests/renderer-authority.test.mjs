@@ -25,7 +25,7 @@ function articleFixture(overrides = {}) {
 		wordCount: 800,
 		publishedAt: '2026-07-30T00:00:00Z',
 		updatedAt: '2026-07-30T00:00:00Z',
-		author: { id: 'actor-1', username: 'ada', displayName: 'Ada', avatarUrl: null },
+		author: { id: 'actor-1', username: 'ada', displayName: 'Ada', avatar: null },
 		featuredImage: null,
 		categories: [],
 		content: '# Heading\n\nSome *markdown* source.',

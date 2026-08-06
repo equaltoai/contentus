@@ -18,11 +18,27 @@
  * `categories` are public reads when the instance has CMS long-form enabled.
  */
 
+/**
+ * `Article.author` is an `Actor`, and an Actor's avatar field is `avatar`.
+ *
+ * It was `avatarUrl` here until this milestone, which is a field lesser's schema
+ * has never had — `graphql-schema.graphql` `type Actor` publishes `avatar: String`.
+ * The name came from the vendored greater adapter's own `Account` projection, not
+ * from lesser, and nothing caught the difference because the only things checking
+ * these documents were fixtures that had been written to match the query. A mock
+ * that agrees with a wrong query is not evidence; it is the same mistake, twice.
+ *
+ * `scripts/audit-graphql-contract.mjs` now validates every document this
+ * repository can send against the pinned schema, so this class of drift fails the
+ * build instead of failing the instance. The Greater-facing `avatarUrl` name still
+ * exists, but only past the view-model boundary in `cms/articles.ts` — lesser's
+ * response shape keeps lesser's field name.
+ */
 const AUTHOR_FIELDS = `
 	id
 	username
 	displayName
-	avatarUrl
+	avatar
 `;
 
 const CATEGORY_FIELDS = `
