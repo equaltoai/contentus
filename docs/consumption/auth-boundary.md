@@ -94,3 +94,58 @@ somewhere the invariant forbids and is not a trade contentus may make.
 
 **Consequence while open:** the status codes stay as documented above, with the
 reasoning recorded here rather than left as an unexplained 200.
+
+## The OAuth core is simulacrum's, and why that had to be restored
+
+Recorded at the M1 recovery (2026-08-05), against lesser ref
+`e710ffb31a983b2ad993845dca7d3263b81de100` and simulacrum ref
+`6cec1b607e48c6efc18dcd6995dbbcc2a4a5fcea`.
+
+`src/lib/auth/session.ts` is a transplant of simulacrum's module of the same
+name, not an independent implementation of the same specification. The product
+design has said so since the foundation document — §3, "Copy sim's
+`src/lib/auth/session.ts` + `pkce.ts` pattern unchanged" — and an earlier
+contentus round did not, which broke sign-in outright.
+
+**The instance defect the divergence collided with.** lesser generates a
+`client_secret` for every OAuth client it stores, including a public one.
+`CreateOAuthClientGeneric` (`pkg/storage/repositories/oauth_helpers.go:137`)
+mints a secret whenever the caller supplied none, and
+`createOAuthClientAndRespond` (`cmd/api/handlers/apps.go`) copies
+`client.ClientSecret` into `models.AppRegistrationResponse`, where only
+`omitempty` guards it. So a registration that asks for
+`token_endpoint_auth_method=none` — and gets `Confidential=false` and `none`
+back in the same response — is nevertheless handed a plaintext secret.
+
+Contentus had been refusing exactly that response, on the reasoning that a
+public client must never be issued a secret. The reasoning is sound and the
+behaviour was wrong: it aborted every sign-in before authorization, against a
+conformant instance, for a field the client simply has no business reading.
+Simulacrum reads `client_id` and `token_endpoint_auth_method` out of that
+response and nothing else, so the secret is never seen, stored, or sent. That is
+now what contentus does, and `tests/auth-session.test.mjs` proves the absence by
+sweeping every stored value and every request body rather than by assertion.
+
+**Where the public-client invariant actually lives.** Three places, all
+simulacrum's: registration always asks for `token_endpoint_auth_method=none`;
+the token request carries the PKCE verifier and no client authentication of any
+kind; and a cached client whose method is not `none`, or which ever carried a
+secret field, is discarded rather than reused. Refusing at registration time was
+a fourth place that no proven client has, and it is gone.
+
+**Routed to:** the lesser steward — returning a plaintext `client_secret` to a
+public client is an instance-side defect worth closing at the source, even
+though no conformant client is harmed by it. Contentus does not depend on the
+fix: ignoring the field is the correct client behaviour either way, so this is
+an upstream report rather than a blocker.
+
+**Deliberate differences from simulacrum**, all local, none on the wire, each
+one also stated in the module header: no `VITE_PUBLIC_OAUTH_CLIENT_ID` override
+(contentus takes no config injection); no RFC 8707 `resource` parameter
+(contentus is an ordinary browser app, not a remote-MCP client); sign-out
+empties every `sessionStorage` key the module writes and announces itself
+through `session-events`, which is this app's stand-in for sim's store
+subscription; a token response without a usable `created_at`/`expires_in` is
+refused rather than multiplied into `NaN`, which would otherwise produce a
+session that never expires; and `returnTo` must be an app-relative path, because
+contentus hands it to `window.location.replace` where sim hands it to `goto`.
