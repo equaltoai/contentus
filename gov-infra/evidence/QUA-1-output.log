@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1785995441549 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1785995441551 COMPLETED 869 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1785999603326 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1785999603328 COMPLETED 869 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -23,9 +23,9 @@ computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-CPZbGsfl.js                690.44 kB │ gzip: 209.72 kB
+build/client/assets/entry-client-DjshrTY-.js                690.43 kB │ gzip: 209.72 kB
 
-✓ built in 1.06s
+✓ built in 1.03s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -40,9 +40,9 @@ vite v8.2.0 building ssr environment for production...
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 1,075.61 kB │ gzip: 264.81 kB
+build/server/handler.mjs                 1,076.54 kB │ gzip: 265.15 kB
 
-✓ built in 980ms
+✓ built in 977ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -52,8 +52,15 @@ stylesheet: brand/contentus.css — 333834 bytes, 143 --tc-* definitions, integr
 brand assets: copied 12 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
-> pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph
+> pnpm run validate:graphql && pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph
 
+
+> @equaltoai/contentus@0.1.0 validate:graphql /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-graphql-contract.mjs
+
+graphql-contract: 91 contentus documents in 14 modules, validated against lesser e710ffb31a98 (docs/contracts/graphql-schema.graphql, sha256 62390f0608fa…)
+graphql-contract: 1256 source files walked; 7 documents and 22 unreadable candidates disclosed inside src/lib/greater/ and excluded as upstream-owned
+graphql-contract: PASS
 
 > @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/audit-renderer-authority.mjs
