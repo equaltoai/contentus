@@ -15,10 +15,21 @@
  * The previous version of this file asserted contentus's own invented policy:
  * that a response carrying `client_secret` must be REFUSED. That policy aborted
  * every sign-in against a real lesser instance. The rule the transplant
- * restores is simulacrum's: accept the response, read `client_id` and
- * `token_endpoint_auth_method` out of it, and never look at the secret again.
- * `noSecretAnywhere` is the test that this is true by inspection of every byte
- * the client stored and every byte it sent, rather than by reading the source.
+ * restores is simulacrum's: accept the response and select `client_id` out of
+ * it, reading `token_endpoint_auth_method` only to decide whether there is a
+ * usable public client at all.
+ *
+ * WHAT `noSecretAnywhere` PROVES, AND WHAT IT CANNOT. `registerOAuthClient`
+ * decodes the whole response body, so the returned secret is transiently
+ * present in that object while the call runs, and no probe run from inside the
+ * same process can show otherwise. What this sweep does prove — by inspecting
+ * every byte the client stored, every byte it sent, every redirect it issued,
+ * and every console call it made, rather than by reading the source — is the
+ * bounded set that governs behaviour: the secret is never selected into the
+ * stored client model, never persisted, never retransmitted, never logged, and
+ * never placed into a redirect. `noRefreshTokenAnywhere` proves the same five
+ * for the seven-day refresh token lesser issues beside the access token, which
+ * contentus does not model, store, or spend.
  */
 
 import assert from 'node:assert/strict';
@@ -86,6 +97,40 @@ const originalGlobals = {
 	fetch: globalThis.fetch,
 };
 
+/**
+ * Every console call made while a flow runs.
+ *
+ * "Never logged" was a claim about the source until this existed. The wrappers
+ * still forward to the real console, so a leak that happens also shows up in
+ * the test output that reports it.
+ */
+let consoleCalls = [];
+const CONSOLE_METHODS = ['debug', 'error', 'info', 'log', 'trace', 'warn'];
+const originalConsole = Object.fromEntries(
+	CONSOLE_METHODS.map((method) => [method, console[method]])
+);
+for (const method of CONSOLE_METHODS) {
+	const original = originalConsole[method].bind(console);
+	console[method] = (...args) => {
+		consoleCalls.push(args);
+		original(...args);
+	};
+}
+
+/** One readable line per console call, for the sweeps. */
+function consoleText(args) {
+	return args
+		.map((arg) => {
+			if (typeof arg === 'string') return arg;
+			try {
+				return JSON.stringify(arg) ?? String(arg);
+			} catch {
+				return String(arg);
+			}
+		})
+		.join(' ');
+}
+
 const assigned = [];
 globalThis.window = {
 	location: {
@@ -101,12 +146,13 @@ globalThis.window = {
 globalThis.localStorage = new MemoryStorage();
 globalThis.sessionStorage = new MemoryStorage();
 
-const { completeLogin, startLogin, clearSession, readSession, isAuthenticated } =
+const { accessTokenOrNull, completeLogin, startLogin, clearSession, readSession, isAuthenticated } =
 	await import('../src/lib/auth/session.ts');
 const { DEFAULT_OAUTH_SCOPE, DRONE_OAUTH_SCOPE } = await import('../src/lib/auth/scopes.ts');
 
 const REDIRECT_URI = 'https://contentus.example/l/auth/callback';
 const CLIENT_SECRET = 'lesser-generated-secret-that-must-never-be-kept';
+const REFRESH_TOKEN = 'lesser-refresh-token-good-for-seven-days';
 
 /** The requests made in the current test, in order. */
 let requests = [];
@@ -114,6 +160,7 @@ let requests = [];
 beforeEach(() => {
 	assigned.length = 0;
 	requests = [];
+	consoleCalls = [];
 	localStorage.clear();
 	sessionStorage.clear();
 });
@@ -123,6 +170,7 @@ after(() => {
 	globalThis.localStorage = originalGlobals.localStorage;
 	globalThis.sessionStorage = originalGlobals.sessionStorage;
 	globalThis.fetch = originalGlobals.fetch;
+	for (const method of CONSOLE_METHODS) console[method] = originalConsole[method];
 });
 
 function response(data, status = 200) {
@@ -161,7 +209,7 @@ function lesserTokenResponse(overrides = {}) {
 		access_token: 'lesser-access-token',
 		token_type: 'Bearer',
 		expires_in: 7200,
-		refresh_token: 'lesser-refresh-token',
+		refresh_token: REFRESH_TOKEN,
 		scope: 'read write follow push',
 		created_at: 1_780_000_000,
 		...overrides,
@@ -214,35 +262,52 @@ async function signIn(options = {}) {
  * from a value that mentions one is not evidence about either. The first test
  * below regresses this reading in both directions before anything relies on it.
  */
-function secretBearingKeys(value, path = []) {
-	if (Array.isArray(value)) {
-		return value.flatMap((entry, index) => secretBearingKeys(entry, [...path, index]));
-	}
-	if (!value || typeof value !== 'object') return [];
+function keysMatching(pattern) {
+	return function walk(value, path = []) {
+		if (Array.isArray(value)) {
+			return value.flatMap((entry, index) => walk(entry, [...path, index]));
+		}
+		if (!value || typeof value !== 'object') return [];
 
-	const found = [];
-	for (const [key, entry] of Object.entries(value)) {
-		if (/secret/i.test(key)) found.push([...path, key].join('.'));
-		found.push(...secretBearingKeys(entry, [...path, key]));
-	}
-	return found;
+		const found = [];
+		for (const [key, entry] of Object.entries(value)) {
+			if (pattern.test(key)) found.push([...path, key].join('.'));
+			found.push(...walk(entry, [...path, key]));
+		}
+		return found;
+	};
 }
 
+const secretBearingKeys = keysMatching(/secret/i);
+
 /**
- * The absence assertion this whole file exists for: the secret lesser handed
- * back is in no storage value and in no request the client sent.
+ * The same reading for the credential contentus refuses to model at all.
+ *
+ * `refreshToken` and `refresh_token` are the two spellings a stored session
+ * could carry one under. Nothing this module writes has a key that matches,
+ * which is the point: the probe is only evidence because it would fire.
  */
-function noSecretAnywhere() {
+const refreshBearingKeys = keysMatching(/refresh/i);
+
+/**
+ * The five bounded negatives, swept for one credential value.
+ *
+ * NOT PERSISTED, NOT RETRANSMITTED, NOT LOGGED, NOT REDIRECTED, and — where a
+ * key name gives it away — NOT SELECTED into a stored model. The one property
+ * deliberately NOT claimed is that the value never existed in memory: both
+ * credentials arrive inside a decoded response body, and a probe running in the
+ * same process cannot prove an absence there. These five are what the client
+ * controls, so these five are what is asserted.
+ */
+function credentialAbsentEverywhere(credential, label, { keyProbe } = {}) {
 	for (const [store, name] of [
 		[localStorage, 'localStorage'],
 		[sessionStorage, 'sessionStorage'],
 	]) {
 		for (const [key, value] of store.entries()) {
-			assert.ok(
-				!value.includes(CLIENT_SECRET),
-				`${name}[${key}] retained the client secret: ${value}`
-			);
+			assert.ok(!value.includes(credential), `${name}[${key}] retained the ${label}: ${value}`);
 
+			if (!keyProbe) continue;
 			let parsed;
 			try {
 				parsed = JSON.parse(value);
@@ -250,9 +315,9 @@ function noSecretAnywhere() {
 				continue;
 			}
 			assert.deepEqual(
-				secretBearingKeys(parsed),
+				keyProbe(parsed),
 				[],
-				`${name}[${key}] retained a secret-bearing field: ${value}`
+				`${name}[${key}] retained a ${label}-bearing field: ${value}`
 			);
 		}
 	}
@@ -260,18 +325,46 @@ function noSecretAnywhere() {
 	for (const { url, init } of requests) {
 		const body = init.body ? [...init.body.entries()] : [];
 		for (const [key, value] of body) {
-			assert.ok(!value.includes(CLIENT_SECRET), `${url} sent the client secret in ${key}`);
-			assert.notEqual(key, 'client_secret', `${url} sent a client_secret parameter`);
+			assert.ok(!value.includes(credential), `${url} sent the ${label} in ${key}`);
 		}
 		assert.ok(
-			!JSON.stringify(init.headers ?? {}).includes(CLIENT_SECRET),
-			`${url} sent the client secret in a header`
+			!JSON.stringify(init.headers ?? {}).includes(credential),
+			`${url} sent the ${label} in a header`
 		);
 	}
 
 	for (const redirect of assigned) {
-		assert.ok(!redirect.includes(CLIENT_SECRET), `authorization redirect leaked the secret`);
+		assert.ok(!redirect.includes(credential), `authorization redirect leaked the ${label}`);
 	}
+
+	for (const args of consoleCalls) {
+		assert.ok(!consoleText(args).includes(credential), `a console call carried the ${label}`);
+	}
+}
+
+/**
+ * The absence assertion this whole file exists for: the secret lesser handed
+ * back reaches no storage value, no request, no redirect, and no log line.
+ */
+function noSecretAnywhere() {
+	credentialAbsentEverywhere(CLIENT_SECRET, 'client secret', { keyProbe: secretBearingKeys });
+
+	for (const { url, init } of requests) {
+		for (const [key] of init.body ? [...init.body.entries()] : []) {
+			assert.notEqual(key, 'client_secret', `${url} sent a client_secret parameter`);
+		}
+	}
+}
+
+/**
+ * The same five for lesser's refresh token, which contentus does not model.
+ *
+ * The access token is a one-hour credential this client needs. The refresh
+ * token is a seven-day one it has no call for, so the only correct amount to
+ * keep is none — and "none" is a sweep, not a comment.
+ */
+function noRefreshTokenAnywhere() {
+	credentialAbsentEverywhere(REFRESH_TOKEN, 'refresh token', { keyProbe: refreshBearingKeys });
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +390,55 @@ test('the secret probe bites on a planted secret and not on an auth-method name'
 		}),
 		[]
 	);
+
+	// The refresh reading, both directions, against the exact shape this module
+	// writes — which is the shape that must keep reading clean.
+	assert.deepEqual(refreshBearingKeys({ refreshToken: 'x' }), ['refreshToken']);
+	assert.deepEqual(refreshBearingKeys({ refresh_token: 'x' }), ['refresh_token']);
+	assert.deepEqual(refreshBearingKeys({ a: [{ refreshToken: 'x' }] }), ['a.0.refreshToken']);
+	assert.deepEqual(
+		refreshBearingKeys({
+			accessToken: 'a',
+			tokenType: 'Bearer',
+			scope: 'read',
+			createdAt: 1,
+			expiresIn: 2,
+			expiresAt: 3,
+		}),
+		[]
+	);
+});
+
+test('the sweeps bite on a planted store, request, redirect, and log line', async () => {
+	// Each of the five channels the sweeps cover, planted one at a time. A sweep
+	// that cannot fail is not evidence that anything passed it.
+	sessionStorage.setItem('planted', CLIENT_SECRET);
+	assert.throws(noSecretAnywhere, /retained the client secret/);
+	sessionStorage.clear();
+
+	sessionStorage.setItem('planted', JSON.stringify({ clientSecret: 'other-value' }));
+	assert.throws(noSecretAnywhere, /retained a client secret-bearing field/);
+	sessionStorage.clear();
+
+	localStorage.setItem('planted', JSON.stringify({ refreshToken: REFRESH_TOKEN }));
+	assert.throws(noRefreshTokenAnywhere, /retained the refresh token/);
+	localStorage.clear();
+
+	requests.push({ url: '/oauth/token', init: { body: new URLSearchParams({ x: REFRESH_TOKEN }) } });
+	assert.throws(noRefreshTokenAnywhere, /sent the refresh token in x/);
+	requests.length = 0;
+
+	assigned.push(`/auth/login?leak=${CLIENT_SECRET}`);
+	assert.throws(noSecretAnywhere, /redirect leaked the client secret/);
+	assigned.length = 0;
+
+	consoleCalls.push(['registered client', { client_secret: CLIENT_SECRET }]);
+	assert.throws(noSecretAnywhere, /console call carried the client secret/);
+	consoleCalls.length = 0;
+
+	// And, with nothing planted, both sweeps are silent.
+	noSecretAnywhere();
+	noRefreshTokenAnywhere();
 });
 
 // ---------------------------------------------------------------------------
@@ -476,20 +618,83 @@ test('a cache written for another redirect_uri is not reused', async () => {
 	assert.equal(authorizeUrl().searchParams.get('client_id'), 'replacement-client');
 });
 
-test('a non-public auth method in the response is not cached for reuse', async () => {
+test('a non-public auth method in the response is refused before the redirect and before the cache', async () => {
+	// FIRST USE IS THE GAP THE CACHE BOUNDARY CANNOT COVER. The client returned
+	// by registration goes straight to the authorization redirect; only a LATER
+	// sign-in would meet the cache reader that discards it. So this is checked
+	// where it happens: nothing cached, nobody redirected, nothing thrown away.
+	for (const authMethod of [
+		'client_secret_post',
+		'client_secret_basic',
+		'private_key_jwt',
+		'NONE',
+		' none',
+		'',
+		42,
+		null,
+		{},
+	]) {
+		localStorage.clear();
+		sessionStorage.clear();
+		assigned.length = 0;
+		requests = [];
+		serveLesser({ registration: { token_endpoint_auth_method: authMethod } });
+
+		await assert.rejects(
+			() => startLogin(),
+			/The instance did not register Contentus as a public client\./,
+			`token_endpoint_auth_method ${JSON.stringify(authMethod)} must not become a client`
+		);
+
+		assert.equal(assigned.length, 0, 'no authorization redirect may be issued');
+		assert.deepEqual(localStorage.entries(), [], 'no client may be cached');
+		assert.equal(requests.filter(({ url }) => url === '/oauth/token').length, 0);
+		noSecretAnywhere();
+	}
+});
+
+test('an omitted auth method still reads as the none this client asked for', async () => {
+	// Sim's `?? 'none'`, kept. Unreachable against a conformant lesser, which
+	// states a method for every registration — but the value it falls back to is
+	// the one the request asked for, so absence is not a refusal.
+	const served = JSON.parse(
+		JSON.stringify(lesserRegistrationResponse({ token_endpoint_auth_method: undefined }))
+	);
+	assert.equal(
+		'token_endpoint_auth_method' in served,
+		false,
+		'this fixture must actually omit the field, or the case under test is not the absent one'
+	);
+	serveLesser({ registration: { token_endpoint_auth_method: undefined } });
+
+	await startLogin();
+
+	assert.equal(assigned.length, 1);
+	const cached = JSON.parse(localStorage.getItem('contentus:oauth_client_default'));
+	assert.equal(cached.tokenEndpointAuthMethod, 'none');
+});
+
+test('a non-public cached client is still discarded on read, and re-registration is refused', async () => {
+	// The cache-boundary half of the invariant, which did not move. A client
+	// cached by an older build is discarded on read; the re-registration that
+	// follows meets the registration-time gate, so the flow ends refused rather
+	// than redirecting against a client it cannot authenticate.
+	localStorage.setItem(
+		'contentus:oauth_client_default',
+		JSON.stringify({
+			clientId: 'confidential-client',
+			redirectUri: REDIRECT_URI,
+			createdAt: Date.now(),
+			tokenEndpointAuthMethod: 'client_secret_post',
+		})
+	);
 	serveLesser({ registration: { token_endpoint_auth_method: 'client_secret_post' } });
 
-	await startLogin();
-	assert.equal(assigned.length, 1, 'simulacrum does not abort registration on this');
+	await assert.rejects(() => startLogin(), /did not register Contentus as a public client/);
 
-	// The invariant lands here instead: the client is never reused from cache.
-	assigned.length = 0;
-	await startLogin();
-	assert.equal(
-		requests.filter(({ url }) => url === '/api/v1/apps').length,
-		2,
-		'a non-public cached client must be discarded, forcing re-registration'
-	);
+	assert.equal(requests.filter(({ url }) => url === '/api/v1/apps').length, 1);
+	assert.equal(localStorage.getItem('contentus:oauth_client_default'), null);
+	assert.equal(assigned.length, 0);
 	noSecretAnywhere();
 });
 
@@ -733,7 +938,6 @@ test('the session is written to sessionStorage only, with lesser’s stated life
 	const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
 	assert.equal(stored.accessToken, 'lesser-access-token');
 	assert.equal(stored.tokenType, 'Bearer');
-	assert.equal(stored.refreshToken, 'lesser-refresh-token');
 	assert.equal(stored.expiresIn, 7200);
 	assert.equal(stored.createdAt, 1_780_000_000 * 1000);
 	assert.equal(stored.expiresAt, 1_780_000_000 * 1000 + 7200 * 1000);
@@ -742,6 +946,33 @@ test('the session is written to sessionStorage only, with lesser’s stated life
 	// expiry check is what proves the arithmetic is load-bearing.
 	assert.equal(readSession(), null);
 	assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+});
+
+test("lesser's seven-day refresh token is neither modelled nor stored", async () => {
+	serveLesser({ token: { created_at: Math.floor(Date.now() / 1000) } });
+
+	const result = await signIn();
+	assert.equal(result.ok, true, 'the refresh token is ignored, not refused');
+
+	// The stored session's whole shape, so a field cannot reappear unnoticed.
+	const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
+	assert.deepEqual(Object.keys(stored).sort(), [
+		'accessToken',
+		'createdAt',
+		'expiresAt',
+		'expiresIn',
+		'scope',
+		'tokenType',
+	]);
+	assert.equal('refreshToken' in stored, false);
+
+	// And the value itself is in nothing the client kept, sent, showed, or said.
+	noRefreshTokenAnywhere();
+
+	// Including anything the session reader hands downstream: `accessTokenOrNull`
+	// is the only credential this app exposes to its GraphQL layer.
+	assert.deepEqual(refreshBearingKeys(readSession()), []);
+	assert.equal(accessTokenOrNull(), 'lesser-access-token');
 });
 
 test('a live session is readable and reports its granted scope', async () => {
@@ -776,6 +1007,128 @@ test('a token response with no usable lifetime is refused, never treated as eter
 		});
 		assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
 		assert.equal(isAuthenticated(), false);
+	}
+});
+
+test('an empty or blank access_token is refused, never reported as a sign-in', async () => {
+	// A 200 with a blank token used to pass the parser, get written, and return
+	// ok: true — and then `readSession` threw the session away. The callback does
+	// not get to disagree with the reader about whether a sign-in happened.
+	for (const accessToken of ['', '   ', '\t\n', undefined, null, 42]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		serveLesser({
+			token: { access_token: accessToken, created_at: Math.floor(Date.now() / 1000) },
+		});
+
+		const result = await signIn();
+		assert.deepEqual(
+			result,
+			{ ok: false, error: 'Token exchange failed (200).' },
+			`access_token ${JSON.stringify(accessToken)} must not be a sign-in`
+		);
+		assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+		assert.equal(readSession(), null);
+		assert.equal(isAuthenticated(), false);
+		assert.equal(accessTokenOrNull(), null);
+	}
+});
+
+test('a missing or blank token_type is normalized to Bearer, never stored blank', async () => {
+	// The other half of the same split brain: `readSession` requires a non-blank
+	// token type, so storing one it rejects would report a session that is gone.
+	for (const tokenType of [undefined, '', '   ', null, 42]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		serveLesser({ token: { token_type: tokenType, created_at: Math.floor(Date.now() / 1000) } });
+
+		const result = await signIn();
+		assert.equal(result.ok, true, `token_type ${JSON.stringify(tokenType)} must not fail sign-in`);
+
+		const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
+		assert.equal(stored.tokenType, 'Bearer');
+		assert.notEqual(readSession(), null, 'the stored session must survive its own reader');
+		assert.equal(isAuthenticated(), true);
+	}
+});
+
+test('completeLogin never reports success for a session readSession rejects', async () => {
+	// The invariant behind both cases above, asserted as one property over every
+	// malformed token response this file knows how to serve. Whatever the parser
+	// decides, the two ends agree: a reported sign-in is a readable session.
+	for (const token of [
+		{},
+		{ access_token: '' },
+		{ access_token: '   ' },
+		{ access_token: undefined },
+		{ token_type: '' },
+		{ token_type: undefined },
+		{ token_type: null },
+		{ scope: undefined },
+		{ created_at: undefined },
+		{ expires_in: undefined },
+		{ expires_in: 0 },
+		{ expires_in: -1 },
+		{ expires_in: 'soon' },
+		{ created_at: 'now' },
+	]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		serveLesser({ token: { created_at: Math.floor(Date.now() / 1000), ...token } });
+
+		const result = await signIn();
+		const session = readSession();
+
+		assert.equal(
+			result.ok === true && session === null,
+			false,
+			`token ${JSON.stringify(token)}: completeLogin said ${JSON.stringify(result)} for a session readSession rejects`
+		);
+		if (result.ok === false) {
+			assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+			assert.equal(isAuthenticated(), false);
+		}
+	}
+});
+
+test('readSession rejects a stored session whose credential fields are unusable', () => {
+	// The reader's half of the agreement, checked against values `completeLogin`
+	// can no longer produce — because a reader that only holds when the writer
+	// behaves is not a check, and this storage is writable by anything on the
+	// origin.
+	const live = {
+		accessToken: 'lesser-access-token',
+		tokenType: 'Bearer',
+		createdAt: Date.now(),
+		expiresIn: 3600,
+		expiresAt: Date.now() + 3_600_000,
+	};
+	sessionStorage.setItem('contentus:auth_session', JSON.stringify(live));
+	assert.notEqual(readSession(), null, 'the control case must be readable, or nothing below bites');
+
+	for (const broken of [
+		{ accessToken: '' },
+		{ accessToken: '   ' },
+		{ accessToken: 42 },
+		{ accessToken: undefined },
+		{ tokenType: '' },
+		{ tokenType: '  ' },
+		{ tokenType: null },
+		{ expiresAt: undefined },
+		{ expiresAt: 'later' },
+		{ expiresAt: Number.NaN },
+	]) {
+		sessionStorage.setItem('contentus:auth_session', JSON.stringify({ ...live, ...broken }));
+		assert.equal(
+			readSession(),
+			null,
+			`a stored session with ${JSON.stringify(broken)} must not be readable`
+		);
+		assert.equal(isAuthenticated(), false);
+		assert.equal(accessTokenOrNull(), null);
 	}
 });
 

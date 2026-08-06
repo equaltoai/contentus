@@ -121,17 +121,39 @@ Contentus had been refusing exactly that response, on the reasoning that a
 public client must never be issued a secret. The reasoning is sound and the
 behaviour was wrong: it aborted every sign-in before authorization, against a
 conformant instance, for a field the client simply has no business reading.
-Simulacrum reads `client_id` and `token_endpoint_auth_method` out of that
-response and nothing else, so the secret is never seen, stored, or sent. That is
-now what contentus does, and `tests/auth-session.test.mjs` proves the absence by
-sweeping every stored value and every request body rather than by assertion.
+Simulacrum selects `client_id` out of that response and reads
+`token_endpoint_auth_method` only to decide whether there is a usable public
+client. That is now what contentus does.
 
-**Where the public-client invariant actually lives.** Three places, all
+**What is claimed about that secret, exactly.** `registerOAuthClient` calls
+`response.json()`, so the returned `client_secret` is **transiently present in
+the decoded server response** on the page's heap for the length of that call. No
+browser client can make that untrue, and an earlier version of this note said
+"never seen", which claimed it. What contentus does hold, and what
+`tests/auth-session.test.mjs` proves by sweeping a whole sign-in rather than by
+assertion, is bounded and is the part that governs behaviour: the secret is
+never **selected** into the client model, never **persisted** to either storage,
+never **retransmitted** on any request, never **logged**, and never placed into a
+**redirect**. The sweep reads every stored value, every request body and header,
+every redirect the client issues, and every console call it makes, and it is
+bite-checked in both directions — a planted value in any one of those five
+channels fails it.
+
+**Where the public-client invariant actually lives.** Four places. Three are
 simulacrum's: registration always asks for `token_endpoint_auth_method=none`;
 the token request carries the PKCE verifier and no client authentication of any
 kind; and a cached client whose method is not `none`, or which ever carried a
-secret field, is discarded rather than reused. Refusing at registration time was
-a fourth place that no proven client has, and it is gone.
+secret field, is discarded rather than reused. The fourth was added under
+cross-client adversarial review of PR #76 (reviewing client codex, finding 1):
+a **fresh registration** whose stated method is not exactly `none` is refused
+before the cache write and before the authorization redirect. The cache boundary
+alone cannot cover first use — the client `registerOAuthClient` returns goes
+straight to the redirect without passing the cache reader — so a
+`client_secret_*` registration would have been redirected against once before
+anything discarded it. An absent method still reads as the `none` the request
+asked for, which is simulacrum's `?? 'none'` and is unreachable against a
+conformant lesser. The registration REQUEST is unchanged; this is a local
+validation strengthening, not a wire-contract change.
 
 **Routed to:** the lesser steward — returning a plaintext `client_secret` to a
 public client is an instance-side defect worth closing at the source, even
@@ -149,3 +171,24 @@ subscription; a token response without a usable `created_at`/`expires_in` is
 refused rather than multiplied into `NaN`, which would otherwise produce a
 session that never expires; and `returnTo` must be an app-relative path, because
 contentus hands it to `window.location.replace` where sim hands it to `goto`.
+
+Three more were added at the PR #76 review rework, all still local:
+
+- **No refresh token is kept.** lesser issues a `refresh_token` good for seven
+  days beside the one-hour access token, and permits a public-client refresh
+  with that token and the public `client_id` — no secret. Simulacrum models and
+  stores it. Contentus has no refresh call, no rotation, and no revocation path,
+  so storing a bearer-equivalent credential nothing spends only widens what a
+  transient same-origin compromise carries away. `AuthSession` has no
+  `refreshToken` field and `completeLogin` does not read `refresh_token`; the
+  same five-channel sweep that covers the client secret covers it (codex
+  finding 2). The field returns when a scoped refresh lifecycle that consumes
+  and clears it does, not ahead of it.
+- **A blank `access_token` is refused and a blank `token_type` normalizes to
+  `Bearer`.** A 200 carrying `access_token: ""` used to be stored and reported
+  as `ok: true`, and `readSession` then rejected the session the caller had just
+  been told it had. `completeLogin` and `readSession` now check the same three
+  properties, and a test asserts the agreement as a property over every
+  malformed token response the suite can serve (codex finding 3).
+- **A non-public fresh registration is refused**, as described above (codex
+  finding 1).

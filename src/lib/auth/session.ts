@@ -28,25 +28,47 @@ import { notifySessionChange } from './session-events';
  *      `token_endpoint_auth_method=none` (lesser ref e710ffb3,
  *      `pkg/storage/repositories/oauth_helpers.go:137`,
  *      `cmd/api/handlers/apps.go`). Sim reads `client_id` and
- *      `token_endpoint_auth_method` out of that response and nothing else, so
- *      the secret is never seen, stored, or sent. That is now what this file
- *      does: `parseRegistrationResponse` names the two fields it reads, and no
- *      code path in this module mentions `client_secret` at all.
+ *      `token_endpoint_auth_method` out of that response and nothing else, and
+ *      so does this file.
+ *
+ *      WHAT THAT BUYS, AND WHAT IT DOES NOT — stated precisely, because the
+ *      earlier wording here ("the secret is never seen") claimed a property no
+ *      browser client can hold. `response.json()` decodes the whole body, so
+ *      the returned secret IS transiently present in that decoded object on the
+ *      page's heap, observable to anything instrumenting the runtime. What is
+ *      proven is bounded, and it is the part that governs the client's
+ *      behaviour: the secret is never SELECTED into the client model, never
+ *      persisted to either storage, never retransmitted on any request, never
+ *      logged, and never placed into a redirect.
+ *      `parseRegistrationResponse` names what IS selected, and
+ *      `tests/auth-session.test.mjs` proves those five negatives by sweeping a
+ *      whole sign-in — every stored value, every request body and header, every
+ *      redirect, and every console call — rather than by reading this comment.
  *   3. Refusing a returned `token_endpoint_auth_method` other than `none` at
- *      REGISTRATION time. Sim refuses it at the CACHE boundary instead, which
- *      is where the invariant actually has to hold. Moved, not dropped.
+ *      REGISTRATION time. Sim refuses it at the CACHE boundary instead. This
+ *      file now refuses at BOTH, because the cache boundary alone cannot cover
+ *      FIRST use: the client `registerOAuthClient` returns goes straight to the
+ *      authorization redirect without passing the cache reader, so a
+ *      `client_secret_*` client would be redirected against once before
+ *      anything discarded it. Refusing here happens before the cache write and
+ *      before the redirect; the cache-boundary discard stays for every later
+ *      read. A deliberate deviation from sim, added under adversarial review of
+ *      PR #76 — and a LOCAL one: the registration REQUEST is unchanged.
  *   4. Modelling the stored auth method as optional-when-omitted. Sim stores
  *      `data.token_endpoint_auth_method ?? 'none'`, and lesser's
  *      `normalizeOAuthTokenEndpointAuthMethod` returns a non-empty method for
  *      every successful registration, so the field is always present in
  *      practice and the default is unreachable against a conformant instance.
+ *      Absent still reads as the `none` this client asked for; anything else
+ *      that is not exactly `none` is now a refusal rather than a stored value.
  *   5. Sorting the scope string before putting it on the wire. Sim sends the
  *      scope as written; normalization is for bucket comparison only.
  *
- * THE PUBLIC-CLIENT INVARIANT, kept exactly the three ways sim keeps it:
- * registration always ASKS for `token_endpoint_auth_method=none`; the token
- * request carries no client authentication of any kind; and a cached client
- * whose method is not `none` is discarded rather than reused.
+ * THE PUBLIC-CLIENT INVARIANT, kept the three ways sim keeps it plus one: at
+ * registration contentus always ASKS for `token_endpoint_auth_method=none`; the
+ * token request carries no client authentication of any kind; a cached client
+ * whose method is not `none` is discarded rather than reused; and a fresh
+ * registration whose stated method is not `none` never becomes a client at all.
  *
  * DELIBERATE DIFFERENCES FROM SIM, all local and none of them on the wire:
  *
@@ -66,6 +88,19 @@ import { notifySessionChange } from './session-events';
  *     expires. Both fields are non-`omitempty` on lesser's `OAuthTokenResponse`
  *     (`cmd/api/models/oauth.go:72`), so refusing cannot fire against a
  *     conformant instance, and failing closed beats inventing a lifetime.
+ *   - An `access_token` that is missing, empty, or blank is refused the same
+ *     way, and a missing or blank `token_type` is normalized to the `Bearer`
+ *     this flow requested. `completeLogin` must never answer `ok: true` for a
+ *     session `readSession` turns around and rejects, so both ends check the
+ *     same three properties. Sim's predicate was a bare truthiness test.
+ *   - lesser's `refresh_token` is not read. Sim models and stores it; contentus
+ *     has no refresh or rotation lifecycle that consumes one, and lesser's
+ *     refresh token outlives the access token by days. Storing a
+ *     bearer-equivalent credential that nothing spends, cleans up, or revokes
+ *     only widens what a transient same-origin compromise carries away.
+ *     Removed under adversarial review of PR #76; if contentus ever refreshes,
+ *     the field returns WITH the lifecycle that consumes and clears it, not
+ *     ahead of it.
  *   - `returnTo` must be an app-relative path. Sim hands its value to
  *     SvelteKit's `goto`; contentus hands it to `window.location.replace`,
  *     which would follow an absolute URL.
@@ -108,11 +143,20 @@ interface StoredOAuthClient {
 	tokenEndpointAuthMethod: TokenEndpointAuthMethod;
 }
 
+/**
+ * The session contentus keeps, which is sim's minus the refresh token.
+ *
+ * There is no `refreshToken` here and there is no code that would spend one.
+ * lesser issues a refresh token good for seven days beside a one-hour access
+ * token; modelling it would put a longer-lived bearer-equivalent credential in
+ * `sessionStorage` for a client that has no refresh call, no rotation, and no
+ * revocation path. The field comes back when the lifecycle that consumes it
+ * does — see the header.
+ */
 export interface AuthSession {
 	accessToken: string;
 	tokenType: string;
 	scope?: string;
-	refreshToken?: string;
 	createdAt: number;
 	expiresIn: number;
 	expiresAt: number;
@@ -248,7 +292,13 @@ export function readSession(): AuthSession | null {
 
 	try {
 		const parsed = JSON.parse(raw) as AuthSession;
-		if (!parsed?.accessToken || !parsed?.tokenType || !parsed?.expiresAt) return null;
+		// THE SAME THREE PROPERTIES `completeLogin` REFUSES TO SUCCEED WITHOUT,
+		// checked here as well and spelled the same way on purpose. A session this
+		// reader rejects must never be one the callback reported as a sign-in, and
+		// the way that stays true is that neither end is the only one checking.
+		if (typeof parsed?.accessToken !== 'string' || !parsed.accessToken.trim()) return null;
+		if (typeof parsed?.tokenType !== 'string' || !parsed.tokenType.trim()) return null;
+		if (typeof parsed?.expiresAt !== 'number' || !Number.isFinite(parsed.expiresAt)) return null;
 		if (Date.now() >= parsed.expiresAt) {
 			sessionStorage.removeItem(STORAGE_KEYS.session);
 			return null;
@@ -335,36 +385,56 @@ function parseOAuthState(state: string): { stateNonce: string; clientBinding: st
 }
 
 /**
- * The two fields contentus reads out of lesser's registration response.
+ * What a registration response is allowed to become.
  *
- * THE OMISSION IS THE POINT. lesser returns a `client_secret` for a public
- * client — a proven defect in the instance, filed as such, and one that is
- * simply not this client's business. Naming the readable fields here, in one
- * place, is what makes "the secret is ignored" a property of the code's shape
- * rather than a claim in a comment: nothing downstream is handed an object the
- * secret survives into.
+ * `unreadable` is "this is not a registration response" — a non-object, or no
+ * usable `client_id`. `not-public` is "this is a registration response for a
+ * client this browser cannot be": it states a `token_endpoint_auth_method` that
+ * is anything other than `none`, so using it would mean presenting client
+ * authentication contentus has none of. The two are separate outcomes because
+ * they are separate messages to the person signing in, and because only one of
+ * them is a statement about the instance's answer rather than about its shape.
  */
-function parseRegistrationResponse(data: unknown): {
-	clientId: string;
-	tokenEndpointAuthMethod: TokenEndpointAuthMethod;
-} | null {
-	if (!data || typeof data !== 'object') return null;
+type RegistrationProjection =
+	| { outcome: 'public-client'; clientId: string }
+	| { outcome: 'not-public' }
+	| { outcome: 'unreadable' };
+
+const NOT_A_PUBLIC_CLIENT =
+	'The instance did not register Contentus as a public client. Please sign in again.';
+
+/**
+ * The two fields contentus reads out of lesser's registration response, and the
+ * one thing it will not accept.
+ *
+ * THE OMISSION IS STILL THE POINT. lesser returns a `client_secret` for a public
+ * client — a proven defect in the instance, filed as such, and one that is
+ * simply not this client's business. Naming what IS selected here, in one place,
+ * is what keeps "the secret is ignored" a property of the code's shape: nothing
+ * downstream is handed an object the secret survives into. What that does NOT
+ * claim is that the field never existed — `registerOAuthClient` holds the whole
+ * decoded body for the length of this call, and no client-side projection can
+ * unmake that. See the header for the five negatives that ARE proven.
+ *
+ * `client_id` is read as DATA. `token_endpoint_auth_method` is read as a GATE:
+ * absent is sim's `?? 'none'` — unreachable against a conformant lesser, kept
+ * because the value it defaults to is the one this client requested — exactly
+ * `none` passes, and every other value, string or not, is `not-public`. The
+ * caller refuses it before caching and before redirecting, which is the first
+ * use sim's cache-boundary discard cannot cover.
+ */
+function parseRegistrationResponse(data: unknown): RegistrationProjection {
+	if (!data || typeof data !== 'object') return { outcome: 'unreadable' };
 
 	const clientId = (data as { client_id?: unknown }).client_id;
-	if (typeof clientId !== 'string' || !clientId.trim()) return null;
+	if (typeof clientId !== 'string' || !clientId.trim()) return { outcome: 'unreadable' };
 
 	const authMethod = (data as { token_endpoint_auth_method?: unknown }).token_endpoint_auth_method;
+	if (authMethod !== undefined && authMethod !== PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD) {
+		return { outcome: 'not-public' };
+	}
 
-	return {
-		clientId,
-		// Sim's `data.token_endpoint_auth_method ?? 'none'`. Unreachable against
-		// a conformant lesser, which always states a method; kept because the
-		// value it defaults to is the one this client requested.
-		tokenEndpointAuthMethod:
-			typeof authMethod === 'string'
-				? (authMethod as TokenEndpointAuthMethod)
-				: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD,
-	};
+	return { outcome: 'public-client', clientId };
 }
 
 function registrationErrorMessage(data: unknown, status: number): string {
@@ -397,14 +467,28 @@ async function registerOAuthClient(
 	});
 
 	const data = (await response.json().catch(() => null)) as unknown;
-	const registration = response.ok ? parseRegistrationResponse(data) : null;
-	if (!registration) throw new Error(registrationErrorMessage(data, response.status));
+	const registration: RegistrationProjection = response.ok
+		? parseRegistrationResponse(data)
+		: { outcome: 'unreadable' };
+
+	// ORDER IS THE CONTROL. Both refusals are `throw`, and they are here — above
+	// the cache write, and therefore above `startLogin`'s redirect, which never
+	// runs for a call that threw. A registration that is not a public client
+	// leaves no cached client behind and sends nobody to the authorization
+	// server. The refusal message names the outcome and not the value lesser
+	// stated, so an instance cannot choose the text this app shows.
+	if (registration.outcome === 'not-public') throw new Error(NOT_A_PUBLIC_CLIENT);
+	if (registration.outcome !== 'public-client') {
+		throw new Error(registrationErrorMessage(data, response.status));
+	}
 
 	const client: StoredOAuthClient = {
 		clientId: registration.clientId,
 		redirectUri,
 		createdAt: Date.now(),
-		tokenEndpointAuthMethod: registration.tokenEndpointAuthMethod,
+		// Not a value carried from the response: past the gate above, the only
+		// method a registration can produce is the one this client asked for.
+		tokenEndpointAuthMethod: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD,
 	};
 
 	if (cacheBucket) {
@@ -588,18 +672,30 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		}),
 	});
 
+	// The fields this client reads out of lesser's `OAuthTokenResponse`.
+	// `refresh_token` is deliberately absent from this projection and from
+	// `AuthSession`: lesser sends one, contentus has nothing that spends it, and
+	// a seven-day credential kept for no purpose is only ever a wider blast
+	// radius. It is ignored the way the registration `client_secret` is ignored.
 	const tokenJson = (await tokenResponse.json().catch(() => null)) as {
 		access_token?: unknown;
 		token_type?: unknown;
 		scope?: unknown;
-		refresh_token?: unknown;
 		created_at?: unknown;
 		expires_in?: unknown;
 		error?: unknown;
 		error_description?: unknown;
 	} | null;
 
-	if (!tokenResponse.ok || typeof tokenJson?.access_token !== 'string') {
+	// A BLANK TOKEN IS NOT A TOKEN. A 200 carrying `access_token: ""` used to
+	// pass this predicate, get stored, and return `ok: true` — and then
+	// `readSession` rejected the session the caller had just been told it had.
+	// A parser at a trust boundary does not get to disagree with the reader.
+	// `!tokenJson` is redundant with the blank check — a null body cannot carry a
+	// usable token — and it is written anyway so the compiler, not a reader's
+	// confidence, is what says the fields below are on an object that exists.
+	const accessToken = typeof tokenJson?.access_token === 'string' ? tokenJson.access_token : '';
+	if (!tokenResponse.ok || !tokenJson || !accessToken.trim()) {
 		for (const key of ['error_description', 'error'] as const) {
 			const candidate = tokenJson?.[key];
 			if (typeof candidate === 'string' && candidate.trim()) {
@@ -626,13 +722,19 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 
 	const createdAt = createdAtSeconds * 1000;
 
+	// Missing, blank, or not a string all normalize to the one type this flow
+	// asked for. Normalizing rather than refusing is the choice the header
+	// records; what is NOT allowed is storing a blank, because `readSession`
+	// rejects that and the callback would have claimed a session that is gone.
+	const statedTokenType =
+		typeof tokenJson.token_type === 'string' ? tokenJson.token_type.trim() : '';
+
 	writeSession({
-		accessToken: tokenJson.access_token,
-		tokenType: typeof tokenJson.token_type === 'string' ? tokenJson.token_type : 'Bearer',
+		// Stored as lesser issued it. The blank check above is a gate, not a
+		// rewrite: a credential is not this client's to reshape.
+		accessToken,
+		tokenType: statedTokenType || 'Bearer',
 		...(typeof tokenJson.scope === 'string' ? { scope: tokenJson.scope } : {}),
-		...(typeof tokenJson.refresh_token === 'string'
-			? { refreshToken: tokenJson.refresh_token }
-			: {}),
 		createdAt,
 		expiresIn: expiresInSeconds,
 		expiresAt: createdAt + expiresInSeconds * 1000,
