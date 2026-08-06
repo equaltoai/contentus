@@ -9,6 +9,7 @@ the sign-in explanation and never fetches an owned roster.
 	import { onMount } from 'svelte';
 
 	import { accessTokenOrNull, readSession, startLogin } from '$lib/auth/session';
+	import { DRONE_OAUTH_SCOPE } from '$lib/auth/scopes';
 	import { onSessionChange, sessionGeneration } from '$lib/auth/session-events';
 	import { createSessionScope } from '$lib/auth/session-scope';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
@@ -101,7 +102,7 @@ the sign-in explanation and never fetches an owned roster.
 	async function onAuthorize() {
 		signInError = null;
 		try {
-			await startLogin({ scope: 'read write follow', returnTo: href('/drones') });
+			await startLogin({ scope: DRONE_OAUTH_SCOPE, returnTo: href('/drones') });
 		} catch (error) {
 			signInError = error instanceof Error ? error.message : 'Sign-in could not start.';
 		}

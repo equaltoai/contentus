@@ -94,3 +94,135 @@ somewhere the invariant forbids and is not a trade contentus may make.
 
 **Consequence while open:** the status codes stay as documented above, with the
 reasoning recorded here rather than left as an unexplained 200.
+
+## The OAuth core is simulacrum's, and why that had to be restored
+
+Recorded at the M1 recovery (2026-08-05), against lesser ref
+`e710ffb31a983b2ad993845dca7d3263b81de100` and simulacrum ref
+`6cec1b607e48c6efc18dcd6995dbbcc2a4a5fcea`.
+
+`src/lib/auth/session.ts` is a transplant of simulacrum's module of the same
+name, not an independent implementation of the same specification. The product
+design has said so since the foundation document — §3, "Copy sim's
+`src/lib/auth/session.ts` + `pkce.ts` pattern unchanged" — and an earlier
+contentus round did not, which broke sign-in outright.
+
+**The instance defect the divergence collided with.** lesser generates a
+`client_secret` for every OAuth client it stores, including a public one.
+`CreateOAuthClientGeneric` (`pkg/storage/repositories/oauth_helpers.go:137`)
+mints a secret whenever the caller supplied none, and
+`createOAuthClientAndRespond` (`cmd/api/handlers/apps.go`) copies
+`client.ClientSecret` into `models.AppRegistrationResponse`, where only
+`omitempty` guards it. So a registration that asks for
+`token_endpoint_auth_method=none` — and gets `Confidential=false` and `none`
+back in the same response — is nevertheless handed a plaintext secret.
+
+Contentus had been refusing exactly that response, on the reasoning that a
+public client must never be issued a secret. The reasoning is sound and the
+behaviour was wrong: it aborted every sign-in before authorization, against a
+conformant instance, for a field the client simply has no business reading.
+Simulacrum selects `client_id` out of that response and reads
+`token_endpoint_auth_method` only to decide whether there is a usable public
+client. That is now what contentus does.
+
+**What is claimed about that secret, exactly.** `registerOAuthClient` calls
+`response.json()`, so the returned `client_secret` is **transiently present in
+the decoded server response** on the page's heap for the length of that call. No
+browser client can make that untrue, and an earlier version of this note said
+"never seen", which claimed it. What contentus does hold, and what
+`tests/auth-session.test.mjs` proves by sweeping a whole sign-in rather than by
+assertion, is bounded and is the part that governs behaviour: the secret is
+never **selected** into the client model, never **persisted** to either storage,
+never **retransmitted** on any request, never **logged**, and never placed into a
+**redirect**. The sweep reads every stored value, every request body and header,
+every redirect the client issues, and every console call it makes, and it is
+bite-checked in both directions — a planted value in any one of those five
+channels fails it.
+
+**Where the public-client invariant actually lives.** Four places. Three are
+simulacrum's: registration always asks for `token_endpoint_auth_method=none`;
+the token request carries the PKCE verifier and no client authentication of any
+kind; and a cached client whose method is not `none`, or which ever carried a
+secret field, is discarded rather than reused. The fourth was added under
+cross-client adversarial review of PR #76 (reviewing client codex, finding 1):
+a **fresh registration** whose stated method is not exactly `none` is refused
+before the cache write and before the authorization redirect. The cache boundary
+alone cannot cover first use — the client `registerOAuthClient` returns goes
+straight to the redirect without passing the cache reader — so a
+`client_secret_*` registration would have been redirected against once before
+anything discarded it. An absent method still reads as the `none` the request
+asked for, which is simulacrum's `?? 'none'` and is unreachable against a
+conformant lesser. The registration REQUEST is unchanged; this is a local
+validation strengthening, not a wire-contract change.
+
+**Routed to:** the lesser steward — returning a plaintext `client_secret` to a
+public client is an instance-side defect worth closing at the source, even
+though no conformant client is harmed by it. Contentus does not depend on the
+fix: ignoring the field is the correct client behaviour either way, so this is
+an upstream report rather than a blocker.
+
+**Deliberate differences from simulacrum**, all local, none on the wire, each
+one also stated in the module header: no `VITE_PUBLIC_OAUTH_CLIENT_ID` override
+(contentus takes no config injection); no RFC 8707 `resource` parameter
+(contentus is an ordinary browser app, not a remote-MCP client); sign-out
+empties every `sessionStorage` key the module writes and announces itself
+through `session-events`, which is this app's stand-in for sim's store
+subscription; a token response without a usable `created_at`/`expires_in` is
+refused rather than multiplied into `NaN`, which would otherwise produce a
+session that never expires; and `returnTo` must be an app-relative path, because
+contentus hands it to `window.location.replace` where sim hands it to `goto`.
+
+Four more were added at the PR #76 review rework, all still local:
+
+- **No refresh token is kept.** lesser issues a `refresh_token` good for seven
+  days beside the one-hour access token, and permits a public-client refresh
+  with that token and the public `client_id` — no secret. Simulacrum models and
+  stores it. Contentus has no refresh call, no rotation, and no revocation path,
+  so storing a bearer-equivalent credential nothing spends only widens what a
+  transient same-origin compromise carries away. `AuthSession` has no
+  `refreshToken` field and `completeLogin` does not read `refresh_token`; the
+  same five-channel sweep that covers the client secret covers it (codex
+  finding 2). The field returns when a scoped refresh lifecycle that consumes
+  and clears it does, not ahead of it.
+- **A blank `access_token` is refused and a blank `token_type` normalizes to
+  `Bearer`.** A 200 carrying `access_token: ""` used to be stored and reported
+  as `ok: true`, and `readSession` then rejected the session the caller had just
+  been told it had. `completeLogin` and `readSession` now check the same three
+  properties, and a test asserts the agreement as a property over every
+  malformed token response the suite can serve (codex finding 3).
+- **A non-public fresh registration is refused**, as described above (codex
+  finding 1).
+- **The token lifetime is checked on the instants the session carries, not on
+  the seconds the response stated.** Validating `created_at` and `expires_in`
+  individually and converting to milliseconds afterwards checks the wrong
+  numbers: `1e308` is finite and `1e308 * 1000` is `Infinity`, which
+  `JSON.stringify` writes as `null` — so `writeSession` announced `signed-in`,
+  `completeLogin` answered `ok: true`, and `readSession` rejected the session a
+  moment later. `createdAt` and `expiresAt` are now computed before anything is
+  stored, announced, or returned, and refused unless both are safe integers:
+  finite so they survive JSON, integral because rounding an instant would invent
+  an expiry lesser did not state, and inside ±(2^53 − 1) because past that
+  milliseconds stop being distinct. Probing this surfaced a second case of the
+  same disagreement — a `created_at` already in the past is finite and exactly
+  storable, and `readSession` deletes an expired session on the next read — so an
+  already-elapsed lifetime is refused too, with its own message. A stated
+  lifetime is never capped: shortening an absurd one would be inventing the
+  lifetime this module exists to avoid inventing (codex finding 5,
+  review 4870975439).
+
+  **The two refusals do not have the same reach, and an earlier version of this
+  note said they did.** The storability refusal cannot fire for the values lesser
+  actually sends: `created_at` is an `int64` second and `expires_in` an `int` on
+  `OAuthTokenResponse` (`cmd/api/models/oauth.go:72`), and a `time.Now().Unix()`
+  stamp plus the 3600-second lifetime lands near 1.78e12 ms — eleven orders of
+  magnitude inside ±(2^53 − 1). The elapsed-lifetime refusal **can** fire against
+  a conformant instance, and is meant to. lesser stamps `created_at` from the
+  SERVER's clock (`cmd/api/handlers/oauth.go:1025`), and the callback compares the
+  instant derived from it against the BROWSER's `Date.now()`. A client clock
+  running ahead of the instance by more than the stated lifetime, or a callback
+  genuinely delayed past the stated expiry, therefore reaches a token that has
+  really elapsed by the only clock this module can read. Refusing there is what
+  keeps the callback and `readSession` from disagreeing: `ok: true` would hand
+  back a session the next read deletes. "Conformant server response" and
+  "synchronized clocks" are different claims, and only the first is lesser's to
+  make (codex finding, review 4871214951).

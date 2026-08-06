@@ -9,6 +9,7 @@ the URL, SSR props, logs, or the public hydration resource.
 	import { onMount } from 'svelte';
 
 	import { accessTokenOrNull, readSession, startLogin } from '$lib/auth/session';
+	import { DRONE_OAUTH_SCOPE } from '$lib/auth/scopes';
 	import { onSessionChange, sessionGeneration } from '$lib/auth/session-events';
 	import { createSessionScope } from '$lib/auth/session-scope';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
@@ -108,7 +109,7 @@ the URL, SSR props, logs, or the public hydration resource.
 	async function authorize() {
 		signInError = null;
 		try {
-			await startLogin({ scope: 'read write follow', returnTo: href('/drones/new') });
+			await startLogin({ scope: DRONE_OAUTH_SCOPE, returnTo: href('/drones/new') });
 		} catch (error) {
 			signInError = error instanceof Error ? error.message : 'Sign-in could not start.';
 		}
