@@ -67,6 +67,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      graphql:
+        specifier: 16.14.2
+        version: 16.14.2
       prettier:
         specifier: ^3.3.0
         version: 3.9.6

@@ -360,13 +360,18 @@ export function modulePath(specifier) {
  * release that moves this property turns the gate red instead of quietly
  * removing the check.
  */
-function parsed(source) {
+function parsed(source, jsx = false) {
+	// THE SCRIPT KIND IS PART OF THE READING. Parsing `.tsx`/`.jsx` bytes as plain
+	// TypeScript makes `<Foo />` a type assertion, the parse recovers into
+	// nonsense, and the throw below turns a legitimate component into "this source
+	// does not parse". Vite resolves and builds both suffixes, so both have to be
+	// readable rather than merely refused; callers that know the file say so.
 	const file = ts.createSourceFile(
-		'probe.ts',
+		jsx ? 'probe.tsx' : 'probe.ts',
 		source,
 		ts.ScriptTarget.Latest,
 		true,
-		ts.ScriptKind.TS
+		jsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS
 	);
 	if (!Array.isArray(file.parseDiagnostics))
 		throw new Error(
@@ -777,8 +782,8 @@ function namesThisFile(node, bound) {
  * Pass a component's source through `liveScript` first. This function reads what
  * it is given, and what it is given must be script.
  */
-export function moduleSpecifiers(source) {
-	return [...new Set(collect(source, false).map((load) => load.specifier))];
+export function moduleSpecifiers(source, { jsx = false } = {}) {
+	return [...new Set(collect(source, false, jsx).map((load) => load.specifier))];
 }
 
 /**
@@ -801,8 +806,8 @@ export function moduleSpecifiers(source) {
  * type-only, and it binds. Only a declaration the compiler erases WHOLE is
  * dropped here.
  */
-export function runtimeSpecifiers(source) {
-	return [...new Set(collect(source, true).map((load) => load.specifier))];
+export function runtimeSpecifiers(source, { jsx = false } = {}) {
+	return [...new Set(collect(source, true, jsx).map((load) => load.specifier))];
 }
 
 /**
@@ -834,8 +839,8 @@ export function runtimeLoads(source) {
  * execution; everything else about the reading is identical, which is the
  * property that keeps the exports from drifting into several readings.
  */
-function collect(source, runtimeOnly) {
-	const file = parsed(source);
+function collect(source, runtimeOnly, jsx = false) {
+	const file = parsed(source, jsx);
 	const { names } = requireLike(file);
 	const loads = [];
 	const seen = new Set();
@@ -1806,8 +1811,8 @@ function nameableCallee(callee) {
  * that is the script the caller extracted, not the file on disk; CON-5, which is
  * the caller that uses them, walks plain modules where the two are the same.
  */
-export function unfollowableLoads(source) {
-	const file = parsed(source);
+export function unfollowableLoads(source, { jsx = false } = {}) {
+	const file = parsed(source, jsx);
 	const { names, factories, modelled } = requireLike(file);
 	const running = importedLocals(file, EXECUTION_MODULES, MODELLED_EXECUTION_EXPORTS);
 	const composers = pathComposers(file);
@@ -2015,8 +2020,8 @@ export function unfollowableLoads(source) {
  * property worth holding is that the graph is statically readable — not that
  * this walker is clever.
  */
-export function computedImports(source) {
-	return unfollowableLoads(source)
+export function computedImports(source, { jsx = false } = {}) {
+	return unfollowableLoads(source, { jsx })
 		.filter((load) => load.kind === 'computed')
 		.map((load) => load.expression);
 }

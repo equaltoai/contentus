@@ -32,6 +32,12 @@ src/lib/transport.ts
 colors_and_type.css
 assets/
 
+# Pinned upstream contract — a byte-for-byte copy of lesser's canonical schema at
+# the ref recorded in contracts/lesser/provenance.json, bound by SHA-256. It is
+# not this repository's source to style: reformatting it would break the digest
+# and, worse, would mean the pinned artifact no longer mirrors upstream exactly.
+contracts/lesser/graphql-schema.graphql
+
 # Lockfile
 pnpm-lock.yaml
 

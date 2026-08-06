@@ -1,0 +1,37 @@
+name: Schema provenance
+
+# The pinned lesser schema, dereferenced against lesser.
+#
+# WHY THIS IS A SEPARATE WORKFLOW AND NOT PART OF `pnpm build`. The build is
+# offline and deterministic by design, and folding a network call into it would
+# either make it flaky or earn a "skip when offline" escape hatch — which is how
+# a gate stops asserting anything. This job's whole value is that it is answered
+# by the UPSTREAM repository rather than by a second value in this one, so it
+# runs where the network is a given and a failure is a red check.
+#
+# It is required. A pull request that moves contracts/lesser/ without this job
+# going green has changed the contract the whole gate rests on, unverified.
+
+on:
+  pull_request:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  provenance:
+    name: Pinned lesser schema is the upstream git object
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      # No dependency install: the verifier is plain Node with no imports outside
+      # scripts/lib, so nothing in the dependency graph can influence the answer.
+      - run: node scripts/verify-schema-provenance.mjs
+        env:
+          # Raises the anonymous API rate limit only. lesser is public and this
+          # job reads public objects; the token is never logged or written.
+          GITHUB_TOKEN: ${{ github.token }}
