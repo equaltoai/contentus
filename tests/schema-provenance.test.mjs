@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+	CANONICAL_SCHEMA_AUTHORITY,
+	checkCanonicalAuthority,
 	checkPinIntegrity,
 	gitBlobOid,
 	isCommitId,
@@ -188,28 +190,33 @@ test('a commit that resolves to a different sha fails', async () => {
 	assert.match(findings, /does not name the object GitHub resolved/);
 });
 
-test('a wrong upstream path fails: there is no object to compare', async () => {
+test('a wrong upstream path fails before any request, however plausible the file', async () => {
+	// This used to fail only because the stub answered 404. That proved an HONEST
+	// upstream refuses a path it does not have — it proved nothing about a path
+	// that exists and contains something else. The rejection is now structural.
 	const pin = { ...PIN, upstream_path: 'docs/contracts/not-the-schema.graphql' };
-	const findings = await findingsFor(
-		pin,
-		BYTES,
-		githubReturning({ commit: { sha: pin.ref }, contents: null })
-	);
+	const seen = [];
+	const findings = await findingsFor(pin, BYTES, async (url) => {
+		seen.push(url);
+		return { ok: false, status: 404, json: async () => ({}) };
+	});
 	assert.match(findings, /not-the-schema\.graphql/);
-	assert.match(findings, /could not be dereferenced/);
+	assert.match(findings, /lesser publishes its canonical contract at/);
+	assert.deepEqual(seen, [], 'a non-canonical path is refused without a request');
 });
 
-test('a wrong repository fails, and is never even requested from the wrong host', async () => {
+test('a wrong repository fails before any request, and none is made at all', async () => {
 	const pin = { ...PIN, repository: 'https://github.com/attacker/lesser' };
 	const seen = [];
 	const findings = await findingsFor(pin, BYTES, async (url) => {
 		seen.push(url);
 		return { ok: false, status: 404, json: async () => ({}) };
 	});
-	assert.match(findings, /could not be dereferenced/);
-	assert.ok(
-		seen.every((url) => url.startsWith('https://api.github.com/repos/attacker/lesser')),
-		'the declared repository is the one dereferenced — no silent substitution'
+	assert.match(findings, /the only repository that can answer what lesser published/);
+	assert.deepEqual(
+		seen,
+		[],
+		'the wrong repository is not dereferenced — not even to be told it is wrong'
 	);
 });
 
@@ -301,6 +308,178 @@ test('a token, when present, is sent as a header and never appears in output', a
 		!findings.join('\n').includes('test-token-value'),
 		'a credential must never reach the report'
 	);
+});
+
+/* =========================================================================
+ * Canonical authority — the review's surviving finding
+ *
+ * The dereference proved the bytes came from SOMEWHERE. It did not prove they
+ * came from lesser, because the pin chose the somewhere. The reviewer built the
+ * refutation in full: fabricated SDL, honest length, honest sha256, honest blob
+ * OID, published at `attacker/fabricated-lesser@aaaa…:schema.graphql`, and a
+ * self-consistent API response for it. Every comparison agreed and
+ * `verifyUpstreamObject` returned zero findings.
+ *
+ * The repair is that the repository, the host and the path are no longer answers
+ * this repository supplies. They are constants in `scripts/lib/schema-pin.mjs`.
+ * `ref` remains a pin field — it is the one value a legitimate pin bump moves —
+ * and it is still dereferenced against an immutable commit id.
+ * ====================================================================== */
+
+/** The reviewer's probe, reconstructed exactly: a fabricated repo that agrees with itself. */
+function fabricatedUpstream(bytes) {
+	return async (url) => {
+		const answer = url.includes('/git/commits/')
+			? { sha: 'a'.repeat(40) }
+			: {
+					type: 'file',
+					sha: gitBlobOid(bytes),
+					encoding: 'base64',
+					content: bytes.toString('base64'),
+				};
+		return { ok: true, status: 200, json: async () => answer };
+	};
+}
+
+test('a fabricated repository containing matching bytes is refused, not confirmed', async () => {
+	const fabricated = Buffer.from('type Query { fabricatedContractSurface: String }\n');
+	const pin = {
+		...PIN,
+		repository: 'https://github.com/attacker/fabricated-lesser',
+		ref: 'a'.repeat(40),
+		upstream_path: 'schema.graphql',
+		sha256: sha256(fabricated),
+		bytes: fabricated.length,
+		git_blob_sha1: gitBlobOid(fabricated),
+	};
+
+	// Every byte-level comparison this module makes would agree. That is the point:
+	// self-consistency is cheap to manufacture, so it cannot be what is checked.
+	const seen = [];
+	const upstream = fabricatedUpstream(fabricated);
+	const findings = await findingsFor(pin, fabricated, async (url) => {
+		seen.push(url);
+		return upstream(url);
+	});
+
+	assert.match(findings, /attacker\/fabricated-lesser as the upstream authority/);
+	assert.match(findings, /equaltoai\/lesser/);
+	assert.match(findings, /schema\.graphql` as the upstream path/);
+	assert.deepEqual(seen, [], 'a fabricated authority is never asked to vouch for itself');
+});
+
+test('the offline gate refuses the same fabricated authority, so both halves agree', () => {
+	// The online verifier builds its request from the constant regardless of the
+	// pin, so a wrong repository could not redirect it either way. What must not
+	// happen is a tree whose pin CLAIMS one upstream while the gate silently checks
+	// another — a document saying something no control enforces is the defect this
+	// whole milestone is about.
+	const fabricated = Buffer.from('type Query { fabricatedContractSurface: String }\n');
+	const findings = checkPinIntegrity(
+		{
+			...PIN,
+			repository: 'https://github.com/attacker/fabricated-lesser',
+			upstream_path: 'schema.graphql',
+			sha256: sha256(fabricated),
+			bytes: fabricated.length,
+			git_blob_sha1: gitBlobOid(fabricated),
+		},
+		fabricated
+	).join('\n');
+
+	assert.match(findings, /the only repository that can answer what lesser published/);
+	assert.match(findings, /lesser publishes its canonical contract at/);
+});
+
+test('canonical authority accepts exactly one repository and one path', () => {
+	assert.deepEqual(checkCanonicalAuthority(PIN), []);
+
+	for (const repository of [
+		'https://github.com/equaltoai/lesser-fork',
+		'https://github.com/EqualToAI/lesser',
+		'https://github.com/attacker/lesser',
+		'https://github.com/equaltoai/greater-components',
+		// Host ambiguity: each of these READS as github.com to a hurried eye.
+		'https://github.com.evil.test/equaltoai/lesser',
+		'https://github.com@evil.test/equaltoai/lesser',
+		'http://github.com/equaltoai/lesser',
+		'https://api.github.com/repos/equaltoai/lesser',
+		'https://raw.githubusercontent.com/equaltoai/lesser',
+		'https://github.com/equaltoai/lesser/../../attacker/lesser',
+	]) {
+		assert.notDeepEqual(
+			checkCanonicalAuthority({ ...PIN, repository }),
+			[],
+			`${repository} must not read as lesser`
+		);
+	}
+
+	for (const upstream_path of [
+		'docs/contracts/graphql-schema.graphql.bak',
+		'docs/contracts/../contracts/graphql-schema.graphql',
+		'graphql-schema.graphql',
+		'docs/contracts/Graphql-Schema.graphql',
+	]) {
+		assert.notDeepEqual(
+			checkCanonicalAuthority({ ...PIN, upstream_path }),
+			[],
+			`${upstream_path} must not read as the canonical contract`
+		);
+	}
+});
+
+test('the request is built from the constant, not from the pin', async () => {
+	// Defence in depth, and the reason it is worth having: the integrity check above
+	// is the thing an edit would loosen. Even with the canonical check removed from
+	// the caller's path, the URL asked must still be lesser's.
+	const seen = [];
+	const upstream = honestGitHub();
+	await verifyUpstreamObject({
+		pin: PIN,
+		bytes: BYTES,
+		fetchImpl: async (url, init) => {
+			seen.push(url);
+			assert.equal(init?.redirect, 'error', 'a redirect must not be followed silently');
+			return upstream(url);
+		},
+	});
+
+	assert.ok(seen.length >= 2, 'both the commit and the blob are dereferenced');
+	for (const url of seen) {
+		assert.ok(
+			url.startsWith('https://api.github.com/repos/equaltoai/lesser/'),
+			`${url} must name the canonical authority`
+		);
+	}
+	assert.ok(seen.some((url) => url.includes('docs/contracts/graphql-schema.graphql')));
+});
+
+test('a redirected answer is refused rather than followed to whoever answers', async () => {
+	// GitHub 301s a repository that has been renamed or transferred. Following that
+	// is how the wrong repository gets to answer for lesser with nothing in the
+	// output saying so — so both the flag and the final URL are checked.
+	const honest = honestGitHub();
+	const redirected = await findingsFor(PIN, BYTES, async (url) => {
+		const response = await honest(url);
+		return { ...response, redirected: true, url: 'https://api.github.com/repos/attacker/lesser/x' };
+	});
+	assert.match(redirected, /rather than/);
+	assert.match(redirected, /A redirected answer names an object this gate did not ask for/);
+
+	const relocated = await findingsFor(PIN, BYTES, async (url) => {
+		const response = await honest(url);
+		return { ...response, url: 'https://api.evil.test/repos/equaltoai/lesser/x' };
+	});
+	assert.match(relocated, /A redirected answer names an object this gate did not ask for/);
+});
+
+test('a fetch that rejects on redirect is a finding, not a skipped check', async () => {
+	// `redirect: 'error'` makes the real fetch throw. The catch has to be a finding.
+	const findings = await findingsFor(PIN, BYTES, async () => {
+		throw new TypeError('fetch failed: unexpected redirect');
+	});
+	assert.match(findings, /could not reach GitHub/);
+	assert.match(findings, /never a passing one/);
 });
 
 /* =========================================================================

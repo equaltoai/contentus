@@ -27,15 +27,41 @@ import {
 	runtimeSpecifiers,
 } from './module-imports.mjs';
 
-/** Extensions whose bytes are script — everything else loads no module. */
-export const SCRIPT_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.svelte'];
-
-export const isScript = (file) => SCRIPT_EXTENSIONS.some((extension) => file.endsWith(extension));
+/**
+ * A predicate over an extension set, rather than a set of its own.
+ *
+ * WHAT WENT WRONG WITH THE CONSTANT IT REPLACES. `SCRIPT_EXTENSIONS` was a literal
+ * list, and it omitted `.tsx` and `.jsx` — two suffixes this repository's Vite has
+ * resolved and built the entire time. The review made an entry import a `.tsx`
+ * module that sent a dynamically assembled invalid document through the production
+ * transport, and the full audit exited 0/PASS. Worse, the test that compares this
+ * closure against a REAL Vite build filtered the build's loaded modules through the
+ * same list, so the omission was invisible from both sides: a second opinion that
+ * inherits the first one's blind spot is not evidence, it is an echo.
+ *
+ * The set now comes from `executableExtensions(resolver)` in `module-resolution.mjs`,
+ * which reads Vite's resolved `resolve.extensions` and its loader plugins' declared
+ * extensions. Callers pass it in; nothing here restates it.
+ */
+export function isScriptIn(extensions) {
+	const suffixes = [...extensions];
+	return (file) => suffixes.some((extension) => file.endsWith(extension));
+}
 
 /** Source a file executes — a component's scripts and markup imports, or the file. */
 export function scriptOf(root, file) {
 	return liveScript(file, readFileSync(path.join(root, file), 'utf8'));
 }
+
+/**
+ * Whether this file's bytes must be parsed with JSX syntax enabled.
+ *
+ * A `.tsx` read as plain TypeScript turns `<Foo />` into a type assertion and the
+ * parse recovers into something that is not the program. The readers throw on a
+ * recovered parse rather than guessing, which is right — but the answer for a
+ * legitimate component is to read it correctly, not to refuse it.
+ */
+export const isJsx = (file) => /\.[jt]sx$/i.test(file);
 
 /**
  * Resolve every specifier in the tree, using Vite's own resolver, to a fixpoint.
@@ -53,7 +79,7 @@ export function scriptOf(root, file) {
  * boundary claim is exactly that no unknown target is a document-bearing vendored
  * module.
  */
-export async function resolveClosure(root, seeds, resolver) {
+export async function resolveClosure(root, seeds, resolver, isScript) {
 	const resolution = new Map();
 	const sources = new Map();
 	const findings = [];
@@ -80,7 +106,7 @@ export async function resolveClosure(root, seeds, resolver) {
 
 		let specifiers;
 		try {
-			specifiers = moduleSpecifiers(source);
+			specifiers = moduleSpecifiers(source, { jsx: isJsx(file) });
 		} catch (error) {
 			// Reported here rather than skipped: a module this reader cannot parse
 			// is a module whose imports are unknown, and an unknown import set is
@@ -96,7 +122,7 @@ export async function resolveClosure(root, seeds, resolver) {
 		}
 	}
 
-	return { resolution, sources, findings, files: [...seen].filter(isScript) };
+	return { resolution, sources, findings, isScript, files: [...seen].filter(isScript) };
 }
 
 /** Synchronous resolution over the pre-computed closure. */
@@ -158,7 +184,7 @@ export function reachableFrom(roots, closure, resolve) {
 
 	while (queue.length) {
 		const file = queue.shift();
-		if (!isScript(file)) continue;
+		if (!closure.isScript(file)) continue;
 
 		const source = closure.sources.get(file);
 		if (source === undefined) {
@@ -172,7 +198,7 @@ export function reachableFrom(roots, closure, resolve) {
 
 		let specifiers;
 		try {
-			specifiers = runtimeSpecifiers(source);
+			specifiers = runtimeSpecifiers(source, { jsx: isJsx(file) });
 		} catch (error) {
 			findings.push(
 				`${file} is reachable and could not be parsed for its imports: ${error.message}`
@@ -227,7 +253,7 @@ export function reachableFrom(roots, closure, resolve) {
 		// A dynamic import whose target no static read can name.
 		let computed;
 		try {
-			computed = computedImports(source);
+			computed = computedImports(source, { jsx: isJsx(file) });
 		} catch {
 			computed = [];
 		}

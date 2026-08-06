@@ -44,6 +44,41 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+/**
+ * THE ONLY AUTHORITY THAT CAN ANSWER THIS QUESTION.
+ *
+ * Dereferencing the pin proved the bytes came from *somewhere*; it did not prove
+ * they came from lesser. The review demonstrated the gap directly: supply
+ * fabricated SDL, compute its length, sha256 and blob OID honestly, publish it at
+ * `https://github.com/attacker/fabricated-lesser@aaaa…:schema.graphql`, and every
+ * comparison in this module agrees — because every comparison was between the pin
+ * and the place the pin chose. A verifier that lets the value under test select
+ * its own examiner is not a verifier.
+ *
+ * So the repository, the path and the host are NOT pin fields any more. They are
+ * these constants. The pin still declares them, and a pin declaring anything else
+ * is a finding, but the request itself is built from here — an edit to
+ * `provenance.json` cannot move the question to a repository that would answer it
+ * differently. `ref` stays a pin field because that is the one value a legitimate
+ * pin bump moves; it remains constrained to an immutable commit id and is still
+ * dereferenced.
+ *
+ * `upstream_path` is canonical for the same reason a repository is: lesser
+ * publishes its contract at one path, and a pin naming `docs/contracts/anything-
+ * else.graphql` is either a mistake or a redirection. Both fail here.
+ */
+export const CANONICAL_SCHEMA_AUTHORITY = Object.freeze({
+	host: 'github.com',
+	owner: 'equaltoai',
+	repo: 'lesser',
+	repository: 'https://github.com/equaltoai/lesser',
+	upstream_path: 'docs/contracts/graphql-schema.graphql',
+	api: 'https://api.github.com',
+});
+
+/** The one API prefix this verifier is ever allowed to talk to. */
+export const CANONICAL_API_PREFIX = `${CANONICAL_SCHEMA_AUTHORITY.api}/repos/${CANONICAL_SCHEMA_AUTHORITY.owner}/${CANONICAL_SCHEMA_AUTHORITY.repo}/`;
+
 /** Fields a schema pin must carry before either check can run. */
 export const REQUIRED_SCHEMA_PIN_FIELDS = [
 	'repository',
@@ -136,6 +171,49 @@ export function parseGitHubRepository(url) {
 }
 
 /**
+ * Does this pin name the one authority allowed to answer the provenance question?
+ *
+ * Checked OFFLINE as well as online, deliberately. The online verifier no longer
+ * builds its request from these fields, so a wrong repository cannot redirect the
+ * check — but a pin that *claims* a different upstream while the check silently
+ * asks the canonical one would be a document saying something the gate does not
+ * enforce, which is the shape of every defect in this milestone. Both must agree,
+ * and the offline gate is where a reader first sees them disagree.
+ */
+export function checkCanonicalAuthority(pin) {
+	const findings = [];
+	const canonical = CANONICAL_SCHEMA_AUTHORITY;
+
+	const repository = parseGitHubRepository(pin?.repository);
+	if (!repository) {
+		findings.push(
+			`the schema pin's repository \`${pin?.repository}\` is not a https://${canonical.host}/<owner>/<repo> ` +
+				'URL. This value is checked against the canonical authority, so it is restricted ' +
+				'rather than free text.'
+		);
+	} else if (repository.owner !== canonical.owner || repository.repo !== canonical.repo) {
+		findings.push(
+			`the schema pin names ${repository.owner}/${repository.repo} as the upstream authority; ` +
+				`the only repository that can answer what lesser published is ${canonical.owner}/${canonical.repo}.`,
+			'  A repository containing byte-identical, self-consistent SDL is not evidence: any',
+			'  author can create one. Provenance is a claim about WHOSE contract this is, and the',
+			'  answer cannot be selected by the value under test.'
+		);
+	}
+
+	if (pin?.upstream_path !== canonical.upstream_path) {
+		findings.push(
+			`the schema pin names \`${pin?.upstream_path}\` as the upstream path; lesser publishes ` +
+				`its canonical contract at \`${canonical.upstream_path}\`.`,
+			'  An alternate path inside the right repository is the same substitution as the wrong',
+			'  repository, one level down: it lets a file nobody reviews stand in for the contract.'
+		);
+	}
+
+	return findings;
+}
+
+/**
  * Offline integrity: do the bytes in the tree match every value pinned beside
  * them? Returns findings; empty means the bytes are what this repository says
  * they are, which is NOT the same as saying they are what lesser published.
@@ -161,13 +239,7 @@ export function checkPinIntegrity(pin, bytes) {
 				'underneath the pin.'
 		);
 	}
-	if (!parseGitHubRepository(pin.repository)) {
-		findings.push(
-			`the schema pin's repository \`${pin.repository}\` is not a https://github.com/<owner>/<repo> ` +
-				'URL. This value selects the host the provenance verifier dereferences, so it is ' +
-				'restricted rather than free text.'
-		);
-	}
+	findings.push(...checkCanonicalAuthority(pin));
 
 	const digest = sha256(bytes);
 	if (digest !== pin.sha256) {
@@ -216,8 +288,12 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	const integrity = checkPinIntegrity(pin, bytes);
 	if (integrity.length) return { findings: integrity, observed };
 
-	const repository = parseGitHubRepository(pin.repository);
-	const api = `https://api.github.com/repos/${repository.owner}/${repository.repo}`;
+	// BUILT FROM THE CONSTANT, NOT FROM THE PIN. `checkPinIntegrity` above already
+	// refused a pin naming anything else, so these agree — but they are read from
+	// here so that even a caller who skipped that check, or a future edit that
+	// loosened it, still asks lesser rather than whoever the pin nominated.
+	const canonical = CANONICAL_SCHEMA_AUTHORITY;
+	const api = `${canonical.api}/repos/${canonical.owner}/${canonical.repo}`;
 	const headers = {
 		accept: 'application/vnd.github+json',
 		'x-github-api-version': '2022-11-28',
@@ -226,13 +302,41 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	};
 
 	const get = async (url, what) => {
+		// The last place a URL could stop naming the canonical authority is here, so
+		// it is checked here rather than trusted from construction. A verifier that
+		// talks to one host and reports about another is worse than no verifier.
+		if (!url.startsWith(CANONICAL_API_PREFIX)) {
+			findings.push(
+				`refusing to dereference ${url}: this verifier may only ask ${CANONICAL_API_PREFIX}. ` +
+					'A provenance check that can be pointed elsewhere is answering a different question.'
+			);
+			return null;
+		}
+
 		let response;
 		try {
-			response = await fetchImpl(url, { headers });
+			// `redirect: 'error'` rather than the default follow. A 3xx is the API
+			// telling us the object lives somewhere else, and "somewhere else" is
+			// exactly the ambiguity this gate exists to remove: a followed redirect
+			// would let a renamed or transferred repository answer for lesser without
+			// anything in the output saying so.
+			response = await fetchImpl(url, { headers, redirect: 'error' });
 		} catch (error) {
 			findings.push(
 				`could not reach GitHub for ${what}: ${error?.message ?? error}. An unreachable ` +
 					'upstream is an unverified pin, never a passing one.'
+			);
+			return null;
+		}
+		// A stub, a proxy, or an implementation that follows redirects regardless can
+		// still hand back a response whose final URL is not the one asked for.
+		if (
+			response?.redirected === true ||
+			(response?.url && !response.url.startsWith(CANONICAL_API_PREFIX))
+		) {
+			findings.push(
+				`${what} was answered from ${response.url ?? 'a redirected location'} rather than ` +
+					`${url}. A redirected answer names an object this gate did not ask for.`
 			);
 			return null;
 		}
@@ -255,7 +359,7 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	// --- the commit object: does this ref exist in the declared repository? ----
 	const commit = await get(
 		`${api}/git/commits/${pin.ref}`,
-		`lesser commit ${pin.ref} in ${pin.repository}`
+		`lesser commit ${pin.ref} in ${canonical.repository}`
 	);
 	if (!commit) return { findings, observed };
 	if (commit.sha !== pin.ref) {
@@ -269,14 +373,14 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 
 	// --- the blob at that path, in that commit -------------------------------
 	const contents = await get(
-		`${api}/contents/${encodeURI(pin.upstream_path)}?ref=${pin.ref}`,
-		`${pin.upstream_path} at ${pin.ref} in ${pin.repository}`
+		`${api}/contents/${encodeURI(canonical.upstream_path)}?ref=${pin.ref}`,
+		`${canonical.upstream_path} at ${pin.ref} in ${canonical.repository}`
 	);
 	if (!contents) return { findings, observed };
 
 	if (contents.type !== 'file' || typeof contents.sha !== 'string') {
 		findings.push(
-			`${pin.upstream_path} at ${pin.ref} is not a file (type ${contents.type ?? 'unknown'}).`
+			`${canonical.upstream_path} at ${pin.ref} is not a file (type ${contents.type ?? 'unknown'}).`
 		);
 		return { findings, observed };
 	}
@@ -285,7 +389,7 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	if (contents.sha !== pin.git_blob_sha1) {
 		findings.push(
 			`the git object upstream does not match the pinned bytes.`,
-			`  ${pin.repository}@${pin.ref}:${pin.upstream_path}`,
+			`  ${canonical.repository}@${pin.ref}:${canonical.upstream_path}`,
 			`  upstream blob ${contents.sha}`,
 			`  pinned   blob ${pin.git_blob_sha1}`,
 			'  The bytes in contracts/ are not the bytes lesser published at this ref. Either the ' +
@@ -297,7 +401,7 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	// --- and the bytes themselves, not just their name ------------------------
 	if (contents.encoding !== 'base64' || typeof contents.content !== 'string') {
 		findings.push(
-			`${pin.upstream_path} came back with encoding ${contents.encoding ?? 'none'}; this check ` +
+			`${canonical.upstream_path} came back with encoding ${contents.encoding ?? 'none'}; this check ` +
 				'compares bytes, so an undecodable body is a failure rather than a shortcut to the ' +
 				'blob id alone.'
 		);
@@ -308,7 +412,7 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	const upstreamOid = gitBlobOid(upstreamBytes);
 	if (upstreamOid !== contents.sha) {
 		findings.push(
-			`GitHub returned content for ${pin.upstream_path} that does not hash to the blob id it ` +
+			`GitHub returned content for ${canonical.upstream_path} that does not hash to the blob id it ` +
 				`reported (${upstreamOid} vs ${contents.sha}). The response is not internally ` +
 				'consistent and is not evidence.'
 		);
@@ -316,7 +420,7 @@ export async function verifyUpstreamObject({ pin, bytes, fetchImpl, token = null
 	}
 	if (!upstreamBytes.equals(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes))) {
 		findings.push(
-			`${pin.pinned_path} differs from ${pin.upstream_path} at ${pin.ref} byte for byte, ` +
+			`${pin.pinned_path} differs from ${canonical.upstream_path} at ${pin.ref} byte for byte, ` +
 				'despite matching blob ids. Treat this as a broken invariant, not a near miss.'
 		);
 		return { findings, observed };

@@ -36,7 +36,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { readPin, verifyUpstreamObject } from './lib/schema-pin.mjs';
+import { CANONICAL_SCHEMA_AUTHORITY, readPin, verifyUpstreamObject } from './lib/schema-pin.mjs';
 
 const PROVENANCE = 'contracts/lesser/provenance.json';
 
@@ -97,9 +97,11 @@ export async function main(argv, { fetchImpl = globalThis.fetch, env = process.e
 
 	process.stdout.write(
 		`schema-provenance: ${pin.pinned_path} is byte-identical to the git object at\n` +
-			`  ${pin.repository}@${pin.ref}\n` +
-			`  ${pin.upstream_path}\n` +
-			`  blob ${observed.upstream_blob}, ${observed.bytes} bytes, sha256 ${observed.sha256}\n`
+			`  ${CANONICAL_SCHEMA_AUTHORITY.repository}@${pin.ref}\n` +
+			`  ${CANONICAL_SCHEMA_AUTHORITY.upstream_path}\n` +
+			`  blob ${observed.upstream_blob}, ${observed.bytes} bytes, sha256 ${observed.sha256}\n` +
+			`  the repository and path are compiled into scripts/lib/schema-pin.mjs, so no edit to\n` +
+			`  ${PROVENANCE} can move this question to a repository that would answer it differently\n`
 	);
 	process.stdout.write('schema-provenance: PASS\n');
 	return 0;

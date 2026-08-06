@@ -49,6 +49,7 @@ import {
 	callMatchesAnySlot,
 	declaredNames,
 	documentSlot,
+	documentSlotIn,
 	enclosingNamedFunction,
 	functionsIn,
 	unfollowableChannelUses,
@@ -523,11 +524,29 @@ export function documentsIn(file, source, resolveImport = () => null, channels =
 
 	const visitSites = (node) => {
 		if (ts.isCallExpression(node)) {
-			const spec = channels?.channelAt(file, node.expression) ?? null;
-			if (spec) {
-				const slot = documentSlot(node, spec);
+			// THREE OUTCOMES, and the middle one is the repair. `callAt` answers with a
+			// transport call, with an UNDECIDABLE call it could not follow, or with
+			// null — and null now means "positively not a transport" rather than "I
+			// have not been taught this form". `.call`, `.apply`, `.bind`, a spread
+			// argument list and a computed receiver each used to arrive here as null.
+			const outcome = channels?.callAt(file, node) ?? null;
+			if (outcome?.undecidable) {
+				malformed.push({
+					name: `${writtenCalleeName(node.expression) ?? '<channel>'}(…)`,
+					line: lineOf(node),
+					file,
+					byChannel: true,
+					reason: outcome.undecidable.reason,
+				});
+			} else if (outcome) {
+				const { spec, args, via } = outcome;
+				const slot = documentSlotIn(args, spec);
 				if (slot) {
-					const label = `${writtenCalleeName(node.expression) ?? '<channel>'} → ${
+					// NAMED BY THE TRANSPORT, not by the method. `graphqlRequest.call(…)`
+					// is written with `call` at the call position, and labelling the
+					// finding `call → arg 0` would hide which transport was resolved —
+					// which is the one thing a reader of this finding needs to know.
+					const label = `${via ?? writtenCalleeName(node.expression) ?? '<channel>'} → ${
 						typeof spec.argument === 'number' ? `arg ${spec.argument}` : `{ ${spec.property} }`
 					}`;
 					for (const arm of branches(slot, scope)) considerChannel(arm, label);
