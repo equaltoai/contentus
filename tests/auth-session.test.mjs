@@ -204,6 +204,17 @@ function lesserRegistrationResponse(overrides = {}) {
 	};
 }
 
+/**
+ * `models.OAuthTokenResponse` as lesser issues it, INCLUDING a live `created_at`.
+ *
+ * That field used to be the literal `1_780_000_000`, and the literal was the
+ * fixture's own defect: a real instance stamps a token with the second it minted
+ * it, so a pinned past constant made the DEFAULT fixture an already-expired
+ * token. Every test that wanted a session it could actually read had to override
+ * `created_at` to get a conformant response, and `completeLogin` reported
+ * `ok: true` for the ones that did not. A fixture that only characterizes lesser
+ * when the caller corrects it is not characterizing lesser.
+ */
 function lesserTokenResponse(overrides = {}) {
 	return {
 		access_token: 'lesser-access-token',
@@ -211,7 +222,7 @@ function lesserTokenResponse(overrides = {}) {
 		expires_in: 7200,
 		refresh_token: REFRESH_TOKEN,
 		scope: 'read write follow push',
-		created_at: 1_780_000_000,
+		created_at: Math.floor(Date.now() / 1000),
 		...overrides,
 	};
 }
@@ -1027,7 +1038,13 @@ test('a failed token exchange stores nothing and reports lesser’s message', as
 // ---------------------------------------------------------------------------
 
 test('the session is written to sessionStorage only, with lesser’s stated lifetime', async () => {
-	serveLesser();
+	// The arithmetic pinned exactly, against a `created_at` this test states
+	// rather than one the fixture happens to hold. The previous version pinned it
+	// to a past constant and then asserted `readSession() === null` — which is to
+	// say it asserted the callback/reader disagreement as though it were the
+	// design. It is the defect; the last assertion here is its replacement.
+	const createdAtSeconds = Math.floor(Date.now() / 1000);
+	serveLesser({ token: { created_at: createdAtSeconds } });
 
 	await signIn();
 
@@ -1036,13 +1053,10 @@ test('the session is written to sessionStorage only, with lesser’s stated life
 	assert.equal(stored.accessToken, 'lesser-access-token');
 	assert.equal(stored.tokenType, 'Bearer');
 	assert.equal(stored.expiresIn, 7200);
-	assert.equal(stored.createdAt, 1_780_000_000 * 1000);
-	assert.equal(stored.expiresAt, 1_780_000_000 * 1000 + 7200 * 1000);
+	assert.equal(stored.createdAt, createdAtSeconds * 1000);
+	assert.equal(stored.expiresAt, createdAtSeconds * 1000 + 7200 * 1000);
 
-	// That timestamp is in the past, so the session is already expired and the
-	// expiry check is what proves the arithmetic is load-bearing.
-	assert.equal(readSession(), null);
-	assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+	assert.notEqual(readSession(), null, 'the stored session must survive its own reader');
 });
 
 test("lesser's seven-day refresh token is neither modelled nor stored", async () => {
@@ -1107,6 +1121,103 @@ test('a token response with no usable lifetime is refused, never treated as eter
 	}
 });
 
+test('a lifetime that survives the stated-value check but not the arithmetic is refused', async () => {
+	// EVERY `created_at` AND `expires_in` BELOW IS A FINITE NUMBER, so the check
+	// on the stated values passes all of them. What fails is the pair of instants
+	// the session would actually carry. `1e308` is finite and `1e308 * 1000` is
+	// `Infinity`, which `JSON.stringify` writes as `null` — and the session
+	// `readSession` goes looking for a moment later has no `expiresAt` at all.
+	// A parser at a trust boundary has to check the numbers it is about to store,
+	// not the numbers it was handed.
+	for (const token of [
+		{ created_at: Number.MAX_VALUE }, // × 1000 overflows to Infinity
+		{ created_at: -Number.MAX_VALUE }, // and so does the negative end
+		{ expires_in: Number.MAX_VALUE }, // a storable createdAt plus an overflow
+		{ created_at: 1e305, expires_in: 1e305 }, // both ends at once
+		{ created_at: Number.MAX_SAFE_INTEGER }, // finite, and 1000× past exact
+		{ created_at: 1e13 }, // finite, integral, 1e16 ms — past exact
+		{ expires_in: 1e13 }, // the same overrun reached through the lifetime
+		{ created_at: 1_780_000_000.0004 }, // a fractional millisecond instant
+		{ expires_in: 0.0004 }, // and a fractional millisecond lifetime
+	]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		serveLesser({ token });
+
+		const result = await signIn();
+		assert.deepEqual(
+			result,
+			{
+				ok: false,
+				error: 'The instance did not state a usable token lifetime. Please sign in again.',
+			},
+			`token ${JSON.stringify(token)} must not become a session`
+		);
+		assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+		assert.equal(readSession(), null);
+		assert.equal(isAuthenticated(), false);
+	}
+});
+
+test('a token whose stated lifetime has already elapsed is refused, not stored', async () => {
+	// Finite, integral, exactly storable — and gone. `readSession` deletes a
+	// session whose `expiresAt` has passed, so reporting `ok: true` for one of
+	// these is the callback claiming a sign-in the reader discards on the very
+	// next read.
+	for (const token of [
+		{ created_at: 0 }, // the epoch
+		{ created_at: -1_000_000 }, // before it
+		{ created_at: 1_780_000_000 }, // the constant this fixture used to pin
+		{ created_at: Math.floor(Date.now() / 1000) - 7200 - 60 }, // expired a minute ago
+		{ expires_in: Number.MIN_VALUE }, // a lifetime too small to reach the next ms
+	]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		serveLesser({ token });
+
+		const result = await signIn();
+		assert.deepEqual(
+			result,
+			{
+				ok: false,
+				error: 'The instance issued a token that had already expired. Please sign in again.',
+			},
+			`token ${JSON.stringify(token)} must not be reported as a sign-in`
+		);
+		assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+		assert.equal(readSession(), null);
+		assert.equal(isAuthenticated(), false);
+	}
+});
+
+test('an extreme but exactly storable future lifetime is accepted, not swept up', async () => {
+	// The other direction, because a refusal that fires on everything large is
+	// not a boundary — it is a blanket, and it would refuse conformant instances
+	// on the day their clock runs ahead. These sit inside the exact millisecond
+	// range and are accepted, stored, and readable.
+	for (const createdAtSeconds of [
+		Math.floor(Date.now() / 1000), // what lesser actually sends
+		4_000_000_000, // year 2096
+		8_000_000_000_000, // 8e15 ms — just inside 2^53 − 1
+	]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		serveLesser({ token: { created_at: createdAtSeconds } });
+
+		const result = await signIn();
+		assert.equal(result.ok, true, `created_at ${createdAtSeconds} must still sign in`);
+
+		const stored = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
+		assert.equal(stored.createdAt, createdAtSeconds * 1000);
+		assert.equal(stored.expiresAt, createdAtSeconds * 1000 + 7200 * 1000);
+		assert.notEqual(readSession(), null, 'the stored session must survive its own reader');
+		assert.equal(isAuthenticated(), true);
+	}
+});
+
 test('an empty or blank access_token is refused, never reported as a sign-in', async () => {
 	// A 200 with a blank token used to pass the parser, get written, and return
 	// ok: true — and then `readSession` threw the session away. The callback does
@@ -1155,6 +1266,13 @@ test('completeLogin never reports success for a session readSession rejects', as
 	// The invariant behind both cases above, asserted as one property over every
 	// malformed token response this file knows how to serve. Whatever the parser
 	// decides, the two ends agree: a reported sign-in is a readable session.
+	//
+	// THE SECOND BLOCK IS THE POINT OF THE PROPERTY. Those values are all finite
+	// numbers, which is what the individual field checks ask about — and a
+	// property that only enumerates values already known to be refused proves
+	// nothing about the ones nobody thought of. Two of them are accepted; the
+	// assertion does not care which, only that acceptance and readability never
+	// come apart.
 	for (const token of [
 		{},
 		{ access_token: '' },
@@ -1170,6 +1288,28 @@ test('completeLogin never reports success for a session readSession rejects', as
 		{ expires_in: -1 },
 		{ expires_in: 'soon' },
 		{ created_at: 'now' },
+
+		// Finite, and computed into something the session cannot carry.
+		{ created_at: Number.MAX_VALUE },
+		{ created_at: -Number.MAX_VALUE },
+		{ expires_in: Number.MAX_VALUE },
+		{ created_at: 1e305, expires_in: 1e305 },
+		{ created_at: Number.MAX_SAFE_INTEGER },
+		{ created_at: 1e13 },
+		{ expires_in: 1e13 },
+		{ created_at: 1_780_000_000.0004 },
+		{ expires_in: 0.0004 },
+
+		// Finite, exactly storable, and already spent.
+		{ created_at: 0 },
+		{ created_at: -1_000_000 },
+		{ created_at: 1_780_000_000 },
+		{ created_at: Math.floor(Date.now() / 1000) - 7200 - 60 },
+		{ expires_in: Number.MIN_VALUE },
+
+		// Finite, exactly storable, and still running — the accepted side.
+		{ created_at: 4_000_000_000 },
+		{ created_at: 8_000_000_000_000 },
 	]) {
 		sessionStorage.clear();
 		localStorage.clear();

@@ -88,6 +88,15 @@ import { notifySessionChange } from './session-events';
  *     expires. Both fields are non-`omitempty` on lesser's `OAuthTokenResponse`
  *     (`cmd/api/models/oauth.go:72`), so refusing cannot fire against a
  *     conformant instance, and failing closed beats inventing a lifetime.
+ *   - That refusal reads the numbers the SESSION CARRIES, not the numbers the
+ *     response stated. Checking the two stated seconds and multiplying them
+ *     afterwards checks the wrong values twice over: `1e308` is finite and
+ *     `1e308 * 1000` is `Infinity`, which `JSON.stringify` writes as `null`; and
+ *     a `created_at` of `0` is finite, exact, and already expired. Both were
+ *     `ok: true` reported for a session `readSession` throws away on the next
+ *     read. `createdAt` and `expiresAt` are now computed and checked BEFORE
+ *     anything is stored, announced, or returned. Added under adversarial review
+ *     of PR #76.
  *   - An `access_token` that is missing, empty, or blank is refused the same
  *     way, and a missing or blank `token_type` is normalized to the `Bearer`
  *     this flow requested. `completeLogin` must never answer `ok: true` for a
@@ -616,6 +625,39 @@ function safeReturnTo(value: string | null): string {
 	return value.startsWith('/') && !value.startsWith('//') ? value : `${base}/`;
 }
 
+const UNUSABLE_TOKEN_LIFETIME =
+	'The instance did not state a usable token lifetime. Please sign in again.';
+
+const ALREADY_EXPIRED_TOKEN =
+	'The instance issued a token that had already expired. Please sign in again.';
+
+/**
+ * A millisecond instant this session can be stored as and read back as itself.
+ *
+ * `Number.isSafeInteger` is the whole boundary, and each of the three things it
+ * says is load-bearing here:
+ *
+ *   - FINITE, because `JSON.stringify` writes `Infinity` as `null` and
+ *     `readSession` rejects a non-numeric `expiresAt`. This is the overflow a
+ *     check on the STATED seconds cannot see: both operands can be finite and
+ *     the product not be.
+ *   - INTEGRAL, because the value is a millisecond timestamp whose only use is
+ *     `Date.now() >= expiresAt`. Rounding a fractional instant to make it fit
+ *     would be this client inventing an expiry the instance did not state, which
+ *     is the thing the refusal exists to avoid.
+ *   - WITHIN ±(2^53 − 1), because past that, milliseconds stop being distinct:
+ *     neighbouring instants collapse onto one double and the comparison stops
+ *     being about time. lesser's real values sit around 1.78e12 ms, eleven
+ *     orders of magnitude inside the bound.
+ *
+ * What this does NOT do is cap a lifetime. An instance that says a token lives
+ * for ten thousand years has stated something absurd and storable, and
+ * shortening it would be inventing the lifetime this file refuses to invent.
+ */
+function isStorableInstant(milliseconds: number): boolean {
+	return Number.isSafeInteger(milliseconds);
+}
+
 export async function completeLogin(searchParams: URLSearchParams): Promise<CallbackResult> {
 	if (!browser) return { ok: false, error: 'OAuth callback must run in the browser' };
 
@@ -714,13 +756,31 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		!Number.isFinite(expiresInSeconds) ||
 		expiresInSeconds <= 0
 	) {
-		return {
-			ok: false,
-			error: 'The instance did not state a usable token lifetime. Please sign in again.',
-		};
+		return { ok: false, error: UNUSABLE_TOKEN_LIFETIME };
 	}
 
+	// COMPUTED HERE, AND CHECKED HERE, BECAUSE THESE ARE THE NUMBERS THE SESSION
+	// CARRIES. The check above reads what the response SAID; these two are what
+	// gets written, announced, and reported as a sign-in, and passing the first
+	// check does not make it past the second. `created_at: 1e308` is finite and
+	// `1e308 * 1000` is `Infinity`; `JSON.stringify` writes that as `null`, so the
+	// session `readSession` finds a moment later has no `expiresAt` at all.
 	const createdAt = createdAtSeconds * 1000;
+	const expiresAt = createdAt + expiresInSeconds * 1000;
+	if (!isStorableInstant(createdAt) || !isStorableInstant(expiresAt)) {
+		return { ok: false, error: UNUSABLE_TOKEN_LIFETIME };
+	}
+
+	// AND THE LIFETIME HAS TO STILL BE RUNNING. `readSession` deletes a session
+	// whose `expiresAt` has passed, so an instant that is finite, exact, and in
+	// the past — `created_at: 0` is all three — is a sign-in the reader discards
+	// the first time it is asked for it. This is the same agreement as every
+	// other check on this path and not a new policy: what the callback reports,
+	// the reader can find. A user whose clock disagrees with the instance now
+	// gets a stated reason instead of a sign-in that silently un-happens.
+	if (Date.now() >= expiresAt) {
+		return { ok: false, error: ALREADY_EXPIRED_TOKEN };
+	}
 
 	// Missing, blank, or not a string all normalize to the one type this flow
 	// asked for. Normalizing rather than refusing is the choice the header
@@ -737,7 +797,7 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		...(typeof tokenJson.scope === 'string' ? { scope: tokenJson.scope } : {}),
 		createdAt,
 		expiresIn: expiresInSeconds,
-		expiresAt: createdAt + expiresInSeconds * 1000,
+		expiresAt,
 	});
 
 	const returnTo = safeReturnTo(sessionStorage.getItem(STORAGE_KEYS.oauthReturnTo));

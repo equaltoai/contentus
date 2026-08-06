@@ -247,7 +247,7 @@
       "tests/agents-roster.test.mjs": "6002314de1ff5b907fe6e7b22c74b8016aae58b2f7a2fdf5f55fcd79e86b7183",
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
       "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
-      "tests/auth-session.test.mjs": "4beb585ab04116e715c7427863a5ea015ed6f80b79ac3ed418e640099babadf9",
+      "tests/auth-session.test.mjs": "dcd7b65f1e4acd267a6bbc591611593ff499a8158eac7cdafbfb626d89fcd78b",
       "tests/cms-graphql.test.mjs": "c2871c4297c15decfd9c149dd4cbfff511359dd74b9ea206ce050a3f67b9056c",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
