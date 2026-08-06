@@ -172,7 +172,7 @@ refused rather than multiplied into `NaN`, which would otherwise produce a
 session that never expires; and `returnTo` must be an app-relative path, because
 contentus hands it to `window.location.replace` where sim hands it to `goto`.
 
-Three more were added at the PR #76 review rework, all still local:
+Four more were added at the PR #76 review rework, all still local:
 
 - **No refresh token is kept.** lesser issues a `refresh_token` good for seven
   days beside the one-hour access token, and permits a public-client refresh
@@ -192,3 +192,20 @@ Three more were added at the PR #76 review rework, all still local:
   malformed token response the suite can serve (codex finding 3).
 - **A non-public fresh registration is refused**, as described above (codex
   finding 1).
+- **The token lifetime is checked on the instants the session carries, not on
+  the seconds the response stated.** Validating `created_at` and `expires_in`
+  individually and converting to milliseconds afterwards checks the wrong
+  numbers: `1e308` is finite and `1e308 * 1000` is `Infinity`, which
+  `JSON.stringify` writes as `null` — so `writeSession` announced `signed-in`,
+  `completeLogin` answered `ok: true`, and `readSession` rejected the session a
+  moment later. `createdAt` and `expiresAt` are now computed before anything is
+  stored, announced, or returned, and refused unless both are safe integers:
+  finite so they survive JSON, integral because rounding an instant would invent
+  an expiry lesser did not state, and inside ±(2^53 − 1) because past that
+  milliseconds stop being distinct. Probing this surfaced a second case of the
+  same disagreement — a `created_at` already in the past is finite and exactly
+  storable, and `readSession` deletes an expired session on the next read — so an
+  already-elapsed lifetime is refused too, with its own message. Neither refusal
+  can fire against a conformant instance, and a stated lifetime is never capped:
+  shortening an absurd one would be inventing the lifetime this module exists to
+  avoid inventing (codex finding 5, review 4870975439).
