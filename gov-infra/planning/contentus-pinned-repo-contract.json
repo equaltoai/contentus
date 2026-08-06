@@ -237,6 +237,13 @@
         "line": 72,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary to list a directory's tracked files, NUL-separated and rooted with `-C`, which is the reading three probes share so none of them lists a directory a concurrent probe is planting fixtures in. No repository file is executed."
+      },
+      {
+        "file": "tests/graphql-contract.test.mjs",
+        "line": 217,
+        "expression": "spawnSync",
+        "reason": "Runs `scripts/audit-graphql-contract.mjs` in a child process rooted at a synthetic repository in a temp directory — the only way to assert what the contract gate does with a tree, since it takes its root from `process.cwd()`. Asserting it against a synthetic tree rather than this one is what keeps the probe from planting a broken document in THIS repository to test whether a broken document is caught. The target IS bound: `binds` names it, so it is pinned, hashed and walked for its own imports like any other file a guarded command executes.",
+        "binds": ["scripts/audit-graphql-contract.mjs"]
       }
     ],
     "sha256": {
@@ -256,6 +263,8 @@
       "scripts/lib/graphql-inventory.mjs": "f3e643644e735d7aba052d732168492f2e1d189c30ce06c96c8351315d1af7a3",
       "scripts/lib/module-imports.mjs": "f5017ffef9f51f3717919c7842c3791191a78e8c46d3ef1c8e954d9c2a70f4ad",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
+      "scripts/lib/transport-channels.mjs": "7dcabb217e810b0a7bf2824e81fe6d7c30f25db3fbed7c944b78f3df753d4392",
+      "scripts/probe-live-contract.mjs": "15f076192d6cd4a7c3287b40b21ce22dc9a8b63b8df0149f26825be4e670e417",
       "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
       "tests/agents-mobile.test.mjs": "197973ced90dff1d1d20700b8d2850ab430888f8c60cd697ea675c371efd9608",
@@ -272,6 +281,7 @@
       "tests/graphql-documents.test.mjs": "3fb1ac32868a44fff9c543af506568092d9da7604622df34282210b036d2504a",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
+      "tests/live-probe.test.mjs": "bfb25de29ae381a313b54cba6f71dccff350e563c4dd54d42206651d585c812d",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
       "tests/messaging-queries.test.mjs": "c4ef9c9187f681feb080fc25159aef0c3224f991e910e800020c744804fd2c9f",
       "tests/messaging-races.test.mjs": "617e6fe01b293d72f57d6b0eb726fdbbe041cd9130e2c510a2650a1006863d25",
@@ -284,6 +294,7 @@
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",
       "tests/review.test.mjs": "5478670b85ea2e46badd6376a13d784043b99cae2c7d909eee9bead9c698d07b",
+      "tests/schema-provenance.test.mjs": "d4c8c449d38b24d2312d8ede4798e4cff6e22d7c1c62db47a70b23739f9547b5",
       "tests/seam-graph.test.mjs": "89b89e09b71c2e65d249f3592add793d6c627d66f1b5bb1c509ec389d3d9c5bb",
       "tests/ssr-messages.test.mjs": "46215833f4c74951839b9f500dec57dad3e709d5cc7601a9a10c2ab188c4b823",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",

@@ -2,7 +2,7 @@
   "name": "@equaltoai/contentus",
   "version": "0.1.0",
   "private": true,
-  "description": "Contentus \u2014 the FaceTheory + greater-components CMS client installed into lesser instances.",
+  "description": "Contentus — the FaceTheory + greater-components CMS client installed into lesser instances.",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {

@@ -17,7 +17,8 @@
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 801 modules transformed.
+[2K
+transforming...✓ 801 modules transformed.
 rendering chunks...
 computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
@@ -36,7 +37,8 @@ build/client/assets/entry-client-DjshrTY-.js                690.43 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 777 modules transformed.
+[2K
+transforming...✓ 777 modules transformed.
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
