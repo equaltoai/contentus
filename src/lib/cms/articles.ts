@@ -45,7 +45,11 @@ export function toAuthorSummary(raw: unknown): AuthorSummary | null {
 		id,
 		username: str(node.username),
 		displayName: str(node.displayName),
-		avatarUrl: str(node.avatarUrl),
+		// lesser's field is `avatar` (`type Actor`). Reading `avatarUrl` here read a key
+		// no lesser response has ever carried, so every byline avatar was silently null
+		// — and stayed null against a real instance, because `str(undefined)` is a
+		// perfectly well-behaved way to be wrong.
+		avatar: str(node.avatar),
 	};
 }
 
@@ -353,7 +357,12 @@ export function toBlogFaceArticle(
 			id: article.author?.id ?? article.id,
 			displayName: article.author?.displayName ?? undefined,
 			username: article.author?.username ?? undefined,
-			avatarUrl: article.author?.avatarUrl ?? undefined,
+			// THE BOUNDARY. lesser says `avatar`; the vendored blog face's
+			// `normalizeArticleData` reads `avatarUrl`. The rename belongs here and only
+			// here — one line, in the function whose whole job is to translate a lesser
+			// response into the face's input — so neither side carries the other's
+			// vocabulary.
+			avatarUrl: article.author?.avatar ?? undefined,
 		},
 		isPublished: true,
 	};

@@ -44,8 +44,9 @@
       "build:server": "vite build --ssr src/facetheory/entry-server.ts",
       "build:assets": "node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs",
       "build": "pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate",
-      "validate": "pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph",
+      "validate": "pnpm run validate:graphql && pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph",
       "validate:csp": "node scripts/audit-csp.mjs",
+      "validate:graphql": "node scripts/audit-graphql-documents.mjs",
       "validate:renderer-authority": "node scripts/audit-renderer-authority.mjs",
       "validate:seam-graph": "node scripts/audit-seam-graph.mjs",
       "test": "node --test --experimental-strip-types 'tests/*.test.mjs' 'scripts/*.test.mjs'"
@@ -220,6 +221,18 @@
         "binds": ["scripts/audit-renderer-authority.mjs"]
       },
       {
+        "file": "scripts/audit-graphql-documents.mjs",
+        "line": 57,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary to list the tracked files under src/, NUL-separated and rooted with `-C`, which is what makes the swept set what the repository CARRIES rather than what is on the disk beside a concurrent probe planting fixtures in src/lib/compose. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system's, outside any repo-local hash boundary."
+      },
+      {
+        "file": "tests/graphql-documents.test.mjs",
+        "line": 224,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary for the same tracked-file listing the gate uses, so the probe asserts the inventory against the same set the gate judges rather than against a directory listing that can differ. No repository file is executed."
+      },
+      {
         "file": "tests/helpers/tracked-source.mjs",
         "line": 72,
         "expression": "execFileSync",
@@ -230,7 +243,8 @@
       "gov-infra/verifiers/check-package-scripts.mjs": "55e2bb2d2661048050817071bc5d3407b7fe74612f27eafd3caa491d5bb26919",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
-      "scripts/audit-renderer-authority.mjs": "b2274a6bf373fdf53112717919c3c1940ccba0502fef0ddfdb068796d416c52a",
+      "scripts/audit-graphql-documents.mjs": "845e94628c6520be8d8a3db6070aa3bafeeba5a1beea51d3b4b26a273d6a3335",
+      "scripts/audit-renderer-authority.mjs": "b0cf9bc364704a92831199ea3c52d08b89149cada89d44a98fbbc0c3ccc87662",
       "scripts/audit-seam-graph.mjs": "ad9a54dff7facf374bee4495e4b661d68a51a40627f65d43f4fb3b3552dc06f7",
       "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
@@ -239,6 +253,7 @@
       "scripts/deploy-client.test.mjs": "b30cc6eef47a0d59fad98dc16eda02cf638c3b021b807e9aeb63a2b934168f5f",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
+      "scripts/lib/graphql-inventory.mjs": "f3e643644e735d7aba052d732168492f2e1d189c30ce06c96c8351315d1af7a3",
       "scripts/lib/module-imports.mjs": "f5017ffef9f51f3717919c7842c3791191a78e8c46d3ef1c8e954d9c2a70f4ad",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
@@ -246,7 +261,7 @@
       "tests/agents-mobile.test.mjs": "197973ced90dff1d1d20700b8d2850ab430888f8c60cd697ea675c371efd9608",
       "tests/agents-roster.test.mjs": "6002314de1ff5b907fe6e7b22c74b8016aae58b2f7a2fdf5f55fcd79e86b7183",
       "tests/agents-trust.test.mjs": "c8d5437b04e8bd162861e18bd3cb12bcae56087aed09618dc2dde46ce847b940",
-      "tests/article-tombstones.test.mjs": "701f844480485d51137d19bdbb5a9776458b4f0205fda93d0c2801b2a86a3d4e",
+      "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/auth-session.test.mjs": "e202568dd297125c4a3ca56759d1b1a2afb8f4ded2cc8aaec72c330b80ff972a",
       "tests/cms-graphql.test.mjs": "c2871c4297c15decfd9c149dd4cbfff511359dd74b9ea206ce050a3f67b9056c",
       "tests/compose.test.mjs": "283471bc29c50d6aa51d8eb57dc6b946a53b31d55b0064c15cf6e28efb7ced21",
@@ -254,6 +269,7 @@
       "tests/drone-seams.test.mjs": "e3c721943e3deee16182604b1dc0fd76656c8e438e0780854fd99e44a46db4b1",
       "tests/drones-mobile.test.mjs": "e6d153c03bf942c04113bcceffdedf84cc8028b95570f10071f02e44425d9fc4",
       "tests/drones-roster.test.mjs": "ba213606df245962697b3f1050828b163f3a4b3d110388452beec242720047a8",
+      "tests/graphql-documents.test.mjs": "3fb1ac32868a44fff9c543af506568092d9da7604622df34282210b036d2504a",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/messaging-adapters.test.mjs": "9d0a696c77fec154915f3ee71d8108cb6593ca8389486382e10769f80f637bdb",
@@ -264,7 +280,7 @@
       "tests/mobile-chrome.test.mjs": "5194c79368253af8ad90a73ea067cd42cea8d4f2cb6bf61b22baceaf15a89d9a",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
       "tests/renderer-authority-audit.test.mjs": "d8ed3deb435c7f2fb92f11ea9cec6adde7862152a0001ef0f728ac14c9cc5ba7",
-      "tests/renderer-authority.test.mjs": "034ca59fd865f2a204973ea36073958e1fb8834675266a05be4726781823de58",
+      "tests/renderer-authority.test.mjs": "83a84b9919a82d3d374861fe8b6f2ffee475e4095b383ef395417e93a104dc57",
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",
       "tests/review.test.mjs": "5478670b85ea2e46badd6376a13d784043b99cae2c7d909eee9bead9c698d07b",
@@ -320,7 +336,7 @@
       {
         "file": "tests/ssr-probe.test.mjs",
         "min_test_points": 18,
-        "sha256": "68c2ece1c2080813a1454708779681396348ba5855c2b325df9244a66937015d"
+        "sha256": "aa536dc71a1690162c2569862d59ad3e3740fcde848b7e4cac6851c5f5706a31"
       },
       {
         "file": "tests/origin.test.mjs",
@@ -351,7 +367,7 @@
       "Binds the two greater channels to each other and to a named release, rather than",
       "to a shape. A 40-hex-shaped ref is not evidence of anything: every commit in every",
       "repository is 40 hex. `vendored_ref` is the greater-components commit the",
-      "greater-v0.13.0 vendoring came from, recorded at the M6 `greater add` run — the",
+      "greater-v0.13.1 vendoring came from, recorded at the M2 `greater update` run — the",
       "release named in `release_tag` beside it, which is the only pin this block asserts.",
       "",
       "Both values move together at a CLI pin bump and only through the CLI.",
@@ -379,17 +395,27 @@
       "  It also retired the `ws` advisory (GHSA-96hv-2xvq-fx4p) from the SEC-2 disclosed",
       "  set, because 0.13.0's adapters resolve ws@8.21.0.",
       "",
+      "  0.13.0 -> 0.13.1 at M2. `greater update` gained the operation the managed channel",
+      "  did not have: pruning a managed file the registry no longer owns. Contentus needed",
+      "  it because two files the CLI had emitted into src/lib/ at M4 —",
+      "  `lesserTimelineStore.ts` and `lesserTimelineStore.svelte.ts` — are imported by",
+      "  nothing here, and at 0.13.0 there was no supported way to take them back: no",
+      "  `remove`, no `uninstall`, and `update` had no prune. Hand-deleting vendored bytes",
+      "  is the edit this repository refuses, so the files stayed. Upstream #1000/#1001",
+      "  added the prune; upstream #1003/#1004 remediated the undici, fast-uri and postcss",
+      "  advisories in the same release. The bump is the fix arriving, not maintenance.",
+      "",
       "CON-4 forces the rest, at every bump: each `installed[]` entry must carry",
       "`vendored_ref`, so the whole vendored tree and every tarball pin move together, in",
       "one commit, through the CLI. The alternative — hand-copying components — is the",
       "vendored-source edit this repository refuses outright."
     ],
-    "release_tag": "greater-v0.13.0",
-    "vendored_ref": "ce8f3d9dd4080eb6886e1dd1cb444d65712eca36",
-    "cli_version": "0.13.0",
+    "release_tag": "greater-v0.13.1",
+    "vendored_ref": "fb6ee92757bf9ef77d0d6227aa36a03bba490f26",
+    "cli_version": "0.13.1",
     "cli_asset": {
-      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.0/greater-components-cli.tgz",
-      "sha256": "ad65b8833c98965db185a066797044720db67f02852e88540fe379416f931288"
+      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.1/greater-components-cli.tgz",
+      "sha256": "d000b5dbaebdc2d5b5a88f96ea8c5422626c45eb13a574ef2f09edd4ff037a51"
     }
   },
   "workflows": {

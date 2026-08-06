@@ -76,7 +76,6 @@
           "@apollo/client@4.2.9",
           "@apollo/client-react-streaming@^0.14.5",
           "@graphql-typed-document-node/core@^3.2.0",
-          "graphql@^16.12.0",
           "graphql-ws@^6.0.6",
           "viem@^2.55.10",
           "remark-gfm@^4.0.1",
@@ -100,7 +99,22 @@
           "SEC-7 asserts the disclosed set EXACTLY, so a moved range reads as one finding",
           "retired and another appearing — which is the gate working. The strings are",
           "updated to what `greater doctor` now reports; nothing was installed and the",
-          "reason for declining is unchanged."
+          "reason for declining is unchanged.",
+          "",
+          "graphql@^16.12.0 LEFT THIS LIST AT M2, and it left by being installed rather than",
+          "re-declined. Contentus now validates the GraphQL documents it sends against",
+          "lesser's pinned canonical schema (scripts/audit-graphql-documents.mjs), and that",
+          "validation uses graphql-js — the reference parser and validator — as a",
+          "DEVDEPENDENCY at build time. It is not the Apollo runtime client and not part of",
+          "the declined Markdown chain: nothing under src/ imports it, and the small",
+          "same-origin transport in src/lib/cms/graphql.ts is untouched. The twelve entries",
+          "still listed above are still declined, for the reasons stated.",
+          "",
+          "The version is greater's declared floor, not the newest release: the registry",
+          "asks for ^16.12.0, so the pin is 16.14.2. Installing 17.x instead would raise a",
+          "fresh `greater doctor` Manifest-vs-Required-Floors warning, and the honest answer",
+          "to a floor a peer declares is to meet it, not to disclose past it. A pin is not a",
+          "place to put problems."
         ]
       }
     ],

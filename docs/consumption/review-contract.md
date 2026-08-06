@@ -6,6 +6,14 @@ review chrome moved to **greater-v0.13.0** (`ce8f3d9d`) at the M6 pin bump, and
 both open asks below were re-read there: both still reproduce, so each names the
 release it reproduces at rather than the one it was first seen at.
 
+The vendored tree is now at **greater-v0.13.1** (`fb6ee927`), bumped at M2 for
+`greater update`'s new obsolete-file pruning. That release changed the CLI and
+nothing else: comparing `ce8f3d9d…fb6ee927` upstream shows no file under
+`packages/*/src` outside `packages/cli` moved, and re-running the CLI over this
+consumer rewrote 104 managed files to byte-identical content. So every
+observation below reproduces at 0.13.1 unchanged — stated because "still
+reproduces" is worth nothing when nobody checked whether the subject moved.
+
 A thin consumption note, not a redefinition of anyone's contract. It records
 what contentus observed while wiring Face 2, what it decided, and what it did
 not build because the contract does not currently support it.
@@ -187,7 +195,8 @@ refusal, feature-gate refusal, and not-found/forbidden.
 
 **Where:** `equaltoai/greater-components`, `review` registry entry,
 `Review/VerdictActions.svelte` (first seen at greater-v0.12.0; still present at
-the current **greater-v0.13.0** pin, where every control is `size="sm"`).
+the current **greater-v0.13.1** pin, where every control is `size="sm"` — the
+component's bytes are unchanged from 0.13.0).
 
 Every control the component renders is `size="sm"` — both verdict buttons, both
 dialog buttons, and the dialog's close control — and the vendored primitives
@@ -211,7 +220,7 @@ against the selectors the component actually emits.
 
 **Where:** `equaltoai/greater-components`, `review` registry entry,
 `Review/state.ts` (first seen at greater-v0.12.0; still present at the current
-**greater-v0.13.0** pin).
+**greater-v0.13.1** pin, byte-identical to 0.13.0).
 
 With no `reviewStatus` and an empty `verdicts`, `resolveReviewState` returns the
 definite label `"No review activity recorded"` with `source: 'none'`. That is

@@ -38,7 +38,7 @@ function tombstoneFixture(overrides = {}) {
 		deletedAt: '2026-08-01T12:00:00Z',
 		slug: 'gone',
 		authorId: 'https://example.invalid/users/ada',
-		author: { id: 'actor-1', username: 'ada', displayName: 'Ada', avatarUrl: null },
+		author: { id: 'actor-1', username: 'ada', displayName: 'Ada', avatar: null },
 		title: '',
 		subtitle: null,
 		excerpt: null,
