@@ -45,6 +45,16 @@
 import { parse } from 'graphql';
 import ts from 'typescript';
 
+import {
+	callMatchesAnySlot,
+	declaredNames,
+	documentSlot,
+	enclosingNamedFunction,
+	functionsIn,
+	unfollowableChannelUses,
+	writtenCalleeName,
+} from './transport-channels.mjs';
+
 /** Extensions whose contents are parsed as TypeScript/JavaScript source. */
 export const SOURCE_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 
@@ -113,21 +123,22 @@ function parsesAsDocument(text) {
 }
 
 /**
- * Where a GraphQL document is HANDED TO A TRANSPORT, named by the channel rather
- * than inferred from the value. An expression reaching one of these sites is a
- * document by provenance: it must fold, it must parse, and it must validate, and
- * failing any of the three is a finding rather than a reason to look away.
+ * Where a GraphQL document is HANDED TO A TRANSPORT.
  *
- * Keep this in step with the transports in `src/lib/cms/graphql.ts` and
- * `src/lib/timelines/subscription.ts`. A transport added without a matching
- * entry here is the one way a document could reach lesser unchecked, which is
- * why `tests/graphql-contract.test.mjs` asserts this table against the call
- * sites the repository actually has.
+ * This used to be a table of NAMES compared against the identifier at a call
+ * site, and the adversarial review sent documents past it four ways — an import
+ * alias, a variable alias, a bracket property, and a `subscribe` alias — none of
+ * them exotic. A name is not a channel. The question is answered by
+ * `scripts/lib/transport-channels.mjs` now, which roots the analysis at the
+ * transport EXPORTS (`src/lib/cms/graphql.ts#graphqlRequest`,
+ * `src/lib/timelines/subscription.ts#subscribe`) and follows the module graph out
+ * to every local name that refers to them, wrappers included.
+ *
+ * Re-exported here so the roots have one import path across the gate and its
+ * tests, and so `tests/graphql-contract.test.mjs` can assert each root really is
+ * an export of the module it names.
  */
-export const EXECUTOR_SITES = [
-	{ callee: 'graphqlRequest', argument: 0 },
-	{ callee: 'subscribe', property: 'query' },
-];
+export { TRANSPORT_ROOTS } from './transport-channels.mjs';
 
 function scriptKind(file) {
 	if (file.endsWith('.tsx')) return ts.ScriptKind.TSX;
@@ -384,101 +395,6 @@ function branches(node, scope, seen = new Set()) {
 	return [node];
 }
 
-/**
- * Function-like declarations by name, with their parameter names.
- *
- * Used to turn a document that arrives as an ARGUMENT into a document this
- * reader can still see. `cms/compose.ts` and `cms/review-transport.ts` both
- * funnel their writes through a private helper that takes the document as a
- * parameter, so the `graphqlRequest` call site itself has nothing to fold — the
- * text lives at the helper's callers.
- *
- * Deriving these rather than declaring them is deliberate. A hand-maintained
- * table of "functions that forward documents" is a list that goes stale the
- * first time someone adds a helper, and a stale entry in a fail-closed gate
- * reads as coverage while covering nothing.
- */
-function functionsIn(sourceFile) {
-	const functions = new Map();
-
-	const record = (name, parameters, node, exported) => {
-		if (!name) return;
-		if (functions.has(name)) {
-			// Two functions, one name: which one a call site means is not
-			// decidable here, so the forwarder is not derived and any site
-			// depending on it stays unresolved.
-			functions.set(name, null);
-			return;
-		}
-		functions.set(name, { parameters, node, exported });
-	};
-
-	const parameterNames = (node) =>
-		node.parameters.map((parameter) =>
-			ts.isIdentifier(parameter.name) ? parameter.name.text : null
-		);
-
-	const isExported = (node) =>
-		Boolean(node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
-
-	const visit = (node) => {
-		if (ts.isFunctionDeclaration(node) && node.name) {
-			record(node.name.text, parameterNames(node), node, isExported(node));
-		} else if (
-			ts.isVariableDeclaration(node) &&
-			ts.isIdentifier(node.name) &&
-			node.initializer &&
-			(ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
-		) {
-			const statement = node.parent?.parent;
-			record(
-				node.name.text,
-				parameterNames(node.initializer),
-				node.initializer,
-				Boolean(statement && ts.isVariableStatement(statement) && isExported(statement))
-			);
-		}
-		ts.forEachChild(node, visit);
-	};
-	visit(sourceFile);
-	return functions;
-}
-
-/**
- * The function-like ancestor of a node, if any, along with its parameter names.
- */
-function enclosingFunction(node, functions) {
-	for (let current = node.parent; current; current = current.parent) {
-		if (
-			ts.isFunctionDeclaration(current) ||
-			ts.isArrowFunction(current) ||
-			ts.isFunctionExpression(current) ||
-			ts.isMethodDeclaration(current)
-		) {
-			for (const [name, entry] of functions) {
-				if (entry && entry.node === current) return { name, entry };
-			}
-			return null;
-		}
-	}
-	return null;
-}
-
-/**
- * The name an executor is called by at a call site.
- *
- * Both `graphqlRequest(...)` and `transport.graphqlRequest(...)` answer
- * `graphqlRequest`: the property name identifies the channel, and a reader keyed
- * only on bare identifiers would lose the document the moment a call site went
- * through a namespace import.
- */
-function calleeName(expression) {
-	if (ts.isIdentifier(expression)) return expression.text;
-	if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
-	if (ts.isParenthesizedExpression(expression)) return calleeName(expression.expression);
-	return null;
-}
-
 /** Literal (non-interpolated) text chunks of an expression, for candidate screening. */
 function literalChunks(node) {
 	const chunks = [];
@@ -504,10 +420,16 @@ function literalChunks(node) {
  * table and the on-disk layout; inventing either here would pin a file that
  * never runs.
  *
+ * `channels` is the transport graph from `buildChannelGraph`, which decides which
+ * calls are transport calls BY PROVENANCE rather than by the name written at the
+ * site. Omitting it leaves only pass 2's shape screen, which cannot see a
+ * dynamically assembled anonymous document — so the gate always builds one, and
+ * `tests/graphql-contract.test.mjs` proves each alias bypass is red with it.
+ *
  * Returns `{ documents, unresolved, malformed }`. `unresolved` and `malformed`
  * are failures, not diagnostics — see the gate.
  */
-export function documentsIn(file, source, resolveImport = () => null) {
+export function documentsIn(file, source, resolveImport = () => null, channels = null) {
 	const cache = new Map();
 	const scope = moduleScope(file, source, resolveImport, 0, cache);
 	const { sourceFile } = scope;
@@ -561,104 +483,95 @@ export function documentsIn(file, source, resolveImport = () => null) {
 		}
 	};
 
-	// Pass 1 — executor sites, to fixpoint.
+	// Pass 1 — transport channels, resolved by provenance.
 	//
 	// Walked first so a document reaching a transport is recorded by provenance
 	// even when its text would not have survived the shape test in pass 2.
-	// Conditional arguments are split, because `graphqlRequest(a ? X : Y, ...)`
-	// sends both X and Y.
+	// Conditional arguments are split, because a channel called as
+	// `send(a ? X : Y, ...)` sends both X and Y.
 	//
-	// The fixpoint exists because a document does not always reach the transport
-	// at the transport's own call site. When the argument is a PARAMETER of the
-	// enclosing function, that function is itself a document channel, and its
-	// call sites become executor sites on the next round. Iterating until nothing
-	// new is discovered is what makes a private forwarding helper transparent
-	// instead of a blind spot — and a helper this reader cannot see through
-	// (exported, so its callers are in other files, or ambiguously named) leaves
-	// the original site unresolved, which fails the gate.
+	// WHICH CALLS ARE CHANNELS is decided by `channels`, built once across the
+	// whole file set: it has already followed import aliases, re-exports, variable
+	// aliases, namespace and object members, and wrapper functions out from the
+	// transport EXPORTS. A caller that hands no graph gets pass 2 only, which is
+	// why the gate always builds one.
+	const bindings = channels?.bindingsFor(file) ?? null;
+	// Built from THIS walk's AST. The channel graph's own map holds nodes from a
+	// different parse, and node identity does not cross between them; only names do.
 	const functions = functionsIn(sourceFile);
-	const sites = [...EXECUTOR_SITES];
-	const known = new Set(sites.map((site) => `${site.callee}#${site.argument ?? site.property}`));
-	const deferred = [];
+
+	/** Is this expression a parameter of a function that is itself a channel? */
+	const coveredByWrapper = (node) => {
+		if (!ts.isIdentifier(node) || !bindings) return false;
+		const enclosing = enclosingNamedFunction(node, functions);
+		if (!enclosing) return false;
+		if (enclosing.entry.parameters.indexOf(node.text) < 0) return false;
+		// The wrapper is a channel, so its own call sites carry the real document
+		// and are checked there — in this file or, for an exported wrapper, in
+		// whichever file calls it. Reporting here would accuse the forwarder of
+		// the caller's job. A parameter of a function that is NOT a channel is a
+		// different thing entirely and still reports.
+		return Boolean(
+			bindings.names.get(enclosing.name) ?? channels.exportedChannels(file).get(enclosing.name)
+		);
+	};
 
 	const considerChannel = (node, label) => {
-		// A parameter cannot be folded here; note the enclosing function as a
-		// channel so its callers are inspected, and hold the site back in case
-		// the derivation does not pan out.
-		if (ts.isIdentifier(node)) {
-			const enclosing = enclosingFunction(node, functions);
-			const index = enclosing ? enclosing.entry.parameters.indexOf(node.text) : -1;
-			if (enclosing && index >= 0) {
-				if (enclosing.entry.exported) {
-					// Callers live in files this reader was not handed. Refusing to
-					// derive is the fail-closed answer: the site stays unresolved.
-					consider(node, label, true);
-					return;
-				}
-				const key = `${enclosing.name}#${index}`;
-				if (!known.has(key)) {
-					known.add(key);
-					sites.push({ callee: enclosing.name, argument: index, derived: true });
-				}
-				deferred.push({ node, label });
-				return;
-			}
-		}
+		if (coveredByWrapper(node)) return;
 		consider(node, label, true);
 	};
 
 	const visitSites = (node) => {
 		if (ts.isCallExpression(node)) {
-			const callee = calleeName(node.expression);
-			for (const site of sites) {
-				if (site.callee !== callee) continue;
-				if (typeof site.argument === 'number') {
-					const argument = node.arguments[site.argument];
-					if (argument) {
-						for (const arm of branches(argument, scope)) {
-							considerChannel(arm, `${callee}(arg ${site.argument})`);
-						}
-					}
+			const spec = channels?.channelAt(file, node.expression) ?? null;
+			if (spec) {
+				const slot = documentSlot(node, spec);
+				if (slot) {
+					const label = `${writtenCalleeName(node.expression) ?? '<channel>'} → ${
+						typeof spec.argument === 'number' ? `arg ${spec.argument}` : `{ ${spec.property} }`
+					}`;
+					for (const arm of branches(slot, scope)) considerChannel(arm, label);
 				}
-				if (site.property) {
-					for (const argument of node.arguments) {
-						if (!ts.isObjectLiteralExpression(argument)) continue;
-						for (const member of argument.properties) {
-							if (ts.isShorthandPropertyAssignment(member) && member.name.text === site.property) {
-								considerChannel(member.name, `${callee}({ ${site.property} })`);
-								continue;
-							}
-							if (!ts.isPropertyAssignment(member)) continue;
-							const key =
-								ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)
-									? member.name.text
-									: null;
-							if (key !== site.property) continue;
-							for (const arm of branches(member.initializer, scope)) {
-								considerChannel(arm, `${callee}({ ${site.property} })`);
-							}
-						}
+			} else {
+				// THE NAME-KEYED BACKSTOP. Provenance said nothing, but the call is
+				// WRITTEN with a channel's name and carries that channel's document
+				// slot — `getTransport().graphqlRequest(document)`. Silence there
+				// would be permission, so it reports as unreadable.
+				//
+				// NARROWED TWICE, because a backstop that fires on correct code is
+				// the pressure that gets gates loosened. By the SLOT, so it cannot
+				// accuse this tree's store and push-manager `subscribe` methods,
+				// which carry no `query`. And by the RECEIVER: a bare identifier the
+				// file itself declares is not an unfollowable receiver — provenance
+				// answered it, and the answer was "not the transport".
+				const written = writtenCalleeName(node.expression);
+				const callee = node.expression;
+				const receiverIsFollowed =
+					ts.isIdentifier(callee) && declaredNames(sourceFile).has(callee.text);
+				const specs =
+					written && !receiverIsFollowed ? (channels?.specsByName.get(written) ?? null) : null;
+				if (specs && callMatchesAnySlot(node, specs)) {
+					const slot = specs.map((candidate) => documentSlot(node, candidate)).find(Boolean);
+					if (slot && !coveredByWrapper(slot)) {
+						unresolved.push({
+							name: `${written}(…) — receiver not resolved to a transport`,
+							line: lineOf(node),
+							file,
+							byChannel: true,
+						});
 					}
 				}
 			}
 		}
 		ts.forEachChild(node, visitSites);
 	};
+	visitSites(sourceFile);
 
-	for (let round = 0, before = -1; sites.length !== before && round < 16; round += 1) {
-		before = sites.length;
-		visitSites(sourceFile);
-	}
-
-	// A deferred site is answered only if the forwarder it named actually turned
-	// up a document. If the helper is never called with a readable document, the
-	// original transport site is still a document this reader could not read, and
-	// it is reported as such.
-	for (const { node, label } of deferred) {
-		const enclosing = enclosingFunction(node, functions);
-		const covered =
-			enclosing && documents.some((document) => document.name.startsWith(`${enclosing.name}(arg `));
-		if (!covered) consider(node, label, true);
+	// Channel references this reading could not follow at all — a computed member
+	// of something carrying a transport, or a transport used as a value rather
+	// than called. Both are places a document could reach lesser unseen.
+	if (bindings) {
+		for (const finding of unfollowableChannelUses(file, bindings)) malformed.push(finding);
 	}
 
 	// Pass 2 — declarations and inline literals anywhere in the file.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -9,8 +9,17 @@ import { fileURLToPath } from 'node:url';
 
 import { buildSchema, parse, validate } from 'graphql';
 
-import { documentsIn, EXECUTOR_SITES } from '../scripts/lib/graphql-documents.mjs';
+import { auditSeamGraph } from '../scripts/audit-seam-graph.mjs';
+import { documentsIn, TRANSPORT_ROOTS } from '../scripts/lib/graphql-documents.mjs';
+import {
+	isScript,
+	reachableFrom,
+	resolveClosure,
+	resolverOver,
+} from '../scripts/lib/module-closure.mjs';
 import { liveScript } from '../scripts/lib/module-imports.mjs';
+import { createViteResolver } from '../scripts/lib/module-resolution.mjs';
+import { gitBlobOid } from '../scripts/lib/schema-pin.mjs';
 import { toAuthorSummary, toBlogFaceArticle, toArticleDetail } from '../src/lib/cms/articles.ts';
 import { ARTICLES_INDEX_QUERY, ARTICLE_BY_SLUG_QUERY } from '../src/lib/cms/queries.ts';
 
@@ -78,16 +87,65 @@ function sha256(text) {
 }
 
 /**
- * A synthetic repository: a schema, a pin that matches it, and whatever modules
- * the case needs. Returns the root.
+ * A stand-in for `src/lib/cms/graphql.ts` — the module the transport analysis is
+ * ROOTED at. Every synthetic tree gets one, because a channel is now an export of
+ * a named module rather than a name a call site happens to use, and a tree
+ * without it would be testing a graph with no roots.
  */
-function tree({ schema = SCHEMA, files = {}, upstream = [], pin = {} } = {}) {
+const TRANSPORT_MODULE = `
+export async function graphqlRequest(query, variables = {}, options = {}) {
+	return { data: null, errors: [], query, variables, options };
+}
+`;
+
+const SUBSCRIPTION_MODULE = `
+export function subscribe(options) {
+	return () => options;
+}
+`;
+
+/**
+ * Vite config for a synthetic tree.
+ *
+ * The gate resolves with VITE, so the aliases a tree declares are the aliases the
+ * gate follows — the same relationship the real repository has with its own
+ * `vite.config.ts`. Nothing is restated in the gate.
+ */
+const VITE_CONFIG = `
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('.', import.meta.url));
+export default {
+	resolve: {
+		alias: [{ find: '$lib', replacement: path.resolve(root, 'src/lib') }],
+	},
+};
+`;
+
+/**
+ * A synthetic repository: a schema, a pin that matches it, a Vite config, the two
+ * transport modules, an entry point, and whatever modules the case needs.
+ */
+function tree({
+	schema = SCHEMA,
+	files = {},
+	upstream = [],
+	pin = {},
+	entries = ['src/entry.ts'],
+	entrySource = null,
+	viteConfig = VITE_CONFIG,
+} = {}) {
 	const root = mkdtempSync(join(tmpdir(), 'contentus-graphql-'));
 	const write = (relative, content) => {
 		const full = join(root, relative);
 		mkdirSync(dirname(full), { recursive: true });
 		writeFileSync(full, content);
 	};
+
+	if (viteConfig) write('vite.config.ts', viteConfig);
+	write('src/lib/cms/graphql.ts', TRANSPORT_MODULE);
+	write('src/lib/timelines/subscription.ts', SUBSCRIPTION_MODULE);
+	if (entrySource !== null) write('src/entry.ts', entrySource);
 
 	write('contracts/lesser/graphql-schema.graphql', schema);
 	write(
@@ -102,12 +160,14 @@ function tree({ schema = SCHEMA, files = {}, upstream = [], pin = {} } = {}) {
 					pinned_path: 'contracts/lesser/graphql-schema.graphql',
 					sha256: sha256(schema),
 					bytes: Buffer.byteLength(schema),
+					git_blob_sha1: gitBlobOid(Buffer.from(schema)),
 					...pin,
 				},
 				document_roots: {
 					paths: ['src'],
 					extensions: ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.svelte'],
 				},
+				build_entry_points: { paths: entries },
 				upstream_trees: upstream,
 			},
 			null,
@@ -116,6 +176,11 @@ function tree({ schema = SCHEMA, files = {}, upstream = [], pin = {} } = {}) {
 	);
 
 	for (const [relative, content] of Object.entries(files)) write(relative, content);
+	// An entry has to exist or the boundary walk starts nowhere; the gate refuses
+	// a missing one, so a case that declares no entry source gets an empty file.
+	for (const entry of entries) {
+		if (!existsSync(join(root, entry))) write(entry, '');
+	}
 	return root;
 }
 
@@ -364,7 +429,10 @@ test('a schema edited without moving the pin fails', () => {
 
 		const result = runGate(root);
 		assert.equal(result.status, 1);
-		assert.match(result.out, /does not match its pin/);
+		assert.match(result.out, /does not match its pinned sha256/);
+		// And the git blob OID moves with the bytes, which is the value the
+		// upstream check compares against lesser.
+		assert.match(result.out, /does not hash to its pinned git blob OID/);
 	});
 });
 
@@ -535,6 +603,7 @@ test('importing an excluded document-bearing module fails — the exclusion is c
 	// contentus module reaches one, the document is contentus's to answer for.
 	withTree(
 		{
+			entrySource: "import { FOREIGN } from './lib/consumer.ts';\nconsole.log(FOREIGN);\n",
 			files: {
 				'src/vendored/adapter.ts': UPSTREAM_MODULE,
 				'src/lib/consumer.ts':
@@ -553,6 +622,7 @@ test('importing an excluded document-bearing module fails — the exclusion is c
 	// from the edge, not from the module merely existing.
 	withTree(
 		{
+			entrySource: "import { unrelated } from './lib/consumer.ts';\nconsole.log(unrelated);\n",
 			files: {
 				'src/vendored/adapter.ts': UPSTREAM_MODULE,
 				'src/lib/consumer.ts': 'export const unrelated = 1;\n',
@@ -565,9 +635,110 @@ test('importing an excluded document-bearing module fails — the exclusion is c
 	);
 });
 
+test('a `.js` specifier resolving to a `.ts` file is followed — the resolver is Vite’s', () => {
+	// THE EXACT EDGE THE REVIEW DEMONSTRATED. `src/lib/routes/ArticleReader.svelte`
+	// imports `$lib/greater/faces/blog/components/Article/index.js` and the file on
+	// disk is `index.ts`. The old candidate list tested `index.js`, then
+	// `index.js.ts`, and answered nothing — so an outside module importing a
+	// document-bearing vendored `adapter.ts` failed as required, while re-spelling
+	// the SAME import `adapter.js` made the gate PASS. Both spellings must bite.
+	for (const specifier of ['../vendored/adapter.ts', '../vendored/adapter.js']) {
+		withTree(
+			{
+				entrySource: "import { FOREIGN } from './lib/consumer.ts';\nconsole.log(FOREIGN);\n",
+				files: {
+					'src/vendored/adapter.ts': UPSTREAM_MODULE,
+					'src/lib/consumer.ts': `import { FOREIGN } from '${specifier}';\nexport { FOREIGN };\n`,
+				},
+				upstream: [UPSTREAM_TREE],
+			},
+			(root) => {
+				const result = runGate(root);
+				assert.equal(result.status, 1, `${specifier} must be followed:\n${result.out}`);
+				assert.match(result.out, /IS\s+reachable by import from contentus source/);
+			}
+		);
+	}
+});
+
+test('an ALIASED specifier and a directory barrel are followed', () => {
+	// `$lib/…` and `./dir` (meaning `./dir/index.ts`) are how this repository
+	// actually imports; a resolver that missed either would leave the boundary
+	// blind along the paths it is most often crossed.
+	withTree(
+		{
+			entrySource: "import { FOREIGN } from '$lib/consumer.ts';\nconsole.log(FOREIGN);\n",
+			files: {
+				'src/vendored/index.ts': "export * from './adapter.js';\n",
+				'src/vendored/adapter.ts': UPSTREAM_MODULE,
+				'src/lib/consumer.ts': "import { FOREIGN } from '../vendored';\nexport { FOREIGN };\n",
+			},
+			upstream: [UPSTREAM_TREE],
+		},
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /IS\s+reachable by import from contentus source/);
+		}
+	);
+});
+
+test('a computed dynamic import inside the reachable closure fails closed', () => {
+	// `import(name)` names nothing a static read can follow, so the boundary cannot
+	// say what is past it. The review noted computed imports were absent from the
+	// walk entirely; absence read as "nothing there".
+	withTree(
+		{
+			entrySource: "import './lib/consumer.ts';\n",
+			files: {
+				'src/vendored/adapter.ts': UPSTREAM_MODULE,
+				'src/lib/consumer.ts':
+					'export async function pick(name) {\n\treturn import(`../vendored/${name}.ts`);\n}\n',
+			},
+			upstream: [UPSTREAM_TREE],
+		},
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /a load whose target no static read can name/);
+		}
+	);
+});
+
+test('an unresolvable specifier that NAMES A PATH fails, while an uninstalled package does not', () => {
+	// The distinction is what keeps this rule about the boundary rather than about
+	// upstream's dependencies. A bare package this repository does not install
+	// cannot be a file inside the vendored tree; a `./…` that will not resolve is
+	// a genuine hole in the closure.
+	withTree(
+		{
+			entrySource: "import './lib/consumer.ts';\n",
+			files: { 'src/lib/consumer.ts': "import './does-not-exist.ts';\nexport const x = 1;\n" },
+		},
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /names a path in this tree/);
+		}
+	);
+
+	withTree(
+		{
+			entrySource: "import './lib/consumer.ts';\n",
+			files: {
+				'src/lib/consumer.ts': "import 'some-uninstalled-package';\nexport const x = 1;\n",
+			},
+		},
+		(root) => {
+			assert.equal(runGate(root).status, 0);
+		}
+	);
+});
+
 test('reachability is transitive — one module in between does not launder the import', () => {
 	withTree(
 		{
+			entrySource: "import { FOREIGN } from './lib/consumer.ts';\nconsole.log(FOREIGN);\n",
 			files: {
 				'src/vendored/adapter.ts': UPSTREAM_MODULE,
 				'src/lib/middle.ts': "export * from '../vendored/adapter.ts';\n",
@@ -612,10 +783,16 @@ export { MESSAGE, OTHER };
 test('a document forwarded through a private helper is still read', () => {
 	// `cms/compose.ts` and `cms/review-transport.ts` both funnel writes through a
 	// helper that takes the document as a parameter, so the `graphqlRequest` call
-	// site has nothing to fold. The reader derives the helper as a channel and
-	// follows its callers; without that, four real documents would be reported as
-	// unreadable and the gate would have to be loosened to ship.
-	const source = `
+	// site has nothing to fold. The wrapper is DERIVED as a channel and its callers
+	// followed; without that, four real documents would be reported as unreadable
+	// and the gate would have to be loosened to ship.
+	withTree(
+		{
+			entrySource: `import { create } from './lib/forward.ts';\ncreate();\n`,
+			files: {
+				'src/lib/forward.ts': `
+import { graphqlRequest } from './cms/graphql.ts';
+
 const CREATE = \`
 	mutation Synthetic { articles { id } }
 \`;
@@ -627,13 +804,44 @@ async function authenticatedWrite(document, variables) {
 export async function create() {
 	return authenticatedWrite(CREATE, {});
 }
-`;
+`,
+			},
+		},
+		(root) => {
+			const result = runGate(root, ['--inventory']);
+			assert.equal(result.status, 0, result.out);
+			assert.match(result.out, /Synthetic|authenticatedWrite/);
+		}
+	);
+});
 
-	const read = documentsIn('src/lib/forward.ts', source);
-	assert.deepEqual(read.unresolved, []);
-	assert.ok(
-		read.documents.some((document) => document.name.startsWith('authenticatedWrite(arg 0)')),
-		'the forwarded document is attributed to the channel that carried it'
+test('a wrapper EXPORTED across files is a channel too, and its callers are checked', () => {
+	// The old reader gave up here — an exported helper's callers are in files it
+	// "was not handed" — and reported the site unresolved. The graph is global now,
+	// so the caller in another module is the site that carries the document.
+	withTree(
+		{
+			entrySource: `import { post } from './lib/caller.ts';\npost();\n`,
+			files: {
+				'src/lib/wrap.ts': `
+import { graphqlRequest } from './cms/graphql.ts';
+export async function send(document, variables) {
+	return graphqlRequest(document, variables);
+}
+`,
+				'src/lib/caller.ts': `
+import { send } from './wrap.ts';
+export async function post() {
+	return send(\`query SyntheticExported { articles { nope } }\`, {});
+}
+`,
+			},
+		},
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "nope"/);
+		}
 	);
 });
 
@@ -641,48 +849,363 @@ test('a branch-selected document contributes BOTH arms', () => {
 	// `cms/loaders.ts` writes `const query = kind === 'series' ? A : B` and then
 	// sends `query`. Folding that to a single value is impossible and folding it
 	// to nothing loses two real documents; both are sent, so both are validated.
-	const source = `
+	withTree(
+		{
+			entrySource: `import { load } from './lib/branch.ts';\nload('series');\n`,
+			files: {
+				'src/lib/branch.ts': `
+import { graphqlRequest } from './cms/graphql.ts';
 const A = \`query SyntheticA { articles { id } }\`;
-const B = \`query SyntheticB { articles { slug } }\`;
+const B = \`query SyntheticB { articles { missingOnPurpose } }\`;
 
 export async function load(kind) {
 	const query = kind === 'series' ? A : B;
 	return graphqlRequest(query, {});
 }
-`;
-
-	const read = documentsIn('src/lib/branch.ts', source);
-	assert.deepEqual(read.unresolved, []);
-	const texts = read.documents.map((document) => document.text).join('\n');
-	assert.match(texts, /SyntheticA/);
-	assert.match(texts, /SyntheticB/);
+`,
+			},
+		},
+		(root) => {
+			// The SECOND arm is the one with the defect: if only one arm were
+			// followed, this would pass and the test would prove nothing.
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "missingOnPurpose"/);
+		}
+	);
 });
 
-test('the executor table covers every transport call site the repository has', () => {
-	// The table is the one place a document could reach lesser unchecked: a new
-	// transport with no entry means its documents are never treated as documents
-	// by provenance. Rather than trusting the list, the list is measured against
-	// the call sites that actually exist.
-	const covered = new Set(EXECUTOR_SITES.map((site) => site.callee));
-	const transports = new Set();
+test('every transport root really is an export of the module it names', () => {
+	// The roots are the one place a document could reach lesser unchecked: a root
+	// naming a module or export that no longer exists matches nothing, and matching
+	// nothing looks exactly like finding nothing wrong. Measured, not trusted.
+	assert.ok(TRANSPORT_ROOTS.length >= 2);
+	for (const root of TRANSPORT_ROOTS) {
+		const source = liveScript(root.module, readFileSync(join(REPO, root.module), 'utf8'));
+		const exported = new Set();
+		for (const match of source.matchAll(
+			/export\s+(?:async\s+)?function\s+([A-Za-z_][\w]*)|export\s+const\s+([A-Za-z_][\w]*)/g
+		)) {
+			exported.add(match[1] ?? match[2]);
+		}
+		assert.ok(
+			exported.has(root.export),
+			`${root.module} must still export ${root.export}; the transport graph is rooted there`
+		);
+		assert.ok(
+			typeof root.argument === 'number' || typeof root.property === 'string',
+			'a root must name the slot its document arrives in'
+		);
+	}
+});
 
-	const sources = [
-		'src/lib/cms/graphql.ts',
-		'src/lib/timelines/subscription.ts',
-		'src/lib/cms/media.ts',
-	];
-	for (const file of sources) {
-		const source = liveScript(file, readFileSync(join(REPO, file), 'utf8'));
-		for (const match of source.matchAll(/export\s+(?:async\s+)?function\s+([A-Za-z_][\w]*)/g)) {
-			transports.add(match[1]);
+/* =========================================================================
+ * The four bypasses the adversarial review demonstrated
+ *
+ * Each one sends a document the old name-matching reader never saw. The document
+ * is INVALID against the schema in every case, so a gate that finds it must fail
+ * and a gate that misses it passes — there is no third outcome, and no assertion
+ * about wording standing in for the bite.
+ * ====================================================================== */
+
+const BAD_DOCUMENT = '`query SyntheticBypass { articles { notAField } }`';
+
+function bypassTree(moduleSource) {
+	return {
+		entrySource: `import { go } from './lib/bypass.ts';\ngo();\n`,
+		files: { 'src/lib/bypass.ts': moduleSource },
+	};
+}
+
+test('BYPASS 1 — an imported alias is still the transport', () => {
+	withTree(
+		bypassTree(`
+import { graphqlRequest as send } from './cms/graphql.ts';
+export async function go() {
+	return send(${BAD_DOCUMENT}, {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('BYPASS 2 — a variable alias is still the transport', () => {
+	withTree(
+		bypassTree(`
+import { graphqlRequest } from './cms/graphql.ts';
+const send = graphqlRequest;
+export async function go() {
+	return send(${BAD_DOCUMENT}, {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('BYPASS 3 — a bracket property on a namespace is still the transport', () => {
+	withTree(
+		bypassTree(`
+import * as transport from './cms/graphql.ts';
+export async function go() {
+	return transport['graphqlRequest'](${BAD_DOCUMENT}, {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('BYPASS 4 — a subscribe alias is still the transport', () => {
+	withTree(
+		bypassTree(`
+import { subscribe as open } from '../lib/timelines/subscription.ts';
+export function go() {
+	return open({ query: ${BAD_DOCUMENT}, onData() {} });
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('BYPASS 5 — an alias of an alias, through a re-export barrel', () => {
+	withTree(
+		{
+			entrySource: `import { go } from './lib/bypass.ts';\ngo();\n`,
+			files: {
+				'src/lib/barrel.ts': `export { graphqlRequest as relay } from './cms/graphql.ts';`,
+				'src/lib/bypass.ts': `
+import { relay } from './barrel.ts';
+const again = relay;
+export async function go() {
+	return again(${BAD_DOCUMENT}, {});
+}
+`,
+			},
+		},
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('BYPASS 6 — `export * from` carries the channel out too', () => {
+	withTree(
+		{
+			entrySource: `import { go } from './lib/bypass.ts';\ngo();\n`,
+			files: {
+				'src/lib/star.ts': `export * from './cms/graphql.ts';`,
+				'src/lib/bypass.ts': `
+import { graphqlRequest } from './star.ts';
+export async function go() {
+	return graphqlRequest(${BAD_DOCUMENT}, {});
+}
+`,
+			},
+		},
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('BYPASS 7 — destructuring a namespace binds the channel', () => {
+	withTree(
+		bypassTree(`
+import * as transport from './cms/graphql.ts';
+const { graphqlRequest: fire } = transport;
+export async function go() {
+	return fire(${BAD_DOCUMENT}, {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /Cannot query field "notAField"/);
+		}
+	);
+});
+
+test('a dynamically assembled document reaching a channel FAILS CLOSED', () => {
+	// The review's probes used exactly this: an anonymous operation built from
+	// pieces, so no keyword survives in the literal chunks and pass 2's shape
+	// screen cannot see it. Provenance still can — and, unable to fold it, must
+	// report rather than shrug.
+	withTree(
+		bypassTree(`
+import { graphqlRequest as send } from './cms/graphql.ts';
+const parts = ['{ articles', ' { id } }'];
+export async function go() {
+	return send(parts.join(''), {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /could not determine what GraphQL text this sends/);
+		}
+	);
+});
+
+test('a transport selected by a COMPUTED key fails closed', () => {
+	withTree(
+		bypassTree(`
+import * as transport from './cms/graphql.ts';
+export async function go(pick) {
+	return transport[pick](${BAD_DOCUMENT}, {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /computed key|undecidable channel/i);
+		}
+	);
+});
+
+test('a transport used as a VALUE rather than called fails closed', () => {
+	withTree(
+		bypassTree(`
+import { graphqlRequest } from './cms/graphql.ts';
+const registry = [];
+export function go() {
+	registry.push(graphqlRequest);
+	return registry;
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /used as a value rather than called/);
+		}
+	);
+});
+
+test('a call merely SPELLED like a transport, with an unfollowable receiver, fails closed', () => {
+	// The name-keyed backstop. Provenance says nothing about `getTransport()`, and
+	// silence would be permission.
+	withTree(
+		bypassTree(`
+function getTransport() { return globalThis.someTransport; }
+export async function go() {
+	return getTransport().graphqlRequest(${BAD_DOCUMENT}, {});
+}
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 1, result.out);
+			assert.match(result.out, /receiver not resolved to a transport/);
+		}
+	);
+});
+
+test('the backstop does NOT fire on an unrelated `subscribe` — precision is part of the control', () => {
+	// This repository has store and push-manager `subscribe` methods. A backstop
+	// keyed on the name alone would be dozens of findings about something else,
+	// whose only repair is a disclosure — which is how a gate stops being read.
+	withTree(
+		bypassTree(`
+const store = { subscribe(callback) { return () => callback; } };
+export function go() {
+	const stop = store.subscribe(() => {});
+	return pushManagerLike.subscribe({ userVisibleOnly: true, applicationServerKey: 'k' }) && stop;
+}
+const pushManagerLike = { subscribe: (options) => options };
+`),
+		(root) => {
+			const result = runGate(root);
+			assert.equal(result.status, 0, result.out);
+		}
+	);
+});
+
+/* =========================================================================
+ * The real build
+ * ====================================================================== */
+
+test('the REAL build loads nothing the static closure missed, and no disclosed vendored document', async () => {
+	// THE COMPLEMENTARY READING, and the one that stops the boundary being an
+	// argument about a parser. The gate's closure is static; this runs the actual
+	// two-pass Vite build and asks what it LOADED. Two directions, both required:
+	//
+	//   (a) every module the build loaded is inside the static closure — so the
+	//       static walk is not missing edges the build has. A miss there is exactly
+	//       the `.js`→`.ts` defect the review demonstrated, and it would be silent.
+	//   (b) no module the disclosure names as carrying an upstream document is
+	//       loaded by either pass — so the exclusion is safe against what runs,
+	//       not merely against what this repository's reader believes runs.
+	//
+	// The gate's OWN functions compute the closure here. A test that reimplemented
+	// the walk would be comparing two of its own opinions, which is the shape of
+	// the defect this whole milestone is about.
+	const { sink } = await auditSeamGraph({ root: REPO });
+
+	const loaded = new Set();
+	for (const pass of sink.reached.keys()) {
+		for (const id of sink.reached.get(pass).loaded) {
+			// A file is not a module: `X.svelte` and `X.svelte?raw` are separate
+			// modules. The boundary question is about the FILE, so the query goes.
+			loaded.add(id.split(/[?#]/)[0]);
 		}
 	}
+	assert.ok(loaded.size > 100, `the build must actually have loaded modules, saw ${loaded.size}`);
 
-	// Every exported function in a transport module that takes a document is
-	// either in the table or does not carry one. The two that do carry one:
-	assert.ok(transports.has('graphqlRequest'), 'the query transport is still exported here');
-	assert.ok(covered.has('graphqlRequest'));
-	assert.ok(covered.has('subscribe'));
+	const pin = JSON.parse(readFileSync(join(REPO, 'contracts/lesser/provenance.json'), 'utf8'));
+	const entries = pin.build_entry_points.paths;
+
+	const resolver = await createViteResolver({
+		root: REPO,
+		configFile: join(REPO, 'vite.config.ts'),
+	});
+	let closure;
+	try {
+		closure = await resolveClosure(REPO, entries, resolver);
+	} finally {
+		await resolver.close();
+	}
+	const { seen: reachable } = reachableFrom(entries, closure, resolverOver(closure));
+
+	// (a) — no edge the build has that the static walk lacks. Scoped to files IN
+	// THIS REPOSITORY: the closure classifies node_modules as external on purpose,
+	// because a document assembled inside an npm package is not a document this
+	// repository declares, and the vendored boundary is about `src/lib/greater/`.
+	const missed = [...loaded].filter(
+		(file) => isScript(file) && !file.startsWith('node_modules/') && !reachable.has(file)
+	);
+	assert.deepEqual(
+		missed,
+		[],
+		'the real build loaded modules the static closure never reached — the boundary is blind along those edges'
+	);
+
+	// (b) — and nothing the disclosure excludes is loaded.
+	for (const tree of pin.upstream_trees) {
+		for (const document of Object.keys(tree.documents)) {
+			assert.ok(
+				!loaded.has(document),
+				`${document} carries a disclosed upstream document and the real build LOADS it; ` +
+					'a module the build loads is a module that can execute'
+			);
+		}
+	}
 });
 
 test('the repository’s own tree passes the gate at its current bytes', () => {

@@ -17,9 +17,21 @@
  *
  *   1. UNKNOWN FIELD — a document selecting something the schema does not define
  *      fails. This is the defect that motivated the gate.
- *   2. STALE SCHEMA — the pinned SDL is checked against the digest recorded in
- *      `contracts/lesser/provenance.json` before it is used. A schema edited
- *      without moving the pin fails; a pin moved without the file fails.
+ *   2. EDITED SCHEMA — the pinned SDL is checked against the digest, byte count
+ *      and GIT BLOB OID recorded in `contracts/lesser/provenance.json` before it
+ *      is used. A schema edited without moving the pin fails; a pin moved without
+ *      the file fails.
+ *
+ *      THIS IS INTEGRITY, NOT PROVENANCE, and the distinction is the point. All
+ *      three values live in this repository and move in the same commit as the
+ *      schema, so an author who fabricates an SDL and updates all three produces
+ *      a self-consistent tree that passes here while still claiming lesser
+ *      `e710ff…` — and a `ref` of forty `f` characters is invisible to any
+ *      offline check, because nothing offline dereferences a ref. Adversarial
+ *      review demonstrated both. What answers those is a SEPARATE mechanism,
+ *      `scripts/verify-schema-provenance.mjs`, which dereferences the git object
+ *      at `<repository>@<ref>:<upstream_path>` and runs as a required CI check.
+ *      This gate deliberately does not claim its result.
  *   3. OMISSION — a document the reader could not fold, or folded and could not
  *      parse, fails. "I could not read what this sends" is a failure, never a
  *      skip, because a document the gate cannot see is exactly the one that
@@ -30,10 +42,12 @@
  *      document-bearing module inside it.
  *
  * WHAT A GREEN RUN CLAIMS. That every document this reader found is valid against
- * the schema at the pinned ref. Not that the instance will accept them (an
- * instance can run an older lesser), not that the responses are handled
- * correctly, and not that the pinned ref is current. It is a contract check, and
- * it is worth exactly as much as the pin is honest.
+ * the bytes pinned in `contracts/lesser/`, and that those bytes are unchanged
+ * since their digest was written. Not that those bytes are what lesser published
+ * — that is `scripts/verify-schema-provenance.mjs`, and it is a different run.
+ * Not that the instance will accept the documents (an instance can run an older
+ * lesser), not that the responses are handled correctly, and not that the pinned
+ * ref is current.
  *
  * Usage:
  *   node scripts/audit-graphql-contract.mjs              validate; non-zero on any finding
@@ -52,13 +66,20 @@
  * text, so the flag cannot be smuggled into the gate the build actually runs.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { buildSchema, parse, validate } from 'graphql';
 
 import { documentsIn } from './lib/graphql-documents.mjs';
-import { liveScript, moduleSpecifiers, modulePath } from './lib/module-imports.mjs';
+import {
+	reachableFrom,
+	resolveClosure,
+	resolverOver,
+	scriptOf as scriptIn,
+} from './lib/module-closure.mjs';
+import { createViteResolver } from './lib/module-resolution.mjs';
+import { checkPinIntegrity, readPin } from './lib/schema-pin.mjs';
+import { buildChannelGraph } from './lib/transport-channels.mjs';
 
 function rootFrom(argv) {
 	const index = argv.indexOf('--root');
@@ -73,52 +94,6 @@ function rootFrom(argv) {
 
 const ROOT = rootFrom(process.argv.slice(2));
 const PROVENANCE = 'contracts/lesser/provenance.json';
-
-/* -------------------------------------------------------------------------
- * Pin
- * ---------------------------------------------------------------------- */
-
-/**
- * Read the provenance pin, rejecting duplicate keys.
- *
- * `JSON.parse` is last-wins, so a repeated key is one value a reviewer reads and
- * a different value this gate enforces. That is the shape of a pin that has
- * quietly stopped asserting what it appears to assert.
- */
-function readPin(file) {
-	const text = readFileSync(path.join(ROOT, file), 'utf8');
-	const seen = [];
-	JSON.parse(text, function reviver(key, value) {
-		if (key !== '' && Object.hasOwn(this, key) && typeof this === 'object') seen.push(key);
-		return value;
-	});
-	const duplicates = duplicateKeys(text);
-	if (duplicates.length) {
-		throw new Error(`${file} has duplicate keys: ${duplicates.join(', ')}`);
-	}
-	return JSON.parse(text);
-}
-
-/** Duplicate keys within any single object, found by re-walking the token stream. */
-function duplicateKeys(text) {
-	const found = new Set();
-	const stack = [new Set()];
-	const tokens = /"((?:[^"\\]|\\.)*)"\s*:|([{[])|([}\]])/g;
-	for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
-		if (match[2]) stack.push(new Set());
-		else if (match[3]) stack.pop();
-		else if (match[1] !== undefined) {
-			const scope = stack[stack.length - 1];
-			if (scope.has(match[1])) found.add(match[1]);
-			scope.add(match[1]);
-		}
-	}
-	return [...found];
-}
-
-function sha256(buffer) {
-	return createHash('sha256').update(buffer).digest('hex');
-}
 
 /* -------------------------------------------------------------------------
  * Files
@@ -137,126 +112,53 @@ function walk(dir, extensions, out = []) {
 	return out;
 }
 
-/**
- * Resolve a specifier to a repository file, or `null` when it leaves the tree.
- *
- * Extension order matters and is not invented: this repository's own modules are
- * written with explicit `.ts` in some places and extensionless in others, and a
- * directory import means `index`. External packages resolve to `null` — folding
- * stops at the tree edge, which is correct, because a document assembled from an
- * npm package is not a document this repository declares.
- */
-const RESOLVE_EXTENSIONS = ['.ts', '.mts', '.cts', '.svelte', '.js', '.mjs', '.cjs'];
-
-function resolveModule(specifier, fromFile) {
-	const bare = modulePath(specifier);
-	let base;
-	if (bare === '$lib') base = path.join(ROOT, 'src/lib');
-	else if (bare.startsWith('$lib/')) base = path.join(ROOT, 'src/lib', bare.slice('$lib/'.length));
-	else if (bare.startsWith('.')) base = path.resolve(ROOT, path.dirname(fromFile), bare);
-	else return null;
-
-	const candidates = [
-		base,
-		...RESOLVE_EXTENSIONS.map((extension) => base + extension),
-		...RESOLVE_EXTENSIONS.map((extension) => path.join(base, `index${extension}`)),
-	];
-	for (const candidate of candidates) {
-		if (existsSync(candidate) && statSync(candidate).isFile()) {
-			return path.relative(ROOT, candidate);
-		}
-	}
-	return null;
-}
-
-/** Source a file executes — a component's scripts and markup imports, or the file. */
-function scriptOf(file) {
-	return liveScript(file, readFileSync(path.join(ROOT, file), 'utf8'));
-}
-
-function resolveForReader(specifier, fromFile) {
-	const resolved = resolveModule(specifier, fromFile);
-	if (!resolved) return null;
-	return { file: resolved, source: scriptOf(resolved) };
-}
-
-/* -------------------------------------------------------------------------
- * Boundary
- * ---------------------------------------------------------------------- */
-
-/**
- * Every file reachable by import from `roots`, following the tree transitively.
- *
- * This is what turns "we excluded the vendored tree" from an assertion into a
- * checked claim. Contentus imports vendored FACES freely and must keep doing so;
- * what it must never do is reach a vendored module that declares a GraphQL
- * document, because that document would then be one contentus can execute and
- * this gate has declared it out of scope.
- *
- * Static, and therefore an over-approximation of what actually runs — which is
- * the safe direction for a reachability question asked this way round. The
- * complementary reading, over the modules a real build LOADS, lives in
- * tests/graphql-contract.test.mjs; a file this walk misses and the build loads
- * would be caught there.
- */
-function reachableFrom(roots) {
-	const seen = new Set(roots);
-	const queue = [...roots];
-	while (queue.length) {
-		const file = queue.shift();
-		let specifiers;
-		try {
-			specifiers = moduleSpecifiers(scriptOf(file));
-		} catch {
-			// An unreadable module is not evidence of absence. Reported by the
-			// document walk, which reads the same files; skipping here would only
-			// shrink the closure, and a smaller closure cannot manufacture a pass
-			// because the boundary check asks whether a FORBIDDEN file was reached.
-			continue;
-		}
-		for (const specifier of specifiers) {
-			const resolved = resolveModule(specifier, file);
-			if (resolved && !seen.has(resolved)) {
-				seen.add(resolved);
-				queue.push(resolved);
-			}
-		}
-	}
-	return seen;
-}
-
 /* -------------------------------------------------------------------------
  * Gate
  * ---------------------------------------------------------------------- */
 
-function main(argv) {
+/** The Vite config a tree declares, or `false` for Vite's defaults. */
+function viteConfigIn(root) {
+	for (const name of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']) {
+		const candidate = path.join(root, name);
+		if (existsSync(candidate)) return candidate;
+	}
+	return false;
+}
+
+async function main(argv) {
 	const inventory = argv.includes('--inventory');
 	const printDisclosure = argv.includes('--print-disclosure');
 	const findings = [];
 
-	const pin = readPin(PROVENANCE);
-	const { schema: schemaPin, document_roots: roots, upstream_trees: upstreamTrees } = pin;
+	const pin = readPin(ROOT, PROVENANCE);
+	const {
+		schema: schemaPin,
+		document_roots: roots,
+		build_entry_points: entries,
+		upstream_trees: upstreamTrees,
+	} = pin;
 
 	// --- the pinned schema, checked before it is trusted ---------------------
-	const schemaFile = path.join(ROOT, schemaPin.pinned_path);
-	if (!existsSync(schemaFile)) {
-		fail([`${schemaPin.pinned_path} is missing — the pinned lesser schema is not in the tree`]);
-	}
-	const schemaBytes = readFileSync(schemaFile);
-	const digest = sha256(schemaBytes);
-	if (digest !== schemaPin.sha256) {
+	//
+	// Integrity only. These bytes hashing to these recorded values says they are
+	// unchanged since the values were written; it says nothing about whether
+	// lesser published them, because every value involved is local and co-edited.
+	// `scripts/verify-schema-provenance.mjs` dereferences the upstream git object
+	// and is the mechanism that makes the stronger claim.
+	const schemaFile = path.join(ROOT, schemaPin.pinned_path ?? '');
+	if (!schemaPin.pinned_path || !existsSync(schemaFile)) {
 		fail([
-			`${schemaPin.pinned_path} does not match its pin.`,
-			`  recorded sha256 ${schemaPin.sha256}`,
-			`  actual   sha256 ${digest}`,
-			'  Either the schema was edited without moving the pin, or the pin was moved',
-			'  without the schema. Both are the same failure: the gate no longer knows',
-			'  which contract it is enforcing.',
+			`${schemaPin.pinned_path ?? '<unset>'} is missing — the pinned lesser schema is not in the tree`,
 		]);
 	}
-	if (schemaBytes.length !== schemaPin.bytes) {
+	const schemaBytes = readFileSync(schemaFile);
+	const integrity = checkPinIntegrity(schemaPin, schemaBytes);
+	if (integrity.length) {
 		fail([
-			`${schemaPin.pinned_path} is ${schemaBytes.length} bytes; the pin records ${schemaPin.bytes}`,
+			...integrity,
+			'Either the schema was edited without moving the pin, or the pin was moved',
+			'without the schema. Both are the same failure: the gate no longer knows',
+			'which contract it is enforcing.',
 		]);
 	}
 
@@ -272,13 +174,50 @@ function main(argv) {
 	const upstreamPaths = upstreamTrees.map((tree) => tree.path);
 	const isUpstream = (file) => upstreamPaths.some((prefix) => file.startsWith(prefix));
 
+	// The build's entry points, checked to exist. A boundary rooted at an entry
+	// that is not there would walk nothing and pass vacuously.
+	const entryPoints = entries?.paths ?? [];
+	if (!entryPoints.length) {
+		fail([
+			`${PROVENANCE} declares no build_entry_points. Execution has to start somewhere ` +
+				'nameable, or the vendored boundary is a walk from nowhere.',
+		]);
+	}
+	for (const entry of entryPoints) {
+		if (!existsSync(path.join(ROOT, entry))) {
+			fail([`build entry point ${entry} does not exist — the boundary walk would be vacuous`]);
+		}
+	}
+
+	// Resolution first: both the fold and the boundary read the same closure, and
+	// it is Vite's resolver that computes it rather than a candidate list.
+	const resolver = await createViteResolver({ root: ROOT, configFile: viteConfigIn(ROOT) });
+	let closure;
+	try {
+		closure = await resolveClosure(ROOT, [...files, ...entryPoints], resolver);
+	} finally {
+		await resolver.close();
+	}
+	findings.push(...closure.findings);
+	const resolve = resolverOver(closure);
+
+	// The transport graph: which calls, anywhere in the closure, hand a document
+	// to lesser. Rooted at the transport exports and followed through aliases,
+	// re-exports, members and wrappers — never matched by name.
+	const channels = buildChannelGraph({
+		files: closure.files,
+		sourceOf: (file) => closure.sources.get(file) ?? '',
+		resolveSync: resolve.resolveSync,
+	});
+
 	const own = { documents: [], unresolved: [], malformed: [], invalid: [] };
 	const upstreamCounts = new Map();
+	const boundaryNotes = [];
 
 	for (const file of files) {
 		let read;
 		try {
-			read = documentsIn(file, scriptOf(file), resolveForReader);
+			read = documentsIn(file, scriptIn(ROOT, file), resolve.resolveForReader, channels);
 		} catch (error) {
 			// A file the reader cannot parse is a file whose documents are unknown.
 			// That is a finding wherever it happens: the alternative reads an
@@ -331,6 +270,26 @@ function main(argv) {
 		findings.push(`${entry.file}:${entry.line} ${entry.name} — ${entry.reason}`);
 	}
 
+	// --- what the build can execute, walked once ------------------------------
+	//
+	// Computed here rather than inside the upstream loop because the walk's own
+	// findings — an unresolvable path, an unreadable module, a computed import —
+	// are facts about this repository's module graph, not about any disclosure. A
+	// tree that declares no upstream exclusion still has to be readable, and
+	// reporting these only when a disclosure happened to exist made the strictest
+	// checks conditional on the thing they were meant to protect.
+	const {
+		seen: reachable,
+		findings: walkFindings,
+		unresolvedPackages,
+	} = reachableFrom(entryPoints, closure, resolve);
+	findings.push(...walkFindings);
+	boundaryNotes.push(
+		`${reachable.size} modules reachable from ${entryPoints.join(' + ')}; ` +
+			`${unresolvedPackages.size} uninstalled package specifiers named by reachable source ` +
+			'(each names a package, so none can be a file inside the tree)'
+	);
+
 	// --- upstream disclosure: counts, and the boundary that makes it safe -----
 	for (const tree of upstreamTrees) {
 		const declared = tree.documents;
@@ -367,8 +326,29 @@ function main(argv) {
 
 		// The boundary. Reached from everything OUTSIDE the tree, does anything
 		// document-bearing INSIDE it become reachable?
-		const outside = files.filter((file) => !file.startsWith(tree.path));
-		const reachable = reachableFrom(outside);
+		// EXECUTION STARTS AT THE BUILD ENTRIES, and `reachable` above is that walk.
+		// A module no entry reaches cannot run, whatever else in the tree names it —
+		// see `build_entry_points` in the pin for why "every file outside the tree"
+		// was the wrong roots.
+		//
+		// Counted, not silent: which outside files WOULD reach a forbidden module if
+		// anything executed them. Today that is dead vendored source at the lib root;
+		// the day one of them is imported, the boundary above fires.
+		const orphanReaches = [];
+		for (const file of closure.files) {
+			if (file.startsWith(tree.path) || reachable.has(file)) continue;
+			const { seen: fromHere } = reachableFrom([file], closure, resolve);
+			if (Object.keys(declared).some((document) => fromHere.has(document))) {
+				orphanReaches.push(file);
+			}
+		}
+		if (orphanReaches.length) {
+			boundaryNotes.push(
+				`${orphanReaches.length} file(s) outside ${tree.path} reach a disclosed vendored ` +
+					`document but are themselves unreachable from any entry, so nothing executes ` +
+					`them: ${orphanReaches.join(', ')}`
+			);
+		}
 		for (const file of Object.keys(declared)) {
 			if (reachable.has(file)) {
 				findings.push(
@@ -400,14 +380,20 @@ function main(argv) {
 	process.stdout.write(
 		`graphql-contract: ${own.documents.length} contentus documents in ${
 			new Set(own.documents.map((document) => document.file)).size
-		} modules, validated against lesser ${schemaPin.ref.slice(0, 12)} ` +
-			`(${schemaPin.upstream_path}, sha256 ${schemaPin.sha256.slice(0, 12)}…)\n`
+		} modules, validated against the pinned SDL ` +
+			`(blob ${schemaPin.git_blob_sha1.slice(0, 12)}…, sha256 ${schemaPin.sha256.slice(0, 12)}…, ` +
+			`declared as lesser ${schemaPin.ref.slice(0, 12)} ${schemaPin.upstream_path})\n`
+	);
+	process.stdout.write(
+		'graphql-contract: those bytes are checked for INTEGRITY here, not provenance — the ' +
+			'declared repository/ref/path are dereferenced by scripts/verify-schema-provenance.mjs\n'
 	);
 	process.stdout.write(
 		`graphql-contract: ${files.length} source files walked; ${upstreamTotal} documents and ` +
 			`${upstreamUnread} unreadable candidates disclosed inside ${upstreamPaths.join(', ')} ` +
 			'and excluded as upstream-owned\n'
 	);
+	for (const note of boundaryNotes) process.stdout.write(`graphql-contract: ${note}\n`);
 
 	if (findings.length) {
 		fail(findings);
@@ -424,4 +410,4 @@ function fail(findings) {
 	process.exit(1);
 }
 
-process.exit(main(process.argv.slice(2)));
+process.exit(await main(process.argv.slice(2)));
