@@ -205,7 +205,24 @@ Four more were added at the PR #76 review rework, all still local:
   milliseconds stop being distinct. Probing this surfaced a second case of the
   same disagreement — a `created_at` already in the past is finite and exactly
   storable, and `readSession` deletes an expired session on the next read — so an
-  already-elapsed lifetime is refused too, with its own message. Neither refusal
-  can fire against a conformant instance, and a stated lifetime is never capped:
-  shortening an absurd one would be inventing the lifetime this module exists to
-  avoid inventing (codex finding 5, review 4870975439).
+  already-elapsed lifetime is refused too, with its own message. A stated
+  lifetime is never capped: shortening an absurd one would be inventing the
+  lifetime this module exists to avoid inventing (codex finding 5,
+  review 4870975439).
+
+  **The two refusals do not have the same reach, and an earlier version of this
+  note said they did.** The storability refusal cannot fire for the values lesser
+  actually sends: `created_at` is an `int64` second and `expires_in` an `int` on
+  `OAuthTokenResponse` (`cmd/api/models/oauth.go:72`), and a `time.Now().Unix()`
+  stamp plus the 3600-second lifetime lands near 1.78e12 ms — eleven orders of
+  magnitude inside ±(2^53 − 1). The elapsed-lifetime refusal **can** fire against
+  a conformant instance, and is meant to. lesser stamps `created_at` from the
+  SERVER's clock (`cmd/api/handlers/oauth.go:1025`), and the callback compares the
+  instant derived from it against the BROWSER's `Date.now()`. A client clock
+  running ahead of the instance by more than the stated lifetime, or a callback
+  genuinely delayed past the stated expiry, therefore reaches a token that has
+  really elapsed by the only clock this module can read. Refusing there is what
+  keeps the callback and `readSession` from disagreeing: `ok: true` would hand
+  back a session the next read deletes. "Conformant server response" and
+  "synchronized clocks" are different claims, and only the first is lesser's to
+  make (codex finding, review 4871214951).
