@@ -291,10 +291,36 @@ nothing invented alongside them.
 **Not verified:** the same draft moving through both surfaces in one session.
 That needs a live instance and a reachable Body endpoint. See below.
 
-### 3. Live instance round trip on `trenchcoat` — NOT RUN
+### 3. Live instance round trip on `trenchcoat` — PARTLY RUN
 
-Non-gating by operator ruling (2026-07-31), and reported rather than skipped
-quietly. What was attempted and what it returned:
+> **CORRECTED 2026-08-06.** The section below concluded there was "no verified
+> address to reach". That conclusion is **false and was false when relied on**.
+> The instance is `https://dev.trenchcoat.greater.website` — a different hostname
+> from the two tried in July — and it answers anonymous GraphQL today. The 2026-07-31
+> non-gating ruling also predates issue #74's acceptance contract and cannot be
+> cited to close it.
+>
+> Anonymous reads are now verified and reproducible in one command; see
+> [docs/consumption/graphql-contract.md](graphql-contract.md#evidence-from-a-real-instance)
+> and `scripts/probe-live-contract.mjs`. All three public article documents are
+> accepted, and the instance refuses `Actor.avatarUrl` by name.
+>
+> Still absent: **authenticated** index/detail reads, and any evidence at all
+> about the reviewed build — PR #77 is neither merged nor deployed, so the
+> artifact serving `/l/` is an older one. Both remaining halves are operator
+> steps; this steward holds no token and no deploy authority.
+>
+> One live mismatch is recorded rather than disguised: the deployed SSR reports
+> `unavailable: { reason: "transport" }` for the index and 404s the detail route
+> while the same anonymous query succeeds from outside. That points at the
+> deployed artifact's edge configuration (`x-lesser-forwarded-host`, which
+> `src/lib/cms/origin.ts` fails closed without), not at this PR's diff.
+
+The July attempts are kept below because the addresses they rule out are still
+useful, and because a record that quietly replaced its own conclusions would be
+worth less than one that shows them being corrected.
+
+What was attempted then and what it returned:
 
 | Attempt                                      | Result                                                                |
 | -------------------------------------------- | --------------------------------------------------------------------- |
@@ -305,16 +331,20 @@ quietly. What was attempted and what it returned:
 
 The runbook's config-free deploy section derives a stage origin from the
 operator-supplied `--stage` and `--base-domain` values for verification only;
-it deliberately keeps no instance registry. No operator-run install outcome
-has been recorded, so there is no verified address to reach. M2b also landed
-on lesser-body's `staging` rather than `main`, so the parity surface is not
-deployed anywhere this session could reach even with an address.
+it deliberately keeps no instance registry. M2b also landed on lesser-body's
+`staging` rather than `main`, so the parity surface is not deployed anywhere
+this session could reach.
 
 **None of this is evidence that the round trip fails.** It is the absence of
 evidence, and it is recorded as such. The live round trip is an operator-run
 step: install contentus to the dev instance, then drive one draft through
 contentus and through the Body tools. Its outcome belongs on issue #14 when it
 happens.
+
+**The lesson worth keeping.** "No address resolved" was recorded as a fact and
+then read, months later, as "no instance exists". An absence of evidence decays
+into a claim unless something re-runs it, which is why the replacement is a
+script anyone can run in one line rather than a paragraph anyone can cite.
 
 ## What contentus refused to do
 
