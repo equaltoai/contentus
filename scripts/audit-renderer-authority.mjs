@@ -175,8 +175,13 @@ const VENDORED_SOURCE_FILES = [
 	'src/lib/graphqlTimelineStore.ts',
 	'src/lib/integration.svelte.ts',
 	'src/lib/integration.ts',
-	'src/lib/lesserTimelineStore.svelte.ts',
-	'src/lib/lesserTimelineStore.ts',
+	// `lesserTimelineStore.svelte.ts` and `lesserTimelineStore.ts` WERE declared here
+	// and are now retired, because the files are gone. greater-v0.13.1 withdrew them
+	// from the `social-timeline` registry entry and taught `greater update` to prune a
+	// managed file the registry no longer owns, so the managed channel removed them —
+	// which is what this repository was waiting for rather than hand-deleting them.
+	// The entries go with the files: this list is a PERMISSION, and a permission that
+	// outlives its subject silently reclassifies whatever next takes the name.
 	'src/lib/notificationStore.svelte.ts',
 	'src/lib/notificationStore.ts',
 	'src/lib/timelineStore.svelte.ts',

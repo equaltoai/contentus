@@ -20,8 +20,8 @@ src/lib/graphqlTimelineStore.ts
 src/lib/graphqlTimelineStore.svelte.ts
 src/lib/integration.ts
 src/lib/integration.svelte.ts
-src/lib/lesserTimelineStore.ts
-src/lib/lesserTimelineStore.svelte.ts
+# lesserTimelineStore.{ts,svelte.ts} were listed here until greater-v0.13.1 pruned
+# them out of the tree through the managed channel. Retired with the files.
 src/lib/notificationStore.ts
 src/lib/notificationStore.svelte.ts
 src/lib/timelineStore.ts
@@ -33,9 +33,9 @@ colors_and_type.css
 assets/
 
 # Pinned upstream contract — a byte-for-byte copy of lesser's canonical schema at
-# the ref recorded in contracts/lesser/provenance.json, bound by SHA-256. It is
-# not this repository's source to style: reformatting it would break the digest
-# and, worse, would mean the pinned artifact no longer mirrors upstream exactly.
+# the ref recorded in contracts/lesser/provenance.json, bound by SHA-256. It is not
+# this repository's source to style: reformatting it would break the digest and,
+# worse, would mean the pinned artifact no longer mirrors upstream exactly.
 contracts/lesser/graphql-schema.graphql
 
 # Lockfile

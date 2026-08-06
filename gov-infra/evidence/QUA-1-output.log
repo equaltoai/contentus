@@ -10,14 +10,15 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786010273647 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786010273649 COMPLETED 869 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1786033231767 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786033231769 COMPLETED 869 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 801 modules transformed.
+[2K
+transforming...✓ 801 modules transformed.
 rendering chunks...
 computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
@@ -25,7 +26,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-DjshrTY-.js                690.43 kB │ gzip: 209.72 kB
 
-✓ built in 1.04s
+✓ built in 1.09s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -36,13 +37,14 @@ build/client/assets/entry-client-DjshrTY-.js                690.43 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 777 modules transformed.
+[2K
+transforming...✓ 777 modules transformed.
 rendering chunks...
 computing gzip size...
 build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 1,076.54 kB │ gzip: 265.15 kB
+build/server/handler.mjs                 1,076.60 kB │ gzip: 265.16 kB
 
-✓ built in 990ms
+✓ built in 998ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -56,14 +58,18 @@ brand assets: copied 12 files to build/client/brand/
 
 
 > @equaltoai/contentus@0.1.0 validate:graphql /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
-> node scripts/audit-graphql-contract.mjs
+> node scripts/audit-graphql-documents.mjs
 
-graphql-contract: 91 contentus documents in 14 modules, validated against the pinned SDL (blob 576d28037ee6…, sha256 62390f0608fa…, declared as lesser e710ffb31a98 docs/contracts/graphql-schema.graphql)
-graphql-contract: those bytes are checked for INTEGRITY here, not provenance — the declared repository/ref/path are dereferenced by scripts/verify-schema-provenance.mjs
-graphql-contract: executable source is .cts .js .jsx .mjs .mts .svelte .ts .tsx — derived from Vite's own resolve.extensions plus its loader plugins, not declared here
-graphql-contract: 1256 source files walked; 7 documents and 22 unreadable candidates disclosed inside src/lib/greater/ and excluded as upstream-owned
-graphql-contract: 550 modules reachable from src/facetheory/entry-client.ts + src/facetheory/entry-server.ts; 0 uninstalled package specifiers named by reachable source (each names a package, so none can be a file inside the tree)
-graphql-contract: 2 declared outside-boundary orphan(s) in src/lib/greater/'s disclosure — unreachable from every entry, upstream-owned, and asserted exactly so a new one fails rather than joining a count: src/lib/lesserTimelineStore.svelte.ts, src/lib/lesserTimelineStore.ts
+# GraphQL contract audit
+
+Schema:     contracts/lesser/graphql-schema.graphql
+            108653 chars, sha256 62390f0608fa09d496b9c75c4729bdbdf060c6115fce9332de66a1502147c373
+            equaltoai/lesser@cbe9787f9b97c1cc6472183834cfd066e61801b2:docs/contracts/graphql-schema.graphql
+            blob 576d28037ee654193a5215dc321e6fc75531270d (contracts/lesser/provenance.json)
+            Integrity checked here; PROVENANCE is the blob id above compared against lesser.
+Documents:  46 in 9 inventoried module(s), 46 operation(s)
+Swept:      77 contentus-authored .ts module(s) under src/, out of 1282 tracked file(s) there
+
 graphql-contract: PASS
 
 > @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus

@@ -16,8 +16,8 @@ export type ContentFormat = 'HTML' | 'MARKDOWN';
  *
  * `avatar` carries lesser's field name deliberately. This is the RESPONSE shape —
  * what came back off the wire — so renaming it here would put a name lesser never
- * sent into the one place a reader goes to learn what lesser sends. The Greater
- * blog face wants `avatarUrl`, and it gets it, at the view-model boundary in
+ * sent into the one place a reader goes to learn what lesser sends. The Greater blog
+ * face wants `avatarUrl`, and it gets it, at the view-model boundary in
  * `cms/articles.ts` where the translation is visible and one line long.
  */
 export interface AuthorSummary {

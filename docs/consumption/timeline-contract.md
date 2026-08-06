@@ -9,8 +9,16 @@ Verified against lesser at `graph/core.graphql`,
 `graph/query_resolvers_instance_parity.go` and `docs/api-reference.md`; against
 greater-components at `greater-v0.12.0` (`c9825f8f`), which was the vendored pin
 when face 4 was written. The vendored tree has since moved to **greater-v0.13.0**
-(`ce8f3d9d`) at the M6 bump; this record is what was read at v0.12.0, not a claim
-about the current pin.
+(`ce8f3d9d`) at the M6 bump and to **greater-v0.13.1** (`fb6ee927`) at M2; this
+record is what was read at v0.12.0, not a claim about the current pin.
+
+One thing at 0.13.1 does bear on this face. `src/lib/lesserTimelineStore.ts` and
+`src/lib/lesserTimelineStore.svelte.ts` — emitted here at M4 by the
+`social-timeline` registry entry, imported by nothing in contentus — were
+withdrawn from that entry upstream, and `greater update` pruned them out of this
+tree through the managed channel. Contentus never hand-deleted them and never
+imported them; `TimelineVirtualized.svelte` and `TimelineVirtualizedReactive.svelte`,
+which this face DOES build, come from the same entry and are untouched.
 
 ## Contract facts that changed the UI
 
