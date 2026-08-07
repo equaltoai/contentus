@@ -407,6 +407,60 @@ code {
 	cursor: default;
 }
 
+/* Account menu (P1-11): sign-out lives behind a menu with an inline
+   confirmation, never as a bare prominent button. The session block sits at
+   the BOTTOM of the desktop sidebar, so the menu opens upward; below 960px
+   the sidebar is a top row and it opens downward, end-aligned. */
+.contentus-account {
+	position: relative;
+}
+
+.contentus-account__menu {
+	position: absolute;
+	bottom: calc(100% + var(--tc-space-2));
+	left: 0;
+	right: 0;
+	z-index: 20;
+	display: grid;
+	gap: var(--tc-space-2);
+	padding: var(--tc-space-3);
+	background: var(--tc-surface-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	box-shadow: var(--tc-shadow-md);
+}
+
+.contentus-account__item {
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-sm);
+	background: transparent;
+	color: var(--tc-fg);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.contentus-account__item:hover {
+	background: var(--tc-surface-3);
+}
+
+.contentus-account__item--destructive {
+	color: var(--tc-error);
+}
+
+.contentus-account__confirm {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-account__confirm-actions {
+	display: grid;
+	gap: var(--tc-space-1);
+}
+
 .contentus-main {
 	min-width: 0;
 	padding: var(--tc-space-12) 0 var(--tc-space-24);
@@ -1061,6 +1115,15 @@ code {
 
 	.contentus-session {
 		margin-top: 0;
+	}
+
+	.contentus-account__menu {
+		/* The sidebar is a top row below 960px, so the menu opens downward,
+		   end-aligned against the session control. */
+		bottom: auto;
+		top: calc(100% + var(--tc-space-2));
+		left: auto;
+		width: min(260px, calc(100vw - var(--tc-space-8)));
 	}
 
 	.contentus-main {

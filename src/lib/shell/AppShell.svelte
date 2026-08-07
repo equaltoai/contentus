@@ -50,6 +50,38 @@ twice, not two navigation systems.
 	let authenticated = $state(false);
 	let signInError = $state<string | null>(null);
 
+	// Account menu + sign-out confirmation. Signing out is destructive to the
+	// reader's working context (the messages face drops its socket and its
+	// conversations on the announcement), so it lives behind a menu rather
+	// than as a bare prominent button, and the menu item asks before acting.
+	let accountOpen = $state(false);
+	let confirmingSignOut = $state(false);
+	let accountMenu = $state<HTMLDivElement | null>(null);
+
+	// Close on Escape and on any pointerdown outside the menu — but only while
+	// it is open, so the shell registers no listeners it does not need.
+	$effect(() => {
+		if (!accountOpen) return;
+		const onKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				accountOpen = false;
+				confirmingSignOut = false;
+			}
+		};
+		const onPointerDown = (event: PointerEvent) => {
+			if (accountMenu && event.target instanceof Node && !accountMenu.contains(event.target)) {
+				accountOpen = false;
+				confirmingSignOut = false;
+			}
+		};
+		document.addEventListener('keydown', onKeydown);
+		document.addEventListener('pointerdown', onPointerDown);
+		return () => {
+			document.removeEventListener('keydown', onKeydown);
+			document.removeEventListener('pointerdown', onPointerDown);
+		};
+	});
+
 	onMount(() => {
 		mounted = true;
 		authenticated = isAuthenticated();
@@ -92,6 +124,8 @@ twice, not two navigation systems.
 		// pass, where `clearSession` returns early).
 		clearSession();
 		authenticated = false;
+		accountOpen = false;
+		confirmingSignOut = false;
 		unreadStore.reset();
 	}
 </script>
@@ -183,9 +217,58 @@ twice, not two navigation systems.
 					Sign in
 				</button>
 			{:else if authenticated}
-				<button class="contentus-session__button" type="button" onclick={onSignOut}>
-					Sign out
-				</button>
+				<div class="contentus-account" bind:this={accountMenu}>
+					<button
+						class="contentus-session__button"
+						type="button"
+						aria-haspopup="menu"
+						aria-expanded={accountOpen}
+						onclick={() => {
+							accountOpen = !accountOpen;
+							confirmingSignOut = false;
+						}}
+					>
+						Account
+					</button>
+					{#if accountOpen}
+						<div class="contentus-account__menu" role="menu">
+							{#if !confirmingSignOut}
+								<button
+									class="contentus-account__item contentus-account__item--destructive"
+									type="button"
+									role="menuitem"
+									onclick={() => (confirmingSignOut = true)}
+								>
+									Sign out
+								</button>
+							{:else}
+								<!-- The confirmation is inline rather than a second dialog: one
+								     step of friction inside the menu the reader already opened. -->
+								<p class="contentus-account__confirm" id="contentus-signout-confirm">
+									Sign out of this session?
+								</p>
+								<div class="contentus-account__confirm-actions">
+									<button
+										class="contentus-account__item contentus-account__item--destructive"
+										type="button"
+										role="menuitem"
+										onclick={onSignOut}
+									>
+										Yes, sign out
+									</button>
+									<button
+										class="contentus-account__item"
+										type="button"
+										role="menuitem"
+										onclick={() => (confirmingSignOut = false)}
+									>
+										Cancel
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
 			{:else}
 				<button class="contentus-session__button" type="button" onclick={onSignIn}>
 					Sign in
