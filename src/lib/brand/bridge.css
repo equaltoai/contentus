@@ -543,6 +543,36 @@ code {
 	color: var(--tc-fg);
 }
 
+/* "Load more" (P1-10): a real button, 44px target, centered under the grid.
+   The appended cards announce through the route's visually-hidden status
+   region rather than by moving focus off the control. */
+.contentus-load-more {
+	display: grid;
+	justify-items: center;
+	gap: var(--tc-space-3);
+	margin-top: var(--tc-space-8);
+}
+
+.contentus-load-more__button {
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-6);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-load-more__button:hover:not(:disabled) {
+	border-color: var(--tc-accent);
+}
+
+.contentus-load-more__button:disabled {
+	cursor: default;
+	color: var(--tc-fg-muted);
+}
+
 /* ---- Designed empty / unavailable states ---- */
 .contentus-notice {
 	border: 1px solid var(--tc-outline-variant);

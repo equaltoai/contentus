@@ -13,6 +13,7 @@ reach a listing.
 	import { ArticleIndexCard } from '$lib/greater/faces/blog/components/Article/index.js';
 
 	import { toBlogFaceArticle } from '$lib/cms/articles';
+	import { fetchArticlesPage } from '$lib/cms/pagination';
 	import { articleHref, categoryHref, href as appHref } from '../../facetheory/routing';
 	import type { AppPageDescriptor, ArticlesIndexData } from '../../facetheory/types';
 	import Notice from './Notice.svelte';
@@ -27,6 +28,40 @@ reach a listing.
 	let { page, data, filterSlug = null }: Props = $props();
 
 	const heading = $derived(filterSlug ? `${page.title}: ${filterSlug}` : page.title);
+
+	// "Load more" pages the SAME listing the server painted: the resolved filter
+	// IDs and the cursor both come from the loader, and the fetch is anonymous
+	// for the same reason the initial load is. `data` never changes after
+	// hydration (a filter change is a navigation, not a prop update), so local
+	// state seeded from it is the source of truth from the first click on.
+	let articles = $state(data.articles);
+	let endCursor = $state(data.endCursor);
+	let hasNextPage = $state(data.hasNextPage);
+	let loadingMore = $state(false);
+	let loadMoreFailed = $state(false);
+	let pageStatus = $state('');
+
+	async function loadMore() {
+		if (loadingMore || !hasNextPage) return;
+		loadingMore = true;
+		loadMoreFailed = false;
+
+		const next = await fetchArticlesPage(data.filters, endCursor);
+
+		loadingMore = false;
+		if (!next) {
+			// Nothing on screen changes: the control stays, labelled for retry,
+			// and the status region says what happened.
+			loadMoreFailed = true;
+			pageStatus = 'More articles could not be loaded.';
+			return;
+		}
+
+		articles = [...articles, ...next.articles];
+		endCursor = next.endCursor;
+		hasNextPage = next.hasNextPage;
+		pageStatus = `Showing ${articles.length} articles.`;
+	}
 </script>
 
 <header class="contentus-page-header">
@@ -67,7 +102,7 @@ reach a listing.
 	/>
 {:else}
 	<div class="contentus-card-grid">
-		{#each data.articles as article (article.id)}
+		{#each articles as article (article.id)}
 			<ArticleIndexCard
 				article={toBlogFaceArticle(article)}
 				href={articleHref(article.slug)}
@@ -76,10 +111,20 @@ reach a listing.
 		{/each}
 	</div>
 
-	{#if data.hasNextPage}
-		<p class="contentus-meta">
-			More articles are available. Pagination beyond the first page lands with the
-			reading-surface work in a later milestone.
-		</p>
+	{#if hasNextPage}
+		<div class="contentus-load-more">
+			<button
+				type="button"
+				class="contentus-load-more__button"
+				disabled={loadingMore}
+				onclick={loadMore}
+			>
+				{loadingMore ? 'Loading…' : loadMoreFailed ? 'Try again' : 'Load more articles'}
+			</button>
+			{#if loadMoreFailed}
+				<p class="contentus-meta">More articles could not be loaded.</p>
+			{/if}
+		</div>
 	{/if}
+	<p class="contentus-visually-hidden" role="status">{pageStatus}</p>
 {/if}

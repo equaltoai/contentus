@@ -65,6 +65,12 @@ export interface ArticlesIndexData {
 	categories: CategorySummary[];
 	endCursor: string | null;
 	hasNextPage: boolean;
+	/**
+	 * The filter this listing was loaded with, so the client's "Load more"
+	 * pages the SAME listing. Resolved IDs, not route slugs — `articles`
+	 * filters by ID, and the slug→ID resolution already happened in the loader.
+	 */
+	filters: { seriesId: string | null; categoryId: string | null };
 	unavailable: ContentUnavailable | null;
 }
 

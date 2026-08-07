@@ -107,6 +107,7 @@ is no catch-all render path that could silently show the wrong surface.
 				categories: [],
 				endCursor: null,
 				hasNextPage: false,
+				filters: { seriesId: null, categoryId: null },
 				unavailable: null,
 			}}
 			filterSlug={slug}
