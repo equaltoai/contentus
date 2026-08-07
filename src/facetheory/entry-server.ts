@@ -601,6 +601,30 @@ const hydrationResource = {
 const app = createFaceApp({
 	faces: ROUTE_PATTERNS.map(createFaceForRoute),
 	resources: [hydrationResource as never],
+	// FaceTheory swallows render errors into its safe 500 document and reports
+	// them ONLY through these hooks — with no hook, a route that throws is a
+	// silent 500 in CloudWatch, which is exactly how the double-instantiation
+	// fault (see vite.config.ts `codeSplitting`) ran undetected. Logging here
+	// changes nothing about the response; it makes the next failure diagnosable
+	// from the SSR host's logs alone.
+	observability: {
+		log: (event: { level: string; event: string; path?: string; routePattern?: string }) => {
+			if (event.level === 'error') console.error('[facetheory]', JSON.stringify(event));
+		},
+		onError: (error: unknown, ctx: { path?: string; routePattern?: string; phase?: string; errorClass?: string }) => {
+			console.error(
+				'[facetheory] render error',
+				JSON.stringify({
+					path: ctx.path,
+					routePattern: ctx.routePattern,
+					phase: ctx.phase,
+					errorClass: ctx.errorClass,
+					message: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined,
+				})
+			);
+		},
+	},
 });
 
 /**

@@ -153,6 +153,12 @@
         "reason": "Loads build/server/handler.mjs, the SSR entry the build just produced. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and its path is assembled at run time rather than written."
       },
       {
+        "file": "tests/ssr-routes.test.mjs",
+        "line": 37,
+        "expression": "import(`${pathToFileURL(entry).href}?install=regression-test`)",
+        "reason": "Loads build/server/handler.mjs with the same query suffix lesser's client_ssr_host wrapper appends, which is the regression probe for the double-instantiation defect that 500'd every context-using route. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and the suffixed specifier is assembled at run time rather than written."
+      },
+      {
         "file": "tests/messaging-races.test.mjs",
         "line": 612,
         "expression": "import(pathToFileURL(file).href)",
@@ -298,7 +304,7 @@
       "tests/seam-graph.test.mjs": "89b89e09b71c2e65d249f3592add793d6c627d66f1b5bb1c509ec389d3d9c5bb",
       "tests/ssr-messages.test.mjs": "46215833f4c74951839b9f500dec57dad3e709d5cc7601a9a10c2ab188c4b823",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
-      "tests/ssr-routes.test.mjs": "6670a40d1ff2df197d85a6bb4d8ebccf10bcce7d3b6e3caa44815c308079b10c",
+      "tests/ssr-routes.test.mjs": "3515f2f3e2979416b4e0c6d9607c6f8940388ed23fad606081e8b9bdab65a63f",
       "tests/ssr-timelines.test.mjs": "270adc5c9af38efb1acceb6ee1c8967fa6138c46df5111b2b766ca420cc030cc",
       "tests/stylesheet.test.mjs": "a9b08c7db5c8ad6dbdf8ccaf2ea5677cb19f4ea577ed8a0bb43ce0738aea3d2a",
       "tests/timeline-adapters.test.mjs": "679d8db67a7a67d8550eb44d9fcceb65c7818c6722b5bcb5b5dbc6f8236ede1b",
