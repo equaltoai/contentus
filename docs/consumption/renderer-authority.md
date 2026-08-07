@@ -196,32 +196,37 @@ vendored source is never hand-edited.
 
 ## FaceTheory
 
-**Strict CSP makes an absolute canonical `<link>` unemittable.** At FaceTheory
-v4.0.1, `renderFaceHead` validates every head `<link href>` under a strict
+**Strict CSP and the canonical `<link>` — resolved at FaceTheory v4.0.6.** At
+v4.0.1, `renderFaceHead` validated every head `<link href>` under a strict
 policy as same-origin-or-relative, resolving "same origin" against an
-`allowedOrigin` option — but `FaceApp` never forwards one. `dist/app.js` calls
-`renderFaceHead(out, { cspNonce: req.cspNonce })` and nothing else, so
-`allowedOrigin` is always undefined and the only shape that passes is a relative
-URL. Any absolute href throws, and the throw is not local to the tag: it takes
-the whole route to a 500.
+`allowedOrigin` option that `FaceApp` never forwarded: `dist/app.js` called
+`renderFaceHead(out, { cspNonce })` and nothing else, so the only shape that
+passed was a relative URL and any absolute href threw — taking the whole route
+to a 500, which is exactly what the loaded-article path did before the reader
+component ever ran (a branch the degraded-path audits could not reach, because
+an article that fails to load emits no canonical tag at all). Contentus's
+workaround emitted the same-origin identity in relative form.
 
-This is not a hypothetical. `<link rel="canonical" href="https://…">` is exactly
-what lesser's Article identity contract asks a reading surface to advertise, so
-the loaded-article path 500'd before the reader component ever ran — a branch
-the degraded-path audits could not reach, because an article that fails to load
-emits no canonical tag at all.
+FaceTheory v4.0.6 (theory-cloud/FaceTheory#404) closes the call-site gap:
+`toHTTPResponse` now derives a per-request `allowedOrigin`
+(`allowedOriginForRequest` in `dist/app.js`) from a configured
+`canonicalOrigin`, the `x-facetheory-original-host` /
+`x-apptheory-original-host` + `cloudfront-forwarded-proto` pairs, or the
+generic `x-forwarded-host` / `x-forwarded-proto` (rightmost) with a `host`
+fallback, and forwards it into `renderFaceHead`. The relative-form workaround
+is retired: the canonical link carries lesser's absolute Article identity.
 
-Contentus's handling, at `headTagsForRoute` in `src/facetheory/entry-server.ts`:
-`og:url` keeps lesser's absolute identity (meta content is not subject to the
-check), and the `<link>` carries the same-origin identity in relative form,
-which resolves byte-identically against the document base. A genuinely
-cross-origin canonical — a syndicated `article.canonicalUrl` — cannot be
-expressed relatively and gets no link tag. That is a real loss of fidelity, and
-the reason this is written down rather than absorbed silently.
-
-Sunset: delete `canonicalLinkHref` and emit the absolute href the day FaceTheory
-forwards a per-request `allowedOrigin` into `renderFaceHead`. The framework
-already has the option and the parameter — only the call site is missing.
+One trust-boundary consequence, handled in `normalizeEvent` in
+`src/facetheory/entry-server.ts`: the generic headers FaceTheory reads are
+viewer-settable on `/l/*` (CloudFront forwards viewer headers verbatim; only
+the `x-lesser-forwarded-*` pair is overwritten at the edge). So contentus
+replaces any viewer-supplied `x-forwarded-host` / `x-forwarded-proto` with the
+edge-verified values before FaceTheory sees the request, and deletes both when
+no trusted origin exists — the origin the strict-CSP check validates against
+is the one lesser verified, never one a viewer named. The same-origin guard in
+`canonicalLinkHref` stays: a cross-origin syndicated canonical can never pass
+the check and still gets no link tag (rather than a 500), with `og:url`
+carrying the absolute identity as before.
 
 ## Routing these upstream
 

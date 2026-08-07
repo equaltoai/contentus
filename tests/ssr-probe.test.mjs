@@ -141,6 +141,15 @@ test('a spoofed forwarding header never reaches the advertised identity', async 
 		value.html,
 		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
 	);
+	// FaceTheory 4.0.6 validates absolute link hrefs against a request-derived
+	// allowedOrigin read from x-forwarded-* — which this exact bag spoofs. The
+	// handler replaces those headers with the edge-verified pair before
+	// FaceTheory sees them, so the canonical resolves same-origin and renders.
+	assert.match(
+		value.html,
+		/href="https:\/\/instance\.example\.com\/articles\/hello" rel="canonical"/,
+		'the viewer-supplied x-forwarded-* must not steer the strict-CSP origin check'
+	);
 	assert.doesNotMatch(value.html, /evil\.example/, 'a spoofed host must not reach the document');
 });
 
@@ -474,10 +483,15 @@ test('canonical identity is advertised in both forms lesser expects', async () =
 		value.html,
 		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
 	);
-	// ...and the canonical link carries the same URL in the relative form
-	// FaceTheory's strict CSP permits. Note /articles/, not the /l/ reading
+	// ...and so does the canonical link. FaceTheory 4.0.6 forwards a per-request
+	// allowedOrigin into the strict-CSP head check, so the relative-form
+	// workaround is retired: the link carries the absolute identity, validated
+	// against the edge-verified origin. Note /articles/, not the /l/ reading
 	// route: the identity is lesser's, and contentus does not rewrite it.
-	assert.match(value.html, /href="\/articles\/hello" rel="canonical"/);
+	assert.match(
+		value.html,
+		/href="https:\/\/instance\.example\.com\/articles\/hello" rel="canonical"/
+	);
 });
 
 test('a cross-origin canonical is left to og:url rather than mis-stated', async () => {
@@ -491,7 +505,8 @@ test('a cross-origin canonical is left to og:url rather than mis-stated', async 
 		value.html,
 		/content="https:\/\/syndicated\.example\/posts\/hello" property="og:url"/
 	);
-	// A cross-origin canonical cannot be expressed relatively, so no link tag is
-	// emitted — better than emitting one that points somewhere else.
+	// A cross-origin canonical can never pass the strict-CSP same-origin check,
+	// so no link tag is emitted — better than emitting one that points somewhere
+	// else, or throwing the route to a 500.
 	assert.doesNotMatch(value.html, /rel="canonical"/);
 });

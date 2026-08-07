@@ -455,7 +455,7 @@ Gaps filed from the M1 rework round (same day, at rework head `20e03ea2`):
 | Item                                                                                                          | Owner                | Status                                                                                              |
 | ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
 | Blog face `Article/context.ts` uses runes without the `.svelte.` infix; uncompiled `$state` in built bundles  | `greater-components` | Filed greater-components#921 — absorbed via `compileModule.include`; sunset tied to the rename       |
-| `FaceApp` never forwards `allowedOrigin` into `renderFaceHead`; absolute `<link href>` 500s under strict CSP  | `FaceTheory`         | Filed theory-cloud/FaceTheory#404 — relative-canonical workaround; cross-origin canonicals unserved  |
+| `FaceApp` never forwards `allowedOrigin` into `renderFaceHead`; absolute `<link href>` 500s under strict CSP  | `FaceTheory`         | Filed theory-cloud/FaceTheory#404 — **closed in FaceTheory v4.0.6** (`allowedOriginForRequest`); workaround sunset 2026-08-07, absolute canonical emitted |
 | `CLIENT_APP_GUIDE.md` pins FaceTheory v3.2.2; proven pin is v4.0.1                                            | `lesser`             | Filed lesser#1290 — minor doc fix                                                                   |
 
 Gaps found consuming the compose surface in M3 (2026-07-31, on branch
