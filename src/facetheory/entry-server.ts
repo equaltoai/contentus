@@ -393,6 +393,17 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
 	}
 	if (article?.ogImage) {
 		tags.push({ type: 'meta', attrs: { property: 'og:image', content: article.ogImage } });
+	} else if (origin) {
+		// Shared links render a card only when og:image is present, and most
+		// articles carry none. The brand card stands in — absolute, because a
+		// relative og:image resolves against nothing a crawler can rely on, and
+		// meta content is not subject to the strict-CSP same-origin check that
+		// governs <link href>. No origin means no claim about where the card
+		// lives, so none is made.
+		tags.push({
+			type: 'meta',
+			attrs: { property: 'og:image', content: `${origin}${CLIENT_ASSET_BASE}brand/og-card.png` },
+		});
 	}
 
 	return { title, tags };

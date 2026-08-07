@@ -189,6 +189,14 @@
 	background: transparent;
 }
 
+/* Read articles dim to the muted foreground: with no archive or read-state
+   of its own yet, :visited is the only signal a returning reader gets that
+   they have already opened a card. Descendant-scoped so it wins over the
+   vendored dark rule on cascade order, the bridge's whole job. */
+[data-theme='dark'] .gr-blog-article-card__link:visited .gr-blog-article-card__title {
+	color: var(--tc-fg-muted);
+}
+
 /* =============================================================
    Surface variants (product design §2)
    -------------------------------------------------------------
@@ -298,6 +306,9 @@ code {
 .contentus-brand {
 	display: inline-flex;
 	align-items: center;
+	/* The wordmark image is 22px tall; the LINK must still meet WCAG 2.2's
+	   24px minimum target, so the box grows around it. */
+	min-height: 24px;
 	text-decoration: none;
 }
 

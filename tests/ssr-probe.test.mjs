@@ -203,6 +203,12 @@ test('the trusted header still wins when an ambient Host disagrees with it', asy
 		value.html,
 		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
 	);
+	// No ogImage on the fixture: the brand card stands in, absolute on the
+	// request origin, so a shared link still renders a card.
+	assert.match(
+		value.html,
+		/content="https:\/\/instance\.example\.com\/l\/_assets\/brand\/og-card\.png" property="og:image"/
+	);
 	assert.doesNotMatch(value.html, /attacker\.example/);
 });
 
