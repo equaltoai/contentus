@@ -67,6 +67,10 @@ test('every route server-renders a complete document', async () => {
 		assert.equal(result.status, 200, `${path} should render`);
 		assert.match(result.html, /^<!doctype html>/i, `${path} should emit a full document`);
 		assert.ok(result.html.includes('contentus-shell'), `${path} should render the shell`);
+		assert.ok(
+			result.html.includes('<footer class="contentus-footer">'),
+			`${path} should close with the page's contentinfo landmark`
+		);
 	}
 });
 

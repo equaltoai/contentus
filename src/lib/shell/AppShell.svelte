@@ -201,5 +201,12 @@ twice, not two navigation systems.
 		{@render children?.()}
 	</main>
 
+	<!-- The page's one contentinfo landmark. It sits OUTSIDE <main>: a footer
+	     scoped to main is not a landmark at all (HTML-AAM), which is how the
+	     site shipped no footer before. -->
+	<footer class="contentus-footer">
+		<p>Contentus — long-form publishing on this instance.</p>
+	</footer>
+
 	<MobileTabBar {page} {authenticated} />
 </div>
