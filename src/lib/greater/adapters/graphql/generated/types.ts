@@ -1081,6 +1081,8 @@ export type Article = {
   readonly publishedAt: Scalars['Time']['output'];
   readonly publishedBy?: Maybe<Actor>;
   readonly readingTimeMinutes: Scalars['Int']['output'];
+  /** Canonical sanitized HTML. Never fall back to rendering content when this field is unavailable. */
+  readonly renderedHtml?: Maybe<Scalars['String']['output']>;
   readonly reviewStatus?: Maybe<Scalars['String']['output']>;
   readonly reviewedBy?: Maybe<Actor>;
   readonly seoDescription?: Maybe<Scalars['String']['output']>;
@@ -4613,6 +4615,7 @@ export type Query = {
   readonly announcements: ReadonlyArray<Announcement>;
   readonly article?: Maybe<Article>;
   readonly articleBySlug?: Maybe<Article>;
+  /** List published articles, optionally filtering public article text with a case-insensitive substring search. */
   readonly articles: ArticleConnection;
   readonly bandwidthUsage: BandwidthReport;
   readonly blocks: ActorListPage;
@@ -4913,6 +4916,7 @@ export type QueryArticlesArgs = {
   authorId?: InputMaybe<Scalars['ID']['input']>;
   categoryId?: InputMaybe<Scalars['ID']['input']>;
   first?: InputMaybe<Scalars['Int']['input']>;
+  search?: InputMaybe<Scalars['String']['input']>;
   seriesId?: InputMaybe<Scalars['ID']['input']>;
 };
 

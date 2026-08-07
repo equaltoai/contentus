@@ -23,7 +23,17 @@ test('the pack webfont import is removed whole, semicolons and all', () => {
 	const stripped = stripCssImports(css);
 
 	assert.ok(!stripped.includes('@import'));
-	assert.ok(!stripped.includes('fonts.googleapis.com'));
+	// Compare hostnames by strict equality against parsed URLs, never by a
+	// substring check: extract any surviving url() references and parse them.
+	// (CodeQL js/incomplete-url-substring-sanitization flags any
+	// includes()/indexOf() against a host literal — rightly so.)
+	const survivingHosts = [...stripped.matchAll(/url\(\s*['"]([^'"]+)['"]/g)].map(
+		([, href]) => new URL(href).hostname
+	);
+	assert.ok(
+		survivingHosts.every((host) => host !== 'fonts.googleapis.com'),
+		'the webfont host must not survive the strip'
+	);
 	assert.ok(!stripped.includes('display=swap'));
 	// The following rule must survive intact — this is the regression that matters.
 	assert.match(stripped, /--tc-bg:\s*#081226/);
@@ -46,7 +56,16 @@ test('the assembled stylesheet passes its own integrity assertions', () => {
 
 	assert.ok(css.length > 10_000, 'assembled sheet is implausibly small');
 	assert.match(css, /--tc-bg\s*:/);
-	assert.match(css, /--gr-color-neutral-0\s*:/);
+	assert.match(
+		css,
+		/\[data-theme='dark'\] \.gr-blog-article-card/,
+		'the vendored dark rules must ship in the assembled sheet'
+	);
+	assert.doesNotMatch(
+		css,
+		/--gr-color-neutral-0\s*:/,
+		'the pre-0.13.2 inverted neutral ramp is deleted; nothing vendored consumes it'
+	);
 	assert.doesNotThrow(() => assertStylesheetIntegrity(css));
 });
 

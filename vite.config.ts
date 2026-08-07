@@ -103,6 +103,22 @@ export default defineConfig(({ command, isSsrBuild }) => {
 							entryFileNames: 'handler.mjs',
 							chunkFileNames: 'chunks/[name]-[hash].mjs',
 							assetFileNames: 'assets/[name]-[hash][extname]',
+							// The handler must be ONE self-contained module. FaceTheory
+							// dynamically imports `svelte/server`, which Rollup factors into
+							// a shared chunk that statically re-exports from the entry —
+							// a circular edge (entry → chunk → entry). lesser's SSR host
+							// imports the entry as `handler.mjs?install=<id>` to scope the
+							// module cache, and the query makes Node instantiate the entry
+							// TWICE: the chunk's bare `../handler.mjs` resolves to a second,
+							// query-less copy. Svelte's SSR context (`ssr_context`) is a
+							// module global, so the render runtime (no-query instance) and
+							// the component code (queried instance) read different
+							// `ssr_context` values and every `getContext`/`setContext`
+							// throws `lifecycle_outside_component` — a 500 on exactly the
+							// routes whose components use context. Inlining the dynamic
+							// import removes the cross-file edge, so a query-suffixed
+							// import can only ever produce one instance.
+							codeSplitting: false,
 						}
 					: {
 							entryFileNames: 'assets/[name]-[hash].js',

@@ -12,6 +12,7 @@ import {
 	withholdUnrenderableSource,
 } from './articles';
 import { GraphQLTransportError, graphqlRequest, isFeatureDisabledError } from './graphql';
+import { ARTICLES_PAGE_SIZE } from './pagination';
 import {
 	ARTICLES_INDEX_QUERY,
 	ARTICLE_BY_SLUG_QUERY,
@@ -35,7 +36,7 @@ import type { CategorySummary, SeriesSummary } from './types';
  * and a reader should not see a stack trace because an origin blipped.
  */
 
-const INDEX_PAGE_SIZE = 12;
+const NO_FILTERS = { seriesId: null, categoryId: null };
 
 function unavailableFromFailure(error: unknown): ContentUnavailable {
 	if (error instanceof GraphQLTransportError) {
@@ -65,12 +66,17 @@ export async function loadArticlesIndex(
 	ctx: LoaderContext,
 	filters: { seriesId?: string | null; categoryId?: string | null } = {}
 ): Promise<ArticlesIndexData> {
+	const appliedFilters = {
+		seriesId: filters.seriesId ?? null,
+		categoryId: filters.categoryId ?? null,
+	};
 	const empty: ArticlesIndexData = {
 		articles: [],
 		series: [],
 		categories: [],
 		endCursor: null,
 		hasNextPage: false,
+		filters: appliedFilters,
 		unavailable: null,
 	};
 
@@ -81,7 +87,7 @@ export async function loadArticlesIndex(
 				{
 					seriesId: filters.seriesId ?? null,
 					categoryId: filters.categoryId ?? null,
-					first: INDEX_PAGE_SIZE,
+					first: ARTICLES_PAGE_SIZE,
 					after: null,
 				},
 				{ endpoint: ctx.endpoint, ...(ctx.signal ? { signal: ctx.signal } : {}) }
@@ -131,6 +137,7 @@ export async function loadArticlesIndex(
 			categories,
 			endCursor: connection.endCursor,
 			hasNextPage: connection.hasNextPage,
+			filters: appliedFilters,
 			unavailable: null,
 		};
 	} catch (error) {
@@ -150,12 +157,15 @@ export async function loadFilteredIndex(
 	kind: 'series' | 'category',
 	slug: string
 ): Promise<ArticlesIndexData> {
+	// The resolved filter ID is unknown until the slug lookup answers, so the
+	// empty shape here carries no filters; the loaded listing carries its own.
 	const empty: ArticlesIndexData = {
 		articles: [],
 		series: [],
 		categories: [],
 		endCursor: null,
 		hasNextPage: false,
+		filters: NO_FILTERS,
 		unavailable: null,
 	};
 

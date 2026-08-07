@@ -2,185 +2,191 @@ TAP version 13
 # Subtest: a spoofed forwarding header never becomes the server-side fetch target
 ok 1 - a spoofed forwarding header never becomes the server-side fetch target
   ---
-  duration_ms: 19.008336
+  duration_ms: 24.75579
   type: 'test'
   ...
 # Subtest: a spoofed forwarding header never reaches the advertised identity
 ok 2 - a spoofed forwarding header never reaches the advertised identity
   ---
-  duration_ms: 1.185202
+  duration_ms: 1.144671
   type: 'test'
   ...
 # Subtest: with no trusted host at all, no viewer-supplied host is substituted
 ok 3 - with no trusted host at all, no viewer-supplied host is substituted
   ---
-  duration_ms: 1.515615
+  duration_ms: 1.595922
   type: 'test'
   ...
 # Subtest: an ambient Host never becomes the server-side fetch target
 ok 4 - an ambient Host never becomes the server-side fetch target
   ---
-  duration_ms: 0.884236
+  duration_ms: 0.971734
   type: 'test'
   ...
 # Subtest: the trusted header still wins when an ambient Host disagrees with it
 ok 5 - the trusted header still wins when an ambient Host disagrees with it
   ---
-  duration_ms: 0.866098
+  duration_ms: 1.002161
   type: 'test'
   ...
 # Subtest: with no trusted host the page degrades on a real fetch, not just a stubbed one
 ok 6 - with no trusted host the page degrades on a real fetch, not just a stubbed one
   ---
-  duration_ms: 1.114338
+  duration_ms: 1.076522
   type: 'test'
   ...
 # Subtest: a loaded article renders rather than 500ing on its own canonical tag
 ok 7 - a loaded article renders rather than 500ing on its own canonical tag
   ---
-  duration_ms: 0.734986
+  duration_ms: 0.866976
   type: 'test'
   ...
 # Subtest: article index keeps partial data when the GraphQL error envelope contains null
 ok 8 - article index keeps partial data when the GraphQL error envelope contains null
   ---
-  duration_ms: 1.192033
+  duration_ms: 1.145071
   type: 'test'
   ...
 # Subtest: category loader keeps partial data when its GraphQL error envelope contains null
 ok 9 - category loader keeps partial data when its GraphQL error envelope contains null
   ---
-  duration_ms: 0.749479
+  duration_ms: 0.736731
+  type: 'test'
+  ...
+# Subtest: canonical renderedHtml renders even when the stored source is Markdown
+ok 10 - canonical renderedHtml renders even when the stored source is Markdown
+  ---
+  duration_ms: 4.497348
   type: 'test'
   ...
 # Subtest: an HTML article renders its body through the vendored blog face
-ok 10 - an HTML article renders its body through the vendored blog face
+ok 11 - an HTML article renders its body through the vendored blog face
   ---
-  duration_ms: 11.977002
+  duration_ms: 1.382008
   type: 'test'
   ...
 # Subtest: a withheld body is absent from the public hydration payload
-ok 11 - a withheld body is absent from the public hydration payload
+ok 12 - a withheld body is absent from the public hydration payload
   ---
-  duration_ms: 0.390089
+  duration_ms: 0.394805
   type: 'test'
   ...
 # Subtest: a withheld body is absent from the SSR document too
-ok 12 - a withheld body is absent from the SSR document too
+ok 13 - a withheld body is absent from the SSR document too
   ---
-  duration_ms: 0.820524
+  duration_ms: 0.944783
   type: 'test'
   ...
 # Subtest: a displayable body still reaches hydration, since the page shows it
-ok 13 - a displayable body still reaches hydration, since the page shows it
+ok 14 - a displayable body still reaches hydration, since the page shows it
   ---
-  duration_ms: 0.303199
+  duration_ms: 0.759434
   type: 'test'
   ...
 # Subtest: a missing article is a real 404, not a 200 that says "not found"
-ok 14 - a missing article is a real 404, not a 200 that says "not found"
+ok 15 - a missing article is a real 404, not a 200 that says "not found"
   ---
-  duration_ms: 0.696654
+  duration_ms: 0.634617
   type: 'test'
   ...
 # Subtest: a missing series or category is a real 404 too
-ok 15 - a missing series or category is a real 404 too
+ok 16 - a missing series or category is a real 404 too
   ---
-  duration_ms: 1.602175
+  duration_ms: 1.27184
   type: 'test'
   ...
 # Subtest: an instance with long-form off is a 200 product state, not a 404
-ok 16 - an instance with long-form off is a 200 product state, not a 404
+ok 17 - an instance with long-form off is a 200 product state, not a 404
   ---
-  duration_ms: 0.641705
+  duration_ms: 0.541582
   type: 'test'
   ...
 # Subtest: canonical identity is advertised in both forms lesser expects
-ok 17 - canonical identity is advertised in both forms lesser expects
+ok 18 - canonical identity is advertised in both forms lesser expects
   ---
-  duration_ms: 0.581188
+  duration_ms: 0.712214
   type: 'test'
   ...
 # Subtest: a cross-origin canonical is left to og:url rather than mis-stated
-ok 18 - a cross-origin canonical is left to og:url rather than mis-stated
+ok 19 - a cross-origin canonical is left to og:url rather than mis-stated
   ---
-  duration_ms: 0.524075
+  duration_ms: 0.787616
   type: 'test'
   ...
-1..18
-# tests 18
+1..19
+# tests 19
 # suites 0
-# pass 18
+# pass 19
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 104.330004
+# duration_ms 98.927891
 TAP version 13
 # Subtest: origin derives from the edge-injected host
 ok 1 - origin derives from the edge-injected host
   ---
-  duration_ms: 0.764413
+  duration_ms: 0.711583
   type: 'test'
   ...
 # Subtest: an ambient Host header is not a trusted host
 ok 2 - an ambient Host header is not a trusted host
   ---
-  duration_ms: 0.107694
+  duration_ms: 0.109607
   type: 'test'
   ...
 # Subtest: the trusted host wins over every host a caller can set
 ok 3 - the trusted host wins over every host a caller can set
   ---
-  duration_ms: 0.134918
+  duration_ms: 0.150524
   type: 'test'
   ...
 # Subtest: scheme honours the edge-injected proto but defaults to https
 ok 4 - scheme honours the edge-injected proto but defaults to https
   ---
-  duration_ms: 0.088192
+  duration_ms: 0.090812
   type: 'test'
   ...
 # Subtest: a malformed or injected trusted host is rejected rather than guessed
 ok 5 - a malformed or injected trusted host is rejected rather than guessed
   ---
-  duration_ms: 0.109667
+  duration_ms: 0.114926
   type: 'test'
   ...
 # Subtest: a malformed trusted host fails closed rather than reaching for another
 ok 6 - a malformed trusted host fails closed rather than reaching for another
   ---
-  duration_ms: 0.064364
+  duration_ms: 0.062798
   type: 'test'
   ...
 # Subtest: a forwarded host list collapses to its first entry, lower-cased
 ok 7 - a forwarded host list collapses to its first entry, lower-cased
   ---
-  duration_ms: 0.061169
+  duration_ms: 0.063169
   type: 'test'
   ...
 # Subtest: a missing trusted host yields null rather than a fabricated origin
 ok 8 - a missing trusted host yields null rather than a fabricated origin
   ---
-  duration_ms: 0.082944
+  duration_ms: 0.105479
   type: 'test'
   ...
 # Subtest: canonical article identity follows lesser, not the contentus route
 ok 9 - canonical article identity follows lesser, not the contentus route
   ---
-  duration_ms: 0.090826
+  duration_ms: 0.087285
   type: 'test'
   ...
 # Subtest: a slug is encoded into the canonical URL
 ok 10 - a slug is encoded into the canonical URL
   ---
-  duration_ms: 0.129859
+  duration_ms: 0.123222
   type: 'test'
   ...
 # Subtest: the GraphQL endpoint is derived, never hard-coded
 ok 11 - the GraphQL endpoint is derived, never hard-coded
   ---
-  duration_ms: 0.068941
+  duration_ms: 0.896822
   type: 'test'
   ...
 1..11
@@ -191,9 +197,9 @@ ok 11 - the GraphQL endpoint is derived, never hard-coded
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 66.90721
+# duration_ms 67.753988
 
 SEC-6 inventory complete: 2 pinned probe file(s), all passing.
-  = tests/ssr-probe.test.mjs: 18 passing test points (minimum 18), content aa536dc71a169016…
+  = tests/ssr-probe.test.mjs: 19 passing test points (minimum 18), content 866d4b725ce4b5cc…
   = tests/origin.test.mjs: 11 passing test points (minimum 11), content 8dc087d361fce1c0…
 Each probe is a regular file, not a symlink, and matches its pinned content hash.

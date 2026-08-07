@@ -10,7 +10,16 @@ Auth awareness is deliberately client-only. The server render is always the
 anonymous nav because the session token lives in `sessionStorage` — there is no
 cookie for the server to read, by design. That means SSR output for the public
 article surfaces is identical for every visitor and safe to cache, and the
-authenticated entries appear on hydration.
+authenticated entries appear on hydration. Two consequences of that are
+managed, not hidden: the session control renders an inert, invisible
+placeholder until mount so nobody is shown the wrong authentication state, and
+the auth-only nav entries (Review, Messages) appearing post-mount is a reflow
+confined to the sidebar column — reserved slots for them were rejected because
+their collapse would then reflow every ANONYMOUS reader's sidebar, the common
+case on a public blog, to save signed-in reviewers a fill that touches no
+content. Timestamps are the remaining true mismatch (server UTC, client
+local); that one is upstream's to fix (greater-components#1007) because the
+formatting chain is vendored end to end.
 
 Below 960px the sidebar nav gives way to the bottom tab bar (product design
 §4). Both are rendered — the swap is CSS, not a JS viewport measurement, because
@@ -37,10 +46,44 @@ twice, not two navigation systems.
 
 	let { page, children }: Props = $props();
 
+	let mounted = $state(false);
 	let authenticated = $state(false);
 	let signInError = $state<string | null>(null);
 
+	// Account menu + sign-out confirmation. Signing out is destructive to the
+	// reader's working context (the messages face drops its socket and its
+	// conversations on the announcement), so it lives behind a menu rather
+	// than as a bare prominent button, and the menu item asks before acting.
+	let accountOpen = $state(false);
+	let confirmingSignOut = $state(false);
+	let accountMenu = $state<HTMLDivElement | null>(null);
+
+	// Close on Escape and on any pointerdown outside the menu — but only while
+	// it is open, so the shell registers no listeners it does not need.
+	$effect(() => {
+		if (!accountOpen) return;
+		const onKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				accountOpen = false;
+				confirmingSignOut = false;
+			}
+		};
+		const onPointerDown = (event: PointerEvent) => {
+			if (accountMenu && event.target instanceof Node && !accountMenu.contains(event.target)) {
+				accountOpen = false;
+				confirmingSignOut = false;
+			}
+		};
+		document.addEventListener('keydown', onKeydown);
+		document.addEventListener('pointerdown', onPointerDown);
+		return () => {
+			document.removeEventListener('keydown', onKeydown);
+			document.removeEventListener('pointerdown', onPointerDown);
+		};
+	});
+
 	onMount(() => {
+		mounted = true;
 		authenticated = isAuthenticated();
 		// The badge's count comes from an authenticated read, so it cannot exist in
 		// the server document — it appears once the session has been read. The
@@ -81,6 +124,8 @@ twice, not two navigation systems.
 		// pass, where `clearSession` returns early).
 		clearSession();
 		authenticated = false;
+		accountOpen = false;
+		confirmingSignOut = false;
 		unreadStore.reset();
 	}
 </script>
@@ -91,12 +136,18 @@ twice, not two navigation systems.
      JavaScript deciding it. The composer uses it to become a full-screen sheet
      below 960px (product design §5) while the same document still renders as a
      panel on a desktop. -->
-<div class="contentus-shell" data-surface={page.surface} data-page={page.key}>
+<!-- `data-theme="dark"` lives on the shell rather than on <html>: FaceTheory
+     v4.0.6's adapter pipeline (assembleFaceRenderResult) does not forward
+     htmlAttrs from renderOptions, so the document element is not contentus's
+     to attribute. Every vendored `[data-theme='dark']` rule resolves against
+     this ancestor, which is all the cascade needs; the `--gr-color-gray-*`
+     ramp itself comes from the greater tokens layer at :root. -->
+<div class="contentus-shell" data-theme="dark" data-surface={page.surface} data-page={page.key}>
 	<header class="contentus-sidebar">
 		<a class="contentus-brand" href={appHref('/')} aria-label="Contentus home">
 			<img
 				class="contentus-brand__wordmark"
-				src="/l/_assets/brand/wordmark-theory-cloud.svg"
+				src="/l/_assets/brand/wordmark-theory-cloud-light.svg"
 				alt="Theory Cloud"
 				width="160"
 				height="22"
@@ -148,10 +199,76 @@ twice, not two navigation systems.
 		</nav>
 
 		<div class="contentus-session">
-			{#if authenticated}
-				<button class="contentus-session__button" type="button" onclick={onSignOut}>
-					Sign out
+			{#if !mounted}
+				<!-- Neutral placeholder, not a guess: the server cannot read the
+				     session (sessionStorage, no cookie), so SSR and the first client
+				     pass both render this inert, invisible slot and the real control
+				     swaps in after mount. Painting "Sign in" here would show a signed-in
+				     reviewer the wrong authentication state for a beat — a flash of
+				     incorrect chrome, not just late chrome. `visibility: hidden` holds
+				     the space so the swap does not move anything. -->
+				<button
+					class="contentus-session__button contentus-session__button--pending"
+					type="button"
+					disabled
+					aria-hidden="true"
+					tabindex="-1"
+				>
+					Sign in
 				</button>
+			{:else if authenticated}
+				<div class="contentus-account" bind:this={accountMenu}>
+					<button
+						class="contentus-session__button"
+						type="button"
+						aria-haspopup="menu"
+						aria-expanded={accountOpen}
+						onclick={() => {
+							accountOpen = !accountOpen;
+							confirmingSignOut = false;
+						}}
+					>
+						Account
+					</button>
+					{#if accountOpen}
+						<div class="contentus-account__menu" role="menu">
+							{#if !confirmingSignOut}
+								<button
+									class="contentus-account__item contentus-account__item--destructive"
+									type="button"
+									role="menuitem"
+									onclick={() => (confirmingSignOut = true)}
+								>
+									Sign out
+								</button>
+							{:else}
+								<!-- The confirmation is inline rather than a second dialog: one
+								     step of friction inside the menu the reader already opened. -->
+								<p class="contentus-account__confirm" id="contentus-signout-confirm">
+									Sign out of this session?
+								</p>
+								<div class="contentus-account__confirm-actions">
+									<button
+										class="contentus-account__item contentus-account__item--destructive"
+										type="button"
+										role="menuitem"
+										onclick={onSignOut}
+									>
+										Yes, sign out
+									</button>
+									<button
+										class="contentus-account__item"
+										type="button"
+										role="menuitem"
+										onclick={() => (confirmingSignOut = false)}
+									>
+										Cancel
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
 			{:else}
 				<button class="contentus-session__button" type="button" onclick={onSignIn}>
 					Sign in
@@ -166,6 +283,13 @@ twice, not two navigation systems.
 	<main class="contentus-main" id="contentus-main">
 		{@render children?.()}
 	</main>
+
+	<!-- The page's one contentinfo landmark. It sits OUTSIDE <main>: a footer
+	     scoped to main is not a landmark at all (HTML-AAM), which is how the
+	     site shipped no footer before. -->
+	<footer class="contentus-footer">
+		<p>Contentus — long-form publishing on this instance.</p>
+	</footer>
 
 	<MobileTabBar {page} {authenticated} />
 </div>

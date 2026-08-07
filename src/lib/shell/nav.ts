@@ -39,6 +39,11 @@ export const NAV_ENTRIES: NavEntry[] = [
 		label: 'Articles',
 		href: href('/'),
 		pageKey: 'articles-index',
+		// The reading surfaces are still the Articles destination: a nav that
+		// dropped its current marker when a reader opened an article, series,
+		// or category would say they had left the surface they are looking at.
+		// Same rule as Messages and its thread.
+		alsoCurrentFor: ['article-reader', 'series', 'category'],
 		surface: 'journal',
 		requiresAuth: false,
 		upcoming: null,

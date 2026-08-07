@@ -434,9 +434,9 @@ gaps are recorded, never patched around.
 | Agent-roster / MCP-detail components                                                             | `greater-components` | **Planned** — new design work; Face 6 consumes                                    |
 | Bottom-nav / drawer / sheet mobile components                                                    | `greater-components` | **Planned** — new design work; until vendored, contentus composes from primitives |
 | Tabbed instance/federated timeline face                                                          | `greater-components` | **Planned** — small composition; contentus owns interim                           |
-| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | Open gap — determines `data-theme="dark"` vs ramp-inversion bridge                |
+| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | **Resolved at v0.13.2** — `data-theme="dark"` now set; residual holes (`gr-blog-author-card`, `.gr-menu`) **closed at v0.13.3 (#1009)** |
 | Licensed self-hosted fonts (Inter/Geist/JetBrains Mono)                                          | operator decision    | Open — v1 runs system fallbacks                                                   |
-| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | Recorded gap — v1 navigates by series/category                                    |
+| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | **Closed at lesser v1.6.3 (#1342)** — `Query.articles(search: String)`; index search UI is the client-side follow-up |
 
 Gaps filed upstream from M1 consumption evidence (2026-07-30, verified by Factory before filing; routed via contentus#1):
 
@@ -455,7 +455,7 @@ Gaps filed from the M1 rework round (same day, at rework head `20e03ea2`):
 | Item                                                                                                          | Owner                | Status                                                                                              |
 | ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
 | Blog face `Article/context.ts` uses runes without the `.svelte.` infix; uncompiled `$state` in built bundles  | `greater-components` | Filed greater-components#921 — absorbed via `compileModule.include`; sunset tied to the rename       |
-| `FaceApp` never forwards `allowedOrigin` into `renderFaceHead`; absolute `<link href>` 500s under strict CSP  | `FaceTheory`         | Filed theory-cloud/FaceTheory#404 — relative-canonical workaround; cross-origin canonicals unserved  |
+| `FaceApp` never forwards `allowedOrigin` into `renderFaceHead`; absolute `<link href>` 500s under strict CSP  | `FaceTheory`         | Filed theory-cloud/FaceTheory#404 — **closed in FaceTheory v4.0.6** (`allowedOriginForRequest`); workaround sunset 2026-08-07, absolute canonical emitted |
 | `CLIENT_APP_GUIDE.md` pins FaceTheory v3.2.2; proven pin is v4.0.1                                            | `lesser`             | Filed lesser#1290 — minor doc fix                                                                   |
 
 Gaps found consuming the compose surface in M3 (2026-07-31, on branch
@@ -481,6 +481,17 @@ Contentus-owned components offered upstream once proven on an instance
 (framework feedback lane), each carrying a swap-to-vendored note in its header:
 `src/lib/shell/MobileTabBar.svelte`, `src/lib/shell/Sheet.svelte`, and the
 compose-side content-warning field.
+
+Gaps filed from the 2026-08-06 design & accessibility audit remediation
+(2026-08-07, on branch `contentus/audit-remediation`):
+
+| Item                                                                                                          | Owner                | Status                                                                                              |
+| ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| `formatDateTime` cannot pin a timezone; SSR (UTC) and hydrated client (local) render different visible text   | `greater-components` | **Primitive closed at v0.13.3 (#1007)** — `timeZone` option shipped; blog date helpers don't thread it, follow-up filed as greater-components#1013 |
+| Blog article card is one giant anchor; accessible name duplicates title when no distinct excerpt exists       | `greater-components` | **Closed at v0.13.3 (#1008)** — link wraps the title only, stretched via `::after`; contentus also dropped its own `?? title` excerpt fallback    |
+| `gr-blog-author-card` and `.gr-menu` ship no `[data-theme='dark']` rules                                      | `greater-components` | **Closed at v0.13.3 (#1009)** — dark rules ship with contrast assertions upstream; not forked locally           |
+| `greater update --all` OOMs on the default Node heap; needed 12 GB here                                        | `greater-components` | **Closed at v0.13.3 (#1010)** — eager quadratic diffs removed; the 0.13.3 `update --all` run completed on a default heap |
+| No article search on the CMS read path; `client_ssr_host`'s query-suffixed import double-instantiates bundles | `lesser`             | **Search half closed at lesser v1.6.3 (#1342)** — additive `Query.articles(search: String)`; import hazard already fixed client-side (`codeSplitting: false`) |
 
 **SEC-2's disclosed advisory set is EMPTY as of the greater-v0.13.0 pin bump.**
 `pnpm audit --audit-level=high` reports nothing across the whole installed graph,

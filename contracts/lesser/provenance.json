@@ -41,18 +41,18 @@
   "upstream": {
     "repository": "equaltoai/lesser",
     "path": "docs/contracts/graphql-schema.graphql",
-    "ref": "cbe9787f9b97c1cc6472183834cfd066e61801b2",
-    "ref_description": "equaltoai/lesser main at 2026-08-05T21:06:06Z, merge of PR #1334",
-    "schema_last_modified_at": "bb6fc92662749f88d59920fe432388d5682ed4d2"
+    "ref": "f833ea0b6dea78c11a2b6da6289bf2305f770ebe",
+    "ref_description": "equaltoai/lesser v1.6.3 release tag, published 2026-08-07",
+    "schema_last_modified_at": "0ac07c3f347902c591a6844a76cc6e4b29d96268"
   },
   "artifact": {
     "path": "contracts/lesser/graphql-schema.graphql",
-    "bytes": 108653,
-    "sha256": "62390f0608fa09d496b9c75c4729bdbdf060c6115fce9332de66a1502147c373",
-    "blob_sha1": "576d28037ee654193a5215dc321e6fc75531270d"
+    "bytes": 108911,
+    "sha256": "fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064",
+    "blob_sha1": "b907306de7b66bd6ab91665b59bb9b1f00897672"
   },
   "inspected": {
-    "at": "2026-08-06",
-    "corroborating_source": "equaltoai/lesser graph/core.graphql at the same ref declares the identical `type Actor`, including `avatar: String`. The string `avatarUrl` does not occur in either file; in lesser it occurs only in auth-ui's vendored greater adapter copy and in Mastodon-compatibility REST/OAuth-provider plumbing, never in the GraphQL Actor type."
+    "at": "2026-08-07",
+    "corroborating_source": "The only schema delta from the previous pin (v1.6.2, 9814bf8e) is additive: `search: String` on `Query.articles`, documented in-schema as 'List published articles, optionally filtering public article text with a case-insensitive substring search.' This is the upstream answer to contentus's lesser#1342 (index search + the client_ssr_host query-suffix hazard's contract half) — public article search arrives in lesser's contract rather than as a client-side invention. greater-v0.13.3 (#1011) regenerates its GraphQL adapters against the same optional argument. Verified against the v1.6.3 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.3 --jq .sha`."
   }
 }

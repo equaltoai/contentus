@@ -113,7 +113,8 @@ function main() {
 	);
 	console.log(`            blob ${pin.provenance.artifact.blob_sha1} (${PROVENANCE_PATH})`);
 	console.log(
-		'            Integrity checked here; PROVENANCE is the blob id above compared against lesser.'
+		'            Integrity checked here; PROVENANCE is the blob id above compared against lesser —\n' +
+			'            dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).'
 	);
 	console.log(
 		`Documents:  ${documents.length} in ${DOCUMENT_INVENTORY.length} inventoried module(s), ` +

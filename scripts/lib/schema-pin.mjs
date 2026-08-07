@@ -91,6 +91,33 @@ export const REQUIRED_SCHEMA_PIN_FIELDS = [
 ];
 
 /**
+ * The flat schema pin this module checks, derived from the nested
+ * `contracts/lesser/provenance.json` document (`upstream` / `artifact`).
+ *
+ * The nested document is the shape the M2 document gate reads; the flat pin is
+ * the shape the integrity and provenance checks below were written against.
+ * This is the one place the two meet, so a drift between them is a finding
+ * here rather than a silent divergence between two files. `repository` in the
+ * nested document is `owner/repo`; the flat pin carries the full URL because
+ * `parseGitHubRepository` restricts the host, and the host must be stated,
+ * not implied.
+ */
+export function schemaPinFromProvenance(provenance) {
+	const upstream = provenance?.upstream ?? {};
+	const artifact = provenance?.artifact ?? {};
+	const repository = upstream.repository ?? '';
+	return {
+		repository: repository.startsWith('https://') ? repository : `https://github.com/${repository}`,
+		ref: upstream.ref,
+		upstream_path: upstream.path,
+		pinned_path: artifact.path,
+		sha256: artifact.sha256,
+		bytes: artifact.bytes,
+		git_blob_sha1: artifact.blob_sha1,
+	};
+}
+
+/**
  * Read a provenance pin, rejecting duplicate keys.
  *
  * `JSON.parse` is last-wins, so a repeated key is one value a reviewer reads and

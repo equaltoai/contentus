@@ -12,6 +12,7 @@ import {
 	isCommitId,
 	parseGitHubRepository,
 	readPin,
+	schemaPinFromProvenance,
 	sha256,
 	verifyUpstreamObject,
 } from '../scripts/lib/schema-pin.mjs';
@@ -46,7 +47,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
 
-const PIN = readPin(REPO, 'contracts/lesser/provenance.json').schema;
+const PIN = schemaPinFromProvenance(readPin(REPO, 'contracts/lesser/provenance.json'));
 const BYTES = readFileSync(join(REPO, PIN.pinned_path));
 
 /** A GitHub whose answers are whatever the case says they are. */
@@ -500,8 +501,9 @@ test('the upstream check is wired as a required CI job and a package script', ()
 
 test('the offline gate does not claim provenance in its own words', () => {
 	// The review's finding was partly a CLAIM defect: a green offline run read as
-	// "this is lesser's schema". The gate now says what it checked.
-	const gate = readFileSync(join(REPO, 'scripts/audit-graphql-contract.mjs'), 'utf8');
-	assert.match(gate, /INTEGRITY here, not provenance/);
+	// "this is lesser's schema". The gate now says what it checked, and names the
+	// separate mechanism that makes the stronger claim.
+	const gate = readFileSync(join(REPO, 'scripts/audit-graphql-documents.mjs'), 'utf8');
+	assert.match(gate, /Integrity checked here; PROVENANCE is the blob id/);
 	assert.match(gate, /verify-schema-provenance\.mjs/);
 });

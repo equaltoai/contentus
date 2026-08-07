@@ -49,6 +49,47 @@ test('markdown source is withheld, never rendered', () => {
 	assert.equal(decision.reason, 'unrendered-source');
 });
 
+test('canonical renderedHtml is the body when the instance provides it', () => {
+	// lesser v1.6.2+: the read path carries the renderer authority's output.
+	// It outranks contentFormat — the fixture's MARKDOWN source is irrelevant
+	// beside it, and must not ship to the browser either.
+	const article = articleFixture({ renderedHtml: '<h1>Heading</h1><p>Canonical output.</p>' });
+	const decision = resolveArticleBody(article);
+
+	assert.equal(decision.kind, 'render');
+
+	const faceInput = toBlogFaceArticle(article, decision);
+	assert.equal(faceInput.renderedHtml, '<h1>Heading</h1><p>Canonical output.</p>');
+	assert.equal(faceInput.content, '', 'stored source is not shipped beside its own rendering');
+	assert.ok(!JSON.stringify(faceInput).includes('markdown'), 'no source anywhere in the input');
+});
+
+test('an empty renderedHtml falls through to the legacy contentFormat signal', () => {
+	// Fail closed on a blank canonical field, exactly as the schema's own
+	// documentation demands ('never fall back to rendering content when this
+	// field is unavailable'): the withhold still applies to source.
+	assert.equal(
+		resolveArticleBody(articleFixture({ renderedHtml: '   ' })).kind,
+		'withhold',
+		'blank canonical HTML is unavailable, not a body'
+	);
+	assert.equal(
+		resolveArticleBody(
+			articleFixture({ renderedHtml: '', content: '<p>x</p>', contentFormat: 'HTML' })
+		).kind,
+		'render',
+		'the legacy HTML path still stands for instances without the field'
+	);
+});
+
+test('a withheld body drops renderedHtml along with the source', () => {
+	const { article, body } = withholdUnrenderableSource(articleFixture({ renderedHtml: null }));
+
+	assert.equal(body.kind, 'withhold');
+	assert.equal(article.content, '');
+	assert.equal(article.renderedHtml, null);
+});
+
 test('a withheld body never reaches the face as content', () => {
 	const article = articleFixture();
 	const faceInput = toBlogFaceArticle(article, resolveArticleBody(article));
@@ -57,6 +98,26 @@ test('a withheld body never reaches the face as content', () => {
 	assert.ok(
 		!faceInput.content.includes('markdown'),
 		'raw source must not survive into the face input'
+	);
+});
+
+test('the card excerpt never falls back to duplicating the title', () => {
+	// greater v0.13.3 closed #1008 — the card's link wraps only the title — so
+	// the announcement-duplication path is gone upstream. This guard stays:
+	// the fallback would still be wrong content (an excerpt is a summary, not
+	// a restatement), and the boundary is contentus's own. An article with no
+	// excerpt and no subtitle shows NO excerpt; the subtitle remains the last
+	// resort.
+	const bare = articleFixture({ excerpt: null, subtitle: null });
+	const bareInput = toBlogFaceArticle(bare, resolveArticleBody(bare));
+
+	assert.equal(bareInput.description, undefined);
+	assert.notEqual(bareInput.description, bare.title);
+
+	const subtitled = articleFixture({ excerpt: null, subtitle: 'A subtitle' });
+	assert.equal(
+		toBlogFaceArticle(subtitled, resolveArticleBody(subtitled)).description,
+		'A subtitle'
 	);
 });
 

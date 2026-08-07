@@ -319,38 +319,33 @@ function hydrationDataUrlForRequest(path: string, query?: Query): string {
 }
 
 /**
- * The form of a canonical URL that FaceTheory's strict CSP will accept in a
- * `<link href>`, or null if there is none.
+ * The canonical link href: lesser's absolute Article identity, emitted only
+ * when it is same-origin with the edge-verified request origin.
  *
- * FaceTheory validates every head `<link href>` under strict CSP as
- * same-origin-or-relative, and resolves "same origin" against an `allowedOrigin`
- * that `FaceApp` never forwards from the face (`dist/app.js` calls
- * `renderFaceHead(out, { cspNonce })` and nothing else). With no allowedOrigin
- * the only accepted shape is a relative URL, so an ABSOLUTE href throws — even
- * the page's own origin — and takes the whole route to a 500. That is what the
- * loaded-article path was hitting before the reader ever ran.
+ * FaceTheory 4.0.6 derives a per-request `allowedOrigin` and validates every
+ * head `<link href>` against it under strict CSP (`dist/app.js`
+ * `allowedOriginForRequest` → `renderFaceHead`). Before that, an absolute href
+ * threw even for the page's own origin — the workaround below emitted the
+ * RELATIVE form. The framework now forwards the origin, so the link carries
+ * the absolute identity it should have carried all along. `normalizeEvent`
+ * translates the trusted `x-lesser-forwarded-*` pair into the headers
+ * FaceTheory reads, so the origin it validates against is the edge-verified
+ * one and never a viewer-supplied `x-forwarded-host`.
  *
- * So the link carries the same-origin identity in its relative form, which
- * resolves byte-identically against the document base: contentus is not
- * rewriting lesser's Article identity, it is spelling it the only way the
- * framework permits. A genuinely cross-origin canonical (a syndicated
- * `article.canonicalUrl`) cannot be expressed relatively and gets no link tag at
- * all — `og:url` still carries the absolute identity, since meta content is not
- * subject to this check.
- *
- * Sunset: delete this and emit the absolute href once FaceTheory forwards a
- * per-request allowedOrigin into `renderFaceHead`. Reported to the FaceTheory
- * steward; see docs/consumption/renderer-authority.md.
+ * The guard stays: a genuinely cross-origin canonical (a syndicated
+ * `article.canonicalUrl`) can never pass the same-origin check, and emitting
+ * it would throw the route to a 500, so it gets no link tag at all — `og:url`
+ * still carries the absolute identity, since meta content is not subject to
+ * this check.
  */
 function canonicalLinkHref(canonical: string | null, origin: string | null): string | null {
 	if (!canonical || !origin) return null;
 	try {
-		const url = new URL(canonical);
-		if (url.origin !== new URL(origin).origin) return null;
-		return `${url.pathname}${url.search}${url.hash}`;
+		if (new URL(canonical).origin !== new URL(origin).origin) return null;
 	} catch {
 		return null;
 	}
+	return canonical;
 }
 
 /** Head tags derived from the loaded route: title, description, OG, canonical. */
@@ -393,6 +388,17 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
 	}
 	if (article?.ogImage) {
 		tags.push({ type: 'meta', attrs: { property: 'og:image', content: article.ogImage } });
+	} else if (origin) {
+		// Shared links render a card only when og:image is present, and most
+		// articles carry none. The brand card stands in — absolute, because a
+		// relative og:image resolves against nothing a crawler can rely on, and
+		// meta content is not subject to the strict-CSP same-origin check that
+		// governs <link href>. No origin means no claim about where the card
+		// lives, so none is made.
+		tags.push({
+			type: 'meta',
+			attrs: { property: 'og:image', content: `${origin}${CLIENT_ASSET_BASE}brand/og-card.png` },
+		});
 	}
 
 	return { title, tags };
@@ -538,6 +544,12 @@ function createFaceForRoute(route: string) {
 				status: statusForRoute(props),
 				csp: STRICT_CSP,
 				headers: headersForRoute(props, origin),
+				// `data-theme="dark"` cannot be set here: FaceTheory v4.0.6's
+				// adapter pipeline (assembleFaceRenderResult) does not forward
+				// htmlAttrs from renderOptions, so these attributes would never
+				// reach the document. The theme and the gray-ramp palette
+				// preset ride the shell root in AppShell.svelte instead; the
+				// vendored dark rules only need an ancestor, not <html>.
 				htmlAttrs: { lang: 'en' },
 				head: { title: head.title },
 				headTags: [...head.tags, ...assets.headTags],
@@ -601,6 +613,33 @@ const hydrationResource = {
 const app = createFaceApp({
 	faces: ROUTE_PATTERNS.map(createFaceForRoute),
 	resources: [hydrationResource as never],
+	// FaceTheory swallows render errors into its safe 500 document and reports
+	// them ONLY through these hooks — with no hook, a route that throws is a
+	// silent 500 in CloudWatch, which is exactly how the double-instantiation
+	// fault (see vite.config.ts `codeSplitting`) ran undetected. Logging here
+	// changes nothing about the response; it makes the next failure diagnosable
+	// from the SSR host's logs alone.
+	observability: {
+		log: (event: { level: string; event: string; path?: string; routePattern?: string }) => {
+			if (event.level === 'error') console.error('[facetheory]', JSON.stringify(event));
+		},
+		onError: (
+			error: unknown,
+			ctx: { path?: string; routePattern?: string; phase?: string; errorClass?: string }
+		) => {
+			console.error(
+				'[facetheory] render error',
+				JSON.stringify({
+					path: ctx.path,
+					routePattern: ctx.routePattern,
+					phase: ctx.phase,
+					errorClass: ctx.errorClass,
+					message: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined,
+				})
+			);
+		},
+	},
 });
 
 /**
@@ -609,12 +648,37 @@ const app = createFaceApp({
  * lesser's SSR host forwards the full public path; the route table is written
  * app-relative so the same code runs unchanged under any base path lesser might
  * reserve in future.
+ *
+ * Also translate the TRUSTED origin into the headers FaceTheory 4.0.6 reads.
+ * FaceTheory derives its strict-CSP `allowedOrigin` from `x-forwarded-host` /
+ * `x-forwarded-proto` (or falls back to `host`), and those are viewer-settable
+ * on `/l/*`: CloudFront forwards viewer headers verbatim, and only the
+ * `x-lesser-forwarded-*` pair is overwritten at the edge. So the trusted pair
+ * is resolved here, any viewer-supplied `x-forwarded-*` is REPLACED by the
+ * edge-verified values, and when no trusted origin exists both are deleted —
+ * FaceTheory then cannot derive an origin at all, which is the fail-closed
+ * answer (no absolute canonical is emitted in that case either).
  */
 function normalizeEvent(event: LambdaUrlEvent): LambdaUrlEvent {
 	const rawPath = stripBasePath(event.rawPath ?? event.requestContext?.http?.path ?? '/');
 
+	const headers: Record<string, string> = {};
+	for (const [name, value] of Object.entries(event.headers ?? {})) {
+		const lower = name.toLowerCase();
+		if (lower === 'x-forwarded-host' || lower === 'x-forwarded-proto') continue;
+		if (typeof value === 'string') headers[lower] = value;
+	}
+
+	const origin = resolveRequestOrigin(headers);
+	if (origin) {
+		const url = new URL(origin);
+		headers['x-forwarded-host'] = url.host;
+		headers['x-forwarded-proto'] = url.protocol.replace(':', '');
+	}
+
 	return {
 		...event,
+		headers,
 		rawPath,
 		requestContext: {
 			...event.requestContext,

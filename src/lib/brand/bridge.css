@@ -21,41 +21,27 @@
      5. Theory Cloud pack   — `--tc-*` brand tokens (design pack)
      6. THIS FILE           — maps `--gr-*` onto `--tc-*`, last so it wins
 
-   ---- Why the neutral ramp is inverted, still ----
-   Product design §2 says to prefer `data-theme="dark"` with a straight
-   ramp IF the vendored faces now ship full dark themes, and to verify at
-   vendoring time. Verified at greater-v0.11.9: they do not. The blog
-   face carries exactly seven `[data-theme='dark']` rules, all scoped to
-   `.gr-blog-article-card`. Article prose (`.gr-blog-article__content`,
-   `--gr-color-neutral-800`) and headings (`--gr-color-neutral-900`) have
-   no dark counterpart, so `data-theme="dark"` would paint near-black
-   text on the Midnight ground.
+   ---- Theme: data-theme="dark" at greater-v0.13.2 ----
+   Product design §2's preference is now satisfied: at greater-v0.13.2
+   the blog face ships 46 `[data-theme='dark']` selectors (cards, prose,
+   headings, review surfaces) and the primitives theme 47 more. The
+   shell root carries `data-theme="dark"` (AppShell.svelte — on the
+   shell, not <html>, because FaceTheory v4.0.6's adapter pipeline does
+   not forward htmlAttrs from renderOptions), and the
+   `--gr-color-gray-*` ramp those rules read comes from the greater
+   tokens layer at :root.
 
-   Contentus therefore keeps emdash's inversion: ONE consistent
-   dark-first ramp where low neutral numbers are deep Midnight surfaces
-   and high numbers are Ice White text. This is emdash's upstream gap
-   U-18, re-confirmed against a newer tag and still open. When
-   greater-components ships a complete dark theme for the blog face,
-   this inversion is deleted in favour of `data-theme="dark"`.
+   The pre-0.13.2 arrangement — an inverted `--gr-color-neutral-*` ramp
+   standing in for a dark theme the faces did not ship — is deleted:
+   nothing vendored consumes `--gr-color-neutral-*` anymore (verified at
+   v0.13.2: zero references outside this file). This was emdash's
+   upstream gap U-18, closed by the v0.13.2 dark coverage. Remaining
+   coverage holes (`gr-blog-author-card`, `.gr-menu`) are upstream:
+   equaltoai/greater-components#1009.
    ============================================================= */
 
 :root {
 	color-scheme: dark;
-
-	/* ---- Neutral ramp, inverted for the dark-first Midnight ground ----
-	   Consumed by the faces as surfaces (low) and text (high). */
-	--gr-color-neutral-0: var(--tc-midnight-depth);
-	--gr-color-neutral-50: var(--tc-midnight-lift-1);
-	--gr-color-neutral-100: var(--tc-midnight-lift-2);
-	--gr-color-neutral-200: var(--tc-steel-dim);
-	--gr-color-neutral-300: var(--tc-steel);
-	--gr-color-neutral-400: var(--tc-fg-dim);
-	--gr-color-neutral-500: var(--tc-fg-dim);
-	--gr-color-neutral-600: var(--tc-fg-muted);
-	--gr-color-neutral-700: var(--tc-fg-muted);
-	--gr-color-neutral-800: var(--tc-fg);
-	--gr-color-neutral-900: var(--tc-fg);
-	--gr-color-neutral-950: var(--tc-fg);
 
 	/* ---- Names the faces use that the tokens package does not define ----
 	   Supplied so the vendored CSS resolves; nothing upstream is renamed. */
@@ -180,6 +166,40 @@
 }
 
 /* =============================================================
+   Dark-theme companion rules
+   -------------------------------------------------------------
+   `data-theme="dark"` activates the vendored dark rules, which ground
+   cards and the article body on raw gray-ramp slabs (gray-900). The
+   brand ground is Midnight, so those surfaces are re-grounded on the
+   `--tc-*` surfaces here; upstream's dark text colors are kept. Same
+   specificity as the vendored dark rules (0,2,0) — this file wins on
+   layer order, which is the bridge's whole job.
+
+   `gr-blog-author-card` and `.gr-menu` ship no dark rules at all at
+   v0.13.2 and are deliberately NOT forked here: that coverage is
+   upstream's to add (equaltoai/greater-components#1009).
+   ============================================================= */
+[data-theme='dark'] .gr-blog-article-card,
+[data-theme='dark'] .gr-blog-review-card {
+	background: var(--tc-surface-1);
+	border-color: var(--tc-outline);
+}
+
+[data-theme='dark'] .gr-blog-article {
+	background: transparent;
+}
+
+/* Read articles dim to the muted foreground: with no archive or read-state
+   of its own yet, :visited is the only signal a returning reader gets that
+   they have already opened a card. Descendant-scoped so it wins over the
+   vendored dark rule on cascade order, the bridge's whole job. At greater
+   v0.13.3 (#1008) the card inverted: the link lives INSIDE the title,
+   stretched over the card by ::after, so the selector follows the link. */
+[data-theme='dark'] .gr-blog-article-card__title .gr-blog-article-card__link:visited {
+	color: var(--tc-fg-muted);
+}
+
+/* =============================================================
    Surface variants (product design §2)
    -------------------------------------------------------------
    One brand, three legible modes. `--tc-accent` is the single knob the
@@ -288,6 +308,9 @@ code {
 .contentus-brand {
 	display: inline-flex;
 	align-items: center;
+	/* The wordmark image is 22px tall; the LINK must still meet WCAG 2.2's
+	   24px minimum target, so the box grows around it. */
+	min-height: 24px;
 	text-decoration: none;
 }
 
@@ -379,9 +402,80 @@ code {
 	border-color: var(--tc-accent);
 }
 
+/* Pre-mount placeholder: inert and unpainted, but occupying exactly the real
+   control's box so the post-mount swap cannot move anything. */
+.contentus-session__button--pending {
+	visibility: hidden;
+	cursor: default;
+}
+
+/* Account menu (P1-11): sign-out lives behind a menu with an inline
+   confirmation, never as a bare prominent button. The session block sits at
+   the BOTTOM of the desktop sidebar, so the menu opens upward; below 960px
+   the sidebar is a top row and it opens downward, end-aligned. */
+.contentus-account {
+	position: relative;
+}
+
+.contentus-account__menu {
+	position: absolute;
+	bottom: calc(100% + var(--tc-space-2));
+	left: 0;
+	right: 0;
+	z-index: 20;
+	display: grid;
+	gap: var(--tc-space-2);
+	padding: var(--tc-space-3);
+	background: var(--tc-surface-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	box-shadow: var(--tc-shadow-md);
+}
+
+.contentus-account__item {
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-sm);
+	background: transparent;
+	color: var(--tc-fg);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.contentus-account__item:hover {
+	background: var(--tc-surface-3);
+}
+
+.contentus-account__item--destructive {
+	color: var(--tc-error);
+}
+
+.contentus-account__confirm {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-account__confirm-actions {
+	display: grid;
+	gap: var(--tc-space-1);
+}
+
 .contentus-main {
 	min-width: 0;
 	padding: var(--tc-space-12) 0 var(--tc-space-24);
+}
+
+/* The page footer (contentinfo). Column 2 on the desktop grid so it closes
+   the reading column rather than sitting under the sticky sidebar. */
+.contentus-footer {
+	grid-column: 2;
+	padding: var(--tc-space-6) 0 var(--tc-space-10);
+	border-top: 1px solid var(--tc-outline-variant);
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-fs-body-sm);
 }
 
 .contentus-page-header {
@@ -449,6 +543,36 @@ code {
 .contentus-filter[aria-current='page'] {
 	border-color: var(--tc-accent);
 	color: var(--tc-fg);
+}
+
+/* "Load more" (P1-10): a real button, 44px target, centered under the grid.
+   The appended cards announce through the route's visually-hidden status
+   region rather than by moving focus off the control. */
+.contentus-load-more {
+	display: grid;
+	justify-items: center;
+	gap: var(--tc-space-3);
+	margin-top: var(--tc-space-8);
+}
+
+.contentus-load-more__button {
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-6);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-load-more__button:hover:not(:disabled) {
+	border-color: var(--tc-accent);
+}
+
+.contentus-load-more__button:disabled {
+	cursor: default;
+	color: var(--tc-fg-muted);
 }
 
 /* ---- Designed empty / unavailable states ---- */
@@ -1025,10 +1149,27 @@ code {
 		margin-top: 0;
 	}
 
+	.contentus-account__menu {
+		/* The sidebar is a top row below 960px, so the menu opens downward,
+		   end-aligned against the session control. */
+		bottom: auto;
+		top: calc(100% + var(--tc-space-2));
+		left: auto;
+		width: min(260px, calc(100vw - var(--tc-space-8)));
+	}
+
 	.contentus-main {
 		/* Clear the fixed tab bar and the FAB's overhang, plus the safe area. */
 		padding: var(--tc-space-8) 0
 			calc(var(--tc-space-16) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+	}
+
+	.contentus-footer {
+		/* Single column below 960px; keep the last line clear of the fixed bar. */
+		grid-column: auto;
+		padding-bottom: calc(
+			var(--tc-space-6) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom)
+		);
 	}
 
 	.contentus-tabbar {

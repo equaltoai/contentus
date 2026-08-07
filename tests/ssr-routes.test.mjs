@@ -18,6 +18,43 @@ async function render(path, expectStatus = 200) {
 	return renderRoute(handler, { name: path, path, expectStatus });
 }
 
+test('a query-suffixed import of the handler still renders every route', async () => {
+	// The regression this pins: lesser's SSR host imports the installed entry as
+	// `handler.mjs?install=<id>` to scope the module cache per install. When the
+	// SSR build emitted a shared chunk for `svelte/server` (entry → chunk →
+	// entry, circular), the query made Node instantiate the bundle TWICE —
+	// components ran in the queried instance while Svelte's render runtime (and
+	// its module-global `ssr_context`) lived in the query-less one, so every
+	// `getContext`/`setContext` threw `lifecycle_outside_component` and the
+	// context-using routes (review, compose, timelines, messages, agents,
+	// profiles, drones) returned a bare 500 on the live instance while passing
+	// every query-less local render. `codeSplitting: false` in vite.config.ts
+	// makes the handler one self-contained module; this test imports it exactly
+	// the way the SSR host does and would catch any future split.
+	const { pathToFileURL } = await import('node:url');
+	const { resolve } = await import('node:path');
+	const entry = resolve(process.cwd(), 'build/server/handler.mjs');
+	const mod = await import(`${pathToFileURL(entry).href}?install=regression-test`);
+	assert.equal(typeof mod.handler, 'function');
+
+	for (const path of [
+		'/l/review',
+		'/l/review/drafts/draft-123',
+		'/l/compose',
+		'/l/timelines',
+		'/l/messages',
+		'/l/messages/conversation-123',
+		'/l/agents',
+		'/l/agents/weatherbot',
+		'/l/profiles/ada',
+		'/l/drones',
+	]) {
+		const result = await renderRoute(mod.handler, { name: path, path, expectStatus: 200 });
+		assert.equal(result.status, 200, `${path} must render under a query-suffixed import`);
+		assert.ok(result.html.includes('contentus-shell'), `${path} should render the shell`);
+	}
+});
+
 test('every route server-renders a complete document', async () => {
 	for (const path of [
 		'/l/',
@@ -30,6 +67,10 @@ test('every route server-renders a complete document', async () => {
 		assert.equal(result.status, 200, `${path} should render`);
 		assert.match(result.html, /^<!doctype html>/i, `${path} should emit a full document`);
 		assert.ok(result.html.includes('contentus-shell'), `${path} should render the shell`);
+		assert.ok(
+			result.html.includes('<footer class="contentus-footer">'),
+			`${path} should close with the page's contentinfo landmark`
+		);
 	}
 });
 
@@ -109,6 +150,13 @@ test('anonymous SSR output shows only the anonymous nav', async () => {
 	assert.ok(result.html.includes('Agents'));
 	assert.ok(!result.html.includes('>Review<'), 'Review is authenticated-only');
 	assert.ok(!result.html.includes('>Messages<'), 'Messages is authenticated-only');
+	// The session control is an inert placeholder until mount: the server cannot
+	// read the session, so SSR must not paint a control that claims either state.
+	assert.ok(
+		result.html.includes('contentus-session__button--pending'),
+		'the session control is a placeholder until mount'
+	);
+	assert.ok(!result.html.includes('>Sign out<'), 'SSR never claims a session');
 });
 
 test('no article body is emitted when lesser returns no rendered HTML', async () => {

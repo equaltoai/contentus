@@ -141,6 +141,15 @@ test('a spoofed forwarding header never reaches the advertised identity', async 
 		value.html,
 		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
 	);
+	// FaceTheory 4.0.6 validates absolute link hrefs against a request-derived
+	// allowedOrigin read from x-forwarded-* — which this exact bag spoofs. The
+	// handler replaces those headers with the edge-verified pair before
+	// FaceTheory sees them, so the canonical resolves same-origin and renders.
+	assert.match(
+		value.html,
+		/href="https:\/\/instance\.example\.com\/articles\/hello" rel="canonical"/,
+		'the viewer-supplied x-forwarded-* must not steer the strict-CSP origin check'
+	);
 	assert.doesNotMatch(value.html, /evil\.example/, 'a spoofed host must not reach the document');
 });
 
@@ -203,6 +212,12 @@ test('the trusted header still wins when an ambient Host disagrees with it', asy
 		value.html,
 		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
 	);
+	// No ogImage on the fixture: the brand card stands in, absolute on the
+	// request origin, so a shared link still renders a card.
+	assert.match(
+		value.html,
+		/content="https:\/\/instance\.example\.com\/l\/_assets\/brand\/og-card\.png" property="og:image"/
+	);
 	assert.doesNotMatch(value.html, /attacker\.example/);
 });
 
@@ -220,6 +235,11 @@ test('with no trusted host the page degrades on a real fetch, not just a stubbed
 
 	assert.equal(value.status, 200, 'failing closed must degrade, not 500');
 	assert.match(value.html, /^<!doctype html>/i);
+	assert.match(
+		value.html,
+		/class="contentus-shell" data-theme="dark"/,
+		'the shell must carry the dark theme so the vendored dark rules activate'
+	);
 	assert.ok(value.html.includes('contentus-shell'), 'the shell must still render');
 	assert.ok(
 		/unavailable|not answer|could not be reached/i.test(value.html),
@@ -319,6 +339,25 @@ test('category loader keeps partial data when its GraphQL error envelope contain
 	assert.equal(props.index.unavailable, null);
 });
 
+test('canonical renderedHtml renders even when the stored source is Markdown', async () => {
+	// lesser v1.6.2's read path: `renderedHtml` is the authority's output and
+	// outranks `contentFormat`. This is the finding the audit named — articles
+	// showing the withhold state on a v1.6.2 instance must now render.
+	const { value } = await probe(
+		{ path: '/l/articles/hello', headers: INSTANCE_HEADERS },
+		{
+			article: articleFixture({
+				renderedHtml: '<h2 id="heading">Heading</h2><p>Canonical output.</p>',
+			}),
+		}
+	);
+
+	assert.equal(value.status, 200);
+	assert.match(value.html, /gr-blog-article__content/, 'the vendored face must have rendered');
+	assert.ok(value.html.includes('Canonical output.'), 'the canonical body must be shown');
+	assert.doesNotMatch(value.html, /SOURCE-SENTINEL/, 'the stored source must not ship beside it');
+});
+
 test('an HTML article renders its body through the vendored blog face', async () => {
 	// The one body class contentus currently displays. It reaches the vendored
 	// face, whose Article context uses Svelte-5 runes in a plain `.ts` module —
@@ -373,7 +412,14 @@ test('a withheld body is absent from the SSR document too', async () => {
 
 	assert.equal(value.status, 200);
 	assert.doesNotMatch(value.html, /SOURCE-SENTINEL/);
-	assert.match(value.html, /awaiting server-rendered output/i, 'the reason must still be stated');
+	assert.match(value.html, /isn't available yet/i, 'the reason must still be stated');
+	// User-facing copy only: no issue-tracker language, no vendor attribution.
+	assert.doesNotMatch(value.html, /upstream gap|CMS contract|ActivityPub/i);
+	// The withhold header carries the article's date as a <time>, and the
+	// reader still offers the way back and keeps the nav's current marker.
+	assert.match(value.html, /<time datetime="2026-07-30T00:00:00Z">Jul 30, 2026<\/time>/);
+	assert.match(value.html, /Back to articles/);
+	assert.match(value.html, /aria-current="page"/);
 });
 
 test('a displayable body still reaches hydration, since the page shows it', async () => {
@@ -437,10 +483,15 @@ test('canonical identity is advertised in both forms lesser expects', async () =
 		value.html,
 		/content="https:\/\/instance\.example\.com\/articles\/hello" property="og:url"/
 	);
-	// ...and the canonical link carries the same URL in the relative form
-	// FaceTheory's strict CSP permits. Note /articles/, not the /l/ reading
+	// ...and so does the canonical link. FaceTheory 4.0.6 forwards a per-request
+	// allowedOrigin into the strict-CSP head check, so the relative-form
+	// workaround is retired: the link carries the absolute identity, validated
+	// against the edge-verified origin. Note /articles/, not the /l/ reading
 	// route: the identity is lesser's, and contentus does not rewrite it.
-	assert.match(value.html, /href="\/articles\/hello" rel="canonical"/);
+	assert.match(
+		value.html,
+		/href="https:\/\/instance\.example\.com\/articles\/hello" rel="canonical"/
+	);
 });
 
 test('a cross-origin canonical is left to og:url rather than mis-stated', async () => {
@@ -454,7 +505,8 @@ test('a cross-origin canonical is left to og:url rather than mis-stated', async 
 		value.html,
 		/content="https:\/\/syndicated\.example\/posts\/hello" property="og:url"/
 	);
-	// A cross-origin canonical cannot be expressed relatively, so no link tag is
-	// emitted — better than emitting one that points somewhere else.
+	// A cross-origin canonical can never pass the strict-CSP same-origin check,
+	// so no link tag is emitted — better than emitting one that points somewhere
+	// else, or throwing the route to a 500.
 	assert.doesNotMatch(value.html, /rel="canonical"/);
 });

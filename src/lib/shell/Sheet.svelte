@@ -134,7 +134,12 @@ sheets.
 		aria-modal="true"
 		aria-labelledby={titleId}
 	>
-		<header class="contentus-sheet__header">
+		<!-- `div`s rather than `header`/`footer`: those elements are scoped to
+		     the body here (a div, even with role="dialog", is not sectioning
+		     content in HTML-AAM), so they would surface as extra banner and
+		     contentinfo landmarks beside the page's own. The classes keep the
+		     styling; the landmark count stays one per page. -->
+		<div class="contentus-sheet__header">
 			<h2 class="contentus-sheet__title" id={titleId}>{title}</h2>
 			<button
 				type="button"
@@ -144,16 +149,16 @@ sheets.
 			>
 				<XIcon size={20} aria-hidden="true" />
 			</button>
-		</header>
+		</div>
 
 		<div class="contentus-sheet__body">
 			{@render children?.()}
 		</div>
 
 		{#if actions}
-			<footer class="contentus-sheet__actions">
+			<div class="contentus-sheet__actions">
 				{@render actions()}
-			</footer>
+			</div>
 		{/if}
 	</div>
 {/if}

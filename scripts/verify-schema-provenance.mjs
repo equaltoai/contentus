@@ -2,7 +2,7 @@
 /**
  * UPSTREAM PROVENANCE GATE — the pinned lesser schema, dereferenced.
  *
- * `scripts/audit-graphql-contract.mjs` validates documents against the schema in
+ * `pnpm run validate:graphql` validates documents against the schema in
  * `contracts/lesser/`. It checks that those bytes are unchanged since the digest
  * beside them was written, and that is all it can check: both values live in this
  * repository and move together in one commit. An author who fabricates a schema
@@ -36,7 +36,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { CANONICAL_SCHEMA_AUTHORITY, readPin, verifyUpstreamObject } from './lib/schema-pin.mjs';
+import {
+	CANONICAL_SCHEMA_AUTHORITY,
+	readPin,
+	schemaPinFromProvenance,
+	verifyUpstreamObject,
+} from './lib/schema-pin.mjs';
 
 const PROVENANCE = 'contracts/lesser/provenance.json';
 
@@ -63,13 +68,13 @@ export async function main(argv, { fetchImpl = globalThis.fetch, env = process.e
 
 	let pin;
 	try {
-		pin = readPin(root, PROVENANCE).schema;
+		pin = schemaPinFromProvenance(readPin(root, PROVENANCE));
 	} catch (error) {
 		fail([`${PROVENANCE} could not be read: ${error.message}`]);
 		return 1;
 	}
-	if (!pin) {
-		fail([`${PROVENANCE} declares no \`schema\` pin`]);
+	if (!pin.upstream_path || !pin.pinned_path) {
+		fail([`${PROVENANCE} declares no upstream/artifact schema pin`]);
 		return 1;
 	}
 

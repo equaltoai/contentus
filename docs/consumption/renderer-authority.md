@@ -64,17 +64,26 @@ Nothing local that would paper over it. Specifically:
   dependency, and `scripts/audit-renderer-authority.mjs` fails the build if one
   appears.
 - **It does not display raw source.** `resolveArticleBody`
-  (`src/lib/cms/articles.ts`) is the single gate: `HTML` is displayed,
-  everything else is withheld and the reader renders an explicit
-  "awaiting server-rendered output" state.
+  (`src/lib/cms/articles.ts`) is the single gate: canonical `renderedHtml` and
+  legacy `HTML` are displayed, everything else is withheld and the reader
+  renders an explicit, reader-facing "isn't available yet" state.
 - **It does not add its own sanitizer.** The vendored greater blog face applies
   greater's `sanitizeHtml` to HTML-format content as defence-in-depth. That is
   upstream-owned code, not a contentus renderer, and contentus does not
   second-guess it.
 
-When lesser renders on the read path — or exposes a `renderedHtml` field
-mirroring `DraftPreview.renderedHtml` — `resolveArticleBody` is the one
-function that changes, and the withhold branch disappears.
+**Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
+note said would close the gap: `Article.renderedHtml`, documented in-schema as
+"Canonical sanitized HTML. Never fall back to rendering content when this
+field is unavailable." greater-v0.13.2 (#1005) consumes it in the blog face's
+normalization (canonical `renderedHtml` preferred, format forced to `html`,
+escaped fallback retained when absent). `resolveArticleBody` changed in the
+one place predicted below: a non-empty `renderedHtml` is the body, outranking
+`contentFormat`; the withhold branch remains only for instances that predate
+the field or return it blank. The audit copy that blamed an "upstream gap"
+was wrong twice over — lesser never pre-renders into storage, and the read
+path now carries the authority's output — and was rewritten to plain
+reader-facing language in the same change.
 
 ## Related observations, same milestone
 
@@ -162,13 +171,18 @@ changes — the file is checksummed, and the fix it actually wants is a rename t
 `context.svelte.ts`. `tests/vendored-runes.test.mjs` asserts no shipped bundle
 carries an uncompiled rune.
 
-**Dark theme still incomplete (emdash's U-18, re-confirmed).** At
-greater-v0.11.9 the blog face carries seven `[data-theme='dark']` rules, all
-scoped to `.gr-blog-article-card`. Article prose and headings remain pinned to
-light neutrals with no dark counterpart, so `data-theme="dark"` would render
-near-black text on the Midnight ground. Product design §2 asks for a straight
-ramp map _if_ the faces now ship full dark themes; they do not, so contentus
-keeps the ramp inversion in `src/lib/brand/bridge.css`.
+**Dark theme (emdash's U-18) — resolved upstream, 2026-08-07.** At
+greater-v0.13.2 the blog face ships 46 `[data-theme='dark']` selectors (cards,
+prose, headings, review surfaces) and the primitives theme 47 more. The shell
+root now carries `data-theme="dark"` (AppShell.svelte — on the shell rather
+than `<html>`, because FaceTheory v4.0.6's adapter pipeline drops `htmlAttrs`
+from renderOptions; the `--gr-color-gray-*` ramp itself comes from the greater
+tokens layer at `:root`), and the inverted `--gr-color-neutral-*` ramp
+in `src/lib/brand/bridge.css` is deleted — nothing vendored consumes
+`--gr-color-neutral-*` at v0.13.2. The bridge keeps only small companion rules
+that re-ground card and article surfaces on the `--tc-*` brand surfaces.
+Residual coverage holes (`gr-blog-author-card`, `.gr-menu`) are routed upstream
+as greater-components#1009.
 
 **CLI defects at greater-v0.11.9.** `greater add` rewrote contentus-owned
 `package.json` devDependencies to nonexistent versions (`vite ^10.0.1`,
@@ -182,32 +196,37 @@ vendored source is never hand-edited.
 
 ## FaceTheory
 
-**Strict CSP makes an absolute canonical `<link>` unemittable.** At FaceTheory
-v4.0.1, `renderFaceHead` validates every head `<link href>` under a strict
+**Strict CSP and the canonical `<link>` — resolved at FaceTheory v4.0.6.** At
+v4.0.1, `renderFaceHead` validated every head `<link href>` under a strict
 policy as same-origin-or-relative, resolving "same origin" against an
-`allowedOrigin` option — but `FaceApp` never forwards one. `dist/app.js` calls
-`renderFaceHead(out, { cspNonce: req.cspNonce })` and nothing else, so
-`allowedOrigin` is always undefined and the only shape that passes is a relative
-URL. Any absolute href throws, and the throw is not local to the tag: it takes
-the whole route to a 500.
+`allowedOrigin` option that `FaceApp` never forwarded: `dist/app.js` called
+`renderFaceHead(out, { cspNonce })` and nothing else, so the only shape that
+passed was a relative URL and any absolute href threw — taking the whole route
+to a 500, which is exactly what the loaded-article path did before the reader
+component ever ran (a branch the degraded-path audits could not reach, because
+an article that fails to load emits no canonical tag at all). Contentus's
+workaround emitted the same-origin identity in relative form.
 
-This is not a hypothetical. `<link rel="canonical" href="https://…">` is exactly
-what lesser's Article identity contract asks a reading surface to advertise, so
-the loaded-article path 500'd before the reader component ever ran — a branch
-the degraded-path audits could not reach, because an article that fails to load
-emits no canonical tag at all.
+FaceTheory v4.0.6 (theory-cloud/FaceTheory#404) closes the call-site gap:
+`toHTTPResponse` now derives a per-request `allowedOrigin`
+(`allowedOriginForRequest` in `dist/app.js`) from a configured
+`canonicalOrigin`, the `x-facetheory-original-host` /
+`x-apptheory-original-host` + `cloudfront-forwarded-proto` pairs, or the
+generic `x-forwarded-host` / `x-forwarded-proto` (rightmost) with a `host`
+fallback, and forwards it into `renderFaceHead`. The relative-form workaround
+is retired: the canonical link carries lesser's absolute Article identity.
 
-Contentus's handling, at `headTagsForRoute` in `src/facetheory/entry-server.ts`:
-`og:url` keeps lesser's absolute identity (meta content is not subject to the
-check), and the `<link>` carries the same-origin identity in relative form,
-which resolves byte-identically against the document base. A genuinely
-cross-origin canonical — a syndicated `article.canonicalUrl` — cannot be
-expressed relatively and gets no link tag. That is a real loss of fidelity, and
-the reason this is written down rather than absorbed silently.
-
-Sunset: delete `canonicalLinkHref` and emit the absolute href the day FaceTheory
-forwards a per-request `allowedOrigin` into `renderFaceHead`. The framework
-already has the option and the parameter — only the call site is missing.
+One trust-boundary consequence, handled in `normalizeEvent` in
+`src/facetheory/entry-server.ts`: the generic headers FaceTheory reads are
+viewer-settable on `/l/*` (CloudFront forwards viewer headers verbatim; only
+the `x-lesser-forwarded-*` pair is overwritten at the edge). So contentus
+replaces any viewer-supplied `x-forwarded-host` / `x-forwarded-proto` with the
+edge-verified values before FaceTheory sees the request, and deletes both when
+no trusted origin exists — the origin the strict-CSP check validates against
+is the one lesser verified, never one a viewer named. The same-origin guard in
+`canonicalLinkHref` stays: a cross-origin syndicated canonical can never pass
+the check and still gets no link tag (rather than a 500), with `og:url`
+carrying the absolute identity as before.
 
 ## Routing these upstream
 

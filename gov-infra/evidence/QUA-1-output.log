@@ -10,23 +10,49 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786033231767 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786033231769 COMPLETED 869 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+Getting Svelte diagnostics...
+
+====================================
+svelte-check found 0 errors and 3 warnings in 1 file
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2K
-transforming...✓ 801 modules transformed.
+[2Ktransforming...4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+35:   // hydration (a filter change is a navigation, not a prop update), so local
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+                                ^
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+                                 ^
+39:   let hasNextPage = $state(data.hasNextPage);
+40:   let loadingMore = $state(false);
+4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+                                   ^
+40:   let loadingMore = $state(false);
+41:   let loadMoreFailed = $state(false);
+✓ 803 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-DjshrTY-.js                690.43 kB │ gzip: 209.72 kB
+build/client/assets/entry-client-DLv5-bA9.js                695.65 kB │ gzip: 211.34 kB
 
-✓ built in 1.09s
+✓ built in 1.07s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -37,21 +63,43 @@ build/client/assets/entry-client-DjshrTY-.js                690.43 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2K
-transforming...✓ 777 modules transformed.
+[2Ktransforming...4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+35:   // hydration (a filter change is a navigation, not a prop update), so local
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+                                ^
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+                                 ^
+39:   let hasNextPage = $state(data.hasNextPage);
+40:   let loadingMore = $state(false);
+4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+                                   ^
+40:   let loadingMore = $state(false);
+41:   let loadMoreFailed = $state(false);
+✓ 779 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/chunks/server-B2vBH2a4.mjs      0.06 kB │ gzip:   0.07 kB
-build/server/handler.mjs                 1,076.60 kB │ gzip: 265.16 kB
+build/server/handler.mjs  1,131.06 kB │ gzip: 271.10 kB
 
-✓ built in 998ms
+✓ built in 1.04s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 333834 bytes, 143 --tc-* definitions, integrity assertions passed
-brand assets: copied 12 files to build/client/brand/
+stylesheet: brand/contentus.css — 338832 bytes, 144 --tc-* definitions, integrity assertions passed
+brand assets: copied 13 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > pnpm run validate:graphql && pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph
@@ -63,12 +111,13 @@ brand assets: copied 12 files to build/client/brand/
 # GraphQL contract audit
 
 Schema:     contracts/lesser/graphql-schema.graphql
-            108653 chars, sha256 62390f0608fa09d496b9c75c4729bdbdf060c6115fce9332de66a1502147c373
-            equaltoai/lesser@cbe9787f9b97c1cc6472183834cfd066e61801b2:docs/contracts/graphql-schema.graphql
-            blob 576d28037ee654193a5215dc321e6fc75531270d (contracts/lesser/provenance.json)
-            Integrity checked here; PROVENANCE is the blob id above compared against lesser.
+            108911 chars, sha256 fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064
+            equaltoai/lesser@f833ea0b6dea78c11a2b6da6289bf2305f770ebe:docs/contracts/graphql-schema.graphql
+            blob b907306de7b66bd6ab91665b59bb9b1f00897672 (contracts/lesser/provenance.json)
+            Integrity checked here; PROVENANCE is the blob id above compared against lesser —
+            dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
 Documents:  46 in 9 inventoried module(s), 46 operation(s)
-Swept:      77 contentus-authored .ts module(s) under src/, out of 1282 tracked file(s) there
+Swept:      58 contentus-authored .ts module(s) under src/, out of 1715 tracked file(s) there
 
 graphql-contract: PASS
 
@@ -101,29 +150,29 @@ Renderer-authority audit: clean.
 - Route status mismatches: 0
 
 ## Per-route
-- articles-index   200    5328 bytes  findings=0
-- article-reader   200    5040 bytes  findings=0
-- series           200    5241 bytes  findings=0
-- category         200    5255 bytes  findings=0
-- compose          200    6184 bytes  findings=0
-- review-queue     200    5615 bytes  findings=0
-- review-workspace 200    5619 bytes  findings=0
-- timelines-instance 200    6446 bytes  findings=0
-- timelines-federated 200    6503 bytes  findings=0
-- timelines-home   200    5791 bytes  findings=0
-- messages-inbox   200    5289 bytes  findings=0
-- messages-requests 200    5318 bytes  findings=0
-- message-thread   200    5280 bytes  findings=0
-- messages-no-id   200    5292 bytes  findings=0
-- agents           200    5550 bytes  findings=0
-- agents-filtered  200    5608 bytes  findings=0
-- agent-detail     200    5630 bytes  findings=0
-- drones           200    5745 bytes  findings=0
-- drone-new        200    5783 bytes  findings=0
-- profile          200    5261 bytes  findings=0
-- auth-callback    200    5064 bytes  findings=0
-- not-found        404    5064 bytes  findings=0
-- hydration-data   200     557 bytes  findings=0
+- articles-index   200    5628 bytes  findings=0
+- article-reader   200    5380 bytes  findings=0
+- series           200    5581 bytes  findings=0
+- category         200    5595 bytes  findings=0
+- compose          200    6484 bytes  findings=0
+- review-queue     200    5915 bytes  findings=0
+- review-workspace 200    5919 bytes  findings=0
+- timelines-instance 200    6746 bytes  findings=0
+- timelines-federated 200    6803 bytes  findings=0
+- timelines-home   200    6091 bytes  findings=0
+- messages-inbox   200    5589 bytes  findings=0
+- messages-requests 200    5618 bytes  findings=0
+- message-thread   200    5580 bytes  findings=0
+- messages-no-id   200    5592 bytes  findings=0
+- agents           200    5850 bytes  findings=0
+- agents-filtered  200    5908 bytes  findings=0
+- agent-detail     200    5930 bytes  findings=0
+- drones           200    6045 bytes  findings=0
+- drone-new        200    6083 bytes  findings=0
+- profile          200    5561 bytes  findings=0
+- auth-callback    200    5364 bytes  findings=0
+- not-found        404    5364 bytes  findings=0
+- hydration-data   200     603 bytes  findings=0
 
 CSP audit: clean.
 
@@ -133,9 +182,9 @@ CSP audit: clean.
 # Seam graph audit — faces 6–7 (src/lib/agents, src/lib/drones)
 
 - Build passes recorded: client, server
-- Modules the client build resolved / loaded: 800 / 800
-- Modules the server build resolved / loaded: 783 / 776
-- Dependency edges recorded: 4488
+- Modules the client build resolved / loaded: 802 / 802
+- Modules the server build resolved / loaded: 785 / 778
+- Dependency edges recorded: 4499
 - Distinct edges into the face: 33
 - Findings: 0
 
