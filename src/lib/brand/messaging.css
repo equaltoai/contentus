@@ -1,0 +1,1058 @@
+/* =============================================================
+   Messaging theme — face 5 appearance + interim consumption layer
+   -------------------------------------------------------------
+   TWO JOBS IN ONE FILE, and the split is worth naming.
+
+   The `.contentus-*` blocks are contentus's own chrome: the two-pane
+   layout, the folder tabs, the conversation cards with their request
+   actions, and the disclosures. Those exist because product design §5
+   asks for a surface the vendored suite does not compose on its own.
+
+   The `.messages-*`, `.message*` and `.new-conversation*` blocks are
+   exactly the `compose.css` / `timelines.css` situation a third time:
+   `greater add messaging` vendors the components and NO stylesheet — the
+   registry record lists `component`, `types` and `utils` entries and no
+   `styles` entry — while every class those components emit is defined in
+   `packages/faces/social/src/theme.css`, reachable only by installing the
+   whole social face. So this is contentus's appearance for upstream's
+   class contract.
+
+   It is APPEARANCE ONLY. No rule here changes what a vendored component
+   does, what it emits, or how it behaves. Anything that would, belongs
+   upstream.
+
+   SUNSET: delete the vendored-class half and its layer in
+   `scripts/build-stylesheet.mjs` the day the `greater` CLI emits
+   per-module CSS. The same day retires `compose.css` and `timelines.css`.
+
+   Values resolve to `--tc-*` and `--gr-*` tokens only; like `bridge.css`,
+   this file contains no brand literals of its own. `--tc-accent` is
+   violet here because the shell sets `data-surface="mcp"` (§2).
+   ============================================================= */
+
+/* =============================================================
+   Page frame
+   ============================================================= */
+
+.contentus-messages-page {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-4);
+	/* The surface owns the viewport below the header so the thread can
+	   scroll inside it rather than scrolling the document — a composer
+	   pinned to a scrolling document walks off the bottom of the page. */
+	min-height: 0;
+}
+
+.contentus-messages-page__eyebrow {
+	margin: 0;
+	color: var(--tc-accent);
+	font-size: var(--tc-font-size-sm);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.contentus-messages-page__title {
+	margin: var(--tc-space-1) 0 0;
+	color: var(--tc-fg);
+}
+
+/* =============================================================
+   The two panes
+   -------------------------------------------------------------
+   Above 960px the list and the thread sit side by side. Below it the
+   component renders one or the other — the thread is its own ROUTE, not
+   a hidden sibling — so the grid collapses to a single column and there
+   is no off-screen pane holding a socket or a scroll position.
+   ============================================================= */
+
+.contentus-messages {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-4);
+	min-height: 0;
+}
+
+@media (min-width: 961px) {
+	.contentus-messages[data-two-pane='true'] {
+		grid-template-columns: minmax(18rem, 22rem) 1fr;
+		align-items: start;
+	}
+}
+
+.contentus-messages__list,
+.contentus-messages__thread {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	min-width: 0;
+	min-height: 0;
+}
+
+.contentus-messages__list-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+}
+
+.contentus-messages__list-title {
+	margin: 0;
+	font-size: var(--tc-font-size-lg);
+	color: var(--tc-fg);
+}
+
+/* =============================================================
+   Folder tabs (contentus-owned)
+   -------------------------------------------------------------
+   Links, so a folder is addressable and survives a cold load. The 44px
+   floor is not negotiable against tab count (§4).
+   ============================================================= */
+
+.contentus-messages__tabs {
+	display: flex;
+	gap: var(--tc-space-1);
+	border-bottom: 1px solid var(--tc-outline-variant);
+}
+
+.contentus-messages__tab {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border-bottom: 2px solid transparent;
+	color: var(--tc-fg-dim);
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.contentus-messages__tab:hover {
+	color: var(--tc-fg);
+}
+
+.contentus-messages__tab--active {
+	color: var(--tc-fg);
+	border-bottom-color: var(--tc-accent);
+}
+
+.contentus-messages__tab-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.5rem;
+	height: 1.5rem;
+	padding: 0 var(--tc-space-1);
+	border-radius: 999px;
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-size: var(--tc-font-size-xs);
+	font-weight: 700;
+}
+
+/* =============================================================
+   Conversation cards (contentus-owned)
+   -------------------------------------------------------------
+   The card is a LINK carrying the conversation's own address, so it
+   works before hydration, opens in a new tab, and is the navigation
+   that pushes the thread as its own route below the breakpoint.
+   ============================================================= */
+
+.contentus-conversations {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+}
+
+.contentus-conversations__item {
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md, 0.5rem);
+	background: var(--tc-surface-1);
+}
+
+.contentus-conversations__item--selected {
+	border-color: var(--tc-accent);
+	background: var(--tc-surface-2);
+}
+
+.contentus-conversations__link {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: center;
+	gap: var(--tc-space-3);
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: var(--tc-space-3);
+	color: inherit;
+	text-decoration: none;
+}
+
+.contentus-conversations__avatar {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: 999px;
+	overflow: hidden;
+	background: var(--tc-surface-2);
+	flex: none;
+}
+
+.contentus-conversations__avatar img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.contentus-conversations__initial {
+	color: var(--tc-fg-dim);
+	font-weight: 700;
+}
+
+.contentus-conversations__body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+	min-width: 0;
+}
+
+.contentus-conversations__name {
+	color: var(--tc-fg);
+	font-weight: 600;
+}
+
+.contentus-conversations__item--unread .contentus-conversations__name {
+	font-weight: 700;
+}
+
+.contentus-conversations__preview {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-font-size-sm);
+	/* One line. A preview that wraps turns the list into a reading surface
+	   and pushes the next conversation off the first screen. */
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.contentus-conversations__meta {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: var(--tc-space-1);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-font-size-xs);
+	flex: none;
+}
+
+/* A DOT, not a numeral: lesser's contract carries one `unread` boolean per
+   conversation and no message count, so a number here would be invented. */
+.contentus-conversations__dot {
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 999px;
+	background: var(--tc-accent);
+}
+
+/* =============================================================
+   Request actions on the card (§5, sub-issue #33)
+   ============================================================= */
+
+.contentus-conversations__request {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	padding: 0 var(--tc-space-3) var(--tc-space-3);
+	border-top: 1px solid var(--tc-outline-variant);
+	margin-top: var(--tc-space-2);
+	padding-top: var(--tc-space-3);
+}
+
+.contentus-conversations__request-text {
+	margin: 0;
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-font-size-sm);
+}
+
+.contentus-conversations__actions {
+	display: flex;
+	gap: var(--tc-space-2);
+	flex-wrap: wrap;
+}
+
+.contentus-conversations__accept,
+.contentus-conversations__decline {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-conversations__accept {
+	border: 1px solid var(--tc-accent);
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+}
+
+.contentus-conversations__decline {
+	border: 1px solid var(--tc-outline);
+	background: transparent;
+	color: var(--tc-fg);
+}
+
+.contentus-conversations__accept:disabled,
+.contentus-conversations__decline:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* =============================================================
+   Thread chrome (contentus-owned)
+   ============================================================= */
+
+.contentus-messages__back,
+.contentus-messages__back-link {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	color: var(--tc-accent);
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.contentus-messages__older {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	align-items: center;
+}
+
+.contentus-messages__older button {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+	cursor: pointer;
+}
+
+.contentus-messages__signin,
+.contentus-messages__retry {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-accent);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-weight: 600;
+	cursor: pointer;
+}
+
+/* =============================================================
+   Disclosures and honest states
+   -------------------------------------------------------------
+   Standing notes rather than alerts: a known limit or a reported
+   transport state is not an incident.
+
+   `__gap` was here and is gone with the disclosure it styled —
+   greater-v0.13.0 fixed both rendering sinks, so the class had no
+   element left to paint.
+   ============================================================= */
+
+.contentus-messages__realtime,
+.contentus-messages__partial,
+.contentus-messages__notice {
+	margin: 0;
+	padding: var(--tc-space-3);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-font-size-sm);
+}
+
+.contentus-messages__notice {
+	border-color: var(--tc-accent);
+	color: var(--tc-fg);
+}
+
+.contentus-messages__error {
+	margin: var(--tc-space-2) 0 0;
+	color: var(--tc-error, var(--tc-fg));
+	font-size: var(--tc-font-size-sm);
+}
+
+.contentus-messages__loading,
+.contentus-messages__empty {
+	margin: 0;
+	padding: var(--tc-space-4);
+	color: var(--tc-fg-muted);
+}
+
+/* =============================================================
+   Nav unread badge (§5 — "unread counts feed the nav badge")
+   -------------------------------------------------------------
+   Counts CONVERSATIONS with unread activity. The accessible label on
+   the element says so; the glyph is a numeral because a nav badge that
+   is only a dot cannot distinguish one from twenty.
+   ============================================================= */
+
+.contentus-nav__unread {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.25rem;
+	height: 1.25rem;
+	margin-left: auto;
+	padding: 0 var(--tc-space-1);
+	border-radius: 999px;
+	background: var(--tc-violet-signal);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-size: var(--tc-font-size-xs);
+	font-weight: 700;
+}
+
+.contentus-tabbar__icon {
+	position: relative;
+	display: inline-flex;
+}
+
+/* Anchored to the ICON, so the badge cannot widen the tab and push a
+   neighbouring target under the 44px floor (§4). */
+.contentus-tabbar__unread {
+	position: absolute;
+	top: -0.25rem;
+	inset-inline-start: 60%;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1rem;
+	height: 1rem;
+	padding: 0 0.2rem;
+	border-radius: 999px;
+	background: var(--tc-violet-signal);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-size: 0.625rem;
+	font-weight: 700;
+	line-height: 1;
+}
+
+/* =============================================================
+   Vendored `shared/messaging` classes — appearance only
+   ============================================================= */
+
+.messages-root {
+	display: contents;
+}
+
+.messages-thread {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	min-height: 0;
+}
+
+.messages-thread__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+	padding-bottom: var(--tc-space-2);
+	border-bottom: 1px solid var(--tc-outline-variant);
+}
+
+.messages-thread__title {
+	margin: 0;
+	font-size: var(--tc-font-size-lg);
+	color: var(--tc-fg);
+}
+
+.messages-thread__menu-trigger,
+.message__menu-trigger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 44px;
+	min-height: 44px;
+	border: none;
+	background: transparent;
+	color: var(--tc-fg-dim);
+	cursor: pointer;
+}
+
+.messages-thread__list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	/* The thread scrolls, not the document — that is what lets the composer
+	   stay put above the keyboard instead of scrolling away with the page. */
+	overflow-y: auto;
+	min-height: 0;
+	padding: var(--tc-space-2) 0;
+}
+
+.messages-thread__loading,
+.messages-thread__empty,
+.messages-thread__no-selection {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--tc-space-3);
+	padding: var(--tc-space-10) var(--tc-space-4);
+	color: var(--tc-fg-muted);
+	text-align: center;
+}
+
+.messages-thread__no-selection svg {
+	width: 3rem;
+	height: 3rem;
+	opacity: 0.4;
+}
+
+.messages-thread__spinner,
+.messages-conversations__spinner,
+.new-conversation__spinner {
+	width: 1.5rem;
+	height: 1.5rem;
+	border: 2px solid var(--tc-outline-variant);
+	border-top-color: var(--tc-accent);
+	border-radius: 999px;
+	animation: contentus-messages-spin 0.8s linear infinite;
+}
+
+@keyframes contentus-messages-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.messages-thread__spinner,
+	.messages-conversations__spinner,
+	.new-conversation__spinner {
+		animation: none;
+	}
+}
+
+/* The request banner inside an open thread. The card carries the primary
+   accept/decline (§5); this is the same action where a reader has already
+   opened the conversation. */
+.messages-thread__request-banner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+	padding: var(--tc-space-3);
+	border: 1px solid var(--tc-accent);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+}
+
+.messages-thread__request-actions {
+	display: flex;
+	gap: var(--tc-space-2);
+}
+
+.messages-thread__request-button {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.messages-thread__request-button--primary {
+	border: 1px solid var(--tc-accent);
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+}
+
+.messages-thread__request-button--secondary {
+	border: 1px solid var(--tc-outline);
+	background: transparent;
+	color: var(--tc-fg);
+}
+
+.messages-thread__request-button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* ---------- One message ---------- */
+
+.message {
+	display: flex;
+	gap: var(--tc-space-2);
+	align-items: flex-end;
+	max-width: 100%;
+}
+
+.message--own {
+	flex-direction: row-reverse;
+}
+
+.message__avatar {
+	width: 2rem;
+	height: 2rem;
+	border-radius: 999px;
+	overflow: hidden;
+	background: var(--tc-surface-2);
+	flex: none;
+}
+
+.message__avatar img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.message__avatar-placeholder {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-font-size-sm);
+	font-weight: 700;
+}
+
+.message__bubble {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+	max-width: min(42rem, 78%);
+	padding: var(--tc-space-3);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md, 0.5rem);
+	background: var(--tc-surface-1);
+}
+
+.message--own .message__bubble {
+	border-color: var(--tc-accent);
+	background: var(--tc-violet-container, var(--tc-surface-2));
+}
+
+.message__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-2);
+}
+
+.message__sender {
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-font-size-sm);
+	font-weight: 600;
+}
+
+.message__content {
+	color: var(--tc-fg);
+	/* `white-space: pre-wrap` because the vendored component renders the body
+	   as TEXT. Newlines lesser sent would otherwise collapse, which would lose
+	   information on top of the escaping the surface already discloses. */
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.message__content-warning {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-2);
+	padding: var(--tc-space-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-2);
+}
+
+.message__content-warning-label {
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-font-size-sm);
+	font-weight: 600;
+}
+
+.message__content-warning-toggle {
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: transparent;
+	color: var(--tc-fg);
+	cursor: pointer;
+}
+
+.message__time {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-font-size-xs);
+}
+
+/* ---------- The composer ---------- */
+
+.messages-composer {
+	display: flex;
+	gap: var(--tc-space-2);
+	align-items: flex-end;
+	padding: var(--tc-space-3) 0;
+	background: var(--tc-bg);
+}
+
+.messages-composer__input {
+	flex: 1;
+	min-height: 44px;
+	padding: var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+	font: inherit;
+	resize: vertical;
+}
+
+.messages-composer__send {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-accent);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.messages-composer__send svg {
+	width: 1rem;
+	height: 1rem;
+}
+
+.messages-composer__send:disabled,
+.messages-composer__input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* ---------- New conversation ---------- */
+
+.new-conversation__trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.new-conversation__trigger svg {
+	width: 1rem;
+	height: 1rem;
+}
+
+.new-conversation__backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--tc-space-4);
+	background: color-mix(in srgb, var(--tc-midnight-depth) 72%, transparent);
+}
+
+.new-conversation__modal {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	width: min(32rem, 100%);
+	max-height: min(40rem, 90svh);
+	padding: var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md, 0.5rem);
+	background: var(--tc-surface-1);
+	overflow: hidden;
+}
+
+.new-conversation__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+}
+
+.new-conversation__title {
+	margin: 0;
+	font-size: var(--tc-font-size-lg);
+	color: var(--tc-fg);
+}
+
+.new-conversation__close {
+	min-width: 44px;
+	min-height: 44px;
+	border: none;
+	background: transparent;
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-font-size-lg);
+	cursor: pointer;
+}
+
+.new-conversation__body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-3);
+	overflow-y: auto;
+	min-height: 0;
+}
+
+.new-conversation__error {
+	padding: var(--tc-space-2);
+	border: 1px solid var(--tc-error, var(--tc-outline));
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	color: var(--tc-error, var(--tc-fg));
+	font-size: var(--tc-font-size-sm);
+}
+
+.new-conversation__selected,
+.new-conversation__chips {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--tc-space-2);
+}
+
+.new-conversation__label {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-font-size-sm);
+}
+
+.new-conversation__chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--tc-space-1);
+	padding: var(--tc-space-1) var(--tc-space-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: 999px;
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font-size: var(--tc-font-size-sm);
+}
+
+.new-conversation__chip-avatar,
+.new-conversation__result-avatar,
+.new-conversation__result-avatar-placeholder {
+	width: 1.5rem;
+	height: 1.5rem;
+	border-radius: 999px;
+	object-fit: cover;
+	background: var(--tc-surface-2);
+}
+
+.new-conversation__result-avatar,
+.new-conversation__result-avatar-placeholder {
+	width: 2rem;
+	height: 2rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--tc-fg-dim);
+	font-weight: 700;
+	flex: none;
+}
+
+.new-conversation__chip-remove {
+	min-width: 1.5rem;
+	min-height: 1.5rem;
+	border: none;
+	background: transparent;
+	color: var(--tc-fg-dim);
+	cursor: pointer;
+}
+
+.new-conversation__search {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-2);
+	padding: 0 var(--tc-space-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-surface-2);
+}
+
+.new-conversation__search-icon {
+	width: 1rem;
+	height: 1rem;
+	color: var(--tc-fg-muted);
+	flex: none;
+}
+
+.new-conversation__input {
+	flex: 1;
+	min-height: 44px;
+	border: none;
+	background: transparent;
+	color: var(--tc-fg);
+	font: inherit;
+}
+
+.new-conversation__input:focus {
+	outline: none;
+}
+
+.new-conversation__results {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+	overflow-y: auto;
+}
+
+.new-conversation__result {
+	display: flex;
+	align-items: center;
+	gap: var(--tc-space-3);
+	min-height: 44px;
+	padding: var(--tc-space-2);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: transparent;
+	color: var(--tc-fg);
+	text-align: start;
+	cursor: pointer;
+}
+
+.new-conversation__result:hover:not(:disabled) {
+	background: var(--tc-surface-2);
+}
+
+.new-conversation__result:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.new-conversation__result-info {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.new-conversation__result-name {
+	font-weight: 600;
+}
+
+.new-conversation__result-username {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-font-size-sm);
+}
+
+.new-conversation__result-check {
+	width: 1.25rem;
+	height: 1.25rem;
+	margin-inline-start: auto;
+	color: var(--tc-accent);
+}
+
+.new-conversation__empty {
+	padding: var(--tc-space-3);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-font-size-sm);
+}
+
+.new-conversation__footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--tc-space-2);
+}
+
+.new-conversation__button {
+	min-height: 44px;
+	padding: 0 var(--tc-space-4);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.new-conversation__button--primary {
+	border: 1px solid var(--tc-accent);
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+}
+
+.new-conversation__button--secondary {
+	border: 1px solid var(--tc-outline);
+	background: transparent;
+	color: var(--tc-fg);
+}
+
+.new-conversation__button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* The vendored unread badge. Contentus renders its own nav badge — this one
+   sums per-conversation booleans under a label that says "unread messages",
+   which is not what the number counts — but the class is styled so a future
+   use is not unstyled. */
+.unread-indicator {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.25rem;
+	height: 1.25rem;
+	padding: 0 var(--tc-space-1);
+	border-radius: 999px;
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-size: var(--tc-font-size-xs);
+	font-weight: 700;
+}
+
+/* =============================================================
+   Mobile: the two-pane collapse (§4, §5)
+   -------------------------------------------------------------
+   The list is full width and the thread is its own route, so there is
+   no second pane to hide. What is left is the composer, which sticks to
+   the bottom of the surface and must clear BOTH the tab bar and the
+   home indicator — the same two offsets the shell already publishes,
+   read here rather than re-measured so the two cannot disagree.
+   ============================================================= */
+
+@media (max-width: 960px) {
+	.contentus-messages__thread {
+		/* The thread owns the viewport below the page header so its list can
+		   scroll under a composer that does not move. */
+		min-height: 60svh;
+	}
+
+	.messages-composer {
+		position: sticky;
+		bottom: calc(var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+		padding-bottom: var(--tc-space-3);
+		border-top: 1px solid var(--tc-outline-variant);
+		/* Opaque: the thread scrolls underneath it. */
+		background: var(--tc-bg);
+		z-index: 5;
+	}
+
+	.contentus-messages__list-head {
+		flex-wrap: wrap;
+	}
+
+	.message__bubble {
+		max-width: 88%;
+	}
+}

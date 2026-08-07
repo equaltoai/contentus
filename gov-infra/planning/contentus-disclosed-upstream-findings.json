@@ -1,0 +1,143 @@
+{
+  "$comment": [
+    "Pinned disclosed upstream state for SEC-2 and SEC-7.",
+    "",
+    "This file is NOT an exclude list and NOT a threshold reduction. Each gate below",
+    "still runs in full; the rubric asserts that the finding set it produces is",
+    "EXACTLY this set. A new finding, a changed finding, or a disappeared finding all",
+    "FAIL the gate and force a human back to this file. Emptying an entry is the only",
+    "way a finding leaves the rubric, and that requires the upstream fix to have",
+    "landed.",
+    "",
+    "Rationale for pinning rather than letting the gate stand red: a permanently-red",
+    "gate reports the same colour whether or not a NEW vulnerability appeared, so it",
+    "detects nothing. An exact-set assertion keeps detection alive while representing",
+    "the known, unfixed, upstream-owned state honestly and visibly in every report."
+  ],
+  "npm_audit": {
+    "gate": "pnpm audit --audit-level=high",
+    "rubric_item": "SEC-2",
+    "$comment": [
+      "The audit covers the whole installed graph, not `--prod`. Dev dependencies are",
+      "not outside the boundary: they execute in CI with the checkout and the runner's",
+      "environment in reach, and they resolve from the same lockfile as the shipped",
+      "build. A dev-only advisory is disclosed here as its own entry with its own owner",
+      "and sunset, never excluded by scope. The full-graph audit currently reports NO",
+      "advisory at or above the gated severity, which is why the list below is empty.",
+      "",
+      "GHSA-96hv-2xvq-fx4p (ws, high) was disclosed here and is RETIRED at the",
+      "greater-v0.13.0 pin bump. The entry's own sunset named this exact condition:",
+      "\"Delete this entry at the first `greater` CLI pin bump whose adapters release",
+      "resolves ws >= 8.21.0.\" greater-v0.13.0 bumped graphql-ws to 6.2.0, which",
+      "resolves ws@8.21.0, so the vulnerable range >=8.0.0 <8.21.0 no longer contains",
+      "the installed version. `pnpm audit` reports zero advisories across the WHOLE",
+      "graph, not only --prod.",
+      "",
+      "The entry is deleted rather than kept with a note, because SEC-2 asserts the",
+      "finding set is EXACTLY this list: a retired advisory left in place fails the",
+      "gate just as loudly as a new one appearing, and that symmetry is the whole",
+      "design. An empty list is not a weakened gate — a new advisory now fails SEC-2",
+      "immediately, which is the strongest this check has been."
+    ],
+    "advisories": []
+  },
+  "greater_doctor": {
+    "gate": "greater doctor --json",
+    "rubric_item": "SEC-7",
+    "cli_pin": "greater-v0.13.0",
+    "must_pass": ["Component Files", "Orphaned Files"],
+    "must_pass_reason": [
+      "These are the two integrity properties the gate exists for: every vendored",
+      "component file the manifest records is present, and nothing extra is sitting",
+      "under the vendored root. They are non-negotiable and are asserted PASS.",
+      "SEC-7 fails if either regresses, regardless of anything disclosed below."
+    ],
+    "disclosed_failures": [
+      {
+        "name": "NPM Dependencies",
+        "severity": "error",
+        "upstream_issue": "equaltoai/greater-components#917",
+        "owner": "equaltoai/greater-components",
+        "summary": [
+          "The blog face's registry manifest requires the shared `content` module,",
+          "which carries MarkdownRenderer.svelte and CodeBlock.svelte and pulls a full",
+          "Markdown rendering chain. The face's own Article.Content deliberately",
+          "refuses to render Markdown — lesser owns canonical rendering — so the",
+          "renderer arrives through a sibling module the reading surface never uses.",
+          "Contentus declines to install that chain: installing it to satisfy a",
+          "checker would ship a second canonical renderer and break the renderer-",
+          "authority invariant this repo exists to hold. See",
+          "docs/consumption/renderer-authority.md."
+        ],
+        "missing_dependencies": [
+          "hast-util-to-mdast@^10.1.2",
+          "mdast-util-gfm@^3.1.0",
+          "mdast-util-to-markdown@^2.1.2",
+          "@apollo/client@4.2.9",
+          "@apollo/client-react-streaming@^0.14.5",
+          "@graphql-typed-document-node/core@^3.2.0",
+          "graphql-ws@^6.0.6",
+          "viem@^2.55.10",
+          "remark-gfm@^4.0.1",
+          "remark-parse@^11.0.0",
+          "remark-rehype@^11.1.2",
+          "shiki@^3.19.0"
+        ],
+        "sunset": [
+          "Delete this entry the day the blog face stops requiring the `content`",
+          "shared module, or the day the Markdown chain moves out of it. The same day",
+          "retires src/types/absent-renderer-modules.d.ts and the",
+          "absent-renderer-module alias in vite.config.ts."
+        ],
+        "$comment": [
+          "VERSION RANGES MOVED AT THE greater-v0.13.0 PIN BUMP, and the finding did not.",
+          "The same thirteen dependencies are still required by the blog face's registry",
+          "manifest and still declined here; three of them are simply required at newer",
+          "ranges by the v0.13.0 registry (@apollo/client ^4.0.9 -> 4.2.9,",
+          "@apollo/client-react-streaming ^0.14.0 -> ^0.14.5, viem ^2.47.14 -> ^2.55.10).",
+          "",
+          "SEC-7 asserts the disclosed set EXACTLY, so a moved range reads as one finding",
+          "retired and another appearing — which is the gate working. The strings are",
+          "updated to what `greater doctor` now reports; nothing was installed and the",
+          "reason for declining is unchanged.",
+          "",
+          "graphql@^16.12.0 LEFT THIS LIST AT M2, and it left by being installed rather than",
+          "re-declined. Contentus now validates the GraphQL documents it sends against",
+          "lesser's pinned canonical schema (scripts/audit-graphql-documents.mjs), and that",
+          "validation uses graphql-js — the reference parser and validator — as a",
+          "DEVDEPENDENCY at build time. It is not the Apollo runtime client and not part of",
+          "the declined Markdown chain: nothing under src/ imports it, and the small",
+          "same-origin transport in src/lib/cms/graphql.ts is untouched. The twelve entries",
+          "still listed above are still declined, for the reasons stated.",
+          "",
+          "The version is greater's declared floor, not the newest release: the registry",
+          "asks for ^16.12.0, so the pin is 16.14.2. Installing 17.x instead would raise a",
+          "fresh `greater doctor` Manifest-vs-Required-Floors warning, and the honest answer",
+          "to a floor a peer declares is to meet it, not to disclose past it. A pin is not a",
+          "place to put problems."
+        ]
+      }
+    ],
+    "disclosed_warnings": [
+      {
+        "names": ["Alias Path: ui", "Alias Path: hooks"],
+        "severity": "warning",
+        "summary": [
+          "components.json declares the CLI's default alias set. Contentus vendors",
+          "only the faces and shared modules it consumes, so src/lib/components/ui and",
+          "src/lib/primitives are never created. Creating empty directories to silence",
+          "a checker would be exactly the cosmetic workaround this rubric refuses.",
+          "These are pinned so that a THIRD warning — which would mean a real alias",
+          "regression — fails SEC-7.",
+          "`Alias Path: utils` WAS pinned here and is now retired, which is what this",
+          "list is supposed to do. M4 vendored the social face's shared modules, whose",
+          "registry manifest places notificationGrouping.ts at `lib/utils/`; the `utils`",
+          "alias target src/lib/utils therefore exists and the check passes on its own.",
+          "It was removed rather than left in place because SEC-7 fails a disclosed",
+          "finding that has started passing — the retirement path working as designed,",
+          "not a silencing."
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,270 @@
+/**
+ * Types for Notifications components
+ */
+
+export interface Account {
+	id: string;
+	username: string;
+	acct: string;
+	displayName: string;
+	avatar: string;
+	avatarStatic?: string;
+	header?: string;
+	headerStatic?: string;
+	note?: string;
+	url: string;
+	followersCount?: number;
+	followingCount?: number;
+	statusesCount?: number;
+	bot?: boolean;
+	locked?: boolean;
+	verified?: boolean;
+	createdAt: string | Date;
+	trustScore?: number;
+}
+
+export interface MediaAttachment {
+	id: string;
+	type: 'image' | 'video' | 'audio' | 'gifv';
+	url: string;
+	previewUrl?: string;
+	description?: string;
+	sensitive?: boolean;
+	spoilerText?: string | null;
+	blurhash?: string;
+}
+
+export interface Mention {
+	id: string;
+	username: string;
+	url: string;
+	acct: string;
+}
+
+export interface Tag {
+	name: string;
+	url: string;
+}
+
+export interface CommunicationFrom {
+	address: string;
+	displayName?: string | null;
+	soulAgentId?: string | null;
+}
+
+export interface CommunicationTo {
+	address: string;
+	soulAgentId?: string | null;
+}
+
+export interface CommunicationAttachment {
+	id: string;
+	filename: string;
+	contentType: string;
+	sizeBytes: number;
+	sha256: string;
+}
+
+export interface CommunicationNotification {
+	channel: string;
+	from: CommunicationFrom;
+	to?: CommunicationTo | null;
+	attachments: CommunicationAttachment[];
+	subject?: string | null;
+	body?: string | null;
+	receivedAt: string;
+	messageId: string;
+	inReplyTo?: string | null;
+	threadId: string;
+}
+
+export type WorkflowEventKind =
+	'request_submitted' | 'review_requested' | 'approval_requested' | 'finalize_ready' | 'graduated';
+
+export interface WorkflowEventPayload {
+	kind: WorkflowEventKind;
+	title: string;
+	summary: string;
+	phase?: string;
+	actorLabel?: string;
+	targetLabel?: string;
+	actionLabel?: string;
+}
+
+export interface Status {
+	id: string;
+	createdAt: string | Date;
+	content: string;
+	account: Account;
+	visibility: 'public' | 'unlisted' | 'private' | 'direct';
+	sensitive: boolean;
+	spoilerText?: string;
+	mediaAttachments?: MediaAttachment[];
+	mentions?: Mention[];
+	tags?: Tag[];
+	favouriteCount?: number;
+	reblogCount?: number;
+	repliesCount?: number;
+	favourited?: boolean;
+	reblogged?: boolean;
+	bookmarked?: boolean;
+	reblog?: Status;
+	url?: string;
+	inReplyToId?: string;
+	inReplyToAccountId?: string;
+}
+
+export type NotificationType =
+	| 'mention'
+	| 'reblog'
+	| 'favourite'
+	| 'follow'
+	| 'follow_request'
+	| 'poll'
+	| 'status'
+	| 'update'
+	| 'admin.sign_up'
+	| 'admin.report'
+	| 'quote'
+	| 'community_note'
+	| 'trust_update'
+	| 'cost_alert'
+	| 'moderation_action'
+	| 'communication_inbound'
+	| 'workflow_event';
+
+export interface BaseNotification {
+	id: string;
+	type: NotificationType;
+	createdAt: string | Date;
+	account: Account;
+	read?: boolean;
+	dismissed?: boolean;
+	status?: Status;
+	communication?: CommunicationNotification | null;
+}
+
+export interface MentionNotification extends BaseNotification {
+	type: 'mention';
+	status: Status;
+}
+
+export interface ReblogNotification extends BaseNotification {
+	type: 'reblog';
+	status: Status;
+}
+
+export interface FavouriteNotification extends BaseNotification {
+	type: 'favourite';
+	status: Status;
+}
+
+export interface FollowNotification extends BaseNotification {
+	type: 'follow';
+}
+
+export interface FollowRequestNotification extends BaseNotification {
+	type: 'follow_request';
+}
+
+export interface PollNotification extends BaseNotification {
+	type: 'poll';
+	status: Status;
+}
+
+export interface StatusNotification extends BaseNotification {
+	type: 'status';
+	status: Status;
+}
+
+export interface UpdateNotification extends BaseNotification {
+	type: 'update';
+	status: Status;
+}
+
+export interface AdminSignUpNotification extends BaseNotification {
+	type: 'admin.sign_up';
+}
+
+export interface AdminReportNotification extends BaseNotification {
+	type: 'admin.report';
+	report: {
+		id: string;
+		targetAccount: Account;
+		comment: string;
+	};
+}
+
+export type Notification =
+	| MentionNotification
+	| ReblogNotification
+	| FavouriteNotification
+	| FollowNotification
+	| FollowRequestNotification
+	| PollNotification
+	| StatusNotification
+	| UpdateNotification
+	| AdminSignUpNotification
+	| AdminReportNotification
+	| QuoteNotification
+	| CommunityNoteNotification
+	| TrustUpdateNotification
+	| CostAlertNotification
+	| ModerationActionNotification
+	| WorkflowEventNotification;
+
+export interface QuoteNotification extends BaseNotification {
+	type: 'quote';
+	status: Status;
+	quoteStatus: Status;
+}
+
+export interface CommunityNote {
+	id: string;
+	content: string;
+	createdAt: string | Date;
+	author?: Account;
+}
+
+export interface CommunityNoteNotification extends BaseNotification {
+	type: 'community_note';
+	status: Status;
+	communityNote: CommunityNote;
+}
+
+export interface TrustUpdateNotification extends BaseNotification {
+	type: 'trust_update';
+	trustScore: number;
+	previousScore?: number;
+	reason?: string;
+}
+
+export interface CostAlertNotification extends BaseNotification {
+	type: 'cost_alert';
+	amount: number;
+	threshold: number;
+	message?: string;
+}
+
+export interface ModerationActionNotification extends BaseNotification {
+	type: 'moderation_action';
+	status?: Status;
+	action: string;
+	reason: string;
+}
+
+export interface WorkflowEventNotification extends BaseNotification {
+	type: 'workflow_event';
+	workflowEvent: WorkflowEventPayload;
+}
+
+export interface NotificationGroup {
+	id: string;
+	type: NotificationType;
+	notifications: Notification[];
+	accounts: Account[];
+	sampleNotification: Notification;
+	count: number;
+	latestCreatedAt: string | Date;
+	allRead: boolean;
+}

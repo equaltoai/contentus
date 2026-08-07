@@ -1,0 +1,2191 @@
+/**
+ * Lesser GraphQL Adapter aligned with the current Lesser schema.
+ *
+ * Provides typed accessors and convenience helpers around the generated
+ * GraphQL operations. Consumers should migrate towards the generic timeline
+ * and object accessors rather than the legacy Mastodon-style wrappers.
+ */
+
+import { Observable, type FetchResult, type OperationVariables } from '@apollo/client';
+import type { ApolloClient as ApolloClientNamespace } from '@apollo/client';
+
+type QueryOptionsFor<
+	TData,
+	TVariables extends OperationVariables,
+> = ApolloClientNamespace.QueryOptions<TData, TVariables>;
+type MutationOptionsFor<
+	TData,
+	TVariables extends OperationVariables,
+> = ApolloClientNamespace.MutateOptions<TData, TVariables>;
+import type { TypedDocumentNode } from '@graphql-typed-document-node/core';
+import { print } from 'graphql';
+import { extractServerErrorCodes } from '../authExpiry.js';
+import type { LesserMessagesAdapter } from '../messaging/createLesserMessagesHandlers.js';
+
+import {
+	createGraphQLClient,
+	type GraphQLClientConfig,
+	type GraphQLClientInstance,
+} from './client.js';
+
+import type {
+	TimelineQueryVariables,
+	TimelineType,
+	NotificationsQueryVariables,
+	SearchQueryVariables,
+	CreateNoteMutationVariables,
+	CreateQuoteNoteMutationVariables,
+	CreateListMutationVariables,
+	UpdateListMutationVariables,
+	ConversationsQueryVariables,
+	ConversationMessagesQueryVariables,
+	CreateConversationMutationVariables,
+	SendMessageMutationVariables,
+	AcceptMessageRequestMutationVariables,
+	DeclineMessageRequestMutationVariables,
+	DeleteMessageMutationVariables,
+	UpdateRelationshipMutationVariables,
+	AgentsQueryVariables,
+	AgentActivityQueryVariables,
+	AgentAccessLeasesQueryVariables,
+	AgentMemorySearchQueryVariables,
+	RegisterAgentMutationVariables,
+	UpdateAgentMutationVariables,
+	DelegateToAgentMutationVariables,
+	CreateAgentAccessLeasePrincipalChallengeMutationVariables,
+	CreateAgentAccessLeaseAgentChallengeMutationVariables,
+	CreateAgentAccessLeaseMutationVariables,
+	RevokeAgentAccessLeaseMutationVariables,
+	CreateAgentAccessLeaseSessionKeyChallengeMutationVariables,
+	AuthorizeAgentAccessLeaseSessionKeyMutationVariables,
+	ExchangeAgentAccessLeaseTokenMutationVariables,
+	UpdateAdminAgentPolicyMutationVariables,
+	AdminVerifyAgentMutationVariables,
+	AdminUnverifyAgentMutationVariables,
+	TimelineUpdatesSubscription,
+	TimelineUpdatesSubscriptionVariables,
+	NotificationStreamSubscription,
+	NotificationStreamSubscriptionVariables,
+	ConversationUpdatesSubscription,
+	ListUpdatesSubscription,
+	ListUpdatesSubscriptionVariables,
+	QuoteActivitySubscription,
+	QuoteActivitySubscriptionVariables,
+	HashtagActivitySubscription,
+	HashtagActivitySubscriptionVariables,
+	ActivityStreamSubscription,
+	ActivityStreamSubscriptionVariables,
+	RelationshipUpdatesSubscription,
+	RelationshipUpdatesSubscriptionVariables,
+	CostUpdatesSubscription,
+	CostUpdatesSubscriptionVariables,
+	ModerationEventsSubscription,
+	ModerationEventsSubscriptionVariables,
+	TrustUpdatesSubscription,
+	TrustUpdatesSubscriptionVariables,
+	AiAnalysisUpdatesSubscription,
+	AiAnalysisUpdatesSubscriptionVariables,
+	MetricsUpdatesSubscription,
+	MetricsUpdatesSubscriptionVariables,
+	ModerationAlertsSubscription,
+	ModerationAlertsSubscriptionVariables,
+	CostAlertsSubscription,
+	CostAlertsSubscriptionVariables,
+	BudgetAlertsSubscription,
+	BudgetAlertsSubscriptionVariables,
+	FederationHealthUpdatesSubscription,
+	FederationHealthUpdatesSubscriptionVariables,
+	ModerationQueueUpdateSubscription,
+	ModerationQueueUpdateSubscriptionVariables,
+	ThreatIntelligenceSubscription,
+	PerformanceAlertSubscription,
+	PerformanceAlertSubscriptionVariables,
+	InfrastructureEventSubscription,
+	AgentActivityUpdatesSubscription,
+	AgentActivityUpdatesSubscriptionVariables,
+	RelationshipQuery,
+	RelationshipsQuery,
+	RelationshipsQueryVariables,
+	ModerationPatternInput,
+	HashtagNotificationSettingsInput,
+	NotificationLevel,
+	UploadMediaInput,
+	UploadMediaMutation,
+	UploadMediaMutationVariables,
+	UpdateMediaMutationVariables,
+	Actor,
+	SharedDraftReviewsQueryVariables,
+	ShareDraftForReviewMutation,
+	SubmitDraftReviewMutationVariables,
+	DraftReviewVerdict,
+} from './generated/types.js';
+
+import {
+	TimelineDocument,
+	NotificationsDocument,
+	DismissNotificationDocument,
+	ClearNotificationsDocument,
+	SearchDocument,
+	ObjectByIdDocument,
+	ActorByIdDocument,
+	ActorByUsernameDocument,
+	AgentByUsernameDocument,
+	AgentsDocument,
+	MyAgentsDocument,
+	MySoulsDocument,
+	AgentActivityDocument,
+	AgentAccessLeasesDocument,
+	AdminAgentPolicyDocument,
+	UpdateAdminAgentPolicyDocument,
+	AgentMemorySearchDocument,
+	CreateNoteDocument,
+	CreateQuoteNoteDocument,
+	WithdrawFromQuotesDocument,
+	UpdateQuotePermissionsDocument,
+	ObjectWithQuotesDocument,
+	DeleteObjectDocument,
+	LikeObjectDocument,
+	UnlikeObjectDocument,
+	ShareObjectDocument,
+	UnshareObjectDocument,
+	BookmarkObjectDocument,
+	UnbookmarkObjectDocument,
+	PinObjectDocument,
+	UnpinObjectDocument,
+	ListsDocument,
+	ListDocument,
+	ListAccountsDocument,
+	CreateListDocument,
+	UpdateListDocument,
+	DeleteListDocument,
+	AddAccountsToListDocument,
+	RemoveAccountsFromListDocument,
+	UploadMediaDocument,
+	MediaDocument,
+	UpdateMediaDocument,
+	ConversationsDocument,
+	ConversationDocument,
+	ConversationMessagesDocument,
+	CreateConversationDocument,
+	SendMessageDocument,
+	AcceptMessageRequestDocument,
+	DeclineMessageRequestDocument,
+	MarkConversationReadDocument,
+	DeleteConversationDocument,
+	DeleteMessageDocument,
+	RelationshipDocument,
+	RelationshipsDocument,
+	FollowActorDocument,
+	UnfollowActorDocument,
+	BlockActorDocument,
+	UnblockActorDocument,
+	MuteActorDocument,
+	UnmuteActorDocument,
+	UpdateRelationshipDocument,
+	FollowersDocument,
+	FollowingDocument,
+	UpdateProfileDocument,
+	UserPreferencesDocument,
+	UpdateUserPreferencesDocument,
+	UpdateStreamingPreferencesDocument,
+	PushSubscriptionDocument,
+	RegisterPushSubscriptionDocument,
+	UpdatePushSubscriptionDocument,
+	DeletePushSubscriptionDocument,
+	TimelineUpdatesDocument,
+	NotificationStreamDocument,
+	ConversationUpdatesDocument,
+	ListUpdatesDocument,
+	QuoteActivityDocument,
+	HashtagActivityDocument,
+	AddCommunityNoteDocument,
+	VoteCommunityNoteDocument,
+	CommunityNotesByObjectDocument,
+	FlagObjectDocument,
+	CreateModerationPatternDocument,
+	DeleteModerationPatternDocument,
+	RequestAiAnalysisDocument,
+	AiAnalysisDocument,
+	AiStatsDocument,
+	AiCapabilitiesDocument,
+	TrustGraphDocument,
+	CostBreakdownDocument,
+	InstanceDocument,
+	InstanceBudgetsDocument,
+	SetInstanceBudgetDocument,
+	OptimizeFederationCostsDocument,
+	FederationLimitsDocument,
+	SetFederationLimitDocument,
+	SyncThreadDocument,
+	SyncMissingRepliesDocument,
+	ThreadContextDocument,
+	SeveredRelationshipsDocument,
+	AcknowledgeSeveranceDocument,
+	AttemptReconnectionDocument,
+	FederationHealthDocument,
+	FederationStatusDocument,
+	PauseFederationDocument,
+	ResumeFederationDocument,
+	FollowHashtagDocument,
+	UnfollowHashtagDocument,
+	MuteHashtagDocument,
+	FollowedHashtagsDocument,
+	ActivityStreamDocument,
+	RelationshipUpdatesDocument,
+	CostUpdatesDocument,
+	ModerationEventsDocument,
+	TrustUpdatesDocument,
+	AiAnalysisUpdatesDocument,
+	MetricsUpdatesDocument,
+	ModerationAlertsDocument,
+	CostAlertsDocument,
+	BudgetAlertsDocument,
+	FederationHealthUpdatesDocument,
+	ModerationQueueUpdateDocument,
+	ThreatIntelligenceDocument,
+	PerformanceAlertDocument,
+	InfrastructureEventDocument,
+	RegisterAgentDocument,
+	UpdateAgentDocument,
+	DeleteAgentDocument,
+	DelegateToAgentDocument,
+	RevokeAgentTokenDocument,
+	CreateAgentAccessLeasePrincipalChallengeDocument,
+	CreateAgentAccessLeaseAgentChallengeDocument,
+	CreateAgentAccessLeaseDocument,
+	RevokeAgentAccessLeaseDocument,
+	CreateAgentAccessLeaseSessionKeyChallengeDocument,
+	AuthorizeAgentAccessLeaseSessionKeyDocument,
+	CreateAgentAccessLeaseRenewChallengeDocument,
+	ExchangeAgentAccessLeaseTokenDocument,
+	AdminVerifyAgentDocument,
+	AdminUnverifyAgentDocument,
+	AdminSuspendAgentDocument,
+	IncorporateSoulDocument,
+	AgentActivityUpdatesDocument,
+	SharedDraftReviewsDocument,
+	DraftReviewDocument,
+	ShareDraftForReviewDocument,
+	RevokeDraftReviewDocument,
+	SubmitDraftReviewDocument,
+} from './generated/types.js';
+
+export type ViewerQuery = { viewer: Actor };
+
+const ViewerDocument = {
+	kind: 'Document',
+	definitions: [
+		{
+			kind: 'OperationDefinition',
+			operation: 'query',
+			name: { kind: 'Name', value: 'Viewer' },
+			selectionSet: {
+				kind: 'SelectionSet',
+				selections: [
+					{
+						kind: 'Field',
+						name: { kind: 'Name', value: 'viewer' },
+						selectionSet: {
+							kind: 'SelectionSet',
+							selections: [
+								{ kind: 'Field', name: { kind: 'Name', value: 'id' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'username' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'displayName' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'avatar' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'header' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'followers' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'following' } },
+								{ kind: 'Field', name: { kind: 'Name', value: 'statusesCount' } },
+							],
+						},
+					},
+				],
+			},
+		},
+	],
+} as unknown as TypedDocumentNode<{ viewer: Actor }, OperationVariables>;
+
+type UpdateHashtagNotificationsMutation = {
+	updateHashtagNotifications: {
+		success: boolean;
+		hashtag?: {
+			name: string;
+			notificationSettings?: {
+				level: NotificationLevel;
+				muted?: boolean | null;
+				mutedUntil?: string | null;
+			} | null;
+		} | null;
+	};
+};
+
+type UpdateHashtagNotificationsMutationVariables = {
+	hashtag: string;
+	settings: HashtagNotificationSettingsInput;
+};
+
+const UpdateHashtagNotificationsDocument = {
+	kind: 'Document',
+	definitions: [
+		{
+			kind: 'OperationDefinition',
+			operation: 'mutation',
+			name: { kind: 'Name', value: 'UpdateHashtagNotifications' },
+			variableDefinitions: [
+				{
+					kind: 'VariableDefinition',
+					variable: { kind: 'Variable', name: { kind: 'Name', value: 'hashtag' } },
+					type: {
+						kind: 'NonNullType',
+						type: { kind: 'NamedType', name: { kind: 'Name', value: 'String' } },
+					},
+				},
+				{
+					kind: 'VariableDefinition',
+					variable: { kind: 'Variable', name: { kind: 'Name', value: 'settings' } },
+					type: {
+						kind: 'NonNullType',
+						type: {
+							kind: 'NamedType',
+							name: { kind: 'Name', value: 'HashtagNotificationSettingsInput' },
+						},
+					},
+				},
+			],
+			selectionSet: {
+				kind: 'SelectionSet',
+				selections: [
+					{
+						kind: 'Field',
+						name: { kind: 'Name', value: 'updateHashtagNotifications' },
+						arguments: [
+							{
+								kind: 'Argument',
+								name: { kind: 'Name', value: 'hashtag' },
+								value: { kind: 'Variable', name: { kind: 'Name', value: 'hashtag' } },
+							},
+							{
+								kind: 'Argument',
+								name: { kind: 'Name', value: 'settings' },
+								value: { kind: 'Variable', name: { kind: 'Name', value: 'settings' } },
+							},
+						],
+						selectionSet: {
+							kind: 'SelectionSet',
+							selections: [
+								{ kind: 'Field', name: { kind: 'Name', value: 'success' } },
+								{
+									kind: 'Field',
+									name: { kind: 'Name', value: 'hashtag' },
+									selectionSet: {
+										kind: 'SelectionSet',
+										selections: [
+											{ kind: 'Field', name: { kind: 'Name', value: 'name' } },
+											{
+												kind: 'Field',
+												name: { kind: 'Name', value: 'notificationSettings' },
+												selectionSet: {
+													kind: 'SelectionSet',
+													selections: [
+														{ kind: 'Field', name: { kind: 'Name', value: 'level' } },
+														{ kind: 'Field', name: { kind: 'Name', value: 'muted' } },
+														{ kind: 'Field', name: { kind: 'Name', value: 'mutedUntil' } },
+													],
+												},
+											},
+										],
+									},
+								},
+							],
+						},
+					},
+				],
+			},
+		},
+	],
+} as unknown as TypedDocumentNode<
+	UpdateHashtagNotificationsMutation,
+	UpdateHashtagNotificationsMutationVariables
+>;
+
+function stripUndefined<T extends Record<string, unknown>>(input: T): T {
+	const result: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(input)) {
+		if (value !== undefined) {
+			result[key] = value;
+		}
+	}
+	return result as T;
+}
+
+function isFileLike(value: unknown): value is Blob {
+	if (typeof Blob !== 'undefined' && value instanceof Blob) {
+		return true;
+	}
+
+	if (value && typeof value === 'object') {
+		const candidate = value as { arrayBuffer?: () => Promise<ArrayBuffer> };
+		return typeof candidate.arrayBuffer === 'function';
+	}
+
+	return false;
+}
+
+export type LesserGraphQLAdapterConfig = GraphQLClientConfig;
+
+export type TimelineVariables = TimelineQueryVariables;
+export type SearchVariables = SearchQueryVariables;
+export type CreateNoteVariables = CreateNoteMutationVariables;
+export type ConversationMessagesVariables = ConversationMessagesQueryVariables;
+export type CreateConversationVariables = CreateConversationMutationVariables;
+export type SendMessageVariables = SendMessageMutationVariables;
+export type UpdateMediaVariables = UpdateMediaMutationVariables;
+
+export class LesserGraphQLAdapterError extends Error {
+	readonly code: string;
+	readonly debugMessages: readonly string[];
+	/**
+	 * Server-defined `extensions.code` values carried by the failure, e.g.
+	 * `UNPROCESSABLE_ENTITY` or `CONFLICT`.
+	 *
+	 * Lesser's GraphQL error presenter sets `extensions.code` from its
+	 * structured `AppError` codes (cmd/graphql/main.go `graphQLErrorPresenter`).
+	 * The code is contract surface rather than server detail, so it survives
+	 * the user-safe sanitisation that strips messages — callers need it to tell
+	 * an expected condition from a genuine fault.
+	 */
+	readonly serverCodes: readonly string[];
+
+	constructor(
+		message: string,
+		options: {
+			code?: string;
+			debugMessages?: readonly string[];
+			serverCodes?: readonly string[];
+			cause?: unknown;
+		} = {}
+	) {
+		super(message, { cause: options.cause });
+		this.name = 'LesserGraphQLAdapterError';
+		this.code = options.code ?? 'LESSER_GRAPHQL_REQUEST_FAILED';
+		this.debugMessages = options.debugMessages ?? [];
+		this.serverCodes = options.serverCodes ?? [];
+	}
+}
+
+const USER_SAFE_GRAPHQL_ERROR_MESSAGE = 'The request could not be completed. Please try again.';
+const USER_SAFE_UPLOAD_ERROR_MESSAGE = 'The upload could not be completed. Please try again.';
+
+function extractDebugMessages(error: unknown): string[] {
+	const messages: string[] = [];
+	const append = (message?: string | null) => {
+		const trimmed = message?.trim();
+		if (trimmed && !messages.includes(trimmed)) {
+			messages.push(trimmed);
+		}
+	};
+
+	if (error instanceof LesserGraphQLAdapterError) {
+		messages.push(...error.debugMessages);
+		append(error.message);
+		return messages;
+	}
+
+	if (error instanceof Error) {
+		append(error.message);
+	}
+
+	if (error && typeof error === 'object') {
+		const { errors, graphQLErrors, networkError, message } = error as {
+			errors?: Array<{ message?: string }>;
+			graphQLErrors?: Array<{ message?: string }>;
+			networkError?: {
+				message?: string;
+				result?: { errors?: Array<{ message?: string }> };
+			};
+			message?: string;
+		};
+
+		append(message);
+
+		// A raw execution result carries its errors under `errors`. Callers that
+		// already extracted them pass `debugMessages` explicitly, so this only
+		// adds coverage for results handed over unprocessed.
+		if (Array.isArray(errors)) {
+			for (const executionError of errors) {
+				append(executionError?.message);
+			}
+		}
+
+		if (Array.isArray(graphQLErrors)) {
+			for (const graphQLError of graphQLErrors) {
+				append(graphQLError.message);
+			}
+		}
+
+		append(networkError?.message);
+
+		const networkErrors = networkError?.result?.errors;
+		if (Array.isArray(networkErrors)) {
+			for (const networkResultError of networkErrors) {
+				append(networkResultError.message);
+			}
+		}
+	}
+
+	return messages;
+}
+
+function createUserSafeAdapterError(
+	message: string,
+	cause: unknown,
+	debugMessages: readonly string[] = extractDebugMessages(cause)
+): LesserGraphQLAdapterError {
+	return new LesserGraphQLAdapterError(message, {
+		cause: createSanitizedAdapterCause(cause),
+		debugMessages,
+		serverCodes: extractServerErrorCodes(cause),
+	});
+}
+
+function createSanitizedAdapterCause(cause: unknown): Record<string, unknown> {
+	const sanitized: Record<string, unknown> = {
+		code: 'LESSER_GRAPHQL_REQUEST_FAILED',
+	};
+
+	if (cause instanceof Error) {
+		sanitized['kind'] = 'error';
+		sanitized['name'] = cause.name || 'Error';
+		return sanitized;
+	}
+
+	if (cause && typeof cause === 'object') {
+		const result = cause as {
+			data?: unknown;
+			errors?: unknown[];
+			error?: unknown;
+			graphQLErrors?: unknown[];
+			networkError?: {
+				result?: { errors?: unknown[] };
+			};
+		};
+
+		sanitized['kind'] = 'graphql-result';
+
+		if (Array.isArray(result.errors)) {
+			sanitized['errorCount'] = result.errors.length;
+		}
+
+		if (Array.isArray(result.graphQLErrors)) {
+			sanitized['graphQLErrorCount'] = result.graphQLErrors.length;
+		}
+
+		if (Array.isArray(result.networkError?.result?.errors)) {
+			sanitized['networkErrorCount'] = result.networkError.result.errors.length;
+		}
+
+		if (result.error) {
+			sanitized['hasTransportError'] = true;
+		}
+
+		if ('data' in result) {
+			sanitized['hadPartialData'] = result.data != null;
+		}
+
+		return sanitized;
+	}
+
+	sanitized['kind'] = typeof cause;
+	return sanitized;
+}
+
+/** The `DraftReview` payload returned by a successful share. */
+export type SharedDraftReview = ShareDraftForReviewMutation['shareDraftForReview'];
+
+/**
+ * Result of {@link LesserGraphQLAdapter.shareDraftForReviewIfAbsent}.
+ *
+ * `already-invited` deliberately carries no `review`: the share was refused, so
+ * there is no server state to report and nothing for the caller to mistake for
+ * success.
+ */
+export type ShareDraftForReviewOutcome =
+	| { status: 'invited'; review: SharedDraftReview }
+	| { status: 'already-invited'; draftId: string; reviewer: string; cause: unknown };
+
+/**
+ * Server codes that unambiguously mean "this grant already exists".
+ *
+ * These are Lesser's own `AppError` codes (pkg/errors/codes.go `CodeConflict`,
+ * `CodeAlreadyExists`), which the GraphQL error presenter copies verbatim onto
+ * `extensions.code` (cmd/graphql/main.go `graphQLErrorPresenter`). A code is
+ * contract surface; the message beside it is not.
+ */
+const DRAFT_REVIEW_CONFLICT_CODES: readonly string[] = ['CONFLICT', 'ALREADY_EXISTS'];
+
+/**
+ * True when a failed share was refused because the grant already exists.
+ *
+ * Classification is by `extensions.code` only. The obvious alternative —
+ * matching the failure text — was deliberately rejected: server message strings
+ * are not contract, so a wording change upstream would silently reclassify a
+ * genuine fault as a benign "already invited" notice, and a substring as broad
+ * as "duplicate" can appear in failures that have nothing to do with this grant.
+ * Presenting a fault as an expected condition is the worse error in both
+ * directions.
+ *
+ * The upstream gap is closed at the pinned v1.6.0: `CreateDraftReviewGrant`
+ * wraps a failed conditional create as `DynamoDBConditionalCheckFailed`, which
+ * maps to `CodeConflict` (`CONFLICT`) and reaches GraphQL `extensions.code`.
+ * This function already recognises that code; see
+ * `docs/lesser/contracts/upstream-gaps.md`.
+ */
+export function isDraftReviewShareConflict(error: unknown): boolean {
+	const codes =
+		error instanceof LesserGraphQLAdapterError ? error.serverCodes : extractServerErrorCodes(error);
+	return codes.some((code) => DRAFT_REVIEW_CONFLICT_CODES.includes(code));
+}
+
+export class LesserGraphQLAdapter implements LesserMessagesAdapter {
+	private readonly client: GraphQLClientInstance;
+	private readonly httpEndpoint: string;
+	private readonly baseHeaders: Record<string, string>;
+	private authToken: string | null;
+
+	constructor(config: LesserGraphQLAdapterConfig) {
+		this.httpEndpoint = config.httpEndpoint;
+		this.baseHeaders = { ...(config.headers ?? {}) };
+		this.authToken = config.token ?? null;
+		this.client = createGraphQLClient(config);
+	}
+
+	updateToken(token: string | null): void {
+		this.authToken = token;
+		this.client.updateToken(token);
+	}
+
+	/**
+	 * Verify credentials and fetch current authenticated user
+	 *
+	 * @returns The authenticated actor/user account
+	 * @throws Error if not authenticated or credentials invalid
+	 */
+	async verifyCredentials(): Promise<Actor> {
+		if (!this.authToken) {
+			throw new Error('No authentication token provided. Cannot verify credentials.');
+		}
+
+		try {
+			const data = await this.query(ViewerDocument);
+
+			if (!data.viewer) {
+				throw new Error('Invalid authentication token');
+			}
+
+			return data.viewer;
+		} catch (error) {
+			if (error instanceof Error) {
+				if (error.message === 'Invalid authentication token') {
+					throw error;
+				}
+				const messages = [error.message, ...extractDebugMessages(error)];
+				if (messages.some((message) => message.includes('401') || message.includes('403'))) {
+					throw new Error('Authentication failed: Invalid or expired token', { cause: error });
+				}
+				throw createUserSafeAdapterError('Failed to verify credentials.', error);
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Check if currently authenticated
+	 */
+	isAuthenticated(): boolean {
+		return this.authToken !== null;
+	}
+
+	/**
+	 * Get current auth token
+	 */
+	getToken(): string | null {
+		return this.authToken;
+	}
+
+	/**
+	 * Refresh authentication token
+	 * @param newToken - New token to use
+	 */
+	refreshToken(newToken: string): void {
+		this.updateToken(newToken);
+	}
+
+	close(): void {
+		this.client.close();
+	}
+
+	public async query<
+		TData extends Record<string, unknown>,
+		TVariables extends OperationVariables = OperationVariables,
+	>(
+		document: TypedDocumentNode<TData, TVariables>,
+		variables?: TVariables,
+		fetchPolicy: 'cache-first' | 'network-only' = 'network-only'
+	): Promise<TData> {
+		const options = {
+			query: document,
+			variables,
+			fetchPolicy,
+		} as unknown as QueryOptionsFor<TData, TVariables>;
+
+		let result: {
+			data?: TData | null;
+			errors?: Array<{ message?: string }>;
+			error?: unknown;
+		};
+		try {
+			result = (await this.client.client.query<TData, TVariables>(options)) as typeof result;
+		} catch (error) {
+			throw createUserSafeAdapterError(USER_SAFE_GRAPHQL_ERROR_MESSAGE, error);
+		}
+
+		const { data } = result;
+
+		const errors = result.errors;
+		if (Array.isArray(errors) && errors.length > 0) {
+			throw createUserSafeAdapterError(
+				USER_SAFE_GRAPHQL_ERROR_MESSAGE,
+				result,
+				errors
+					.map((error) => error.message)
+					.filter((message): message is string => Boolean(message))
+			);
+		}
+
+		const transportError = result.error;
+		if (transportError) {
+			throw createUserSafeAdapterError(USER_SAFE_GRAPHQL_ERROR_MESSAGE, transportError);
+		}
+
+		if (data == null) {
+			return {} as TData;
+		}
+
+		return data;
+	}
+
+	public async mutate<
+		TData extends Record<string, unknown>,
+		TVariables extends OperationVariables = OperationVariables,
+	>(document: TypedDocumentNode<TData, TVariables>, variables?: TVariables): Promise<TData> {
+		const options = {
+			mutation: document,
+			variables,
+		} as unknown as MutationOptionsFor<TData, TVariables>;
+		let result: {
+			data?: TData | null;
+			errors?: Array<{ message?: string }>;
+			error?: unknown;
+		};
+		try {
+			result = (await this.client.client.mutate<TData, TVariables>(options)) as typeof result;
+		} catch (error) {
+			throw createUserSafeAdapterError(USER_SAFE_GRAPHQL_ERROR_MESSAGE, error);
+		}
+
+		const errors = result.errors;
+		if (Array.isArray(errors) && errors.length > 0) {
+			throw createUserSafeAdapterError(
+				USER_SAFE_GRAPHQL_ERROR_MESSAGE,
+				result,
+				errors
+					.map((error) => error.message)
+					.filter((message): message is string => Boolean(message))
+			);
+		}
+
+		const transportError = result.error;
+		if (transportError) {
+			throw createUserSafeAdapterError(USER_SAFE_GRAPHQL_ERROR_MESSAGE, transportError);
+		}
+
+		const { data } = result;
+		if (data == null) {
+			throw createUserSafeAdapterError(
+				USER_SAFE_GRAPHQL_ERROR_MESSAGE,
+				new Error('Mutation completed without returning data.')
+			);
+		}
+
+		return data;
+	}
+
+	private static hasMissingTargetIdError(error: unknown): boolean {
+		const containsTargetId = (message?: string | null) => {
+			if (!message) {
+				return false;
+			}
+			const normalized = message.toLowerCase();
+			return normalized.includes('target_id') || normalized.includes('target id');
+		};
+
+		if (error instanceof Error && containsTargetId(error.message)) {
+			return true;
+		}
+
+		if (
+			error instanceof LesserGraphQLAdapterError &&
+			error.debugMessages.some((message) => containsTargetId(message))
+		) {
+			return true;
+		}
+
+		if (error && typeof error === 'object') {
+			const { graphQLErrors, networkError } = error as {
+				graphQLErrors?: Array<{ message?: string }>;
+				networkError?: { message?: string; result?: { errors?: Array<{ message?: string }> } };
+			};
+
+			if (
+				Array.isArray(graphQLErrors) &&
+				graphQLErrors.some((err) => containsTargetId(err?.message))
+			) {
+				return true;
+			}
+
+			const networkErrors = networkError?.result?.errors;
+			if (
+				Array.isArray(networkErrors) &&
+				networkErrors.some((err) => containsTargetId(err?.message))
+			) {
+				return true;
+			}
+
+			if (containsTargetId(networkError?.message)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private buildUploadMediaFormData(variables: UploadMediaMutationVariables): FormData {
+		const { input } = variables;
+		const { file, ...rest } = input;
+
+		if (!isFileLike(file)) {
+			throw new Error('UploadMedia input.file must be a File or Blob');
+		}
+
+		const inferredFilename =
+			(typeof rest.filename === 'string' && rest.filename.trim().length > 0
+				? rest.filename
+				: undefined) ??
+			(typeof File !== 'undefined' && file instanceof File ? file.name : undefined) ??
+			'upload.bin';
+
+		const normalizedInput = stripUndefined({
+			...rest,
+			filename:
+				rest.filename ??
+				(typeof File !== 'undefined' && file instanceof File ? file.name : undefined),
+			sensitive: rest.sensitive ?? false,
+			spoilerText: rest.spoilerText ?? null,
+			mediaType: rest.mediaType ?? null,
+			file: null,
+		});
+
+		const operations = {
+			query: print(UploadMediaDocument),
+			variables: {
+				input: normalizedInput,
+			},
+		};
+
+		const formData = new FormData();
+		formData.append('operations', JSON.stringify(operations));
+		formData.append('map', JSON.stringify({ 0: ['variables.input.file'] }));
+		formData.append('0', file as Blob, inferredFilename);
+
+		return formData;
+	}
+
+	async fetchTimeline(variables: TimelineQueryVariables) {
+		const data = await this.query(TimelineDocument, variables);
+		return data.timeline;
+	}
+
+	async fetchHomeTimeline(pagination?: Partial<Pick<TimelineQueryVariables, 'first' | 'after'>>) {
+		return this.fetchTimeline({
+			type: 'HOME',
+			first: pagination?.first,
+			after: pagination?.after,
+		});
+	}
+
+	async fetchPublicTimeline(
+		pagination?: Partial<Pick<TimelineQueryVariables, 'first' | 'after'>>,
+		scope: Extract<TimelineType, 'PUBLIC' | 'LOCAL'> = 'PUBLIC'
+	) {
+		return this.fetchTimeline({
+			type: scope,
+			first: pagination?.first,
+			after: pagination?.after,
+		});
+	}
+
+	async fetchDirectTimeline(pagination?: Partial<Pick<TimelineQueryVariables, 'first' | 'after'>>) {
+		return this.fetchTimeline({
+			type: 'DIRECT',
+			first: pagination?.first,
+			after: pagination?.after,
+		});
+	}
+
+	async fetchHashtagTimeline(
+		hashtag: string,
+		pagination?: Partial<Pick<TimelineQueryVariables, 'first' | 'after'>>
+	) {
+		return this.fetchTimeline({
+			type: 'HASHTAG',
+			hashtag,
+			first: pagination?.first,
+			after: pagination?.after,
+		});
+	}
+
+	async fetchListTimeline(
+		listId: string,
+		pagination?: Partial<Pick<TimelineQueryVariables, 'first' | 'after'>>
+	) {
+		return this.fetchTimeline({
+			type: 'LIST',
+			listId,
+			first: pagination?.first,
+			after: pagination?.after,
+		});
+	}
+
+	async fetchActorTimeline(
+		actorId: string,
+		pagination?: Partial<Pick<TimelineQueryVariables, 'first' | 'after' | 'mediaOnly'>>
+	) {
+		return this.fetchTimeline({
+			type: 'ACTOR',
+			actorId,
+			first: pagination?.first,
+			after: pagination?.after,
+			mediaOnly: pagination?.mediaOnly,
+		});
+	}
+
+	async getObject(id: string) {
+		const data = await this.query(ObjectByIdDocument, { id });
+		return data.object;
+	}
+
+	async getActorById(id: string) {
+		const data = await this.query(ActorByIdDocument, { id });
+		return data.actor;
+	}
+
+	async getActorByUsername(username: string) {
+		const data = await this.query(ActorByUsernameDocument, { username });
+		return data.actor;
+	}
+
+	async getInstance() {
+		const data = await this.query(InstanceDocument);
+		return data.instance;
+	}
+
+	// ============================================================================
+	// AGENTS
+	// ============================================================================
+
+	async getAgentByUsername(username: string) {
+		const data = await this.query(AgentByUsernameDocument, { username });
+		return data.agent;
+	}
+
+	async getAgents(variables?: AgentsQueryVariables) {
+		const data = await this.query(AgentsDocument, variables);
+		return data.agents;
+	}
+
+	async getMyAgents() {
+		const data = await this.query(MyAgentsDocument);
+		return data.myAgents;
+	}
+
+	async getMySouls() {
+		const data = await this.query(MySoulsDocument);
+		return data.mySouls;
+	}
+
+	async getAgentActivity(variables: AgentActivityQueryVariables) {
+		const data = await this.query(AgentActivityDocument, variables);
+		return data.agentActivity;
+	}
+
+	async getAgentAccessLeases(variables: AgentAccessLeasesQueryVariables) {
+		const data = await this.query(AgentAccessLeasesDocument, variables);
+		return data.agentAccessLeases;
+	}
+
+	async getAdminAgentPolicy() {
+		const data = await this.query(AdminAgentPolicyDocument);
+		return data.adminAgentPolicy;
+	}
+
+	async updateAdminAgentPolicy(input: UpdateAdminAgentPolicyMutationVariables['input']) {
+		const data = await this.mutate(UpdateAdminAgentPolicyDocument, { input });
+		return data.updateAdminAgentPolicy;
+	}
+
+	async agentMemorySearch(variables: AgentMemorySearchQueryVariables) {
+		const data = await this.query(AgentMemorySearchDocument, variables);
+		return data.agentMemorySearch;
+	}
+
+	async registerAgent(input: RegisterAgentMutationVariables['input']) {
+		const data = await this.mutate(RegisterAgentDocument, { input });
+		return data.registerAgent;
+	}
+
+	async updateAgent(username: string, input: UpdateAgentMutationVariables['input']) {
+		const data = await this.mutate(UpdateAgentDocument, { username, input });
+		return data.updateAgent;
+	}
+
+	async deleteAgent(username: string) {
+		const data = await this.mutate(DeleteAgentDocument, { username });
+		return data.deleteAgent;
+	}
+
+	async delegateToAgent(input: DelegateToAgentMutationVariables['input']) {
+		const data = await this.mutate(DelegateToAgentDocument, { input });
+		return data.delegateToAgent;
+	}
+
+	async revokeAgentToken(username: string) {
+		const data = await this.mutate(RevokeAgentTokenDocument, { username });
+		return data.revokeAgentToken;
+	}
+
+	async createAgentAccessLeasePrincipalChallenge(
+		username: string,
+		input: CreateAgentAccessLeasePrincipalChallengeMutationVariables['input']
+	) {
+		const data = await this.mutate(CreateAgentAccessLeasePrincipalChallengeDocument, {
+			username,
+			input,
+		});
+		return data.createAgentAccessLeasePrincipalChallenge;
+	}
+
+	async createAgentAccessLeaseAgentChallenge(
+		username: string,
+		input: CreateAgentAccessLeaseAgentChallengeMutationVariables['input']
+	) {
+		const data = await this.mutate(CreateAgentAccessLeaseAgentChallengeDocument, {
+			username,
+			input,
+		});
+		return data.createAgentAccessLeaseAgentChallenge;
+	}
+
+	async createAgentAccessLease(
+		username: string,
+		input: CreateAgentAccessLeaseMutationVariables['input']
+	) {
+		const data = await this.mutate(CreateAgentAccessLeaseDocument, { username, input });
+		return data.createAgentAccessLease;
+	}
+
+	async revokeAgentAccessLease(
+		username: string,
+		leaseID: string,
+		input?: RevokeAgentAccessLeaseMutationVariables['input']
+	) {
+		const data = await this.mutate(RevokeAgentAccessLeaseDocument, {
+			username,
+			leaseID,
+			input,
+		});
+		return data.revokeAgentAccessLease;
+	}
+
+	async createAgentAccessLeaseSessionKeyChallenge(
+		username: string,
+		leaseID: string,
+		input: CreateAgentAccessLeaseSessionKeyChallengeMutationVariables['input']
+	) {
+		const data = await this.mutate(CreateAgentAccessLeaseSessionKeyChallengeDocument, {
+			username,
+			leaseID,
+			input,
+		});
+		return data.createAgentAccessLeaseSessionKeyChallenge;
+	}
+
+	async authorizeAgentAccessLeaseSessionKey(
+		username: string,
+		leaseID: string,
+		input: AuthorizeAgentAccessLeaseSessionKeyMutationVariables['input']
+	) {
+		const data = await this.mutate(AuthorizeAgentAccessLeaseSessionKeyDocument, {
+			username,
+			leaseID,
+			input,
+		});
+		return data.authorizeAgentAccessLeaseSessionKey;
+	}
+
+	async createAgentAccessLeaseRenewChallenge(username: string, leaseID: string) {
+		const data = await this.mutate(CreateAgentAccessLeaseRenewChallengeDocument, {
+			username,
+			leaseID,
+		});
+		return data.createAgentAccessLeaseRenewChallenge;
+	}
+
+	async exchangeAgentAccessLeaseToken(
+		username: string,
+		leaseID: string,
+		input: ExchangeAgentAccessLeaseTokenMutationVariables['input']
+	) {
+		const data = await this.mutate(ExchangeAgentAccessLeaseTokenDocument, {
+			username,
+			leaseID,
+			input,
+		});
+		return data.exchangeAgentAccessLeaseToken;
+	}
+
+	async adminVerifyAgent(username: string, input?: AdminVerifyAgentMutationVariables['input']) {
+		const data = await this.mutate(AdminVerifyAgentDocument, { username, input });
+		return data.adminVerifyAgent;
+	}
+
+	async adminUnverifyAgent(username: string, input?: AdminUnverifyAgentMutationVariables['input']) {
+		const data = await this.mutate(AdminUnverifyAgentDocument, { username, input });
+		return data.adminUnverifyAgent;
+	}
+
+	async adminSuspendAgent(username: string) {
+		const data = await this.mutate(AdminSuspendAgentDocument, { username });
+		return data.adminSuspendAgent;
+	}
+
+	async incorporateSoul(agentId: string, targetAgentUsername: string) {
+		const id = agentId.trim();
+		if (!id) {
+			throw new Error('agentId is required');
+		}
+		const targetUsername = targetAgentUsername.trim();
+		if (!targetUsername) {
+			throw new Error('targetAgentUsername is required');
+		}
+
+		const data = await this.mutate(IncorporateSoulDocument, {
+			agentId: id,
+			targetAgentUsername: targetUsername,
+		});
+		return data.incorporateSoul;
+	}
+
+	async search(variables: SearchQueryVariables) {
+		const data = await this.query(SearchDocument, variables);
+		return data.search;
+	}
+
+	async fetchNotifications(variables: NotificationsQueryVariables) {
+		const data = await this.query(NotificationsDocument, variables);
+		return data.notifications;
+	}
+
+	async dismissNotification(id: string) {
+		const data = await this.mutate(DismissNotificationDocument, { id });
+		return data.dismissNotification;
+	}
+
+	async clearNotifications() {
+		const data = await this.mutate(ClearNotificationsDocument);
+		return data.clearNotifications;
+	}
+
+	async getConversations(variables: ConversationsQueryVariables) {
+		const data = await this.query(ConversationsDocument, variables);
+		const conversations = (data as Partial<typeof data>).conversations;
+		return Array.isArray(conversations) ? conversations : [];
+	}
+
+	async getConversation(id: string) {
+		const data = await this.query(ConversationDocument, { id });
+		return data.conversation;
+	}
+
+	async getConversationMessages(variables: ConversationMessagesQueryVariables) {
+		const data = await this.query(ConversationMessagesDocument, variables);
+		return data.conversationMessages;
+	}
+
+	async createConversation(participantId: string) {
+		const data = await this.mutate(CreateConversationDocument, { participantId });
+		return data.createConversation;
+	}
+
+	async sendMessage(conversationId: string, content: string, mediaIds?: string[]) {
+		const data = await this.mutate(SendMessageDocument, {
+			conversationId,
+			content,
+			mediaIds,
+		});
+		return data.sendMessage;
+	}
+
+	async acceptMessageRequest(
+		conversationId: AcceptMessageRequestMutationVariables['conversationId']
+	) {
+		const data = await this.mutate(AcceptMessageRequestDocument, { conversationId });
+		return data.acceptMessageRequest;
+	}
+
+	async declineMessageRequest(
+		conversationId: DeclineMessageRequestMutationVariables['conversationId']
+	) {
+		const data = await this.mutate(DeclineMessageRequestDocument, { conversationId });
+		return data.declineMessageRequest;
+	}
+
+	async markConversationAsRead(id: string) {
+		const data = await this.mutate(MarkConversationReadDocument, { id });
+		return data.markConversationAsRead;
+	}
+
+	async deleteConversation(conversationId: string) {
+		const data = await this.mutate(DeleteConversationDocument, { conversationId });
+		return data.deleteConversation;
+	}
+
+	async deleteMessage(messageId: DeleteMessageMutationVariables['messageId']) {
+		const data = await this.mutate(DeleteMessageDocument, { messageId });
+		return data.deleteMessage;
+	}
+
+	async getLists() {
+		const data = await this.query(ListsDocument);
+		return data.lists;
+	}
+
+	async getList(id: string) {
+		const data = await this.query(ListDocument, { id });
+		return data.list;
+	}
+
+	async getListAccounts(id: string) {
+		const data = await this.query(ListAccountsDocument, { id });
+		return data.listAccounts;
+	}
+
+	async createList(input: CreateListMutationVariables['input']) {
+		const data = await this.mutate(CreateListDocument, { input });
+		return data.createList;
+	}
+
+	async updateList(id: string, input: UpdateListMutationVariables['input']) {
+		const data = await this.mutate(UpdateListDocument, { id, input });
+		return data.updateList;
+	}
+
+	async deleteList(id: string) {
+		const data = await this.mutate(DeleteListDocument, { id });
+		return data.deleteList;
+	}
+
+	async addAccountsToList(id: string, accountIds: string[]) {
+		const data = await this.mutate(AddAccountsToListDocument, { id, accountIds });
+		return data.addAccountsToList;
+	}
+
+	async removeAccountsFromList(id: string, accountIds: string[]) {
+		const data = await this.mutate(RemoveAccountsFromListDocument, { id, accountIds });
+		return data.removeAccountsFromList;
+	}
+
+	async uploadMedia(input: UploadMediaInput): Promise<UploadMediaMutation['uploadMedia']> {
+		const variables: UploadMediaMutationVariables = {
+			input: {
+				...input,
+				sensitive: input.sensitive ?? false,
+				spoilerText: input.spoilerText ?? null,
+				mediaType: input.mediaType ?? null,
+			},
+		};
+
+		const formData = this.buildUploadMediaFormData(variables);
+
+		const headers: Record<string, string> = { ...this.baseHeaders };
+		if (this.authToken) {
+			headers['authorization'] = `Bearer ${this.authToken}`;
+		}
+
+		for (const key of Object.keys(headers)) {
+			if (key.toLowerCase() === 'content-type') {
+				delete headers[key];
+			}
+		}
+
+		const response = await fetch(this.httpEndpoint, {
+			method: 'POST',
+			headers,
+			body: formData,
+		});
+
+		if (!response.ok) {
+			const errorBody = await response.text().catch(() => '');
+			throw createUserSafeAdapterError(
+				USER_SAFE_UPLOAD_ERROR_MESSAGE,
+				undefined,
+				errorBody
+					? [`Upload failed (${response.status}): ${errorBody}`]
+					: [`Upload failed with status ${response.status}`]
+			);
+		}
+
+		const result = (await response.json()) as {
+			data?: UploadMediaMutation;
+			errors?: Array<{ message: string }>;
+		};
+
+		if (result.errors?.length) {
+			throw createUserSafeAdapterError(
+				USER_SAFE_UPLOAD_ERROR_MESSAGE,
+				result,
+				result.errors.map((error) => error.message)
+			);
+		}
+
+		const payload = result.data?.uploadMedia;
+		if (!payload) {
+			throw new Error('Upload media mutation returned no payload.');
+		}
+
+		return payload;
+	}
+
+	async getMedia(id: string) {
+		const data = await this.query(MediaDocument, { id });
+		return data.media;
+	}
+
+	async updateMedia(id: string, input: UpdateMediaMutationVariables['input']) {
+		const data = await this.mutate(UpdateMediaDocument, { id, input });
+		return data.updateMedia;
+	}
+
+	async createNote(input: CreateNoteMutationVariables['input']) {
+		const data = await this.mutate(CreateNoteDocument, { input });
+		return data.createNote;
+	}
+
+	async createQuoteNote(input: CreateQuoteNoteMutationVariables['input']) {
+		const data = await this.mutate(CreateQuoteNoteDocument, { input });
+		return data.createQuoteNote;
+	}
+
+	async getObjectWithQuotes(id: string, first?: number, after?: string) {
+		const data = await this.query(ObjectWithQuotesDocument, { id, first, after });
+		return data.object;
+	}
+
+	async withdrawFromQuotes(noteId: string) {
+		const data = await this.mutate(WithdrawFromQuotesDocument, { noteId });
+		return data.withdrawFromQuotes;
+	}
+
+	async updateQuotePermissions(
+		noteId: string,
+		quoteable: boolean,
+		permission: 'EVERYONE' | 'FOLLOWERS' | 'MENTIONED' | 'NONE'
+	) {
+		const data = await this.mutate(UpdateQuotePermissionsDocument, {
+			noteId,
+			quoteable,
+			permission,
+		});
+		return data.updateQuotePermissions;
+	}
+
+	async deleteObject(id: string) {
+		const data = await this.mutate(DeleteObjectDocument, { id });
+		return data.deleteObject;
+	}
+
+	async likeObject(id: string) {
+		const data = await this.mutate(LikeObjectDocument, { id });
+		return data.likeObject;
+	}
+
+	async unlikeObject(id: string) {
+		const data = await this.mutate(UnlikeObjectDocument, { id });
+		return data.unlikeObject;
+	}
+
+	async shareObject(id: string) {
+		const data = await this.mutate(ShareObjectDocument, { id });
+		return data.shareObject;
+	}
+
+	async unshareObject(id: string) {
+		const data = await this.mutate(UnshareObjectDocument, { id });
+		return data.unshareObject;
+	}
+
+	async bookmarkObject(id: string) {
+		const data = await this.mutate(BookmarkObjectDocument, { id });
+		return data.bookmarkObject;
+	}
+
+	async unbookmarkObject(id: string) {
+		const data = await this.mutate(UnbookmarkObjectDocument, { id });
+		return data.unbookmarkObject;
+	}
+
+	async pinObject(id: string) {
+		const data = await this.mutate(PinObjectDocument, { id });
+		return data.pinObject;
+	}
+
+	async unpinObject(id: string) {
+		const data = await this.mutate(UnpinObjectDocument, { id });
+		return data.unpinObject;
+	}
+
+	async getRelationship(id: string): Promise<RelationshipQuery['relationship']> {
+		try {
+			const data = await this.query(RelationshipDocument, { id });
+			return data.relationship ?? null;
+		} catch (error) {
+			if (LesserGraphQLAdapter.hasMissingTargetIdError(error)) {
+				const fallback = await this.query(RelationshipsDocument, { ids: [id] });
+				return fallback.relationships?.[0] ?? null;
+			}
+			throw error;
+		}
+	}
+
+	async getRelationships(ids: string[]) {
+		const data = await this.query<RelationshipsQuery, RelationshipsQueryVariables>(
+			RelationshipsDocument,
+			{ ids }
+		);
+		return data.relationships;
+	}
+
+	async followActor(id: string) {
+		const data = await this.mutate(FollowActorDocument, { id });
+		return data.followActor;
+	}
+
+	async unfollowActor(id: string) {
+		const data = await this.mutate(UnfollowActorDocument, { id });
+		return data.unfollowActor;
+	}
+
+	async blockActor(id: string) {
+		const data = await this.mutate(BlockActorDocument, { id });
+		return data.blockActor;
+	}
+
+	async unblockActor(id: string) {
+		const data = await this.mutate(UnblockActorDocument, { id });
+		return data.unblockActor;
+	}
+
+	async muteActor(id: string, notifications?: boolean) {
+		const data = await this.mutate(MuteActorDocument, { id, notifications });
+		return data.muteActor;
+	}
+
+	async unmuteActor(id: string) {
+		const data = await this.mutate(UnmuteActorDocument, { id });
+		return data.unmuteActor;
+	}
+
+	async updateRelationship(id: string, input: UpdateRelationshipMutationVariables['input']) {
+		const data = await this.mutate(UpdateRelationshipDocument, { id, input });
+		return data.updateRelationship;
+	}
+
+	// ============================================================================
+	// Followers & Following
+	// ============================================================================
+
+	async getFollowers(username: string, limit = 40, cursor?: string) {
+		const data = await this.query(FollowersDocument, { username, limit, cursor });
+		return data.followers;
+	}
+
+	async getFollowing(username: string, limit = 40, cursor?: string) {
+		const data = await this.query(FollowingDocument, { username, limit, cursor });
+		return data.following;
+	}
+
+	// ============================================================================
+	// Profile Management
+	// ============================================================================
+
+	async updateProfile(input: {
+		displayName?: string;
+		bio?: string;
+		avatar?: string;
+		header?: string;
+		locked?: boolean;
+		bot?: boolean;
+		discoverable?: boolean;
+		noIndex?: boolean;
+		sensitive?: boolean;
+		language?: string;
+		fields?: Array<{ name: string; value: string; verifiedAt?: string }>;
+	}) {
+		const data = await this.mutate(UpdateProfileDocument, { input });
+		return data.updateProfile;
+	}
+
+	// ============================================================================
+	// User Preferences
+	// ============================================================================
+
+	async getUserPreferences() {
+		const data = await this.query(UserPreferencesDocument);
+		return data.userPreferences;
+	}
+
+	async updateUserPreferences(input: {
+		language?: string;
+		defaultPostingVisibility?: 'PUBLIC' | 'UNLISTED' | 'FOLLOWERS' | 'DIRECT';
+		defaultMediaSensitive?: boolean;
+		expandSpoilers?: boolean;
+		expandMedia?: 'DEFAULT' | 'SHOW_ALL' | 'HIDE_ALL';
+		autoplayGifs?: boolean;
+		showFollowCounts?: boolean;
+		preferredTimelineOrder?: 'NEWEST' | 'OLDEST';
+		searchSuggestionsEnabled?: boolean;
+		personalizedSearchEnabled?: boolean;
+		reblogFilters?: Array<{ key: string; enabled: boolean }>;
+		streaming?: {
+			defaultQuality?: 'AUTO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
+			autoQuality?: boolean;
+			preloadNext?: boolean;
+			dataSaver?: boolean;
+		};
+	}) {
+		const data = await this.mutate(UpdateUserPreferencesDocument, { input });
+		return data.updateUserPreferences;
+	}
+
+	async updateStreamingPreferences(input: {
+		defaultQuality?: 'AUTO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
+		autoQuality?: boolean;
+		preloadNext?: boolean;
+		dataSaver?: boolean;
+	}) {
+		const data = await this.mutate(UpdateStreamingPreferencesDocument, { input });
+		return data.updateStreamingPreferences;
+	}
+
+	// ============================================================================
+	// Push Notifications
+	// ============================================================================
+
+	async getPushSubscription() {
+		const data = await this.query(PushSubscriptionDocument);
+		return data.pushSubscription;
+	}
+
+	async registerPushSubscription(input: {
+		endpoint: string;
+		keys: {
+			auth: string;
+			p256dh: string;
+		};
+		alerts: {
+			follow?: boolean;
+			favourite?: boolean;
+			reblog?: boolean;
+			mention?: boolean;
+			poll?: boolean;
+			followRequest?: boolean;
+			status?: boolean;
+			update?: boolean;
+			adminSignUp?: boolean;
+			adminReport?: boolean;
+		};
+	}) {
+		const data = await this.mutate(RegisterPushSubscriptionDocument, { input });
+		return data.registerPushSubscription;
+	}
+
+	async updatePushSubscription(input: {
+		alerts: {
+			follow?: boolean;
+			favourite?: boolean;
+			reblog?: boolean;
+			mention?: boolean;
+			poll?: boolean;
+			followRequest?: boolean;
+			status?: boolean;
+			update?: boolean;
+			adminSignUp?: boolean;
+			adminReport?: boolean;
+		};
+	}) {
+		const data = await this.mutate(UpdatePushSubscriptionDocument, { input });
+		return data.updatePushSubscription;
+	}
+
+	async deletePushSubscription() {
+		const data = await this.mutate(DeletePushSubscriptionDocument);
+		return data.deletePushSubscription;
+	}
+
+	// ============================================================================
+	// PHASE 4: Community Notes
+	// ============================================================================
+
+	async addCommunityNote(input: { objectId: string; content: string }) {
+		const data = await this.mutate(AddCommunityNoteDocument, { input });
+		return data.addCommunityNote;
+	}
+
+	async voteCommunityNote(id: string, helpful: boolean) {
+		const data = await this.mutate(VoteCommunityNoteDocument, { id, helpful });
+		return data.voteCommunityNote;
+	}
+
+	async getCommunityNotesByObject(objectId: string, first?: number, after?: string) {
+		const data = await this.query(CommunityNotesByObjectDocument, { objectId, first, after });
+		return data.object;
+	}
+
+	// ============================================================================
+	// PHASE 4: Moderation
+	// ============================================================================
+
+	async flagObject(input: { objectId: string; reason: string; evidence?: string[] }) {
+		const data = await this.mutate(FlagObjectDocument, { input });
+		return data.flagObject;
+	}
+
+	async createModerationPattern(input: ModerationPatternInput) {
+		const data = await this.mutate(CreateModerationPatternDocument, { input });
+		return data.createModerationPattern;
+	}
+
+	async deleteModerationPattern(id: string) {
+		const data = await this.mutate(DeleteModerationPatternDocument, { id });
+		return data.deleteModerationPattern;
+	}
+
+	// ============================================================================
+	// PHASE 4: AI Analysis
+	// ============================================================================
+
+	async requestAIAnalysis(objectId: string, objectType?: string, force?: boolean) {
+		const data = await this.mutate(RequestAiAnalysisDocument, { objectId, objectType, force });
+		return data.requestAIAnalysis;
+	}
+
+	async getAIAnalysis(objectId: string) {
+		const data = await this.query(AiAnalysisDocument, { objectId });
+		return data.aiAnalysis;
+	}
+
+	async getAIStats(period: 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | 'YEAR') {
+		const data = await this.query(AiStatsDocument, { period });
+		return data.aiStats;
+	}
+
+	async getAICapabilities() {
+		const data = await this.query(AiCapabilitiesDocument);
+		return data.aiCapabilities;
+	}
+
+	// ============================================================================
+	// PHASE 4: Trust Graph
+	// ============================================================================
+
+	async getTrustGraph(actorId: string, category?: 'CONTENT' | 'BEHAVIOR' | 'TECHNICAL') {
+		const data = await this.query(TrustGraphDocument, { actorId, category });
+		return data.trustGraph;
+	}
+
+	// ============================================================================
+	// PHASE 4: Cost Management
+	// ============================================================================
+
+	async getCostBreakdown(period?: 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | 'YEAR') {
+		const data = await this.query(CostBreakdownDocument, { period });
+		return data.costBreakdown;
+	}
+
+	async getInstanceBudgets() {
+		const data = await this.query(InstanceBudgetsDocument);
+		return data.instanceBudgets;
+	}
+
+	async setInstanceBudget(domain: string, monthlyUSD: number, autoLimit?: boolean) {
+		const data = await this.mutate(SetInstanceBudgetDocument, { domain, monthlyUSD, autoLimit });
+		return data.setInstanceBudget;
+	}
+
+	async optimizeFederationCosts(threshold: number) {
+		const data = await this.mutate(OptimizeFederationCostsDocument, { threshold });
+		return data.optimizeFederationCosts;
+	}
+
+	async getFederationLimits() {
+		const data = await this.query(FederationLimitsDocument);
+		return data.federationLimits;
+	}
+
+	async setFederationLimit(domain: string, limit: Record<string, unknown>) {
+		const data = await this.mutate(SetFederationLimitDocument, { domain, limit });
+		return data.setFederationLimit;
+	}
+
+	// ============================================================================
+	// PHASE 4: Thread Sync & Federation
+	// ============================================================================
+
+	async syncThread(noteUrl: string, depth?: number) {
+		const data = await this.mutate(SyncThreadDocument, { noteUrl, depth });
+		return data.syncThread;
+	}
+
+	async syncMissingReplies(noteId: string) {
+		const data = await this.mutate(SyncMissingRepliesDocument, { noteId });
+		return data.syncMissingReplies;
+	}
+
+	async getThreadContext(noteId: string) {
+		const data = await this.query(ThreadContextDocument, { noteId });
+		return data.threadContext;
+	}
+
+	async getSeveredRelationships(instance?: string, first?: number, after?: string) {
+		const data = await this.query(SeveredRelationshipsDocument, { instance, first, after });
+		return data.severedRelationships;
+	}
+
+	async acknowledgeSeverance(id: string) {
+		const data = await this.mutate(AcknowledgeSeveranceDocument, { id });
+		return data.acknowledgeSeverance;
+	}
+
+	async attemptReconnection(id: string) {
+		const data = await this.mutate(AttemptReconnectionDocument, { id });
+		return data.attemptReconnection;
+	}
+
+	async getFederationHealth(threshold?: number) {
+		const data = await this.query(FederationHealthDocument, { threshold });
+		return data.federationHealth;
+	}
+
+	async getFederationStatus(domain: string) {
+		const data = await this.query(FederationStatusDocument, { domain });
+		return data.federationStatus;
+	}
+
+	async pauseFederation(domain: string, reason: string, until?: string) {
+		const data = await this.mutate(PauseFederationDocument, { domain, reason, until });
+		return data.pauseFederation;
+	}
+
+	async resumeFederation(domain: string) {
+		const data = await this.mutate(ResumeFederationDocument, { domain });
+		return data.resumeFederation;
+	}
+
+	// ============================================================================
+	// PHASE 4: Hashtag Management
+	// ============================================================================
+
+	async followHashtag(hashtag: string, notifyLevel?: 'ALL' | 'MUTUALS' | 'FOLLOWING' | 'NONE') {
+		const data = await this.mutate(FollowHashtagDocument, { hashtag, notifyLevel });
+		return data.followHashtag;
+	}
+
+	async unfollowHashtag(hashtag: string) {
+		const data = await this.mutate(UnfollowHashtagDocument, { hashtag });
+		return data.unfollowHashtag;
+	}
+
+	async muteHashtag(hashtag: string, until?: string) {
+		const data = await this.mutate(MuteHashtagDocument, { hashtag, until });
+		return data.muteHashtag;
+	}
+
+	async getFollowedHashtags(first?: number, after?: string) {
+		const data = await this.query(FollowedHashtagsDocument, { first, after });
+		return data.followedHashtags;
+	}
+
+	async updateHashtagNotifications(hashtag: string, settings: HashtagNotificationSettingsInput) {
+		const data = await this.mutate(UpdateHashtagNotificationsDocument, {
+			hashtag,
+			settings,
+		});
+		return data.updateHashtagNotifications;
+	}
+
+	async unmuteHashtag(
+		hashtag: string,
+		options: {
+			level?: NotificationLevel;
+			mutedUntil?: string | null;
+			filters?: HashtagNotificationSettingsInput['filters'];
+		} = {}
+	) {
+		const settings: HashtagNotificationSettingsInput = {
+			level: options.level ?? 'ALL',
+			muted: false,
+			mutedUntil: options.mutedUntil ?? null,
+			filters: options.filters,
+		};
+
+		return this.updateHashtagNotifications(hashtag, settings);
+	}
+
+	// ============================================================================
+	// SUBSCRIPTIONS
+	// ============================================================================
+
+	subscribeToTimelineUpdates(
+		variables: TimelineUpdatesSubscriptionVariables
+	): Observable<FetchResult<TimelineUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: TimelineUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToNotificationStream(
+		variables?: NotificationStreamSubscriptionVariables
+	): Observable<FetchResult<NotificationStreamSubscription>> {
+		return this.client.client.subscribe({
+			query: NotificationStreamDocument,
+			variables,
+		});
+	}
+
+	subscribeToConversationUpdates(): Observable<FetchResult<ConversationUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: ConversationUpdatesDocument,
+		});
+	}
+
+	subscribeToListUpdates(
+		variables: ListUpdatesSubscriptionVariables
+	): Observable<FetchResult<ListUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: ListUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToQuoteActivity(
+		variables: QuoteActivitySubscriptionVariables
+	): Observable<FetchResult<QuoteActivitySubscription>> {
+		return this.client.client.subscribe({
+			query: QuoteActivityDocument,
+			variables,
+		});
+	}
+
+	subscribeToHashtagActivity(
+		variables: HashtagActivitySubscriptionVariables
+	): Observable<FetchResult<HashtagActivitySubscription>> {
+		return this.client.client.subscribe({
+			query: HashtagActivityDocument,
+			variables,
+		});
+	}
+
+	subscribeToActivityStream(
+		variables?: ActivityStreamSubscriptionVariables
+	): Observable<FetchResult<ActivityStreamSubscription>> {
+		return this.client.client.subscribe({
+			query: ActivityStreamDocument,
+			variables,
+		});
+	}
+
+	subscribeToRelationshipUpdates(
+		variables?: RelationshipUpdatesSubscriptionVariables
+	): Observable<FetchResult<RelationshipUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: RelationshipUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToCostUpdates(
+		variables?: CostUpdatesSubscriptionVariables
+	): Observable<FetchResult<CostUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: CostUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToModerationEvents(
+		variables?: ModerationEventsSubscriptionVariables
+	): Observable<FetchResult<ModerationEventsSubscription>> {
+		return this.client.client.subscribe({
+			query: ModerationEventsDocument,
+			variables,
+		});
+	}
+
+	subscribeToTrustUpdates(
+		variables: TrustUpdatesSubscriptionVariables
+	): Observable<FetchResult<TrustUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: TrustUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToAiAnalysisUpdates(
+		variables?: AiAnalysisUpdatesSubscriptionVariables
+	): Observable<FetchResult<AiAnalysisUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: AiAnalysisUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToMetricsUpdates(
+		variables?: MetricsUpdatesSubscriptionVariables
+	): Observable<FetchResult<MetricsUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: MetricsUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToModerationAlerts(
+		variables?: ModerationAlertsSubscriptionVariables
+	): Observable<FetchResult<ModerationAlertsSubscription>> {
+		return this.client.client.subscribe({
+			query: ModerationAlertsDocument,
+			variables,
+		});
+	}
+
+	subscribeToCostAlerts(
+		variables: CostAlertsSubscriptionVariables
+	): Observable<FetchResult<CostAlertsSubscription>> {
+		return this.client.client.subscribe({
+			query: CostAlertsDocument,
+			variables,
+		});
+	}
+
+	subscribeToBudgetAlerts(
+		variables?: BudgetAlertsSubscriptionVariables
+	): Observable<FetchResult<BudgetAlertsSubscription>> {
+		return this.client.client.subscribe({
+			query: BudgetAlertsDocument,
+			variables,
+		});
+	}
+
+	subscribeToFederationHealthUpdates(
+		variables?: FederationHealthUpdatesSubscriptionVariables
+	): Observable<FetchResult<FederationHealthUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: FederationHealthUpdatesDocument,
+			variables,
+		});
+	}
+
+	subscribeToModerationQueueUpdate(
+		variables?: ModerationQueueUpdateSubscriptionVariables
+	): Observable<FetchResult<ModerationQueueUpdateSubscription>> {
+		return this.client.client.subscribe({
+			query: ModerationQueueUpdateDocument,
+			variables,
+		});
+	}
+
+	subscribeToThreatIntelligence(): Observable<FetchResult<ThreatIntelligenceSubscription>> {
+		return this.client.client.subscribe({
+			query: ThreatIntelligenceDocument,
+		});
+	}
+
+	subscribeToPerformanceAlert(
+		variables: PerformanceAlertSubscriptionVariables
+	): Observable<FetchResult<PerformanceAlertSubscription>> {
+		return this.client.client.subscribe({
+			query: PerformanceAlertDocument,
+			variables,
+		});
+	}
+
+	subscribeToInfrastructureEvent(): Observable<FetchResult<InfrastructureEventSubscription>> {
+		return this.client.client.subscribe({
+			query: InfrastructureEventDocument,
+		});
+	}
+
+	subscribeToAgentActivityUpdates(
+		variables: AgentActivityUpdatesSubscriptionVariables
+	): Observable<FetchResult<AgentActivityUpdatesSubscription>> {
+		return this.client.client.subscribe({
+			query: AgentActivityUpdatesDocument,
+			variables,
+		});
+	}
+
+	// ==========================================================================
+	// Shared-draft review (Lesser M2a review contract)
+	// ==========================================================================
+
+	/**
+	 * Lists drafts shared with the viewer for review.
+	 */
+	async getSharedDraftReviews(variables: SharedDraftReviewsQueryVariables = {}) {
+		const data = await this.query(SharedDraftReviewsDocument, variables);
+		return data.sharedDraftReviews;
+	}
+
+	/**
+	 * Fetches a single shared draft under review.
+	 */
+	async getDraftReview(id: string) {
+		const data = await this.query(DraftReviewDocument, { id });
+		return data.draftReview;
+	}
+
+	/**
+	 * Invites a reviewer to a draft.
+	 *
+	 * Throws on any failure, including a duplicate share. Callers that want to
+	 * treat "already invited" as an expected condition should use
+	 * {@link shareDraftForReviewIfAbsent}.
+	 */
+	async shareDraftForReview(draftId: string, reviewer: string) {
+		const data = await this.mutate(ShareDraftForReviewDocument, { draftId, reviewer });
+		return data.shareDraftForReview;
+	}
+
+	/**
+	 * Invites a reviewer, reporting an existing grant as an expected condition
+	 * rather than a fault.
+	 *
+	 * Lesser v1.6.0 creates the grant conditionally
+	 * (`attribute_not_exists`, pkg/storage/repositories/draft_repository.go
+	 * `CreateDraftReviewGrant`) and version-conditions the regrant path. A
+	 * duplicate share therefore fails loudly, and that is deliberate: the
+	 * condition is what preserves a concurrent revocation. Two operators acting
+	 * at once must not silently resurrect access one of them just revoked.
+	 *
+	 * So this method does exactly one thing on conflict — it reports it:
+	 *
+	 * - it never re-issues the grant, and never retries;
+	 * - it never fabricates a `DraftReview`, because the share did not happen
+	 *   and the caller must not be told otherwise;
+	 * - it rethrows anything it cannot confidently identify as a duplicate.
+	 *
+	 * `already-invited` means "the server refused because a grant exists" — a
+	 * notice to show, not a success to act on. Re-enabling a revoked reviewer
+	 * is a deliberate re-share, which Lesser's regrant path already accepts.
+	 *
+	 * Recognition depends on Lesser sending a typed conflict code. The upstream
+	 * gap is closed at the pinned v1.6.0: the conditional-create path now sends
+	 * `CONFLICT`, which {@link isDraftReviewShareConflict} already accepts.
+	 */
+	async shareDraftForReviewIfAbsent(
+		draftId: string,
+		reviewer: string
+	): Promise<ShareDraftForReviewOutcome> {
+		try {
+			const data = await this.mutate(ShareDraftForReviewDocument, { draftId, reviewer });
+			return { status: 'invited', review: data.shareDraftForReview };
+		} catch (error) {
+			if (isDraftReviewShareConflict(error)) {
+				return { status: 'already-invited', draftId, reviewer, cause: error };
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Revokes a reviewer's invitation to a draft.
+	 */
+	async revokeDraftReview(draftId: string, reviewer: string) {
+		const data = await this.mutate(RevokeDraftReviewDocument, { draftId, reviewer });
+		return data.revokeDraftReview;
+	}
+
+	/**
+	 * Records a reviewer verdict against a draft.
+	 *
+	 * Lesser owns review policy: it decides whether the caller may record this
+	 * verdict and what the resulting `reviewStatus` becomes. This method
+	 * forwards the submission and returns the server's updated `DraftReview`.
+	 */
+	async submitDraftReview(variables: SubmitDraftReviewMutationVariables) {
+		const data = await this.mutate(SubmitDraftReviewDocument, variables);
+		return data.submitDraftReview;
+	}
+}
+
+export function createLesserGraphQLAdapter(
+	config: LesserGraphQLAdapterConfig
+): LesserGraphQLAdapter {
+	return new LesserGraphQLAdapter(config);
+}
+
+/**
+ * Submission payload accepted by {@link createSubmitDraftReviewHandler}.
+ *
+ * Structurally identical to the `VerdictSubmission` emitted by the blog face's
+ * `Review.VerdictActions` component, so the component's `onSubmit` can be wired
+ * straight through without an adapter shim in consumer code.
+ */
+export interface DraftReviewSubmission {
+	draftId: string;
+	verdict: DraftReviewVerdict;
+	notes?: string;
+}
+
+/**
+ * Builds an `onSubmit` handler for the blog face's `Review.VerdictActions`.
+ *
+ * Usage:
+ *
+ * ```svelte
+ * <Review.VerdictActions
+ *   draftId={review.draftId}
+ *   onSubmit={createSubmitDraftReviewHandler(adapter)}
+ * />
+ * ```
+ *
+ * Errors propagate to the caller so the component can surface them in its
+ * confirmation dialog and let the reviewer retry.
+ */
+export function createSubmitDraftReviewHandler(adapter: LesserGraphQLAdapter) {
+	return (submission: DraftReviewSubmission) =>
+		adapter.submitDraftReview({
+			draftId: submission.draftId,
+			verdict: submission.verdict,
+			notes: submission.notes ?? null,
+		});
+}

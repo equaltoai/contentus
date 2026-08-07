@@ -1,0 +1,226 @@
+
+> @equaltoai/contentus@0.1.0 build /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> pnpm run typecheck && pnpm run svelte-check && pnpm run build:client && pnpm run build:server && pnpm run build:assets && pnpm run validate
+
+
+> @equaltoai/contentus@0.1.0 typecheck /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> tsc --noEmit
+
+
+> @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+Getting Svelte diagnostics...
+
+====================================
+svelte-check found 0 errors and 3 warnings in 1 file
+
+> @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> vite build
+
+vite v8.2.0 building client environment for production...
+[2Ktransforming...4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+35:   // hydration (a filter change is a navigation, not a prop update), so local
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+                                ^
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+                                 ^
+39:   let hasNextPage = $state(data.hasNextPage);
+40:   let loadingMore = $state(false);
+4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+                                   ^
+40:   let loadingMore = $state(false);
+41:   let loadMoreFailed = $state(false);
+✓ 803 modules transformed.
+rendering chunks...
+computing gzip size...
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
+build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
+build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
+build/client/assets/entry-client-DLv5-bA9.js                695.65 kB │ gzip: 211.34 kB
+
+✓ built in 1.07s
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+> @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> vite build --ssr src/facetheory/entry-server.ts
+
+vite v8.2.0 building ssr environment for production...
+[2Ktransforming...4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+35:   // hydration (a filter change is a navigation, not a prop update), so local
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+                                ^
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+36:   // state seeded from it is the source of truth from the first click on.
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+                                 ^
+39:   let hasNextPage = $state(data.hasNextPage);
+40:   let loadingMore = $state(false);
+4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+37:   let articles = $state(data.articles);
+38:   let endCursor = $state(data.endCursor);
+39:   let hasNextPage = $state(data.hasNextPage);
+                                   ^
+40:   let loadingMore = $state(false);
+41:   let loadMoreFailed = $state(false);
+✓ 779 modules transformed.
+rendering chunks...
+computing gzip size...
+build/server/handler.mjs  1,131.06 kB │ gzip: 271.10 kB
+
+✓ built in 1.04s
+
+> @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
+
+manifest: copied client manifest to build/server/client-manifest.json
+stylesheet: brand/contentus.css — 338832 bytes, 144 --tc-* definitions, integrity assertions passed
+brand assets: copied 13 files to build/client/brand/
+
+> @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> pnpm run validate:graphql && pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph
+
+
+> @equaltoai/contentus@0.1.0 validate:graphql /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-graphql-documents.mjs
+
+# GraphQL contract audit
+
+Schema:     contracts/lesser/graphql-schema.graphql
+            108911 chars, sha256 fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064
+            equaltoai/lesser@f833ea0b6dea78c11a2b6da6289bf2305f770ebe:docs/contracts/graphql-schema.graphql
+            blob b907306de7b66bd6ab91665b59bb9b1f00897672 (contracts/lesser/provenance.json)
+            Integrity checked here; PROVENANCE is the blob id above compared against lesser —
+            dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
+Documents:  46 in 9 inventoried module(s), 46 operation(s)
+Swept:      58 contentus-authored .ts module(s) under src/, out of 1715 tracked file(s) there
+
+graphql-contract: PASS
+
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-renderer-authority.mjs
+
+# Renderer-authority audit
+
+- dependencies: clean
+- owned-source imports: clean
+- owned-source {@html} sinks: clean
+- vendored blog-face escape fallback: clean
+- owned-source coverage: clean
+
+- Forbidden renderer packages checked: 17
+- Contentus-owned source roots scanned: 16
+- Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
+
+Renderer-authority audit: clean.
+
+> @equaltoai/contentus@0.1.0 validate:csp /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 23
+- Documents scanned: 22
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    5628 bytes  findings=0
+- article-reader   200    5380 bytes  findings=0
+- series           200    5581 bytes  findings=0
+- category         200    5595 bytes  findings=0
+- compose          200    6484 bytes  findings=0
+- review-queue     200    5915 bytes  findings=0
+- review-workspace 200    5919 bytes  findings=0
+- timelines-instance 200    6746 bytes  findings=0
+- timelines-federated 200    6803 bytes  findings=0
+- timelines-home   200    6091 bytes  findings=0
+- messages-inbox   200    5589 bytes  findings=0
+- messages-requests 200    5618 bytes  findings=0
+- message-thread   200    5580 bytes  findings=0
+- messages-no-id   200    5592 bytes  findings=0
+- agents           200    5850 bytes  findings=0
+- agents-filtered  200    5908 bytes  findings=0
+- agent-detail     200    5930 bytes  findings=0
+- drones           200    6045 bytes  findings=0
+- drone-new        200    6083 bytes  findings=0
+- profile          200    5561 bytes  findings=0
+- auth-callback    200    5364 bytes  findings=0
+- not-found        404    5364 bytes  findings=0
+- hydration-data   200     603 bytes  findings=0
+
+CSP audit: clean.
+
+> @equaltoai/contentus@0.1.0 validate:seam-graph /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-seam-graph.mjs
+
+# Seam graph audit — faces 6–7 (src/lib/agents, src/lib/drones)
+
+- Build passes recorded: client, server
+- Modules the client build resolved / loaded: 802 / 802
+- Modules the server build resolved / loaded: 785 / 778
+- Dependency edges recorded: 4499
+- Distinct edges into the face: 33
+- Findings: 0
+
+## Edges into the face
+- src/facetheory/entry-server.ts → src/lib/agents/contract.ts [server:import]
+- src/facetheory/entry-server.ts → src/lib/agents/filters.ts [server:import]
+- src/facetheory/entry-server.ts → src/lib/agents/mcp.ts [server:import]
+- src/lib/agents/AgentCard.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentCapabilities.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentMcpPanel.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustDetail.svelte [client:import, server:import]
+- src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/Accordion.svelte [client:import, server:import]
+- src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/CopyBlock.svelte [client:import, server:import]
+- src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/mcp.ts [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentRosterFilters.svelte [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/MyAgents.svelte [client:import, server:import]
+- src/lib/agents/AgentRoster.svelte → src/lib/agents/filters.ts [client:import, server:import]
+- src/lib/agents/AgentRosterFilters.svelte → src/lib/agents/filters.ts [client:import, server:import]
+- src/lib/agents/MyAgents.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
+- src/lib/agents/MyAgents.svelte → src/lib/agents/contract.ts [client:import, server:import]
+- src/lib/agents/filters.ts → src/lib/agents/contract.ts [client:import, server:import]
+- src/lib/drones/DroneCard.svelte → src/lib/drones/identity.ts [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/DroneCreationForm.svelte [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/DroneCredentials.svelte [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/DronePolicyDisabled.svelte [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/contract.ts [client:import, server:import]
+- src/lib/drones/DroneCreationFlow.svelte → src/lib/drones/identity.ts [client:import, server:import]
+- src/lib/drones/DroneCreationForm.svelte → src/lib/drones/contract.ts [client:import, server:import]
+- src/lib/drones/DroneRoster.svelte → src/lib/drones/DroneCard.svelte [client:import, server:import]
+- src/lib/drones/DroneRoster.svelte → src/lib/drones/contract.ts [client:import, server:import]
+- src/lib/drones/contract.ts → src/lib/agents/contract.ts [client:import, server:import]
+- src/lib/routes/AgentDetailRoute.svelte → src/lib/agents/AgentDetail.svelte [client:import, server:import]
+- src/lib/routes/Agents.svelte → src/lib/agents/AgentRoster.svelte [client:import, server:import]
+- src/lib/routes/DroneNew.svelte → src/lib/drones/DroneCreationFlow.svelte [client:import, server:import]
+- src/lib/routes/Drones.svelte → src/lib/drones/DroneRoster.svelte [client:import, server:import]
+
+Seam graph audit: clean.

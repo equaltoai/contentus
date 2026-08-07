@@ -1,0 +1,38 @@
+
+> @equaltoai/contentus@0.1.0 validate:csp /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-csp.mjs
+
+# CSP Audit — contentus SSR output
+
+- Routes rendered from build/server/handler.mjs: 23
+- Documents scanned: 22
+- Ship-blocking findings: 0
+- Off-origin script/style references: 0
+- Route status mismatches: 0
+
+## Per-route
+- articles-index   200    5628 bytes  findings=0
+- article-reader   200    5380 bytes  findings=0
+- series           200    5581 bytes  findings=0
+- category         200    5595 bytes  findings=0
+- compose          200    6484 bytes  findings=0
+- review-queue     200    5915 bytes  findings=0
+- review-workspace 200    5919 bytes  findings=0
+- timelines-instance 200    6746 bytes  findings=0
+- timelines-federated 200    6803 bytes  findings=0
+- timelines-home   200    6091 bytes  findings=0
+- messages-inbox   200    5589 bytes  findings=0
+- messages-requests 200    5618 bytes  findings=0
+- message-thread   200    5580 bytes  findings=0
+- messages-no-id   200    5592 bytes  findings=0
+- agents           200    5850 bytes  findings=0
+- agents-filtered  200    5908 bytes  findings=0
+- agent-detail     200    5930 bytes  findings=0
+- drones           200    6045 bytes  findings=0
+- drone-new        200    6083 bytes  findings=0
+- profile          200    5561 bytes  findings=0
+- auth-callback    200    5364 bytes  findings=0
+- not-found        404    5364 bytes  findings=0
+- hydration-data   200     603 bytes  findings=0
+
+CSP audit: clean.

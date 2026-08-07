@@ -1,0 +1,6 @@
+
+> @equaltoai/contentus@0.1.0 lint /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!

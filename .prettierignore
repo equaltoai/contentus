@@ -1,0 +1,60 @@
+# Build output
+build/
+
+# Vendored greater-components source — CLI-managed, never hand-edited or reformatted
+src/lib/greater/
+src/lib/components/
+src/lib/generics/
+src/lib/patterns/
+src/lib/blog-types.ts
+src/lib/blog-share.ts
+src/lib/types.ts
+styles/greater/
+# The social face's shared modules land at the root of src/lib rather than in a
+# directory of their own: the registry spells their paths `lib/lib/<name>`, and
+# the components.json `lib` alias resolves that to `src/lib`. Same vendored
+# status as everything above, so the same rule — listed one by one because the
+# directory they share is contentus's own.
+src/lib/utils/
+src/lib/graphqlTimelineStore.ts
+src/lib/graphqlTimelineStore.svelte.ts
+src/lib/integration.ts
+src/lib/integration.svelte.ts
+# lesserTimelineStore.{ts,svelte.ts} were listed here until greater-v0.13.1 pruned
+# them out of the tree through the managed channel. Retired with the files.
+src/lib/notificationStore.ts
+src/lib/notificationStore.svelte.ts
+src/lib/timelineStore.ts
+src/lib/timelineStore.svelte.ts
+src/lib/transport.ts
+
+# Theory Cloud brand pack — copied verbatim from the design pack
+colors_and_type.css
+assets/
+
+# Pinned upstream contract — a byte-for-byte copy of lesser's canonical schema at
+# the ref recorded in contracts/lesser/provenance.json, bound by SHA-256. It is not
+# this repository's source to style: reformatting it would break the digest and,
+# worse, would mean the pinned artifact no longer mirrors upstream exactly.
+contracts/lesser/graphql-schema.graphql
+
+# Lockfile
+pnpm-lock.yaml
+
+# Agent materials — steward-owned, outside this repo's app write scope.
+# `greater doctor`/install markers carry checksums; reformatting them is not
+# cosmetic, it edits governed state.
+.codex/
+.agents/
+.claude/
+.kimi-code/
+.theorymcp/
+GEMINI.md
+AGENTS.md
+README.md
+
+# greater CLI state — written and rewritten by the CLI, never hand-formatted.
+components.json
+
+# Design authority — operator-owned baseline.
+docs/product-design.md

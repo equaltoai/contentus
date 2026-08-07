@@ -1,0 +1,17 @@
+
+> @equaltoai/contentus@0.1.0 validate:renderer-authority /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> node scripts/audit-renderer-authority.mjs
+
+# Renderer-authority audit
+
+- dependencies: clean
+- owned-source imports: clean
+- owned-source {@html} sinks: clean
+- vendored blog-face escape fallback: clean
+- owned-source coverage: clean
+
+- Forbidden renderer packages checked: 17
+- Contentus-owned source roots scanned: 16
+- Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
+
+Renderer-authority audit: clean.

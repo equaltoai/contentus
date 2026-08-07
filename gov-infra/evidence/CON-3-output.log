@@ -1,0 +1,7 @@
+facetheory.lesser.json declares every key `lesser client install` reads.
+  app_name=contentus version=0.1.0
+  build=pnpm build (allowlisted in gov-infra/planning/contentus-pinned-repo-contract.json)
+  server=build/server/handler.mjs export=handler
+  assets=build/client
+  paths resolve beneath the repository root; entry resolves beneath server.dir.
+  every real path stays beneath its real base; no path escapes through a symlink.

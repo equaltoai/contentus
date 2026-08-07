@@ -1,0 +1,4 @@
+
+> @equaltoai/contentus@0.1.0 typecheck /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> tsc --noEmit
+

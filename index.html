@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Contentus</title>
+	</head>
+	<body>
+		<!--
+			`vite dev` entry only. The installed build never serves this file:
+			lesser routes /l/* to the SSR host, which renders the document itself
+			(see src/facetheory/entry-server.ts). Nothing here ships.
+		-->
+		<div id="app"></div>
+		<script type="module" src="/src/facetheory/entry-client.ts"></script>
+	</body>
+</html>

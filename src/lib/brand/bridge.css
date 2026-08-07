@@ -1,0 +1,1287 @@
+/* =============================================================
+   Theory Cloud → greater-components bridge
+   -------------------------------------------------------------
+   Contentus-owned brand consumption layer. This file contains NO brand
+   literals: every value resolves to a `--tc-*` token defined by the
+   design pack (`colors_and_type.css`, sourced from
+   `theory_cloud_branding_package.md`). The pack is the brand authority;
+   the `--gr-*` names below are the contract the vendored greater
+   components consume.
+
+   This is a token mapping, NOT a component fork. No vendored source is
+   edited and no reusable component is reimplemented here. If a rule
+   below starts describing component BEHAVIOUR rather than brand values,
+   it belongs upstream in greater-components instead.
+
+   Layer order (see `scripts/build-stylesheet.mjs`):
+     1. greater tokens      — `--gr-*` defaults    (tarball-pin channel)
+     2. greater primitives  — component CSS        (CLI-copy channel)
+     3. greater shell       — shell CSS            (CLI-copy channel)
+     4. greater blog face   — blog CSS             (CLI-copy channel)
+     5. Theory Cloud pack   — `--tc-*` brand tokens (design pack)
+     6. THIS FILE           — maps `--gr-*` onto `--tc-*`, last so it wins
+
+   ---- Theme: data-theme="dark" at greater-v0.13.2 ----
+   Product design §2's preference is now satisfied: at greater-v0.13.2
+   the blog face ships 46 `[data-theme='dark']` selectors (cards, prose,
+   headings, review surfaces) and the primitives theme 47 more. The
+   shell root carries `data-theme="dark"` (AppShell.svelte — on the
+   shell, not <html>, because FaceTheory v4.0.6's adapter pipeline does
+   not forward htmlAttrs from renderOptions), and the
+   `--gr-color-gray-*` ramp those rules read comes from the greater
+   tokens layer at :root.
+
+   The pre-0.13.2 arrangement — an inverted `--gr-color-neutral-*` ramp
+   standing in for a dark theme the faces did not ship — is deleted:
+   nothing vendored consumes `--gr-color-neutral-*` anymore (verified at
+   v0.13.2: zero references outside this file). This was emdash's
+   upstream gap U-18, closed by the v0.13.2 dark coverage. Remaining
+   coverage holes (`gr-blog-author-card`, `.gr-menu`) are upstream:
+   equaltoai/greater-components#1009.
+   ============================================================= */
+
+:root {
+	color-scheme: dark;
+
+	/* ---- Names the faces use that the tokens package does not define ----
+	   Supplied so the vendored CSS resolves; nothing upstream is renamed. */
+	--gr-color-surface: var(--tc-surface-1);
+	/* `--tc-outline` (Steel — the pack's "neutral UI linework") rather than
+	   `--tc-outline-variant`: this is the article card's boundary, and Steel
+	   on the card surface clears WCAG 1.4.11's 3:1 non-text minimum where the
+	   quieter variant does not. The variant is used below for decorative
+	   separators, which 1.4.11 does not govern. */
+	--gr-color-border: var(--tc-outline);
+	--gr-color-focus: var(--tc-core-blue);
+	--gr-shadow-md: var(--tc-shadow-md);
+	--gr-shadows-base: var(--tc-shadow-sm);
+	--gr-shadows-lg: var(--tc-shadow-lg);
+	--gr-spacing-scale-9: var(--tc-space-8);
+
+	/* ---- Accent ramp → Core Blue (brand primary) ---- */
+	--gr-color-primary-50: var(--tc-core-blue-container);
+	--gr-color-primary-100: var(--tc-core-blue-container);
+	--gr-color-primary-200: var(--tc-core-blue-inverse);
+	--gr-color-primary-300: var(--tc-core-blue-fixed-dim);
+	--gr-color-primary-400: var(--tc-core-blue-fixed-dim);
+	--gr-color-primary-500: var(--tc-core-blue);
+	--gr-color-primary-600: var(--tc-core-blue);
+	--gr-color-primary-700: var(--tc-core-blue-fixed);
+	--gr-color-primary-800: var(--tc-core-blue-fixed);
+	--gr-color-primary-900: var(--tc-core-blue-fixed);
+	--gr-color-primary-950: var(--tc-core-blue-fixed);
+
+	/* ---- Status ramps ---- */
+	--gr-color-success-50: var(--tc-surface-2);
+	--gr-color-success-100: var(--tc-surface-2);
+	--gr-color-success-200: var(--tc-surface-3);
+	--gr-color-success-300: var(--tc-steel);
+	--gr-color-success-700: var(--tc-fg-muted);
+	--gr-color-success-900: var(--tc-fg);
+	--gr-color-warning-50: var(--tc-phi-gold-container);
+	--gr-color-warning-100: var(--tc-phi-gold-container);
+	--gr-color-warning-200: var(--tc-phi-gold-container);
+	--gr-color-warning-300: var(--tc-phi-gold);
+	--gr-color-warning-700: var(--tc-phi-gold);
+	--gr-color-warning-900: var(--tc-phi-gold-fixed);
+	--gr-color-error-100: var(--tc-error-container);
+	--gr-color-error-500: var(--tc-error);
+	--gr-color-error-700: var(--tc-error);
+
+	/* ---- Greater semantic roles ---- */
+	--gr-semantic-background-base: var(--tc-bg);
+	--gr-semantic-background-surface: var(--tc-surface);
+	--gr-semantic-background-raised: var(--tc-surface-2);
+	--gr-semantic-background-overlay: var(--tc-surface-3);
+	--gr-semantic-background-primary: var(--tc-surface);
+	--gr-semantic-background-secondary: var(--tc-surface-1);
+	--gr-semantic-background-tertiary: var(--tc-surface-2);
+	--gr-semantic-background-input: var(--tc-surface-2);
+	--gr-semantic-foreground-primary: var(--tc-fg);
+	--gr-semantic-foreground-secondary: var(--tc-fg-muted);
+	--gr-semantic-foreground-tertiary: var(--tc-fg-dim);
+	--gr-semantic-foreground-disabled: var(--tc-fg-dim);
+	--gr-semantic-border-subtle: var(--tc-outline-variant);
+	--gr-semantic-border-default: var(--tc-outline);
+	--gr-semantic-border-strong: var(--tc-fg-dim);
+	--gr-semantic-border-focus: var(--tc-core-blue);
+	--gr-semantic-action-primary-default: var(--tc-core-blue);
+	--gr-semantic-action-primary-hover: var(--tc-core-blue-fixed-dim);
+	--gr-semantic-action-primary-active: var(--tc-core-blue-fixed);
+	--gr-semantic-action-link-default: var(--tc-core-blue);
+	--gr-semantic-action-link-hover: var(--tc-core-blue-fixed-dim);
+	--gr-semantic-action-link-active: var(--tc-core-blue-fixed);
+	--gr-semantic-action-error-default: var(--tc-error);
+	--gr-semantic-focus-ring: var(--tc-core-blue);
+
+	/* ---- Radii and spacing from the pack's scales ---- */
+	--gr-radii-sm: var(--tc-radius-sm);
+	--gr-radii-md: var(--tc-radius-md);
+	--gr-radii-lg: var(--tc-radius-lg);
+	--gr-radii-full: var(--tc-radius-pill);
+	--gr-spacing-scale-1: var(--tc-space-1);
+	--gr-spacing-scale-2: var(--tc-space-2);
+	--gr-spacing-scale-3: var(--tc-space-3);
+	--gr-spacing-scale-4: var(--tc-space-4);
+	--gr-spacing-scale-5: var(--tc-space-5);
+	--gr-spacing-scale-6: var(--tc-space-6);
+	--gr-spacing-scale-8: var(--tc-space-8);
+	--gr-spacing-scale-10: var(--tc-space-10);
+	--gr-spacing-scale-12: var(--tc-space-12);
+
+	/* ---- Typography ----
+	   `serif` maps to the sans stack deliberately: the pack specifies
+	   Geist / Inter / JetBrains Mono and ships no serif face, and the blog
+	   face uses `fontFamily-serif` only as its long-form reading stack. */
+	--gr-typography-font: var(--tc-font-sans);
+	--gr-typography-fontFamily-sans: var(--tc-font-sans);
+	--gr-typography-fontFamily-serif: var(--tc-font-sans);
+	--gr-typography-fontFamily-mono: var(--tc-font-mono);
+
+	/* ---- Long-form reading measures ---- */
+	--gr-blog-font-family-body: var(--tc-font-sans);
+	--gr-blog-font-family-heading: var(--tc-font-display);
+	--gr-blog-font-family-code: var(--tc-font-mono);
+	--gr-blog-line-height-body: var(--tc-lh-body-lg);
+	--gr-blog-line-height-heading: var(--tc-lh-h2);
+	--gr-blog-content-max-width: 760px;
+	--gr-blog-featured-image-radius: var(--tc-radius-xl);
+	--gr-blog-code-radius: var(--tc-radius-md);
+	--gr-blog-progress-color: var(--tc-accent);
+	--gr-blog-toc-active-color: var(--tc-accent);
+
+	/* ---- Shell metrics ---- */
+	--gr-shell-topbar-height: 56px;
+	--gr-shell-gutter: var(--tc-space-6);
+	--gr-shell-gap-sm: var(--tc-space-2);
+	--gr-shell-gap-md: var(--tc-space-4);
+	--gr-shell-gap-lg: var(--tc-space-6);
+	--gr-shell-sidebar-width-compact: 64px;
+	--gr-shell-sidebar-width-sm: 200px;
+	--gr-shell-sidebar-width-md: 240px;
+	--gr-shell-sidebar-width-lg: 280px;
+	--gr-shell-content-max-narrow: 760px;
+	--gr-shell-content-max-default: 960px;
+	--gr-shell-content-max-wide: 1200px;
+}
+
+/* =============================================================
+   Dark-theme companion rules
+   -------------------------------------------------------------
+   `data-theme="dark"` activates the vendored dark rules, which ground
+   cards and the article body on raw gray-ramp slabs (gray-900). The
+   brand ground is Midnight, so those surfaces are re-grounded on the
+   `--tc-*` surfaces here; upstream's dark text colors are kept. Same
+   specificity as the vendored dark rules (0,2,0) — this file wins on
+   layer order, which is the bridge's whole job.
+
+   `gr-blog-author-card` and `.gr-menu` ship no dark rules at all at
+   v0.13.2 and are deliberately NOT forked here: that coverage is
+   upstream's to add (equaltoai/greater-components#1009).
+   ============================================================= */
+[data-theme='dark'] .gr-blog-article-card,
+[data-theme='dark'] .gr-blog-review-card {
+	background: var(--tc-surface-1);
+	border-color: var(--tc-outline);
+}
+
+[data-theme='dark'] .gr-blog-article {
+	background: transparent;
+}
+
+/* Read articles dim to the muted foreground: with no archive or read-state
+   of its own yet, :visited is the only signal a returning reader gets that
+   they have already opened a card. Descendant-scoped so it wins over the
+   vendored dark rule on cascade order, the bridge's whole job. At greater
+   v0.13.3 (#1008) the card inverted: the link lives INSIDE the title,
+   stretched over the card by ::after, so the selector follows the link. */
+[data-theme='dark'] .gr-blog-article-card__title .gr-blog-article-card__link:visited {
+	color: var(--tc-fg-muted);
+}
+
+/* =============================================================
+   Surface variants (product design §2)
+   -------------------------------------------------------------
+   One brand, three legible modes. `--tc-accent` is the single knob the
+   rest of the sheet reads, so a surface swap is one declaration rather
+   than a parallel theme.
+     journal → Phi Gold  — Articles, Review (the editorial half)
+     core    → Core Blue — Compose, Timelines (the social half)
+     mcp     → Violet    — Messages, Agents, Drones (system intelligence)
+   Only `journal` ships in M1; the other two are declared so later faces
+   inherit the mechanism rather than inventing one.
+   ============================================================= */
+
+[data-surface='journal'] {
+	--tc-accent: var(--tc-phi-gold);
+	--tc-accent-2: var(--tc-phi-gold-fixed);
+}
+
+[data-surface='core'] {
+	--tc-accent: var(--tc-core-blue);
+	--tc-accent-2: var(--tc-core-blue-fixed);
+}
+
+[data-surface='mcp'] {
+	--tc-accent: var(--tc-violet-signal);
+	--tc-accent-2: var(--tc-violet-fixed);
+}
+
+/* =============================================================
+   Contentus application shell
+   -------------------------------------------------------------
+   Product-specific composition only: document ground, landmarks, nav,
+   and the page-level blocks the route layer emits around the face
+   components. Anything reusable belongs in greater-components.
+   ============================================================= */
+
+html,
+body {
+	background: var(--tc-bg);
+	color: var(--tc-fg);
+}
+
+body {
+	font-family: var(--tc-font-sans);
+	font-size: var(--tc-fs-body-lg);
+	line-height: var(--tc-lh-body-lg);
+	margin: 0;
+	-webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+	outline: 2px solid var(--tc-core-blue);
+	outline-offset: 2px;
+}
+
+a {
+	color: var(--tc-core-blue);
+	text-decoration: underline;
+	text-underline-offset: 0.18em;
+}
+
+code {
+	font-family: var(--tc-font-mono);
+	font-size: var(--tc-fs-mono);
+}
+
+.contentus-skip-link {
+	position: absolute;
+	left: -9999px;
+	top: var(--tc-space-2);
+	z-index: 10;
+	padding: var(--tc-space-2) var(--tc-space-4);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	text-decoration: none;
+}
+
+.contentus-skip-link:focus {
+	left: var(--tc-space-4);
+}
+
+/* ---- Shell grid: sticky nav | content, collapsing at 960px ---- */
+.contentus-shell {
+	display: grid;
+	grid-template-columns: var(--gr-shell-sidebar-width-md) minmax(0, 1fr);
+	gap: var(--tc-space-8);
+	min-height: 100vh;
+	max-width: var(--gr-shell-content-max-wide);
+	margin: 0 auto;
+	padding: 0 var(--tc-space-6);
+}
+
+.contentus-sidebar {
+	position: sticky;
+	top: 0;
+	align-self: start;
+	height: 100vh;
+	padding: var(--tc-space-8) 0;
+	border-right: 1px solid var(--tc-outline-variant);
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-8);
+}
+
+.contentus-brand {
+	display: inline-flex;
+	align-items: center;
+	/* The wordmark image is 22px tall; the LINK must still meet WCAG 2.2's
+	   24px minimum target, so the box grows around it. */
+	min-height: 24px;
+	text-decoration: none;
+}
+
+.contentus-brand__wordmark {
+	display: block;
+	height: 22px;
+	width: auto;
+}
+
+.contentus-nav {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+}
+
+.contentus-nav__link {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-3);
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border-radius: var(--tc-radius-md);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body);
+	text-decoration: none;
+}
+
+.contentus-nav__link:hover {
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+}
+
+.contentus-nav__link[aria-current='page'] {
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	box-shadow: inset 2px 0 0 var(--tc-accent);
+}
+
+.contentus-nav__badge {
+	min-width: 20px;
+	padding: 0 var(--tc-space-1);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-accent);
+	color: var(--tc-midnight);
+	font-size: var(--tc-fs-label-sm);
+	line-height: 20px;
+	text-align: center;
+}
+
+/* The compose action reads as an action, not a destination: the nav's other
+   entries are places, and this one writes. */
+.contentus-nav__compose {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	margin-top: var(--tc-space-3);
+	padding: var(--tc-space-2) var(--tc-space-4);
+	border: 1px solid var(--tc-core-blue);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-core-blue);
+	color: var(--tc-midnight);
+	font-size: var(--tc-fs-body);
+	font-weight: var(--tc-w-semibold);
+	text-decoration: none;
+}
+
+.contentus-session {
+	margin-top: auto;
+	font-size: var(--tc-fs-body-sm);
+	color: var(--tc-fg-muted);
+}
+
+.contentus-session__button {
+	min-height: 44px;
+	width: 100%;
+	padding: var(--tc-space-2) var(--tc-space-4);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-session__button:hover {
+	border-color: var(--tc-accent);
+}
+
+/* Pre-mount placeholder: inert and unpainted, but occupying exactly the real
+   control's box so the post-mount swap cannot move anything. */
+.contentus-session__button--pending {
+	visibility: hidden;
+	cursor: default;
+}
+
+/* Account menu (P1-11): sign-out lives behind a menu with an inline
+   confirmation, never as a bare prominent button. The session block sits at
+   the BOTTOM of the desktop sidebar, so the menu opens upward; below 960px
+   the sidebar is a top row and it opens downward, end-aligned. */
+.contentus-account {
+	position: relative;
+}
+
+.contentus-account__menu {
+	position: absolute;
+	bottom: calc(100% + var(--tc-space-2));
+	left: 0;
+	right: 0;
+	z-index: 20;
+	display: grid;
+	gap: var(--tc-space-2);
+	padding: var(--tc-space-3);
+	background: var(--tc-surface-2);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	box-shadow: var(--tc-shadow-md);
+}
+
+.contentus-account__item {
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-3);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-sm);
+	background: transparent;
+	color: var(--tc-fg);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.contentus-account__item:hover {
+	background: var(--tc-surface-3);
+}
+
+.contentus-account__item--destructive {
+	color: var(--tc-error);
+}
+
+.contentus-account__confirm {
+	margin: 0;
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-account__confirm-actions {
+	display: grid;
+	gap: var(--tc-space-1);
+}
+
+.contentus-main {
+	min-width: 0;
+	padding: var(--tc-space-12) 0 var(--tc-space-24);
+}
+
+/* The page footer (contentinfo). Column 2 on the desktop grid so it closes
+   the reading column rather than sitting under the sticky sidebar. */
+.contentus-footer {
+	grid-column: 2;
+	padding: var(--tc-space-6) 0 var(--tc-space-10);
+	border-top: 1px solid var(--tc-outline-variant);
+	color: var(--tc-fg-dim);
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-page-header {
+	margin-bottom: var(--tc-space-12);
+}
+
+.contentus-eyebrow {
+	font-size: var(--tc-fs-eyebrow);
+	letter-spacing: var(--tc-ls-eyebrow);
+	text-transform: uppercase;
+	color: var(--tc-accent);
+	margin: 0 0 var(--tc-space-4) 0;
+}
+
+.contentus-h1 {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h1);
+	line-height: var(--tc-lh-h1);
+	letter-spacing: var(--tc-ls-h1);
+	font-weight: var(--tc-w-semibold);
+	margin: 0 0 var(--tc-space-4) 0;
+}
+
+.contentus-lede {
+	color: var(--tc-fg-muted);
+	max-width: 56ch;
+	margin: 0 0 var(--tc-space-8) 0;
+}
+
+.contentus-meta {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	margin: 0 0 var(--tc-space-4) 0;
+}
+
+/* ---- Index grid: single column on mobile per product design §5 ---- */
+.contentus-card-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-6);
+	border-top: 1px solid var(--tc-outline-variant);
+	padding-top: var(--tc-space-8);
+}
+
+.contentus-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-2);
+	margin-bottom: var(--tc-space-8);
+}
+
+.contentus-filter {
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-pill);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	text-decoration: none;
+}
+
+.contentus-filter:hover,
+.contentus-filter[aria-current='page'] {
+	border-color: var(--tc-accent);
+	color: var(--tc-fg);
+}
+
+/* "Load more" (P1-10): a real button, 44px target, centered under the grid.
+   The appended cards announce through the route's visually-hidden status
+   region rather than by moving focus off the control. */
+.contentus-load-more {
+	display: grid;
+	justify-items: center;
+	gap: var(--tc-space-3);
+	margin-top: var(--tc-space-8);
+}
+
+.contentus-load-more__button {
+	min-height: 44px;
+	padding: var(--tc-space-2) var(--tc-space-6);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-load-more__button:hover:not(:disabled) {
+	border-color: var(--tc-accent);
+}
+
+.contentus-load-more__button:disabled {
+	cursor: default;
+	color: var(--tc-fg-muted);
+}
+
+/* ---- Designed empty / unavailable states ---- */
+.contentus-notice {
+	border: 1px solid var(--tc-outline-variant);
+	border-left: 3px solid var(--tc-accent);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+	padding: var(--tc-space-6);
+	margin: var(--tc-space-8) 0;
+}
+
+.contentus-notice__title {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h4);
+	font-weight: var(--tc-w-semibold);
+	margin: 0 0 var(--tc-space-2) 0;
+}
+
+.contentus-notice__body {
+	color: var(--tc-fg-muted);
+	margin: 0;
+}
+
+.contentus-reader {
+	max-width: var(--gr-blog-content-max-width);
+}
+
+/* =============================================================
+   Face 2 — review queue (product design §5; contentus-owned, M2d.1)
+
+   Only the queue AROUND the cards. Every `.gr-blog-review-*` class the
+   vendored `Review.QueueCard` / `AttributionStrip` / `VerdictActions`
+   emit is styled by the blog face's own theme.css, which the site
+   stylesheet already adopts — unlike `compose` at M3, the `review`
+   registry entry ships its appearance upstream, so there is no shim
+   here and nothing for a pin bump to drift away from.
+   ============================================================= */
+.contentus-h2 {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h3);
+	font-weight: var(--tc-w-semibold);
+	margin: 0 0 var(--tc-space-4) 0;
+}
+
+.contentus-review-group {
+	border-top: 1px solid var(--tc-outline-variant);
+	padding-top: var(--tc-space-6);
+	margin-bottom: var(--tc-space-8);
+}
+
+.contentus-review-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--tc-space-4);
+}
+
+.contentus-review-empty {
+	color: var(--tc-fg-muted);
+	max-width: 60ch;
+	margin: 0;
+}
+
+.contentus-review-hint {
+	color: var(--tc-fg-muted);
+	margin: var(--tc-space-6) 0;
+}
+
+/* ---- Workspace: metadata rail beside the server-rendered preview ----
+   Desktop is two columns; the mobile single-column form lands with the
+   segmented control in M2d.4. The rail comes FIRST in the document, so
+   the stacked order already reads attribution-then-body: knowing who
+   wrote something changes how the prose reads. */
+.contentus-review-workspace {
+	display: grid;
+	grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+	gap: var(--tc-space-6);
+	align-items: start;
+}
+
+.contentus-review-rail {
+	display: grid;
+	gap: var(--tc-space-4);
+	min-width: 0;
+}
+
+.contentus-review-preview {
+	min-width: 0;
+}
+
+.contentus-review-meta {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--tc-space-2) var(--tc-space-4);
+	margin: 0 0 var(--tc-space-4) 0;
+	font-size: var(--tc-fs-body-sm);
+}
+
+.contentus-review-meta dt {
+	color: var(--tc-fg-muted);
+}
+
+.contentus-review-meta dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.contentus-review-note {
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-body-sm);
+	margin: 0 0 var(--tc-space-2) 0;
+}
+
+.contentus-review-errors {
+	margin: 0;
+	padding-left: var(--tc-space-6);
+	color: var(--tc-fg-muted);
+	font-family: var(--tc-font-mono);
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* ---- Verdict and publish controls (contentus-owned, M2d.3) ----
+   The vendored `Review.VerdictActions` brings its own appearance from the
+   blog face theme; these are the contentus controls around it. 44px is a
+   floor on every one of them, not a preference. */
+.contentus-review-verdict {
+	display: grid;
+	gap: var(--tc-space-2);
+}
+
+/* =============================================================
+   SIZING BRIDGE — the vendored verdict controls (M2d rework)
+   -------------------------------------------------------------
+   WHY THIS BLOCK EXISTS, and when it should stop existing.
+
+   `Review.VerdictActions` renders every one of its controls at
+   `size="sm"`, and the vendored primitives theme sizes that variant
+   `min-height: 2rem` — 32px. So the two decisions a reviewer makes on a
+   phone, approve and request-changes, plus both buttons in the
+   confirmation dialog and its close control, were 32px targets on a
+   surface whose primary input is a thumb. The design's floor is 44px
+   (product design §4) and the publish controls beside them already meet
+   it, so the verdict pair were the smallest targets on the screen and
+   the only ones that fell short.
+
+   The buttons themselves are vendored and are not edited: the `size`
+   prop is upstream's, and hand-editing the component would take it out
+   of the `greater` CLI's hands. So this is a SIZING BRIDGE in the sense
+   `src/lib/brand/compose.css` established at M3 — contentus's own
+   appearance over upstream's class contract, appearance only, changing
+   nothing about what the components do or emit.
+
+   NOT INSIDE A MEDIA QUERY, deliberately, and this is the same rule the
+   publish controls above follow: a touch target that is only large on a
+   phone is a target that got small on a tablet. The mobile breakpoints
+   are therefore covered by a floor that never lifts rather than by a
+   rule that has to be repeated at each one.
+
+   Specificity is descendant-qualified (0,2,0) so it beats
+   `.gr-button--sm` (0,1,0) on merit rather than on cascade order, and
+   the block sits after the primitives theme in the assembled sheet in
+   any case.
+
+   SWAP-TO-VENDORED: delete this block when greater's review chrome sizes
+   its verdict controls to the 44px touch floor itself, or exposes the
+   size as a consumer prop. Recorded as an UPSTREAM SIZING CANDIDATE
+   against `equaltoai/greater-components` in
+   `docs/consumption/review-contract.md`; until then the floor lives here
+   rather than in a fork of the component.
+   ============================================================= */
+.gr-blog-review-verdict .gr-blog-review-verdict__approve,
+.gr-blog-review-verdict .gr-blog-review-verdict__request-changes,
+.gr-blog-review-verdict__dialog .gr-modal__footer .gr-button,
+.gr-blog-review-verdict__dialog .gr-modal__close {
+	min-height: 44px;
+	min-width: 44px;
+}
+
+.contentus-review-publish {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--tc-space-3);
+	margin-bottom: var(--tc-space-3);
+}
+
+.contentus-review-publish__primary,
+.contentus-review-publish__secondary {
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 var(--tc-space-5);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	cursor: pointer;
+}
+
+.contentus-review-publish__primary {
+	border: 1px solid var(--tc-accent);
+	background: var(--tc-accent);
+	color: var(--tc-midnight);
+	font-weight: var(--tc-w-semibold);
+}
+
+.contentus-review-publish__secondary {
+	border: 1px solid var(--tc-outline-variant);
+	background: transparent;
+	color: var(--tc-fg);
+}
+
+.contentus-review-publish__primary[disabled],
+.contentus-review-publish__secondary[disabled] {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.contentus-review-field {
+	display: grid;
+	gap: var(--tc-space-2);
+	margin: var(--tc-space-4) 0;
+}
+
+.contentus-review-field input {
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+	background: var(--tc-surface-1);
+	color: var(--tc-fg);
+	font: inherit;
+}
+
+.contentus-review-error {
+	color: var(--tc-fg);
+	border-left: 3px solid var(--tc-accent);
+	padding-left: var(--tc-space-3);
+	margin: var(--tc-space-3) 0 0 0;
+	font-size: var(--tc-fs-body-sm);
+}
+
+/* The decisions sit under both columns on desktop, and become the sticky
+   bar below. `grid-column: 1 / -1` rather than a third column: a verdict is
+   about the whole draft, not about one pane of it. */
+.contentus-review-actions {
+	grid-column: 1 / -1;
+	display: grid;
+	gap: var(--tc-space-4);
+}
+
+/* The segmented control has nothing to switch while both panels are on
+   screen, so above the breakpoint it is not in the layout at all. */
+.contentus-review-segmented {
+	display: none;
+}
+
+/* =============================================================
+   Single-column workspace (product design §5; M2d.4)
+
+   ONE PANEL AT A TIME, NEVER A SPLIT. A split view on a phone is two
+   columns too narrow to read instead of one that is. `data-panel` on
+   the workspace root is the only state; this media query is what
+   decides that it means anything. No script measures the viewport.
+   ============================================================= */
+@media (max-width: 960px) {
+	.contentus-review-workspace {
+		grid-template-columns: 1fr;
+		/* Room for the sticky bar and, below it, the tab bar and the home
+		   indicator — so the last line of a preview is readable rather than
+		   permanently behind the controls. */
+		padding-bottom: calc(
+			var(--tc-space-20) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom)
+		);
+	}
+
+	.contentus-review-segmented {
+		display: flex;
+		gap: var(--tc-space-2);
+		margin-bottom: var(--tc-space-4);
+		padding: var(--tc-space-1);
+		border: 1px solid var(--tc-outline-variant);
+		border-radius: var(--tc-radius-pill);
+		background: var(--tc-surface-1);
+	}
+
+	.contentus-review-segmented__option {
+		flex: 1;
+		/* 44px is a floor, not a preference. */
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: 0;
+		border-radius: var(--tc-radius-pill);
+		background: transparent;
+		color: var(--tc-fg-muted);
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.contentus-review-segmented__option[aria-pressed='true'] {
+		background: var(--tc-surface-2);
+		color: var(--tc-fg);
+		font-weight: var(--tc-w-semibold);
+	}
+
+	/* The panel the control is not showing is GONE, not merely hidden behind
+	   another: `display: none` keeps it out of the accessibility tree and out
+	   of the tab order, so a screen reader and a keyboard agree with the
+	   painted state. */
+	.contentus-review-workspace[data-panel='details'] [data-review-panel='preview'],
+	.contentus-review-workspace[data-panel='preview'] [data-review-panel='details'] {
+		display: none;
+	}
+
+	/* The decisions stay reachable while a long preview scrolls. A decision
+	   surface that scrolls away is one that gets made from memory. */
+	.contentus-review-actions {
+		position: sticky;
+		bottom: calc(var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+		z-index: 2;
+		gap: var(--tc-space-2);
+		padding-top: var(--tc-space-2);
+		background: var(--tc-bg);
+		border-top: 1px solid var(--tc-outline-variant);
+	}
+}
+
+.contentus-visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* =============================================================
+   Mobile chrome — bottom tab bar, compose FAB, sheet
+   (product design §4; contentus-owned, M3.1)
+   -------------------------------------------------------------
+   greater-components ships no bottom-nav, drawer, or sheet at
+   greater-v0.11.9 — a planned upstream gap (§7). These rules are the
+   presentation half of the interim chrome; the components are
+   `src/lib/shell/MobileTabBar.svelte` and `src/lib/shell/Sheet.svelte`.
+   SWAP-TO-VENDORED: delete this whole block when greater M3a lands its
+   mobile-nav components and the two files above become bindings.
+
+   Metrics, all from the brand's own scales:
+     --contentus-tabbar-height  56px  bar chrome, excluding the safe area
+     44px minimum touch target on every tab and the FAB
+     env(safe-area-inset-bottom) keeps the row clear of a home indicator
+
+   No affordance here depends on hover. Every tab carries a permanent text
+   label beside its icon, current state is `aria-current` plus a painted
+   indicator, and the hover rules below only add emphasis to something
+   already legible — which is the rule for a surface whose primary input
+   has no hover at all.
+   ============================================================= */
+
+:root {
+	--contentus-tabbar-height: 56px;
+	--contentus-fab-size: 56px;
+	--contentus-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.contentus-tabbar {
+	display: none;
+}
+
+.contentus-tabbar__list {
+	display: flex;
+	align-items: stretch;
+	justify-content: space-around;
+	gap: 0;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-tabbar__item {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+}
+
+.contentus-tabbar__tab {
+	position: relative;
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	min-width: 44px;
+	padding: var(--tc-space-1) var(--tc-space-1);
+	color: var(--tc-fg-muted);
+	font-size: var(--tc-fs-label-sm);
+	line-height: 1.2;
+	text-align: center;
+	text-decoration: none;
+}
+
+.contentus-tabbar__tab[aria-disabled='true'] {
+	color: var(--tc-fg-dim);
+}
+
+.contentus-tabbar__tab[aria-current='page'] {
+	color: var(--tc-fg);
+}
+
+/* The current-tab indicator is a painted bar, not a colour change alone:
+   colour is the one signal a reader may not be able to resolve. */
+.contentus-tabbar__tab[aria-current='page']::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	width: 28px;
+	height: 2px;
+	border-radius: var(--tc-radius-pill);
+	background: var(--tc-accent);
+}
+
+.contentus-tabbar__label {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.contentus-tabbar__upcoming {
+	font-size: var(--tc-fs-label-sm);
+	color: var(--tc-fg-dim);
+}
+
+.contentus-fab {
+	display: none;
+}
+
+/* ---- Sheet chrome ----
+   `100svh` (small viewport height) rather than `100vh`: on a phone the
+   large viewport is the pre-scroll one, so `100vh` puts the sticky action
+   bar under the browser's own chrome exactly when the keyboard is up and
+   the submit button is what the reader is reaching for. */
+.contentus-sheet-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background: color-mix(in srgb, var(--tc-midnight-depth) 72%, transparent);
+}
+
+.contentus-sheet {
+	position: fixed;
+	z-index: 41;
+	display: flex;
+	flex-direction: column;
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-outline-variant);
+	box-shadow: var(--tc-shadow-lg);
+	/* Desktop default: a centered dialog. The mobile full-screen form is the
+	   ≤960px override below. */
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: min(640px, calc(100vw - var(--tc-space-8)));
+	max-height: min(80svh, calc(100svh - var(--tc-space-8)));
+	border-radius: var(--tc-radius-lg);
+}
+
+.contentus-sheet__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--tc-space-4);
+	padding: var(--tc-space-4) var(--tc-space-5);
+	border-bottom: 1px solid var(--tc-outline-variant);
+}
+
+.contentus-sheet__title {
+	font-family: var(--tc-font-display);
+	font-size: var(--tc-fs-h4);
+	font-weight: var(--tc-w-semibold);
+	margin: 0;
+}
+
+.contentus-sheet__close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	min-width: 44px;
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md);
+	background: transparent;
+	color: var(--tc-fg-muted);
+	cursor: pointer;
+}
+
+.contentus-sheet__close:hover {
+	background: var(--tc-surface-2);
+	color: var(--tc-fg);
+}
+
+.contentus-sheet__body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: var(--tc-space-5);
+}
+
+.contentus-sheet__actions {
+	position: sticky;
+	bottom: 0;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--tc-space-3);
+	padding: var(--tc-space-4) var(--tc-space-5);
+	padding-bottom: calc(var(--tc-space-4) + var(--contentus-safe-bottom));
+	border-top: 1px solid var(--tc-outline-variant);
+	background: var(--tc-surface-1);
+}
+
+/* =============================================================
+   Breakpoints — sim's proven system (product design §4)
+   960px: grid collapses to one column; the bottom tab bar takes over
+          from the sidebar nav
+   720px: tighter gutters, stacked headers
+   640px: tab labels tighten, sheet loses its inset
+   480px: smallest supported phone — labels shrink before targets do
+   ============================================================= */
+
+@media (max-width: 960px) {
+	.contentus-shell {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0;
+		padding: 0 var(--tc-space-4);
+	}
+
+	.contentus-sidebar {
+		position: static;
+		height: auto;
+		padding: var(--tc-space-4) 0;
+		border-right: none;
+		border-bottom: 1px solid var(--tc-outline-variant);
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--tc-space-4);
+	}
+
+	/* The bottom tab bar is the mobile nav (product design §4), so the sidebar
+	   nav is not also shown — two navigation systems on one small screen is
+	   worse than one. The sidebar collapses to brand + session, which the tab
+	   bar deliberately does not carry.
+
+	   Review is the one primary destination the four-tab bar has no slot for.
+	   §4 answers that: "tabs carry the unread/review badges" — when M2 lands,
+	   the review count rides the Articles tab (the journal surface it belongs
+	   to) rather than becoming a fifth target that would push every tab under
+	   44px on a 360px screen. */
+	.contentus-nav {
+		display: none;
+	}
+
+	.contentus-session {
+		margin-top: 0;
+	}
+
+	.contentus-account__menu {
+		/* The sidebar is a top row below 960px, so the menu opens downward,
+		   end-aligned against the session control. */
+		bottom: auto;
+		top: calc(100% + var(--tc-space-2));
+		left: auto;
+		width: min(260px, calc(100vw - var(--tc-space-8)));
+	}
+
+	.contentus-main {
+		/* Clear the fixed tab bar and the FAB's overhang, plus the safe area. */
+		padding: var(--tc-space-8) 0
+			calc(var(--tc-space-16) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+	}
+
+	.contentus-footer {
+		/* Single column below 960px; keep the last line clear of the fixed bar. */
+		grid-column: auto;
+		padding-bottom: calc(
+			var(--tc-space-6) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom)
+		);
+	}
+
+	.contentus-tabbar {
+		position: fixed;
+		z-index: 30;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		display: block;
+		padding-bottom: var(--contentus-safe-bottom);
+		border-top: 1px solid var(--tc-outline-variant);
+		background: var(--tc-surface-1);
+		box-shadow: var(--tc-shadow-lg);
+	}
+
+	.contentus-tabbar__list {
+		min-height: var(--contentus-tabbar-height);
+		/* Leave the middle clear for the FAB without narrowing any tab: the two
+		   centre items keep their full width and the FAB floats above them. */
+		padding: 0 var(--tc-space-2);
+	}
+
+	.contentus-fab {
+		position: fixed;
+		z-index: 31;
+		left: 50%;
+		bottom: calc(
+			var(--contentus-tabbar-height) - var(--contentus-fab-size) / 2 + var(--contentus-safe-bottom)
+		);
+		transform: translateX(-50%);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--contentus-fab-size);
+		height: var(--contentus-fab-size);
+		border: 1px solid var(--tc-outline);
+		border-radius: var(--tc-radius-pill);
+		background: var(--tc-core-blue);
+		color: var(--tc-midnight);
+		box-shadow: var(--tc-shadow-lg);
+		text-decoration: none;
+	}
+
+	.contentus-fab[aria-disabled='true'] {
+		background: var(--tc-surface-2);
+		color: var(--tc-fg-dim);
+	}
+
+	/* Full-screen sheet on mobile: the composer is the highest-frequency
+	   mobile write path, and a centered dialog wastes the screen it needs. */
+	.contentus-sheet {
+		top: auto;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		transform: none;
+		width: 100%;
+		height: 100svh;
+		max-height: 100svh;
+		border: none;
+		border-radius: 0;
+	}
+}
+
+@media (max-width: 720px) {
+	.contentus-h1 {
+		font-size: var(--tc-fs-h2);
+		line-height: var(--tc-lh-h2);
+	}
+
+	.contentus-main {
+		padding: var(--tc-space-6) 0
+			calc(var(--tc-space-12) + var(--contentus-tabbar-height) + var(--contentus-safe-bottom));
+	}
+
+	.contentus-sheet__header,
+	.contentus-sheet__body,
+	.contentus-sheet__actions {
+		padding-left: var(--tc-space-4);
+		padding-right: var(--tc-space-4);
+	}
+}
+
+@media (max-width: 640px) {
+	.contentus-shell {
+		padding: 0 var(--tc-space-3);
+	}
+
+	.contentus-tabbar__list {
+		padding: 0;
+	}
+
+	.contentus-tabbar__upcoming {
+		/* The milestone marker is the first thing to go: the label and the
+		   target matter more than the note, and the sidebar still states it. */
+		display: none;
+	}
+}
+
+@media (max-width: 480px) {
+	.contentus-shell {
+		padding: 0 var(--tc-space-2);
+	}
+
+	/* Labels shrink; touch targets do not. 44px is a floor, not a preference. */
+	.contentus-tabbar__label {
+		font-size: var(--tc-fs-label-sm);
+		letter-spacing: -0.01em;
+	}
+
+	.contentus-tabbar__tab {
+		padding-left: 0;
+		padding-right: 0;
+	}
+}

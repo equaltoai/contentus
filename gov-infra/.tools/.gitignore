@@ -1,0 +1,6 @@
+# Repo-local pinned tools installed by CI and by the verifier host.
+# Only the directory marker is tracked; installed trees never are.
+*
+!.gitignore
+!bin
+!bin/.gitkeep

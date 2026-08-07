@@ -1,0 +1,9 @@
+
+> @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+> svelte-check --tsconfig tsconfig.json --threshold error
+
+Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
+Getting Svelte diagnostics...
+
+====================================
+svelte-check found 0 errors and 3 warnings in 1 file

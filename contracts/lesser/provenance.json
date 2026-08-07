@@ -1,0 +1,58 @@
+{
+  "$comment": [
+    "Where contracts/lesser/graphql-schema.graphql came from, stated precisely enough",
+    "that anyone can re-derive it without trusting this file.",
+    "",
+    "THE TWO PROPERTIES ARE NOT THE SAME PROPERTY, and conflating them is how a pin",
+    "starts certifying something it never checked:",
+    "",
+    "  INTEGRITY is offline. `sha256` is the digest of the bytes in this repository.",
+    "  scripts/audit-graphql-documents.mjs recomputes it before it validates anything,",
+    "  so a schema edited in the same pull request as the documents it is supposed to",
+    "  judge fails the build. That check proves the bytes have not drifted HERE. It",
+    "  proves nothing whatsoever about upstream.",
+    "",
+    "  PROVENANCE is `blob_sha1`. It is git's own object id for these exact bytes —",
+    "  sha1('blob ' + length + '\\0' + content) — which is the id equaltoai/lesser",
+    "  itself records for docs/contracts/graphql-schema.graphql at `ref`. Anyone can",
+    "  check it in one call, against lesser rather than against us:",
+    "",
+    "    gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=<ref> --jq .sha",
+    "    git hash-object contracts/lesser/graphql-schema.graphql",
+    "",
+    "  Both must print blob_sha1. That comparison is the binding to upstream; the",
+    "  offline digest is not, and this repository never reports a green offline run as",
+    "  evidence of provenance.",
+    "",
+    "WHY THERE IS NO NETWORK CHECK HERE. A gate that dereferences the pin at build",
+    "time is a gate whose answer depends on GitHub being reachable and on the request",
+    "being aimed at the right repository — and the aiming is the part an edit loosens.",
+    "The M2 predecessor to this file grew four layers of defence around that one",
+    "question and still had to be told, by review, that its pin had been able to",
+    "choose its own examiner. The honest small version is this: pin the bytes, record",
+    "the upstream object id beside them, check integrity offline, and let the",
+    "human-verifiable one-liner above be the provenance step.",
+    "",
+    "MOVING THIS PIN is a contract event, not maintenance. Fetch the file at the new",
+    "lesser ref, recompute all three values, and re-run the document validation in the",
+    "same commit — a schema bump that is not accompanied by a validated document set",
+    "is a claim that nothing changed, made without looking."
+  ],
+  "upstream": {
+    "repository": "equaltoai/lesser",
+    "path": "docs/contracts/graphql-schema.graphql",
+    "ref": "f833ea0b6dea78c11a2b6da6289bf2305f770ebe",
+    "ref_description": "equaltoai/lesser v1.6.3 release tag, published 2026-08-07",
+    "schema_last_modified_at": "0ac07c3f347902c591a6844a76cc6e4b29d96268"
+  },
+  "artifact": {
+    "path": "contracts/lesser/graphql-schema.graphql",
+    "bytes": 108911,
+    "sha256": "fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064",
+    "blob_sha1": "b907306de7b66bd6ab91665b59bb9b1f00897672"
+  },
+  "inspected": {
+    "at": "2026-08-07",
+    "corroborating_source": "The only schema delta from the previous pin (v1.6.2, 9814bf8e) is additive: `search: String` on `Query.articles`, documented in-schema as 'List published articles, optionally filtering public article text with a case-insensitive substring search.' This is the upstream answer to contentus's lesser#1342 (index search + the client_ssr_host query-suffix hazard's contract half) — public article search arrives in lesser's contract rather than as a client-side invention. greater-v0.13.3 (#1011) regenerates its GraphQL adapters against the same optional argument. Verified against the v1.6.3 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.3 --jq .sha`."
+  }
+}

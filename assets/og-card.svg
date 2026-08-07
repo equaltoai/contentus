@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Theory Cloud">
+  <title>Theory Cloud — social / OG card</title>
+  
+  <defs>
+    <linearGradient id="og-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2EA7FF"></stop>
+      <stop offset="1" stop-color="#7A5CFF"></stop>
+    </linearGradient>
+    <linearGradient id="og-tc-grad-top" x1="43.78" y1="39.57" x2="131.39" y2="140.96" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2EA7FF"></stop>
+      <stop offset="1" stop-color="#7A5CFF"></stop>
+    </linearGradient>
+    <linearGradient id="og-tc-grad-bl" x1="-10.28" y1="87.44" x2="77.19" y2="188.67" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2EA7FF"></stop>
+      <stop offset="1" stop-color="#7A5CFF"></stop>
+    </linearGradient>
+    <linearGradient id="og-tc-grad-br" x1="12.03" y1="62.04" x2="102.74" y2="167.02" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2EA7FF"></stop>
+      <stop offset="1" stop-color="#7A5CFF"></stop>
+    </linearGradient>
+  </defs>
+
+  
+  <rect x="0" y="0" width="1200" height="630" fill="#081226"></rect>
+
+  
+  <g fill="none" stroke="url(#og-accent)" stroke-linecap="round" stroke-width="6">
+    <path d="M1380 520 A300 300 0 0 1 1080 820" stroke-opacity="0.55"></path>
+    <path d="M1290 520 A210 210 0 0 1 1080 730" stroke-opacity="0.75"></path>
+    <path d="M1200 520 A120 120 0 0 1 1080 640"></path>
+  </g>
+
+  
+  <g transform="translate(180 155) scale(5)">
+    <g transform="translate(15.006 4) scale(0.2866)">
+      <path fill="url(#og-tc-grad-top)" d="M118.58,0v115.18H.13C3.65,52.64,55.02,2.51,118.58,0Z"></path>
+      <path fill="url(#og-tc-grad-bl)" d="M65.28,125.01v70.09C29.48,190.73,1.46,161.18,0,125.01h65.28Z"></path>
+      <path fill="url(#og-tc-grad-br)" d="M75.1,125.01h43.49s0,26.88,0,26.88c0,24.02-19.47,43.49-43.49,43.49h0s0-70.37,0-70.37Z"></path>
+    </g>
+  </g>
+</svg>
