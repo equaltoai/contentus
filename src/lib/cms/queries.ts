@@ -134,6 +134,7 @@ export const ARTICLE_BY_SLUG_QUERY = `
 			${ARTICLE_SUMMARY_FIELDS}
 			content
 			contentFormat
+			renderedHtml
 			canonicalUrl
 			seoTitle
 			seoDescription

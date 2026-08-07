@@ -87,13 +87,10 @@ that quietly prints Markdown source.
 
 			{#if body?.kind === 'withhold' && body.reason === 'unrendered-source'}
 				<Notice
-					title="This article is awaiting server-rendered output"
-					message="The instance returned this article's source rather than its published
-						HTML. Contentus shows only what lesser's renderer produces — it will not
-						render the source itself, and it will not display it raw."
-					detail="Tracked as an upstream gap against lesser's CMS contract: the article
-						read path does not run the publication renderer that the ActivityPub path
-						uses."
+					title="This article isn't available yet"
+					message="The instance didn't return this article in a displayable form.
+						Contentus shows articles only as rendered output, never as raw source —
+						please check back later."
 				/>
 			{:else}
 				<Notice

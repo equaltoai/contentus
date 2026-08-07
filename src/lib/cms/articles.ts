@@ -166,6 +166,7 @@ export function toArticleDetail(raw: unknown): ArticleDetail | null {
 		...summary,
 		content: typeof node.content === 'string' ? node.content : '',
 		contentFormat: toContentFormat(node.contentFormat),
+		renderedHtml: typeof node.renderedHtml === 'string' ? node.renderedHtml : null,
 		canonicalUrl: str(node.canonicalUrl),
 		seoTitle: str(node.seoTitle),
 		seoDescription: str(node.seoDescription),
@@ -222,10 +223,12 @@ export type ArticleBodyDecision =
  *   - render Markdown client-side, and
  *   - display raw draft/article source as a reading view.
  *
- * On lesser as it stands, GraphQL `Article.content` carries the STORED SOURCE
- * rather than rendered output — only the ActivityPub serialization path runs
- * `cmsrender.RenderArticleContent`. So `contentFormat` is the only signal
- * available for whether what we received is publishable HTML:
+ * Since lesser v1.6.2 the read path carries that authority's output directly:
+ * `Article.renderedHtml` is the canonical sanitized HTML ("Never fall back to
+ * rendering content when this field is unavailable", per the schema itself),
+ * produced by the same renderer the ActivityPub serialization path uses. When
+ * it is present, it is the body. When it is absent — an older instance — the
+ * only signal left is `contentFormat`:
  *
  *   HTML     → the body is HTML; the vendored blog face passes it through
  *              greater's `sanitizeHtml` before display. Rendered.
@@ -233,12 +236,12 @@ export type ArticleBodyDecision =
  *              Withheld. Rendering it here would create the second canonical
  *              renderer the contract forbids; showing it raw would publish
  *              source as a reading view. Neither is acceptable, so the reader
- *              shows an explicit state and the gap is tracked upstream.
- *
- * When lesser renders on the read path (or exposes a `renderedHtml` field),
- * this function is where that lands — and the withhold branch disappears.
+ *              shows an explicit state.
  */
 export function resolveArticleBody(article: ArticleDetail): ArticleBodyDecision {
+	if (article.renderedHtml?.trim()) {
+		return { kind: 'render' };
+	}
 	if (!article.content.trim()) {
 		return { kind: 'withhold', reason: 'empty' };
 	}
@@ -272,7 +275,10 @@ export function withholdUnrenderableSource(article: ArticleDetail): {
 	body: ArticleBodyDecision;
 } {
 	const body = resolveArticleBody(article);
-	return { article: body.kind === 'render' ? article : { ...article, content: '' }, body };
+	return {
+		article: body.kind === 'render' ? article : { ...article, content: '', renderedHtml: null },
+		body,
+	};
 }
 
 /**
@@ -289,6 +295,7 @@ export interface BlogFaceArticleInput {
 	slug: string;
 	content: string;
 	contentFormat: 'html';
+	renderedHtml?: string | undefined;
 	author: {
 		id: string;
 		displayName?: string | undefined;
@@ -315,18 +322,26 @@ export interface BlogFaceArticleInput {
  * `normalizeArticleData` accepts (it explicitly supports "the flat
  * Lesser/Emdash article display shape").
  *
- * `content` is passed only for bodies that cleared `resolveArticleBody`; a
- * withheld body is passed as an empty string so no source can reach the DOM
- * even if a future face revision changes its fallback rendering. By this point
- * `withholdUnrenderableSource` has already emptied it — this is the second of
- * the two locks, not the only one.
+ * A body is passed only when it cleared `resolveArticleBody`, and only in the
+ * form the authority produced it: when lesser supplied `renderedHtml` (v1.6.2+)
+ * that field is the carrier and `content` goes out empty — the stored source
+ * is not shipped to the browser beside its own rendering. On the legacy path
+ * (no `renderedHtml`, `contentFormat: HTML`) `content` itself is the rendered
+ * body. A withheld body goes out as empty strings in both fields so no source
+ * can reach the DOM even if a future face revision changes its fallback
+ * rendering. By this point `withholdUnrenderableSource` has already emptied
+ * them — this is the second of the two locks, not the only one. The vendored
+ * normalize prefers `renderedHtml` and marks the format `html` when it is
+ * present, which is the same precedence `resolveArticleBody` applies.
  */
 export function toBlogFaceArticle(
 	article: ArticleSummary | ArticleDetail,
 	body?: ArticleBodyDecision
 ): BlogFaceArticleInput {
 	const detail = 'content' in article ? article : null;
-	const renderedBody = body?.kind === 'render' ? (detail?.content ?? '') : '';
+	const canonicalHtml = body?.kind === 'render' ? (detail?.renderedHtml ?? null) : null;
+	const renderedBody =
+		body?.kind === 'render' && !canonicalHtml?.trim() ? (detail?.content ?? '') : '';
 
 	return {
 		id: article.id,
@@ -339,6 +354,7 @@ export function toBlogFaceArticle(
 		// Only ever 'html': a withheld body is not Markdown we are choosing not
 		// to render, it is content we are declining to display at all.
 		contentFormat: 'html',
+		renderedHtml: canonicalHtml?.trim() ? canonicalHtml : undefined,
 		publishedAt: article.publishedAt,
 		updatedAt: article.updatedAt,
 		readingTimeMinutes: article.readingTimeMinutes,

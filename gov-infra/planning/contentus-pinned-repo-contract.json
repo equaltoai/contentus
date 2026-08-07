@@ -291,7 +291,7 @@
       "tests/mobile-chrome.test.mjs": "5194c79368253af8ad90a73ea067cd42cea8d4f2cb6bf61b22baceaf15a89d9a",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
       "tests/renderer-authority-audit.test.mjs": "d8ed3deb435c7f2fb92f11ea9cec6adde7862152a0001ef0f728ac14c9cc5ba7",
-      "tests/renderer-authority.test.mjs": "83a84b9919a82d3d374861fe8b6f2ffee475e4095b383ef395417e93a104dc57",
+      "tests/renderer-authority.test.mjs": "c1ac3b79a8f41dcf7a7f6c8133461d4a324b6fc53aa452a54eaa27944fa8732b",
       "tests/review-adapters.test.mjs": "ba289e84764be4f344ab9c655d410a0142507162131c444c64bcf4f6613f716a",
       "tests/review-round-trip.test.mjs": "34aa7aad24ed8a9cf264b760ad71aecbb53b64cba4e39a98b0ded72a2f6470c1",
       "tests/review.test.mjs": "5478670b85ea2e46badd6376a13d784043b99cae2c7d909eee9bead9c698d07b",
@@ -348,7 +348,7 @@
       {
         "file": "tests/ssr-probe.test.mjs",
         "min_test_points": 18,
-        "sha256": "aa536dc71a1690162c2569862d59ad3e3740fcde848b7e4cac6851c5f5706a31"
+        "sha256": "0ca07ba5761e08bba4bd79cdc83223a197aae332e221de03a6420a6a2e4cff2a"
       },
       {
         "file": "tests/origin.test.mjs",

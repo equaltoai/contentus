@@ -70,10 +70,15 @@ export interface ArticleSummary {
 	categories: CategorySummary[];
 }
 
-/** Shape used by the reader. `content`/`contentFormat` carry lesser's body. */
+/**
+ * Shape used by the reader. `content`/`contentFormat` carry lesser's stored
+ * source; `renderedHtml` carries lesser's canonical sanitized HTML (v1.6.2+),
+ * which is what the reader displays when the instance provides it.
+ */
 export interface ArticleDetail extends ArticleSummary {
 	content: string;
 	contentFormat: ContentFormat;
+	renderedHtml: string | null;
 	canonicalUrl: string | null;
 	seoTitle: string | null;
 	seoDescription: string | null;

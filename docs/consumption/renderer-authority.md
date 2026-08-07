@@ -64,17 +64,26 @@ Nothing local that would paper over it. Specifically:
   dependency, and `scripts/audit-renderer-authority.mjs` fails the build if one
   appears.
 - **It does not display raw source.** `resolveArticleBody`
-  (`src/lib/cms/articles.ts`) is the single gate: `HTML` is displayed,
-  everything else is withheld and the reader renders an explicit
-  "awaiting server-rendered output" state.
+  (`src/lib/cms/articles.ts`) is the single gate: canonical `renderedHtml` and
+  legacy `HTML` are displayed, everything else is withheld and the reader
+  renders an explicit, reader-facing "isn't available yet" state.
 - **It does not add its own sanitizer.** The vendored greater blog face applies
   greater's `sanitizeHtml` to HTML-format content as defence-in-depth. That is
   upstream-owned code, not a contentus renderer, and contentus does not
   second-guess it.
 
-When lesser renders on the read path — or exposes a `renderedHtml` field
-mirroring `DraftPreview.renderedHtml` — `resolveArticleBody` is the one
-function that changes, and the withhold branch disappears.
+**Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
+note said would close the gap: `Article.renderedHtml`, documented in-schema as
+"Canonical sanitized HTML. Never fall back to rendering content when this
+field is unavailable." greater-v0.13.2 (#1005) consumes it in the blog face's
+normalization (canonical `renderedHtml` preferred, format forced to `html`,
+escaped fallback retained when absent). `resolveArticleBody` changed in the
+one place predicted below: a non-empty `renderedHtml` is the body, outranking
+`contentFormat`; the withhold branch remains only for instances that predate
+the field or return it blank. The audit copy that blamed an "upstream gap"
+was wrong twice over — lesser never pre-renders into storage, and the read
+path now carries the authority's output — and was rewritten to plain
+reader-facing language in the same change.
 
 ## Related observations, same milestone
 

@@ -319,6 +319,25 @@ test('category loader keeps partial data when its GraphQL error envelope contain
 	assert.equal(props.index.unavailable, null);
 });
 
+test('canonical renderedHtml renders even when the stored source is Markdown', async () => {
+	// lesser v1.6.2's read path: `renderedHtml` is the authority's output and
+	// outranks `contentFormat`. This is the finding the audit named — articles
+	// showing the withhold state on a v1.6.2 instance must now render.
+	const { value } = await probe(
+		{ path: '/l/articles/hello', headers: INSTANCE_HEADERS },
+		{
+			article: articleFixture({
+				renderedHtml: '<h2 id="heading">Heading</h2><p>Canonical output.</p>',
+			}),
+		}
+	);
+
+	assert.equal(value.status, 200);
+	assert.match(value.html, /gr-blog-article__content/, 'the vendored face must have rendered');
+	assert.ok(value.html.includes('Canonical output.'), 'the canonical body must be shown');
+	assert.doesNotMatch(value.html, /SOURCE-SENTINEL/, 'the stored source must not ship beside it');
+});
+
 test('an HTML article renders its body through the vendored blog face', async () => {
 	// The one body class contentus currently displays. It reaches the vendored
 	// face, whose Article context uses Svelte-5 runes in a plain `.ts` module —
@@ -373,7 +392,9 @@ test('a withheld body is absent from the SSR document too', async () => {
 
 	assert.equal(value.status, 200);
 	assert.doesNotMatch(value.html, /SOURCE-SENTINEL/);
-	assert.match(value.html, /awaiting server-rendered output/i, 'the reason must still be stated');
+	assert.match(value.html, /isn't available yet/i, 'the reason must still be stated');
+	// User-facing copy only: no issue-tracker language, no vendor attribution.
+	assert.doesNotMatch(value.html, /upstream gap|CMS contract|ActivityPub/i);
 });
 
 test('a displayable body still reaches hydration, since the page shows it', async () => {
