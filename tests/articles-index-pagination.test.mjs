@@ -198,3 +198,23 @@ test('no next page, no control', async () => {
 	assert.equal(value.status, 200);
 	assert.ok(!value.html.includes('Load more articles'));
 });
+
+test('the served card links the title only — the #1008 structure, not the giant anchor', async () => {
+	const handler = await loadHandler();
+	const { value } = await withStubbedGraphql(
+		respondWithPage({ hasNextPage: false, endCursor: 'cursor-3' }),
+		() => renderRoute(handler, route('articles-index'))
+	);
+
+	assert.equal(value.status, 200);
+	assert.match(
+		value.html,
+		/class="gr-blog-article-card__title"[^>]*>\s*<a class="gr-blog-article-card__link"/,
+		'the anchor lives inside the title at greater v0.13.3'
+	);
+	assert.doesNotMatch(
+		value.html,
+		/<a class="gr-blog-article-card__link"[^>]*>\s*<div class="gr-blog-article-card__body"/,
+		'the pre-0.13.3 giant anchor wrapping the whole body must be gone'
+	);
+});

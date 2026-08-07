@@ -102,10 +102,12 @@ test('a withheld body never reaches the face as content', () => {
 });
 
 test('the card excerpt never falls back to duplicating the title', () => {
-	// The vendored card is one anchor whose accessible name concatenates every
-	// child, so a title-as-excerpt fallback announces the same sentence twice
-	// (upstream markup: greater-components#1008). An article with no excerpt
-	// and no subtitle shows NO excerpt; the subtitle remains the last resort.
+	// greater v0.13.3 closed #1008 — the card's link wraps only the title — so
+	// the announcement-duplication path is gone upstream. This guard stays:
+	// the fallback would still be wrong content (an excerpt is a summary, not
+	// a restatement), and the boundary is contentus's own. An article with no
+	// excerpt and no subtitle shows NO excerpt; the subtitle remains the last
+	// resort.
 	const bare = articleFixture({ excerpt: null, subtitle: null });
 	const bareInput = toBlogFaceArticle(bare, resolveArticleBody(bare));
 

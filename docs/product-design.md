@@ -434,9 +434,9 @@ gaps are recorded, never patched around.
 | Agent-roster / MCP-detail components                                                             | `greater-components` | **Planned** — new design work; Face 6 consumes                                    |
 | Bottom-nav / drawer / sheet mobile components                                                    | `greater-components` | **Planned** — new design work; until vendored, contentus composes from primitives |
 | Tabbed instance/federated timeline face                                                          | `greater-components` | **Planned** — small composition; contentus owns interim                           |
-| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | **Resolved at v0.13.2** — `data-theme="dark"` now set; residual holes (`gr-blog-author-card`, `.gr-menu`) filed as greater-components#1009 |
+| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | **Resolved at v0.13.2** — `data-theme="dark"` now set; residual holes (`gr-blog-author-card`, `.gr-menu`) **closed at v0.13.3 (#1009)** |
 | Licensed self-hosted fonts (Inter/Geist/JetBrains Mono)                                          | operator decision    | Open — v1 runs system fallbacks                                                   |
-| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | Filed lesser#1342 — v1 navigates by series/category                               |
+| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | **Closed at lesser v1.6.3 (#1342)** — `Query.articles(search: String)`; index search UI is the client-side follow-up |
 
 Gaps filed upstream from M1 consumption evidence (2026-07-30, verified by Factory before filing; routed via contentus#1):
 
@@ -487,11 +487,11 @@ Gaps filed from the 2026-08-06 design & accessibility audit remediation
 
 | Item                                                                                                          | Owner                | Status                                                                                              |
 | ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
-| `formatDateTime` cannot pin a timezone; SSR (UTC) and hydrated client (local) render different visible text   | `greater-components` | Filed greater-components#1007 — true hydration mismatch; `<time datetime>` ISO is correct meanwhile |
-| Blog article card is one giant anchor; accessible name duplicates title when no distinct excerpt exists       | `greater-components` | Filed greater-components#1008 — contentus dropped its own `?? title` excerpt fallback               |
-| `gr-blog-author-card` and `.gr-menu` ship no `[data-theme='dark']` rules                                      | `greater-components` | Filed greater-components#1009 — residual after U-18 closed at v0.13.2; not forked locally           |
-| `greater update --all` OOMs on the default Node heap; needed 12 GB here                                        | `greater-components` | Filed greater-components#1010 — bounded batches (#1005) do not cover `update`                        |
-| No article search on the CMS read path; `client_ssr_host`'s query-suffixed import double-instantiates bundles | `lesser`             | Filed lesser#1342 — search stays out of the client per GraphQL-first; import hazard documented       |
+| `formatDateTime` cannot pin a timezone; SSR (UTC) and hydrated client (local) render different visible text   | `greater-components` | **Primitive closed at v0.13.3 (#1007)** — `timeZone` option shipped; blog date helpers don't thread it, follow-up filed as greater-components#1013 |
+| Blog article card is one giant anchor; accessible name duplicates title when no distinct excerpt exists       | `greater-components` | **Closed at v0.13.3 (#1008)** — link wraps the title only, stretched via `::after`; contentus also dropped its own `?? title` excerpt fallback    |
+| `gr-blog-author-card` and `.gr-menu` ship no `[data-theme='dark']` rules                                      | `greater-components` | **Closed at v0.13.3 (#1009)** — dark rules ship with contrast assertions upstream; not forked locally           |
+| `greater update --all` OOMs on the default Node heap; needed 12 GB here                                        | `greater-components` | **Closed at v0.13.3 (#1010)** — eager quadratic diffs removed; the 0.13.3 `update --all` run completed on a default heap |
+| No article search on the CMS read path; `client_ssr_host`'s query-suffixed import double-instantiates bundles | `lesser`             | **Search half closed at lesser v1.6.3 (#1342)** — additive `Query.articles(search: String)`; import hazard already fixed client-side (`codeSplitting: false`) |
 
 **SEC-2's disclosed advisory set is EMPTY as of the greater-v0.13.0 pin bump.**
 `pnpm audit --audit-level=high` reports nothing across the whole installed graph,

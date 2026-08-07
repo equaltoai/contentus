@@ -192,8 +192,10 @@
 /* Read articles dim to the muted foreground: with no archive or read-state
    of its own yet, :visited is the only signal a returning reader gets that
    they have already opened a card. Descendant-scoped so it wins over the
-   vendored dark rule on cascade order, the bridge's whole job. */
-[data-theme='dark'] .gr-blog-article-card__link:visited .gr-blog-article-card__title {
+   vendored dark rule on cascade order, the bridge's whole job. At greater
+   v0.13.3 (#1008) the card inverted: the link lives INSIDE the title,
+   stretched over the card by ::after, so the selector follows the link. */
+[data-theme='dark'] .gr-blog-article-card__title .gr-blog-article-card__link:visited {
 	color: var(--tc-fg-muted);
 }
 

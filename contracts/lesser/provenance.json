@@ -41,18 +41,18 @@
   "upstream": {
     "repository": "equaltoai/lesser",
     "path": "docs/contracts/graphql-schema.graphql",
-    "ref": "9814bf8e8db4ce6deebc2de5394dde2ef09f3010",
-    "ref_description": "equaltoai/lesser v1.6.2 release tag, published 2026-08-07",
-    "schema_last_modified_at": "703839c74501628ab94b4a51eaf802a2227383cf"
+    "ref": "f833ea0b6dea78c11a2b6da6289bf2305f770ebe",
+    "ref_description": "equaltoai/lesser v1.6.3 release tag, published 2026-08-07",
+    "schema_last_modified_at": "0ac07c3f347902c591a6844a76cc6e4b29d96268"
   },
   "artifact": {
     "path": "contracts/lesser/graphql-schema.graphql",
-    "bytes": 108779,
-    "sha256": "e77bea60fea65d34db48f9e2ddddd0d63d52159a83af146194472995812fa452",
-    "blob_sha1": "8989cc63d7c9402c38b038c724f78873b531661e"
+    "bytes": 108911,
+    "sha256": "fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064",
+    "blob_sha1": "b907306de7b66bd6ab91665b59bb9b1f00897672"
   },
   "inspected": {
     "at": "2026-08-07",
-    "corroborating_source": "The only schema delta from the previous pin (cbe9787f) is additive: `Article.renderedHtml: String`, documented in-schema as 'Canonical sanitized HTML. Never fall back to rendering content when this field is unavailable.' This is the read-path counterpart of the renderer authority the ActivityPub path already used, shipped by lesser itself — the upstream gap the M6-era withhold copy blamed is closed by lesser, not worked around here. greater-v0.13.2 (equaltoai/greater-components #1005) consumes the same field in blog normalization. Verified against equaltoai/lesser graph/ and the v1.6.2 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.2 --jq .sha`."
+    "corroborating_source": "The only schema delta from the previous pin (v1.6.2, 9814bf8e) is additive: `search: String` on `Query.articles`, documented in-schema as 'List published articles, optionally filtering public article text with a case-insensitive substring search.' This is the upstream answer to contentus's lesser#1342 (index search + the client_ssr_host query-suffix hazard's contract half) — public article search arrives in lesser's contract rather than as a client-side invention. greater-v0.13.3 (#1011) regenerates its GraphQL adapters against the same optional argument. Verified against the v1.6.3 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.3 --jq .sha`."
   }
 }
