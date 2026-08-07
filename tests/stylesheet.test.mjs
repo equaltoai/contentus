@@ -23,14 +23,15 @@ test('the pack webfont import is removed whole, semicolons and all', () => {
 	const stripped = stripCssImports(css);
 
 	assert.ok(!stripped.includes('@import'));
-	// Compare hostnames exactly, never by substring on the raw CSS: extract any
-	// surviving url() references and parse them. (A substring check here is what
-	// CodeQL js/incomplete-url-substring-sanitization flags — rightly so.)
+	// Compare hostnames by strict equality against parsed URLs, never by a
+	// substring check: extract any surviving url() references and parse them.
+	// (CodeQL js/incomplete-url-substring-sanitization flags any
+	// includes()/indexOf() against a host literal — rightly so.)
 	const survivingHosts = [...stripped.matchAll(/url\(\s*['"]([^'"]+)['"]/g)].map(
 		([, href]) => new URL(href).hostname
 	);
 	assert.ok(
-		!survivingHosts.includes('fonts.googleapis.com'),
+		survivingHosts.every((host) => host !== 'fonts.googleapis.com'),
 		'the webfont host must not survive the strip'
 	);
 	assert.ok(!stripped.includes('display=swap'));
