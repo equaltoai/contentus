@@ -220,6 +220,11 @@ test('with no trusted host the page degrades on a real fetch, not just a stubbed
 
 	assert.equal(value.status, 200, 'failing closed must degrade, not 500');
 	assert.match(value.html, /^<!doctype html>/i);
+	assert.match(
+		value.html,
+		/class="contentus-shell" data-theme="dark"/,
+		'the shell must carry the dark theme so the vendored dark rules activate'
+	);
 	assert.ok(value.html.includes('contentus-shell'), 'the shell must still render');
 	assert.ok(
 		/unavailable|not answer|could not be reached/i.test(value.html),

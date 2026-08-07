@@ -301,7 +301,7 @@
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
       "tests/ssr-routes.test.mjs": "3515f2f3e2979416b4e0c6d9607c6f8940388ed23fad606081e8b9bdab65a63f",
       "tests/ssr-timelines.test.mjs": "270adc5c9af38efb1acceb6ee1c8967fa6138c46df5111b2b766ca420cc030cc",
-      "tests/stylesheet.test.mjs": "a9b08c7db5c8ad6dbdf8ccaf2ea5677cb19f4ea577ed8a0bb43ce0738aea3d2a",
+      "tests/stylesheet.test.mjs": "02ac40ad07e32f69b04465ceb474de1bc6c7bf354b79061f34c0ca5569db608d",
       "tests/timeline-adapters.test.mjs": "679d8db67a7a67d8550eb44d9fcceb65c7818c6722b5bcb5b5dbc6f8236ede1b",
       "tests/timeline-contract.test.mjs": "4f76bba4fb27e9ab8b6708007d64a9db403d7d1140b7dcfd9364d0d0c9f710fb",
       "tests/timeline-feed-state.test.mjs": "bd850c59dd3bd6f2b203b00dcf8a1868eb03c306d429717810378595f91431f5",
@@ -348,7 +348,7 @@
       {
         "file": "tests/ssr-probe.test.mjs",
         "min_test_points": 18,
-        "sha256": "0ca07ba5761e08bba4bd79cdc83223a197aae332e221de03a6420a6a2e4cff2a"
+        "sha256": "bb539fa74b79a063d7293a7502ddf851a0d5f861b806c7a40d61c32407cb6b90"
       },
       {
         "file": "tests/origin.test.mjs",

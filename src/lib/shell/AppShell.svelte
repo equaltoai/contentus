@@ -91,7 +91,13 @@ twice, not two navigation systems.
      JavaScript deciding it. The composer uses it to become a full-screen sheet
      below 960px (product design §5) while the same document still renders as a
      panel on a desktop. -->
-<div class="contentus-shell" data-surface={page.surface} data-page={page.key}>
+<!-- `data-theme="dark"` lives on the shell rather than on <html>: FaceTheory
+     v4.0.6's adapter pipeline (assembleFaceRenderResult) does not forward
+     htmlAttrs from renderOptions, so the document element is not contentus's
+     to attribute. Every vendored `[data-theme='dark']` rule resolves against
+     this ancestor, which is all the cascade needs; the `--gr-color-gray-*`
+     ramp itself comes from the greater tokens layer at :root. -->
+<div class="contentus-shell" data-theme="dark" data-surface={page.surface} data-page={page.key}>
 	<header class="contentus-sidebar">
 		<a class="contentus-brand" href={appHref('/')} aria-label="Contentus home">
 			<img

@@ -46,7 +46,16 @@ test('the assembled stylesheet passes its own integrity assertions', () => {
 
 	assert.ok(css.length > 10_000, 'assembled sheet is implausibly small');
 	assert.match(css, /--tc-bg\s*:/);
-	assert.match(css, /--gr-color-neutral-0\s*:/);
+	assert.match(
+		css,
+		/\[data-theme='dark'\] \.gr-blog-article-card/,
+		'the vendored dark rules must ship in the assembled sheet'
+	);
+	assert.doesNotMatch(
+		css,
+		/--gr-color-neutral-0\s*:/,
+		'the pre-0.13.2 inverted neutral ramp is deleted; nothing vendored consumes it'
+	);
 	assert.doesNotThrow(() => assertStylesheetIntegrity(css));
 });
 

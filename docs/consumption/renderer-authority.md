@@ -171,13 +171,18 @@ changes — the file is checksummed, and the fix it actually wants is a rename t
 `context.svelte.ts`. `tests/vendored-runes.test.mjs` asserts no shipped bundle
 carries an uncompiled rune.
 
-**Dark theme still incomplete (emdash's U-18, re-confirmed).** At
-greater-v0.11.9 the blog face carries seven `[data-theme='dark']` rules, all
-scoped to `.gr-blog-article-card`. Article prose and headings remain pinned to
-light neutrals with no dark counterpart, so `data-theme="dark"` would render
-near-black text on the Midnight ground. Product design §2 asks for a straight
-ramp map _if_ the faces now ship full dark themes; they do not, so contentus
-keeps the ramp inversion in `src/lib/brand/bridge.css`.
+**Dark theme (emdash's U-18) — resolved upstream, 2026-08-07.** At
+greater-v0.13.2 the blog face ships 46 `[data-theme='dark']` selectors (cards,
+prose, headings, review surfaces) and the primitives theme 47 more. The shell
+root now carries `data-theme="dark"` (AppShell.svelte — on the shell rather
+than `<html>`, because FaceTheory v4.0.6's adapter pipeline drops `htmlAttrs`
+from renderOptions; the `--gr-color-gray-*` ramp itself comes from the greater
+tokens layer at `:root`), and the inverted `--gr-color-neutral-*` ramp
+in `src/lib/brand/bridge.css` is deleted — nothing vendored consumes
+`--gr-color-neutral-*` at v0.13.2. The bridge keeps only small companion rules
+that re-ground card and article surfaces on the `--tc-*` brand surfaces.
+Residual coverage holes (`gr-blog-author-card`, `.gr-menu`) are routed upstream
+as greater-components#1009.
 
 **CLI defects at greater-v0.11.9.** `greater add` rewrote contentus-owned
 `package.json` devDependencies to nonexistent versions (`vite ^10.0.1`,

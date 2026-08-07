@@ -434,9 +434,9 @@ gaps are recorded, never patched around.
 | Agent-roster / MCP-detail components                                                             | `greater-components` | **Planned** — new design work; Face 6 consumes                                    |
 | Bottom-nav / drawer / sheet mobile components                                                    | `greater-components` | **Planned** — new design work; until vendored, contentus composes from primitives |
 | Tabbed instance/federated timeline face                                                          | `greater-components` | **Planned** — small composition; contentus owns interim                           |
-| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | Open gap — determines `data-theme="dark"` vs ramp-inversion bridge                |
+| Full dark theme coverage in vendored faces (emdash U-18)                                         | `greater-components` | **Resolved at v0.13.2** — `data-theme="dark"` now set; residual holes (`gr-blog-author-card`, `.gr-menu`) filed as greater-components#1009 |
 | Licensed self-hosted fonts (Inter/Geist/JetBrains Mono)                                          | operator decision    | Open — v1 runs system fallbacks                                                   |
-| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | Recorded gap — v1 navigates by series/category                                    |
+| No full-text article search (`search` covers statuses/accounts/hashtags)                         | `lesser`             | Filed lesser#1342 — v1 navigates by series/category                               |
 
 Gaps filed upstream from M1 consumption evidence (2026-07-30, verified by Factory before filing; routed via contentus#1):
 

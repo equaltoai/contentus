@@ -538,6 +538,12 @@ function createFaceForRoute(route: string) {
 				status: statusForRoute(props),
 				csp: STRICT_CSP,
 				headers: headersForRoute(props, origin),
+				// `data-theme="dark"` cannot be set here: FaceTheory v4.0.6's
+				// adapter pipeline (assembleFaceRenderResult) does not forward
+				// htmlAttrs from renderOptions, so these attributes would never
+				// reach the document. The theme and the gray-ramp palette
+				// preset ride the shell root in AppShell.svelte instead; the
+				// vendored dark rules only need an ancestor, not <html>.
 				htmlAttrs: { lang: 'en' },
 				head: { title: head.title },
 				headTags: [...head.tags, ...assets.headTags],
