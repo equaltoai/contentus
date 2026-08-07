@@ -1,13 +1,13 @@
 note: a PATH `greater` exists (/home/aron/.local/share/pnpm/greater) and is deliberately not used.
 note: a repo-local install exists under gov-infra/.tools and is deliberately not executed;
       SEC-7 runs only what it extracts itself from the digest-verified tarball.
-greater CLI release asset: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.2/greater-components-cli.tgz
-  SHA-256 1ab16e41bf75aade27560b7994e6cdfa6f7b7cc21596b19a823b7eb1b4865189 verified against gov-infra/planning/contentus-pinned-repo-contract.json at gate time.
+greater CLI release asset: https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.3/greater-components-cli.tgz
+  SHA-256 515fab4754b0c013c2ff8e83cffed8f584ee0dc5a281878cecbb6d204b7bf5f7 verified against gov-infra/planning/contentus-pinned-repo-contract.json at gate time.
   183 archive members validated; entry point package/dist/index.js
   entry-point SHA-256 4e5e5418f9edd96286c27ce0fb1a36fe4dd4dbe3914637ccce7cb9b5ecc97b76 (from the verified archive)
   extracted 183 files into a quarantine and re-verified every digest.
   runtime dependencies installed into the quarantine with --ignore-scripts.
-  version=0.13.2, pinned 0.13.2
+  version=0.13.3, pinned 0.13.3
 greater doctor: 10/13 checks passed.
   PASS Component Files — 228 file(s) verified
   PASS Orphaned Files — No orphaned component files detected
