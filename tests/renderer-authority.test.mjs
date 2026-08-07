@@ -101,6 +101,24 @@ test('a withheld body never reaches the face as content', () => {
 	);
 });
 
+test('the card excerpt never falls back to duplicating the title', () => {
+	// The vendored card is one anchor whose accessible name concatenates every
+	// child, so a title-as-excerpt fallback announces the same sentence twice
+	// (upstream markup: greater-components#1008). An article with no excerpt
+	// and no subtitle shows NO excerpt; the subtitle remains the last resort.
+	const bare = articleFixture({ excerpt: null, subtitle: null });
+	const bareInput = toBlogFaceArticle(bare, resolveArticleBody(bare));
+
+	assert.equal(bareInput.description, undefined);
+	assert.notEqual(bareInput.description, bare.title);
+
+	const subtitled = articleFixture({ excerpt: null, subtitle: 'A subtitle' });
+	assert.equal(
+		toBlogFaceArticle(subtitled, resolveArticleBody(subtitled)).description,
+		'A subtitle'
+	);
+});
+
 test('server-rendered HTML is passed through', () => {
 	const article = articleFixture({
 		content: '<h1>Heading</h1><p>Rendered by lesser.</p>',

@@ -349,7 +349,12 @@ export function toBlogFaceArticle(
 		title: article.title,
 		subtitle: article.subtitle ?? undefined,
 		excerpt: article.excerpt ?? undefined,
-		description: article.excerpt ?? article.subtitle ?? article.title,
+		// Never the title: with no distinct excerpt the card's accessible name
+		// announced the same sentence twice (the whole card is one anchor —
+		// upstream greater-components#1008). The card's own fallback already
+		// shows the subtitle when description is absent, and an article with
+		// neither simply shows no excerpt.
+		description: article.excerpt ?? article.subtitle ?? undefined,
 		content: renderedBody,
 		// Only ever 'html': a withheld body is not Markdown we are choosing not
 		// to render, it is content we are declining to display at all.
