@@ -20,7 +20,7 @@ svelte-check found 0 errors and 3 warnings in 1 file
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...4:05:37 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+[2Ktransforming...4:29:24 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 35:   // hydration (a filter change is a navigation, not a prop update), so local
 36:   // state seeded from it is the source of truth from the first click on.
@@ -28,7 +28,7 @@ https://svelte.dev/e/state_referenced_locally
                                 ^
 38:   let endCursor = $state(data.endCursor);
 39:   let hasNextPage = $state(data.hasNextPage);
-4:05:37 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+4:29:24 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 36:   // state seeded from it is the source of truth from the first click on.
 37:   let articles = $state(data.articles);
@@ -36,7 +36,7 @@ https://svelte.dev/e/state_referenced_locally
                                  ^
 39:   let hasNextPage = $state(data.hasNextPage);
 40:   let loadingMore = $state(false);
-4:05:37 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+4:29:24 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 37:   let articles = $state(data.articles);
 38:   let endCursor = $state(data.endCursor);
@@ -52,7 +52,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-DLv5-bA9.js                695.65 kB │ gzip: 211.34 kB
 
-✓ built in 1.07s
+✓ built in 1.05s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -63,7 +63,7 @@ build/client/assets/entry-client-DLv5-bA9.js                695.65 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...4:05:38 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+[2Ktransforming...4:29:25 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 35:   // hydration (a filter change is a navigation, not a prop update), so local
 36:   // state seeded from it is the source of truth from the first click on.
@@ -71,7 +71,7 @@ https://svelte.dev/e/state_referenced_locally
                                 ^
 38:   let endCursor = $state(data.endCursor);
 39:   let hasNextPage = $state(data.hasNextPage);
-4:05:38 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+4:29:25 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 36:   // state seeded from it is the source of truth from the first click on.
 37:   let articles = $state(data.articles);
@@ -79,7 +79,7 @@ https://svelte.dev/e/state_referenced_locally
                                  ^
 39:   let hasNextPage = $state(data.hasNextPage);
 40:   let loadingMore = $state(false);
-4:05:38 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+4:29:25 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 37:   let articles = $state(data.articles);
 38:   let endCursor = $state(data.endCursor);
@@ -92,7 +92,7 @@ rendering chunks...
 computing gzip size...
 build/server/handler.mjs  1,131.06 kB │ gzip: 271.10 kB
 
-✓ built in 973ms
+✓ built in 1.01s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
