@@ -101,6 +101,20 @@
 	line-height: 1.6;
 }
 
+/* The gate's sign-in action, mirroring the messages face's control: the
+   roster is a session read, so this is the way in for an anonymous reader. */
+.contentus-agents__signin {
+	min-height: 44px;
+	margin-top: var(--tc-space-3);
+	padding: 0 var(--tc-space-4);
+	border: 1px solid var(--tc-accent);
+	border-radius: var(--tc-radius-sm, 0.375rem);
+	background: var(--tc-accent);
+	color: var(--tc-violet-inverse, var(--tc-midnight-depth));
+	font-weight: 600;
+	cursor: pointer;
+}
+
 .contentus-agents__grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));

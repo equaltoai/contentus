@@ -8,21 +8,57 @@ Companion to `renderer-authority.md`, `review-contract.md`,
 `docs/contracts/graphql-schema.graphql` and the resolvers named below; where
 this document and lesser disagree, lesser is right and this is a bug.
 
+## The gateway refuses what the resolver would answer
+
+**Read this section first — it overrides the "anonymous" rows below.** The
+agent resolvers are designed for anonymous readers: `Agents` and
+`Agent(username)` answer without a caller and redact owner-only fields for
+non-owners (behaviour 2 below), and `mcpAccess` is deliberately not redacted.
+That design is real, and it is unreachable. The HTTP gateway in
+`cmd/graphql/main.go` admits anonymous operations only when every root field
+is in `anonymousGraphQLPublicQueryFields`, and `agents` / `agent` are not in
+that set — an anonymous roster or detail operation gets 401 `authentication
+required` **before the resolver, and its redaction, ever runs**. Verified live
+against a v1.6.3 instance, not just read.
+
+So face 6 is a **session read**, the same shape `/messages` already follows:
+the server ships the address grammar and a session gate, and the roster, the
+agent, and the published MCP contract arrive once the client has read the
+session. Two consequences worth recording because they were designed the other
+way and changed:
+
+- **The first paint is a gate, not content.** No-script readers get the gate
+  and nothing else; the anonymous-safe SSR this face was built around is
+  unreachable behind the gateway.
+- **The detail route's CSP ceiling is derived, not fetched.** The server no
+  longer has `mcpAccess` when it writes `connect-src`, so the MCP origin is
+  derived from the request origin using lesser's own
+  `canonicalMCPResourceBaseURL` rule (`mcpConnectOriginForInstance` in
+  `src/lib/agents/mcp.ts`). The probe targets are still lesser's stated URLs.
+
+Whether the refusal is intended policy or an allowlist that predates the
+resolvers' anonymous design is routed upstream as
+[lesser#1345](https://github.com/equaltoai/lesser/issues/1345). If lesser adds
+`agents` / `agent` to the allowlist, this face reverts to anonymous SSR with no
+resolver change — the redaction path already IS the anonymous answer. The
+"anonymous" rows in the table below describe the resolver contract as written,
+kept because that is the shape this face takes the day the gateway agrees.
+
 ## Operations
 
-| Surface              | lesser operation                              | Auth                      |
-| -------------------- | --------------------------------------------- | ------------------------- |
-| `/agents`            | `agents(first, after, type, query, verified)` | anonymous                 |
-| `/agents/{username}` | `agent(username)`                             | anonymous                 |
-| "Agents you own"     | `myAgents`                                    | bearer token, client only |
-| MCP addresses        | `Agent.mcpAccess`                             | anonymous (not redacted)  |
-| Capability badges    | `Agent.agentCapabilities`                     | anonymous                 |
-| Trust state          | `Agent.verified`, `Agent.quarantine*`         | anonymous                 |
+| Surface              | lesser operation                              | Auth                                                 |
+| -------------------- | --------------------------------------------- | ---------------------------------------------------- |
+| `/agents`            | `agents(first, after, type, query, verified)` | bearer token (gateway; see above)                    |
+| `/agents/{username}` | `agent(username)`                             | bearer token (gateway; see above)                    |
+| "Agents you own"     | `myAgents`                                    | bearer token, client only                            |
+| MCP addresses        | `Agent.mcpAccess`                             | not redacted — but only reachable with a token today |
+| Capability badges    | `Agent.agentCapabilities`                     | same                                                 |
+| Trust state          | `Agent.verified`, `Agent.quarantine*`         | same                                                 |
 
 `agents(ownerUsername:)` is **not used**. lesser rejects it for anonymous
 callers and, for authenticated ones, permits only the caller's own username
-unless they are an admin (`graph/agent_resolvers_stubs.go`). As a control on an
-anonymous-safe roster it is `myAgents` with more ways to be refused, and routed
+unless they are an admin (`graph/agent_resolvers_stubs.go`). As a control on the
+roster it is `myAgents` with more ways to be refused, and routed
 through the roster's URL grammar a shared `?ownerUsername=` link would promise a
 view its recipient cannot have.
 
@@ -50,7 +86,7 @@ what came back. Two consequences, both load-bearing:
 **2. Redaction is indistinguishable from data.** `redactGraphAgentPrivateFields`
 blanks `agentOwner` to null, `delegatedScopes` to `[]`, and the soul fields to
 `UNBOUND` for anyone who is not the agent's owner or an admin. Rendering those
-would tell every anonymous visitor that every agent has no owner and no scopes.
+would tell every non-owner reader that every agent has no owner and no scopes.
 The view model omits them unless the read was authorized to see them, and
 `viewerIsOwner` is derived from what lesser **answered**, never from whether a
 token was sent.
@@ -73,7 +109,9 @@ These are different kinds of claim and the panel keeps them apart.
 **Stated** — `Agent.mcpAccess`, in the server's paint, true whether or not
 anything is reachable: `mcpURL`, `protectedResourceURL`,
 `authorizationServerURL`, `registrationURL`, `scopes`, `guidance`. Not redacted
-for non-owners, so a reader with no script gets every address they need.
+for non-owners — every signed-in reader gets every address they need. (It was
+also the no-script reader's copy when this face was anonymous SSR; the gateway
+section above records why that is not currently reachable.)
 
 **Probed** — two unauthenticated documents, fetched by the reader's browser and
 reported only as what that request returned:
@@ -141,8 +179,8 @@ around a nested MCP panel. `AgentMcpPanel` sits INSIDE it and is still its own
 seam, which is what lets the MCP detail be swapped without the page around it.
 
 What does **not** change when the swap happens: the routes, the URL grammar
-(`?type=`, `?q=`, `?verified=`, `?after=`), `filters.ts`, `contract.ts`,
-`mcp.ts`, and the SSR loaders.
+(`?type=`, `?q=`, `?verified=`, `?after=`), `filters.ts`, `contract.ts`, and
+`mcp.ts`.
 
 How that is checked, and where it used to not be. `tests/agents-mobile.test.mjs`
 declares the table above as data and asserts three things against it: every

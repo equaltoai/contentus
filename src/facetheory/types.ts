@@ -234,10 +234,12 @@ export interface MessagesRouteData {
 /**
  * The `/agents` roster.
  *
- * Anonymous by construction: every field here comes from a read lesser serves
- * without a caller, because these props are serialized into the public
- * hydration endpoint. The viewer's own agents (`myAgents`) are fetched in the
- * browser and never travel through here.
+ * THE ADDRESS GRAMMAR, NOT THE ROSTER. lesser v1.6.3's GraphQL gateway refuses
+ * anonymous `agents` operations with 401 before the resolver runs, and the
+ * session lives in `sessionStorage` — so the server cannot read the roster and
+ * these props carry only what the URL named. The roster arrives once the
+ * client has read the session; `myAgents` was always a browser read on the
+ * same route.
  */
 export interface AgentsRouteData {
 	page: AgentRosterPage | null;
@@ -248,10 +250,11 @@ export interface AgentsRouteData {
 /**
  * One agent's detail page.
  *
- * Anonymous like the roster, and for a stronger reason: `mcpAccess` is not
- * among the fields lesser redacts for non-owners, so the whole published MCP
- * contract belongs in the server's paint. The live probes against it do not —
- * they are browser requests to a sibling origin.
+ * The username from the address and nothing else, for the same reason as the
+ * roster: the gateway refuses anonymous `agent(username)` operations, so the
+ * agent — and the published MCP contract with it — is fetched by the client
+ * with the session token after mount. The live probes against the MCP
+ * addresses remain browser requests to a sibling origin.
  */
 export interface AgentDetailRouteData {
 	username: string | null;

@@ -16,16 +16,11 @@ import {
 	moduleSpecifiers,
 	runtimeSpecifiers,
 } from '../scripts/lib/module-imports.mjs';
-import {
-	AUDIT_ROUTES,
-	loadHandler,
-	renderRoute,
-	withStubbedGraphql,
-} from '../scripts/render-routes.mjs';
+import { toAgentSummary } from '../src/lib/agents/contract.ts';
+import { renderComponent } from './helpers/svelte-server.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
 const agentsCss = readFileSync(join(repoRoot, 'src/lib/brand/agents.css'), 'utf8');
 
 const ACCESS = {
@@ -60,13 +55,24 @@ function agentNode(overrides = {}) {
 	};
 }
 
+/**
+ * The detail component's paint for one lesser answer.
+ *
+ * These tests used to render through the built SSR handler with GraphQL
+ * stubbed. The detail became a session read — lesser's gateway refuses
+ * anonymous `agent(username)` before the resolver runs — so the handler no
+ * longer fetches, and the render that carries these behaviours is the
+ * component's. The progressive-enhancement property below is unchanged: the
+ * FIRST paint a reader gets once the data arrives is this one, and it must
+ * hide nothing behind script.
+ */
 async function renderDetail() {
-	const handler = await loadHandler();
-	return withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgent' ? { data: { agent: agentNode() } } : { data: null },
-		() => renderRoute(handler, route('agent-detail'))
-	);
+	const html = await renderComponent('src/lib/agents/AgentDetail.svelte', {
+		agent: toAgentSummary(agentNode(), false),
+		failure: null,
+		username: 'weatherbot',
+	});
+	return { value: { html } };
 }
 
 /* -------------------------------------------------------------------------
@@ -78,22 +84,21 @@ test('MCP sections are native disclosure widgets, not built ones', async () => {
 
 	// `<details>`/`<summary>` opens and closes with no script at all, and is a
 	// real disclosure widget to a screen reader without a single ARIA attribute.
-	// lesser has no SPA fallback under `/l/*`, so the first paint of a phone deep
-	// link is the server's — a button-and-class-toggle would do nothing there.
+	// A button-and-class-toggle would need script to reveal anything at all.
 	assert.match(value.html, /<details class="contentus-accordion"/);
 	assert.match(value.html, /<summary class="contentus-accordion__summary"/);
 });
 
-test('the server renders every section OPEN, so no-script hides nothing', async () => {
+test('every section renders OPEN, so the enhancement never hides the contract', async () => {
 	const { value } = await renderDetail();
 
 	// THE DIRECTION OF THE ENHANCEMENT. Script makes a phone tidier; its absence
 	// must never hide the contract. Rendering closed and opening with script
-	// would leave a no-script phone reader with headings and no addresses.
+	// would leave a reader whose script failed with headings and no addresses.
 	const details = value.html.match(/<details class="contentus-accordion"[^>]*>/g) ?? [];
 	assert.ok(details.length >= 3, 'the panel must render its accordions');
 	for (const tag of details) {
-		assert.match(tag, /\sopen\b/, 'every accordion is open in the server’s paint');
+		assert.match(tag, /\sopen\b/, 'every accordion renders open');
 	}
 
 	// And the content really is present, not just the container.

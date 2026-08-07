@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { parse } from 'svelte/compiler';
 
-import { fetchMyAgents, MY_AGENTS_QUERY } from '../src/lib/agents/contract.ts';
+import { fetchMyAgents, MY_AGENTS_QUERY, toAgentSummary } from '../src/lib/agents/contract.ts';
 import { notifySessionChange, sessionGeneration } from '../src/lib/auth/session-events.ts';
 import { createSessionScope } from '../src/lib/auth/session-scope.ts';
 import {
@@ -15,6 +15,7 @@ import {
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
+import { renderComponent } from './helpers/svelte-server.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -50,13 +51,24 @@ function agentNode(overrides = {}) {
 	};
 }
 
+/**
+ * The detail component's paint for one lesser answer.
+ *
+ * These tests used to render through the built SSR handler with GraphQL
+ * stubbed. The detail became a session read — lesser's gateway refuses
+ * anonymous `agent(username)` before the resolver runs — so the handler no
+ * longer fetches, and the render that carries these behaviours is the
+ * component's. Same props, same paint: the non-owner view, which is what the
+ * anonymous pass used to produce.
+ */
 async function renderDetail(node) {
-	const handler = await loadHandler();
-	return withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgent' ? { data: { agent: node } } : { data: null },
-		() => renderRoute(handler, route('agent-detail'))
-	);
+	const agent = node ? toAgentSummary(node, false) : null;
+	const html = await renderComponent('src/lib/agents/AgentDetail.svelte', {
+		agent,
+		failure: agent ? null : { reason: 'not-found', message: 'No agent matches this address.' },
+		username: 'weatherbot',
+	});
+	return { value: { html } };
 }
 
 /* -------------------------------------------------------------------------
@@ -181,27 +193,30 @@ test('quarantineActive is never recomputed from the timestamps', () => {
  * The auth split
  * ---------------------------------------------------------------------- */
 
-test('myAgents is never fetched on the server pass', async () => {
-	// These props are serialized into the PUBLIC hydration endpoint. A
+test('no agent read of any kind happens on the server pass', async () => {
+	// These props are serialized into the PUBLIC hydration endpoint, and the
+	// session lives in sessionStorage where the server cannot read it. A
 	// server-side `myAgents` read would put one operator's agent inventory —
-	// including the owner fields lesser redacts from everyone else — behind a URL
-	// anyone could request.
+	// including the owner fields lesser redacts from everyone else — behind a
+	// URL anyone could request. And since lesser's gateway began refusing
+	// anonymous `agents`/`agent` operations, the same is true of the roster
+	// itself: the server pass makes NO agent read at all, and paints the
+	// session gate the client replaces after reading the session.
 	const handler = await loadHandler();
 	const { value, requests } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? { data: { agents: { totalCount: 0, pageInfo: {}, edges: [] } } }
-				: { data: null },
+		({ operation }) => {
+			throw new Error(`the server must not make an agent read (${operation})`);
+		},
 		() => renderRoute(handler, route('agents'))
 	);
 
+	assert.equal(value.status, 200);
 	assert.deepEqual(
-		requests.filter((r) => r.operation === 'ContentusMyAgents'),
-		[]
+		requests.filter((r) => r.operation.startsWith('ContentusAgent')),
+		[],
+		'no roster, no detail, no owned inventory'
 	);
 	assert.ok(!value.html.includes('Agents you own'), 'and nothing of it is in the paint');
-	// The public roster is unaffected: it is a separate anonymous read.
-	assert.equal(requests.filter((r) => r.operation === 'ContentusAgents').length, 1);
 });
 
 test('the owned view asks for the owner-only fields the public roster does not', () => {

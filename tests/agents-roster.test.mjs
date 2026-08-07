@@ -9,11 +9,16 @@ import { compile } from 'svelte/compiler';
 import {
 	AGENTS_ROSTER_QUERY,
 	agentUnavailableFromErrors,
+	fetchAgentRoster,
 	isAgentsDisabledError,
 	toAgentRosterPage,
 	toAgentSummary,
 } from '../src/lib/agents/contract.ts';
-import { hasActiveFilters, resolveAgentFilters } from '../src/lib/agents/filters.ts';
+import {
+	emptyRosterMessage,
+	hasActiveFilters,
+	resolveAgentFilters,
+} from '../src/lib/agents/filters.ts';
 import {
 	computedImports,
 	liveScript,
@@ -26,7 +31,51 @@ import {
 	renderRoute,
 	withStubbedGraphql,
 } from '../scripts/render-routes.mjs';
+import { renderComponent } from './helpers/svelte-server.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
+
+const ROSTER_ENDPOINT = 'https://instance.invalid/api/graphql';
+
+/**
+ * `fetchAgentRoster` against a stubbed `fetch`, recording what was sent.
+ *
+ * The same shape `tests/agents-trust.test.mjs`'s `heldRead` uses, without the
+ * held-open gate: the roster became a CLIENT read when lesser's gateway began
+ * refusing anonymous `agents` operations, so the behaviours the SSR section
+ * used to pin through the built handler — filters travelling, failures
+ * degrading — are now pinned at the contract layer the client actually calls.
+ */
+function stubbedFetch(respond) {
+	const requests = [];
+	const originalFetch = globalThis.fetch;
+
+	globalThis.fetch = async (input, init = {}) => {
+		const payload = init.body ? JSON.parse(init.body) : {};
+		const request = {
+			url: typeof input === 'string' ? input : String(input?.url ?? input),
+			operation: /(?:query|mutation)\s+([A-Za-z0-9_]+)/.exec(payload.query ?? '')?.[1] ?? '',
+			variables: payload.variables ?? {},
+			authorization: new Headers(init.headers).get('authorization'),
+		};
+		requests.push(request);
+
+		const envelope = respond(request) ?? { data: null };
+		if (envelope.httpStatus && !envelope.data && !envelope.errors) {
+			return new Response('Service Unavailable', { status: envelope.httpStatus });
+		}
+		return new Response(JSON.stringify(envelope), {
+			status: envelope.httpStatus ?? 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	};
+
+	return {
+		requests,
+		restore: () => {
+			globalThis.fetch = originalFetch;
+		},
+	};
+}
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
@@ -91,11 +140,13 @@ test('the roster asks for the preferred field names, not the deprecated aliases'
 	assert.match(AGENTS_ROSTER_QUERY, /agentVersion/);
 	assert.match(AGENTS_ROSTER_QUERY, /agentCapabilities/);
 
-	// `ownerUsername` is not anonymous-safe, and the roster is. Asking for it
-	// here would make the public roster error for every anonymous visitor.
+	// `ownerUsername` is owner-scoped: lesser rejects it anonymously and permits
+	// only the caller's own username otherwise, so as a roster filter it is
+	// `myAgents` spelled a second way. Asking for it here would error the roster
+	// for every reader but one.
 	assert.ok(
 		!AGENTS_ROSTER_QUERY.includes('ownerUsername'),
-		'the anonymous roster must not send an argument lesser refuses anonymously'
+		'the roster must not send an argument lesser refuses for most readers'
 	);
 });
 
@@ -121,7 +172,7 @@ test('hasNextPage comes from lesser, never from page length', () => {
 
 test('redacted owner fields are absent rather than empty', () => {
 	// lesser blanks `agentOwner` to null and `delegatedScopes` to [] for
-	// non-owners. Rendering those as facts would tell every anonymous visitor
+	// non-owners. Rendering those as facts would tell every non-owner reader
 	// that every agent has no owner and no scopes.
 	const anonymous = toAgentSummary(agentNode({ agentOwner: null, delegatedScopes: [] }), false);
 	assert.equal(anonymous.owner, null);
@@ -206,37 +257,35 @@ test('paging alone is not a filter', () => {
 });
 
 test('the rendered roster links each card to its agent, under the lesser base path', async () => {
-	// Asserted against the server's paint rather than against the href builder,
-	// because what has to be right is the link a reader actually receives —
-	// including the `/l` base path lesser's SSR host forwards under.
-	const handler = await loadHandler();
-	const { value } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? { data: { agents: connection([agentNode()]) } }
-				: { data: null },
-		() => renderRoute(handler, route('agents'))
-	);
+	// Asserted against the component's paint rather than against the href
+	// builder, because what has to be right is the link a reader actually
+	// receives — including the `/l` base path lesser's SSR host forwards under.
+	// The roster is a session read now (the gateway refuses anonymous
+	// `agents`), so the paint is the component's rather than the built
+	// handler's; the props are the same either way.
+	const page = toAgentRosterPage(connection([agentNode()]));
+	const html = await renderComponent('src/lib/agents/AgentRoster.svelte', {
+		page,
+		failure: null,
+		filters: resolveAgentFilters({}),
+	});
 
-	assert.ok(value.html.includes('href="/l/agents/weatherbot"'), 'card links to the agent');
+	assert.ok(html.includes('href="/l/agents/weatherbot"'), 'card links to the agent');
 });
 
 test('the next-page link carries the filters as well as the cursor', async () => {
 	// A cursor without its filters resumes a different list. Both have to travel.
-	const handler = await loadHandler();
-	const { value } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? {
-						data: {
-							agents: connection([agentNode()], { hasNextPage: true, endCursor: 'cursor-9' }),
-						},
-					}
-				: { data: null },
-		() => renderRoute(handler, route('agents-filtered'))
+	const filters = resolveAgentFilters({ type: ['CURATOR'], q: ['weather'], verified: ['true'] });
+	const page = toAgentRosterPage(
+		connection([agentNode()], { hasNextPage: true, endCursor: 'cursor-9' })
 	);
+	const html = await renderComponent('src/lib/agents/AgentRoster.svelte', {
+		page,
+		failure: null,
+		filters,
+	});
 
-	const next = /href="([^"]*after=cursor-9[^"]*)"/.exec(value.html)?.[1];
+	const next = /href="([^"]*after=cursor-9[^"]*)"/.exec(html)?.[1];
 	assert.ok(next, 'a next-page link must be rendered when lesser reports another page');
 	assert.match(next, /type=CURATOR/);
 	assert.match(next, /q=weather/);
@@ -456,82 +505,142 @@ test('the route imports the seam and not the pieces behind it', () => {
 });
 
 /* -------------------------------------------------------------------------
- * SSR
+ * SSR: the server paints the gate, and nothing else
  * ---------------------------------------------------------------------- */
 
-test('the roster server-renders anonymously, with real agents', async () => {
+test('the server renders the session gate and asks lesser for nothing', async () => {
+	// THE SHAPE THE ROUTE NOW HAS. lesser's GraphQL gateway refuses anonymous
+	// `agents` operations with 401 BEFORE the resolver runs
+	// (`anonymousGraphQLPublicQueryFields`, cmd/graphql/main.go), and the
+	// session lives in sessionStorage where the server cannot read it. So the
+	// server paints the gate the client replaces after reading the session,
+	// and makes NO roster read: these props are serialized verbatim into the
+	// public hydration endpoint, and a server-side read would both fail for
+	// lack of a token and put an authenticated answer behind a public URL.
+	//
+	// The stub THROWS rather than answering, so a regression that reintroduces
+	// a server-side roster read fails loudly instead of passing quietly with a
+	// null-data roster.
 	const handler = await loadHandler();
 	const { value, requests } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? { data: { agents: connection([agentNode()]) } }
-				: { data: null },
+		({ operation }) => {
+			throw new Error(`the server must not call lesser for the roster (${operation})`);
+		},
 		() => renderRoute(handler, route('agents'))
 	);
 
 	assert.equal(value.status, 200);
-	assert.ok(value.html.includes('Weather Bot'), 'the agent must be in the server’s paint');
-	assert.ok(value.html.includes('@weatherbot'));
-	assert.ok(value.html.includes('Curator'), 'with its type');
-	assert.ok(value.html.includes('Verified'), 'and its trust state');
-
-	// Anonymous: these props are serialized into the public hydration endpoint.
-	const rosterRequests = requests.filter((r) => r.operation === 'ContentusAgents');
-	assert.equal(rosterRequests.length, 1);
-	assert.equal(rosterRequests[0].authorization, null);
-});
-
-test('the server passes the filters through to lesser', async () => {
-	const handler = await loadHandler();
-	const { requests } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents' ? { data: { agents: connection([]) } } : { data: null },
-		() => renderRoute(handler, route('agents-filtered'))
+	assert.ok(value.html.includes('Reading your session'), 'the gate is the server’s paint');
+	assert.ok(
+		!value.html.includes('Sign in to see this'),
+		'the gate must not guess signed-out — that was the bug this redesign fixes'
 	);
-
-	const [roster] = requests.filter((r) => r.operation === 'ContentusAgents');
-	assert.equal(roster.variables.type, 'CURATOR');
-	assert.equal(roster.variables.query, 'weather');
-	assert.equal(roster.variables.verified, true);
+	assert.deepEqual(
+		requests.filter((r) => r.operation.startsWith('ContentusAgent')),
+		[],
+		'no roster or detail read on the server pass'
+	);
 });
 
-test('an empty filtered page with more pages does not claim there are no matches', async () => {
+test('the filtered address renders the same gate, filters intact for the client', async () => {
+	// The address grammar is all the server ships: `resolveAgentFilters` reads
+	// it off the URL (asserted above), the client fetch asks for exactly that
+	// page (asserted below), and the gate in between is identical.
 	const handler = await loadHandler();
-	const { value } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? { data: { agents: connection([], { hasNextPage: true, endCursor: 'c9' }) } }
-				: { data: null },
+	const { value, requests } = await withStubbedGraphql(
+		({ operation }) => {
+			throw new Error(`the server must not call lesser for the roster (${operation})`);
+		},
 		() => renderRoute(handler, route('agents-filtered'))
 	);
 
 	assert.equal(value.status, 200);
+	assert.ok(value.html.includes('Reading your session'));
+	assert.deepEqual(requests, []);
+});
+
+/* -------------------------------------------------------------------------
+ * The client read: what the session fetch sends and how it degrades
+ * ---------------------------------------------------------------------- */
+
+test('the client read sends the caller’s token and the address’s filters', async () => {
+	const stub = stubbedFetch(() => ({ data: { agents: connection([agentNode()]) } }));
+	try {
+		const result = await fetchAgentRoster(
+			{ endpoint: ROSTER_ENDPOINT, accessToken: 'token-ada' },
+			{ type: 'CURATOR', query: 'weather', verified: true, after: 'cursor-8' }
+		);
+
+		assert.equal(result.ok, true);
+		assert.equal(result.page.agents[0].username, 'weatherbot');
+
+		assert.equal(stub.requests.length, 1);
+		const [request] = stub.requests;
+		assert.equal(request.url, ROSTER_ENDPOINT);
+		assert.equal(request.operation, 'ContentusAgents');
+		assert.equal(request.authorization, 'Bearer token-ada');
+		assert.equal(request.variables.type, 'CURATOR');
+		assert.equal(request.variables.query, 'weather');
+		assert.equal(request.variables.verified, true);
+		assert.equal(request.variables.after, 'cursor-8');
+	} finally {
+		stub.restore();
+	}
+});
+
+test('an empty filtered page with more pages does not claim there are no matches', () => {
+	// lesser filters each page AFTER reading it, so an empty page with
+	// `hasNextPage` is "not on this page", not "none exist". The wording lives
+	// in `emptyRosterMessage` with the filter model; the component renders it
+	// verbatim.
+	assert.equal(
+		emptyRosterMessage({ agentCount: 0, filtered: true, hasNextPage: true }),
+		'No agents on this page match these filters. This instance filters each page as it is read, so there may be matches further along.'
+	);
+	assert.equal(
+		emptyRosterMessage({ agentCount: 0, filtered: true, hasNextPage: false }),
+		'No agents match these filters.'
+	);
+	assert.equal(
+		emptyRosterMessage({ agentCount: 0, filtered: false, hasNextPage: false }),
+		'This instance has no agents to show.'
+	);
+	assert.equal(emptyRosterMessage({ agentCount: 2, filtered: true, hasNextPage: true }), null);
+});
+
+test('the component renders the contract’s empty message verbatim', async () => {
+	const html = await renderComponent('src/lib/agents/AgentRoster.svelte', {
+		page: toAgentRosterPage(connection([], { hasNextPage: true, endCursor: 'c9' })),
+		failure: null,
+		filters: resolveAgentFilters({ type: ['CURATOR'] }),
+	});
+
 	assert.ok(
-		value.html.includes('there may be matches further along'),
+		html.includes('there may be matches further along'),
 		'lesser filters each page after reading it, and the empty state must say so'
 	);
 	assert.ok(
-		!value.html.includes('No agents match these filters.'),
+		!html.includes('No agents match these filters.'),
 		'that claim is only true when there are no further pages'
 	);
 });
 
 test('an instance with agents switched off says so rather than erroring', async () => {
-	const handler = await loadHandler();
-	const { value } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? { errors: [{ message: 'agents are disabled by instance policy' }] }
-				: { data: null },
-		() => renderRoute(handler, route('agents'))
-	);
+	const stub = stubbedFetch(() => ({
+		errors: [{ message: 'agents are disabled by instance policy' }],
+	}));
+	try {
+		const result = await fetchAgentRoster({ endpoint: ROSTER_ENDPOINT, accessToken: 'token' });
 
-	assert.equal(value.status, 200);
-	assert.ok(value.html.includes('does not offer an agent surface'));
+		assert.equal(result.ok, false);
+		assert.equal(result.failure.reason, 'agents-disabled');
+		assert.ok(result.failure.message.includes('does not offer an agent surface'));
+	} finally {
+		stub.restore();
+	}
 });
 
-test('malformed errors, HTTP failures, and empty data degrade to an agents page with HTTP 200', async () => {
-	const handler = await loadHandler();
+test('malformed errors, HTTP failures, and empty data degrade to an explained failure', async () => {
 	const cases = [
 		['non-object error entries', { data: null, errors: [null, 42, 'broken'] }],
 		['a non-GraphQL HTTP failure', { httpStatus: 503 }],
@@ -543,34 +652,32 @@ test('malformed errors, HTTP failures, and empty data degrade to an agents page 
 	];
 
 	for (const [name, envelope] of cases) {
-		const { value } = await withStubbedGraphql(
-			({ operation }) => (operation === 'ContentusAgents' ? envelope : { data: null }),
-			() => renderRoute(handler, route('agents'))
-		);
-
-		assert.equal(value.status, 200, `${name} must render the route, not FaceTheory's 500 page`);
-		assert.match(
-			value.html,
-			/(?:could not|did not) answer the agent query/i,
-			`${name} must explain the failure`
-		);
+		const stub = stubbedFetch(() => envelope);
+		try {
+			const result = await fetchAgentRoster({ endpoint: ROSTER_ENDPOINT, accessToken: 'token' });
+			assert.equal(result.ok, false, `${name} must degrade, never throw`);
+			assert.match(
+				result.failure.message,
+				/(?:could not|did not) answer the agent query/i,
+				`${name} must explain the failure`
+			);
+		} finally {
+			stub.restore();
+		}
 	}
 });
 
-test('a degenerate agents connection remains renderable', async () => {
-	const handler = await loadHandler();
-	const { value } = await withStubbedGraphql(
-		({ operation }) =>
-			operation === 'ContentusAgents'
-				? {
-						data: {
-							agents: { edges: [null, 42, { node: null }], pageInfo: 'not-an-object' },
-						},
-					}
-				: { data: null },
-		() => renderRoute(handler, route('agents'))
-	);
-
-	assert.equal(value.status, 200);
-	assert.ok(value.html.length > 1000, 'the route must render a complete degraded document');
+test('a degenerate agents connection never throws', async () => {
+	const stub = stubbedFetch(() => ({
+		data: { agents: { edges: [null, 42, { node: null }], pageInfo: 'not-an-object' } },
+	}));
+	try {
+		const result = await fetchAgentRoster({ endpoint: ROSTER_ENDPOINT, accessToken: 'token' });
+		// Whether it reads as an empty page or a transport failure is lesser's
+		// answer to make; the one thing it may not do is take the surface down.
+		assert.ok(result.ok === true || result.ok === false);
+		if (result.ok) assert.deepEqual(result.page.agents, []);
+	} finally {
+		stub.restore();
+	}
 });

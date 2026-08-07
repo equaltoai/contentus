@@ -92,10 +92,14 @@ export const NAV_ENTRIES: NavEntry[] = [
 		// are looking at. Same rule as Messages and its thread.
 		alsoCurrentFor: ['agent-detail'],
 		surface: 'mcp',
-		// Anonymous, like Timelines and unlike Messages: lesser serves `agents`
-		// and `agent` without a caller. The owned view on the same route says
-		// what it needs rather than gating the public roster.
-		requiresAuth: false,
+		// Authenticated, like Messages: lesser v1.6.3's GraphQL gateway refuses
+		// anonymous `agents`/`agent` operations with 401 before the resolver runs
+		// (`anonymousGraphQLPublicQueryFields`, cmd/graphql/main.go), so an
+		// anonymous reader is not shown a destination that would only refuse
+		// them. The resolver's own anonymous design (non-owner redaction) is
+		// unreachable behind that gate — routed upstream as lesser#1345, not
+		// assumed here.
+		requiresAuth: true,
 		upcoming: null,
 	},
 ];
@@ -115,7 +119,7 @@ export function isCurrentEntry(entry: NavEntry, pageKey: AppPageKey): boolean {
  * Nav entries visible to a given session.
  *
  * Anonymous visitors see only the surfaces lesser serves anonymously —
- * Articles, Timelines, Agents — matching the instance's actual read behavior
+ * Articles and Timelines — matching the instance's actual read behavior
  * rather than showing a signed-out user destinations that would reject them.
  */
 export function visibleNavEntries(authenticated: boolean): NavEntry[] {
@@ -175,11 +179,11 @@ const MOBILE_TAB_IDS = ['articles', 'timelines', 'messages', 'agents'] as const;
  *
  * Same auth rule as the sidebar, and the same consequence: the server render is
  * always the anonymous bar, because the session token lives in `sessionStorage`
- * and there is no cookie for the server to read. Messages therefore appears on
- * hydration for a signed-in reader. The bar is already painted by then, so this
- * costs one reflow of a rendered control rather than a control that was not
- * there — which is the trade M1 already made for the sidebar, kept here so the
- * two navs cannot disagree about who sees what.
+ * and there is no cookie for the server to read. Messages and Agents therefore
+ * appear on hydration for a signed-in reader. The bar is already painted by
+ * then, so this costs one reflow of a rendered control rather than a control
+ * that was not there — which is the trade M1 already made for the sidebar,
+ * kept here so the two navs cannot disagree about who sees what.
  */
 export function visibleMobileTabs(authenticated: boolean): NavEntry[] {
 	const byId = new Map(NAV_ENTRIES.map((entry) => [entry.id, entry]));

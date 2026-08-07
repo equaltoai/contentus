@@ -9,10 +9,9 @@
  * WHAT IS NOT HERE. `agents(ownerUsername:)` is a lesser argument this model
  * deliberately does not expose. lesser rejects it for anonymous callers and, for
  * authenticated ones, allows only the caller's own username unless they are an
- * admin (`graph/agent_resolvers_stubs.go`). A control on an anonymous-safe
- * roster that errors for almost everyone who can see it is not a filter; the
- * owned view is `myAgents`, which is a different question with a different
- * answer shape.
+ * admin (`graph/agent_resolvers_stubs.go`). A control on the roster that errors
+ * for almost everyone who can see it is not a filter; the owned view is
+ * `myAgents`, which is a different question with a different answer shape.
  */
 
 // Explicit `.ts` extension and no route import, so this module loads straight
@@ -96,4 +95,29 @@ export function hasActiveFilters(filters: AgentRosterFilterState): boolean {
 /** The same filters, at the first page. */
 export function withoutCursor(filters: AgentRosterFilterState): AgentRosterFilterState {
 	return { ...filters, after: null };
+}
+
+/**
+ * The roster's empty state, or null when there are agents to show.
+ *
+ * Pure and here rather than inline in the roster component because the three
+ * situations it distinguishes are lesser's contract, not a rendering detail,
+ * and the third is the one a naive roster gets wrong: lesser applies
+ * `type`/`query`/`verified` to a page AFTER fetching it
+ * (`graph/agent_resolvers_stubs.go`), so a filtered page can come back with
+ * zero matches while `hasNextPage` is true — there may be matches further
+ * down the list, and saying "no agents match" there would be a claim lesser
+ * never made.
+ */
+export function emptyRosterMessage(state: {
+	agentCount: number;
+	filtered: boolean;
+	hasNextPage: boolean;
+}): string | null {
+	if (state.agentCount > 0) return null;
+	if (!state.filtered) return 'This instance has no agents to show.';
+	if (state.hasNextPage) {
+		return 'No agents on this page match these filters. This instance filters each page as it is read, so there may be matches further along.';
+	}
+	return 'No agents match these filters.';
 }

@@ -18,9 +18,8 @@ import {
 	graphqlEndpointForOrigin,
 	resolveRequestOrigin,
 } from '$lib/cms/origin';
-import { fetchAgent, fetchAgentRoster } from '$lib/agents/contract';
 import { resolveAgentFilters } from '$lib/agents/filters';
-import { mcpConnectOrigin } from '$lib/agents/mcp';
+import { mcpConnectOriginForInstance } from '$lib/agents/mcp';
 import { loadSourceStatus } from '$lib/cms/compose';
 import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cms/loaders';
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
@@ -177,48 +176,38 @@ async function createRouteProps(
 				},
 			};
 		case 'agents': {
-			// Anonymous-safe, so the server paints a real roster. lesser resolves
-			// the viewer optionally for `agents` and requires a caller only for the
-			// `ownerUsername` argument, which this surface does not use — the
-			// viewer's own agents are a client-only read on the same route.
+			// A SESSION READ, not an anonymous one — lesser v1.6.3's GraphQL
+			// gateway admits only a named set of public query fields anonymously
+			// (`anonymousGraphQLPublicQueryFields`, cmd/graphql/main.go), and
+			// `agents` is not among them: every anonymous roster operation is
+			// refused with 401 "authentication required" BEFORE the resolver —
+			// and its non-owner redaction — ever runs. The anonymous-safe design
+			// this route used to assert is unreachable behind that gate, and an
+			// SSR fetch here painted "Sign in to see this." for EVERY reader,
+			// including the signed-in principal the surface exists for. So the
+			// server ships the address grammar and nothing else: the roster
+			// arrives once the client has read the session, the same shape
+			// `/messages` already follows and for the same reason — these props
+			// are serialized VERBATIM into the PUBLIC hydration endpoint.
 			const filters = resolveAgentFilters(query);
-			const result = await fetchAgentRoster(
-				{ endpoint },
-				{
-					type: filters.type,
-					query: filters.query,
-					verified: filters.verified,
-					after: filters.after,
-				}
-			);
-
 			return {
 				...base,
-				agents: {
-					page: result.ok ? result.page : null,
-					failure: result.ok ? null : result.failure,
-					filters,
-				},
+				agents: { page: null, failure: null, filters },
 			};
 		}
 		case 'agent-detail': {
-			// Anonymous, like the roster. `mcpAccess` is not among the fields lesser
-			// redacts for non-owners, so the whole published MCP contract —
-			// endpoint, protected-resource URL, scopes, guidance — lands in the
-			// server's paint and a reader with no script still gets every address.
-			// The live probes against those addresses are the client's; they are
-			// requests to a sibling origin and would report the SSR host's
-			// reachability rather than the reader's.
+			// The same gateway refusal covers `agent(username)`, so the detail is
+			// a session read too: the server ships the username from the address
+			// and the client fetches with its token. The published MCP contract
+			// therefore lands after mount rather than in the first paint — the
+			// cost of consuming lesser's gateway as it actually behaves. The
+			// upstream question (the resolver is built for anonymous readers —
+			// it redacts for non-owners — so is the gateway refusal intended?)
+			// is routed to lesser as lesser#1345, not papered over here.
 			const username = resolveAgentUsername(path);
-			const result = await fetchAgent({ endpoint }, username ?? '');
-
 			return {
 				...base,
-				agentDetail: {
-					username,
-					agent: result.ok ? result.agent : null,
-					failure: result.ok ? null : result.failure,
-				},
+				agentDetail: { username, agent: null, failure: null },
 			};
 		}
 		case 'profile': {
@@ -436,23 +425,28 @@ const SOCKET_ROUTES: ReadonlySet<string> = new Set(['timelines', 'messages', 'me
 
 /**
  * `/agents/{username}` gets the same treatment for the same reason, one
- * milestone later and from a better source.
+ * milestone later and from a source that had to change.
  *
  * The MCP detail panel probes two discovery documents in the browser, and lesser
  * canonicalises MCP onto `api.<domain>` (`canonicalMCPResourceBaseURL`) — a
  * sibling of the host serving this page — so without an addition here the
  * browser blocks both probes before they leave.
  *
- * The addition is narrower than the socket one in the way that matters: the
- * origin is not derived from the request at all, it is the ORIGIN OF THE URL
- * LESSER JUST RETURNED for this agent. If lesser published no MCP endpoint,
- * there is nothing to probe and nothing is added. Still exactly one origin,
- * still only on the route that connects, and still never touching `script-src`
- * or `style-src`: no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
+ * The origin was once read off the agent's `mcpAccess` as the server pass
+ * fetched it — the narrowest possible source. The detail is a session read now
+ * (the gateway refuses anonymous `agent(username)`), so the server no longer
+ * has `mcpAccess` when it writes this header, and the allowance is DERIVED
+ * from the request origin by applying lesser's own canonicalisation rule —
+ * `mcpConnectOriginForInstance` carries the reasoning. The allowance is still
+ * exactly one origin, still only on the route that connects, and still never
+ * touching `script-src` or `style-src`: no `unsafe-inline`, no `unsafe-eval`,
+ * no third-party origin. The probe TARGETS are unchanged: they are the URLs
+ * lesser states for the agent, so an agent publishing no MCP endpoint fires no
+ * probe even though the ceiling is there.
  */
 function cspOptionsForRoute(props: RouteProps, origin: string | null) {
 	if (props.page.key === 'agent-detail') {
-		const mcpOrigin = mcpConnectOrigin(props.agentDetail?.agent?.mcpAccess);
+		const mcpOrigin = mcpConnectOriginForInstance(origin);
 		return mcpOrigin ? { directives: { 'connect-src': [mcpOrigin] } } : {};
 	}
 

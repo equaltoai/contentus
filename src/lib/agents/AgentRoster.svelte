@@ -53,7 +53,7 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 	import AgentRosterFilters from './AgentRosterFilters.svelte';
 	import MyAgents from './MyAgents.svelte';
 	import { agentsHref } from '../../facetheory/routing';
-	import { hasActiveFilters, type AgentRosterFilterState } from './filters';
+	import { emptyRosterMessage, hasActiveFilters, type AgentRosterFilterState } from './filters';
 	import type { AgentRosterPage, AgentUnavailable } from './contract';
 
 	interface Props {
@@ -67,24 +67,16 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 	const filtered = $derived(hasActiveFilters(filters));
 	const agents = $derived(page?.agents ?? []);
 
-	/**
-	 * The empty state has to distinguish three situations lesser produces, and
-	 * the third is the one a naive roster gets wrong.
-	 *
-	 * lesser applies `type`/`query`/`verified` to a page AFTER fetching it
-	 * (`graph/agent_resolvers_stubs.go`), so a filtered page can come back with
-	 * zero matches while `hasNextPage` is true — there may be matches further
-	 * down the list. Saying "no agents match" there would be a claim lesser
-	 * never made.
-	 */
-	const emptyMessage = $derived.by(() => {
-		if (agents.length) return null;
-		if (!filtered) return 'This instance has no agents to show.';
-		if (page?.hasNextPage) {
-			return 'No agents on this page match these filters. This instance filters each page as it is read, so there may be matches further along.';
-		}
-		return 'No agents match these filters.';
-	});
+	// The three situations the empty state distinguishes are lesser's contract —
+	// a filtered page can be empty with more pages behind it — so the wording
+	// lives with the filter model (`emptyRosterMessage`), not inline here.
+	const emptyMessage = $derived(
+		emptyRosterMessage({
+			agentCount: agents.length,
+			filtered,
+			hasNextPage: page?.hasNextPage ?? false,
+		})
+	);
 </script>
 
 {#if failure}

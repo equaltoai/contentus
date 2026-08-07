@@ -120,8 +120,10 @@ test('no tab depends on hover to say what it is', async () => {
 
 	// Every tab carries a permanent text label beside its icon. A phone has no
 	// hover, so an icon whose meaning arrives on hover has no meaning at all.
+	// The anonymous bar is the two surfaces lesser serves anonymously; the rest
+	// arrive on hydration.
 	const labels = rendered.html.match(/class="contentus-tabbar__label">([^<]+)</g) ?? [];
-	assert.ok(labels.length >= 3, 'each rendered tab must carry a visible text label');
+	assert.ok(labels.length >= 2, 'each rendered tab must carry a visible text label');
 
 	// And the current tab is marked structurally, not by colour alone.
 	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/" aria-current="page"/);
@@ -137,7 +139,7 @@ test('every tab is either a link to a route that answers, or a disabled span', a
 	const rendered = await renderRoute(handler, { name: 'index', path: '/l/', expectStatus: 200 });
 
 	const tabs = [...rendered.html.matchAll(/<(a|span) class="contentus-tabbar__tab"([^>]*)>/g)];
-	assert.ok(tabs.length >= 3, 'the bar must render its tabs');
+	assert.ok(tabs.length >= 2, 'the bar must render its tabs');
 
 	for (const [, element, attributes] of tabs) {
 		if (element === 'span') {
@@ -158,19 +160,24 @@ test('a SHIPPED face is a real link, so the tab bar tracks what exists', async (
 
 	// The other half of the rule above, and the half that catches the opposite
 	// mistake: a face whose route landed while its nav entry stayed `upcoming` is
-	// a surface nobody can reach from the chrome. Agents joined this assertion
-	// when M6 landed its route, the way Timelines did at M4.
+	// a surface nobody can reach from the chrome. Asserted against the anonymous
+	// bar, which is the server's paint: Agents shipped too, but as an
+	// authenticated tab — lesser's gateway refuses anonymous `agents` — so it
+	// arrives on hydration like Messages, and what must not happen is an
+	// anonymous tab to a route that would only refuse the reader.
 	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/timelines"/);
-	assert.match(rendered.html, /class="contentus-tabbar__tab" href="\/l\/agents"/);
+	assert.doesNotMatch(rendered.html, /class="contentus-tabbar__tab" href="\/l\/agents"/);
 });
 
 test('the anonymous server render shows only anonymous tabs', async () => {
 	const rendered = await renderRoute(handler, { name: 'index', path: '/l/', expectStatus: 200 });
 
-	// Messages requires auth, and the server cannot know who is asking — the
-	// session lives in sessionStorage. So the cacheable SSR document is the
-	// anonymous bar, and Messages arrives on hydration.
+	// Messages and Agents require auth, and the server cannot know who is
+	// asking — the session lives in sessionStorage, and lesser's gateway
+	// refuses anonymous `conversations` and `agents` alike. So the cacheable
+	// SSR document is the anonymous bar, and both arrive on hydration.
 	assert.doesNotMatch(rendered.html, /contentus-tabbar__label">Messages</);
+	assert.doesNotMatch(rendered.html, /contentus-tabbar__label">Agents</);
 	assert.match(rendered.html, /contentus-tabbar__label">Articles</);
 });
 

@@ -147,7 +147,10 @@ test('anonymous SSR output shows only the anonymous nav', async () => {
 
 	assert.ok(result.html.includes('Articles'));
 	assert.ok(result.html.includes('Timelines'));
-	assert.ok(result.html.includes('Agents'));
+	assert.ok(
+		!result.html.includes('>Agents<'),
+		'Agents is authenticated-only (the gateway refuses anonymous `agents`)'
+	);
 	assert.ok(!result.html.includes('>Review<'), 'Review is authenticated-only');
 	assert.ok(!result.html.includes('>Messages<'), 'Messages is authenticated-only');
 	// The session control is an inert placeholder until mount: the server cannot

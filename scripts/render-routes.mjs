@@ -94,21 +94,26 @@ export const AUDIT_ROUTES = [
 	// two answers and is asserted as such in `tests/ssr-messages.test.mjs`
 	// rather than left to whichever branch happened to win.
 	{ name: 'messages-no-id', path: '/l/messages/', expectStatus: 200 },
-	// Face 6. The roster is an anonymous-safe read, so the server fetches it and
-	// the probe exercises a real render rather than a signed-out placeholder. The
-	// filtered variant is audited separately because its controls, its empty
-	// state and its paging link all differ from the unfiltered one, and CSP
-	// findings hide in exactly that kind of conditional markup.
+	// Face 6. Both are SESSION reads — lesser's GraphQL gateway refuses
+	// anonymous `agents`/`agent` operations before the resolver runs
+	// (`anonymousGraphQLPublicQueryFields`, cmd/graphql/main.go), and the
+	// session lives in sessionStorage. So the server paints the session gate
+	// and makes NO fetch, which is exactly what the audit needs to exercise:
+	// the gate is the only first paint a cold deep link gets, and a
+	// reintroduced server-side read here would be both a 401 and an
+	// authenticated answer serialized into the public hydration payload. The
+	// filtered variant is audited separately because the address grammar has
+	// to survive the gate intact.
 	{ name: 'agents', path: '/l/agents', expectStatus: 200 },
 	{
 		name: 'agents-filtered',
 		path: '/l/agents?type=CURATOR&q=weather&verified=true',
 		expectStatus: 200,
 	},
-	// One agent, deep-linked cold. Anonymous like the roster, and the surface
-	// where the published MCP contract has to appear in the SERVER's paint —
-	// `mcpAccess` is not redacted for non-owners, so a no-script reader gets every
-	// address. The live probes against those addresses are the client's.
+	// One agent, deep-linked cold. Same session gate as the roster, and the
+	// route whose CSP carries the derived MCP `connect-src` ceiling
+	// (`mcpConnectOriginForInstance`) — the one header-level difference from
+	// every other route, and the reason it stays on the audit list.
 	{ name: 'agent-detail', path: '/l/agents/weatherbot', expectStatus: 200 },
 	// Face 7. Both are private client-loaded surfaces: the server paints the
 	// write-scoped sign-in state and must not read roster, policy, delegation, or

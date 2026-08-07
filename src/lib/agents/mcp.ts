@@ -19,14 +19,18 @@
  *    `canonicalMCPResourceBaseURL`), and lesser hands contentus the finished
  *    values on `Agent.mcpAccess`. They come from the instance.
  *
- * THE ONE VALUE THAT IS STILL DERIVED, and why. `mcpAccess` names four URLs;
+ * THE TWO VALUES THAT ARE STILL DERIVED, and why. `mcpAccess` names four URLs;
  * `/.well-known/mcp.json` is not among them. It is derived from the ORIGIN of
  * `mcpAccess.mcpURL` — the host lesser itself just named as the MCP host — and
  * never from `window.location`, which is the app host and a different origin
  * (lesser canonicalises MCP onto `api.<domain>`). Deriving a well-known path
  * beneath a host the instance stated is a much smaller claim than deriving the
  * host, and it is the smallest one that reaches a document contentus needs.
- * That the document is missing is itself a reportable answer.
+ * That the document is missing is itself a reportable answer. The second is
+ * the CSP ceiling for this route, which the server CANNOT read off `mcpAccess`
+ * because the detail is a session read; `mcpConnectOriginForInstance` derives
+ * it from the page origin using lesser's own canonicalisation rule, and its
+ * comment carries the reasoning.
  *
  * BROWSER ONLY. These are live reachability checks against a sibling origin.
  * Running them during SSR would make a cold page render wait on a third host
@@ -86,23 +90,49 @@ export function resolveMcpProbeTargets(access: {
 }
 
 /**
- * The origin an agent's MCP probes target, for CSP.
+ * The MCP origin the agent-detail route's CSP must permit, derived from the
+ * origin the page was served from — or null.
  *
- * Separate from `resolveMcpProbeTargets` because the SSR pass needs only this
- * much: the `connect-src` allowance is one origin, derived from the value
- * lesser returned for this agent, added only on this route.
+ * WHY THIS DERIVES A HOST THE MODULE HEADER SAYS NOT TO DERIVE. The probe
+ * TARGETS still come from lesser's `mcpAccess`, verbatim; nothing here
+ * rebuilds them. But the detail route is a session read — lesser's GraphQL
+ * gateway refuses anonymous `agent(username)` operations before the resolver
+ * runs — so the server pass no longer has the agent's `mcpAccess` in hand when
+ * it writes `connect-src`, and a policy that can only name the origin after
+ * the answer arrives would CSP-block the very probes it exists to permit. The
+ * ceiling therefore comes from the one fact the server does know: where this
+ * instance lives. It applies lesser's OWN canonicalisation rule
+ * (`canonicalMCPResourceBaseURL`, `pkg/auth/mcp_access.go`): `api.` prefixed
+ * onto the instance host, port preserved, local hostnames left alone.
+ *
+ * The consequence of a wrong derivation is honest degradation, never a
+ * widened hole: the allowance is one sibling origin on one route, the probes
+ * still fire only at the URLs lesser stated for the agent, and if an instance
+ * publishes its MCP surface somewhere else the panel reports it unreachable
+ * rather than connecting somewhere unexpected.
  */
-export function mcpConnectOrigin(
-	access: { mcpURL: string | null } | null | undefined
-): string | null {
-	const endpoint = access?.mcpURL?.trim();
-	if (!endpoint) return null;
+export function mcpConnectOriginForInstance(origin: string | null | undefined): string | null {
+	if (!origin) return null;
+
+	let url: URL;
 	try {
-		const url = new URL(endpoint);
-		return url.hostname ? url.origin : null;
+		url = new URL(origin);
 	} catch {
 		return null;
 	}
+	if (!url.hostname) return null;
+
+	// lesser keeps MCP on the instance host itself for local deployments
+	// (`isLocalMCPHostname`), so those probes are same-origin and 'self'
+	// already covers them — no widening to give.
+	const host = url.hostname.toLowerCase();
+	if (host === 'localhost' || host === '[::1]' || host === '::1' || host.endsWith('.localhost'))
+		return null;
+
+	// Already an api host — do not stack another prefix onto it.
+	const apiHost = host.startsWith('api.') ? host : `api.${host}`;
+	const port = url.port ? `:${url.port}` : '';
+	return `${url.protocol}//${apiHost}${port}`;
 }
 
 /* -------------------------------------------------------------------------
