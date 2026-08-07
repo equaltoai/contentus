@@ -10,7 +10,16 @@ Auth awareness is deliberately client-only. The server render is always the
 anonymous nav because the session token lives in `sessionStorage` — there is no
 cookie for the server to read, by design. That means SSR output for the public
 article surfaces is identical for every visitor and safe to cache, and the
-authenticated entries appear on hydration.
+authenticated entries appear on hydration. Two consequences of that are
+managed, not hidden: the session control renders an inert, invisible
+placeholder until mount so nobody is shown the wrong authentication state, and
+the auth-only nav entries (Review, Messages) appearing post-mount is a reflow
+confined to the sidebar column — reserved slots for them were rejected because
+their collapse would then reflow every ANONYMOUS reader's sidebar, the common
+case on a public blog, to save signed-in reviewers a fill that touches no
+content. Timestamps are the remaining true mismatch (server UTC, client
+local); that one is upstream's to fix (greater-components#1007) because the
+formatting chain is vendored end to end.
 
 Below 960px the sidebar nav gives way to the bottom tab bar (product design
 §4). Both are rendered — the swap is CSS, not a JS viewport measurement, because
@@ -37,10 +46,12 @@ twice, not two navigation systems.
 
 	let { page, children }: Props = $props();
 
+	let mounted = $state(false);
 	let authenticated = $state(false);
 	let signInError = $state<string | null>(null);
 
 	onMount(() => {
+		mounted = true;
 		authenticated = isAuthenticated();
 		// The badge's count comes from an authenticated read, so it cannot exist in
 		// the server document — it appears once the session has been read. The
@@ -154,7 +165,24 @@ twice, not two navigation systems.
 		</nav>
 
 		<div class="contentus-session">
-			{#if authenticated}
+			{#if !mounted}
+				<!-- Neutral placeholder, not a guess: the server cannot read the
+				     session (sessionStorage, no cookie), so SSR and the first client
+				     pass both render this inert, invisible slot and the real control
+				     swaps in after mount. Painting "Sign in" here would show a signed-in
+				     reviewer the wrong authentication state for a beat — a flash of
+				     incorrect chrome, not just late chrome. `visibility: hidden` holds
+				     the space so the swap does not move anything. -->
+				<button
+					class="contentus-session__button contentus-session__button--pending"
+					type="button"
+					disabled
+					aria-hidden="true"
+					tabindex="-1"
+				>
+					Sign in
+				</button>
+			{:else if authenticated}
 				<button class="contentus-session__button" type="button" onclick={onSignOut}>
 					Sign out
 				</button>

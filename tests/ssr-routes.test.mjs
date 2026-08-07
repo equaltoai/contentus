@@ -146,6 +146,13 @@ test('anonymous SSR output shows only the anonymous nav', async () => {
 	assert.ok(result.html.includes('Agents'));
 	assert.ok(!result.html.includes('>Review<'), 'Review is authenticated-only');
 	assert.ok(!result.html.includes('>Messages<'), 'Messages is authenticated-only');
+	// The session control is an inert placeholder until mount: the server cannot
+	// read the session, so SSR must not paint a control that claims either state.
+	assert.ok(
+		result.html.includes('contentus-session__button--pending'),
+		'the session control is a placeholder until mount'
+	);
+	assert.ok(!result.html.includes('>Sign out<'), 'SSR never claims a session');
 });
 
 test('no article body is emitted when lesser returns no rendered HTML', async () => {

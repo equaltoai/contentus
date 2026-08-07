@@ -389,6 +389,13 @@ code {
 	border-color: var(--tc-accent);
 }
 
+/* Pre-mount placeholder: inert and unpainted, but occupying exactly the real
+   control's box so the post-mount swap cannot move anything. */
+.contentus-session__button--pending {
+	visibility: hidden;
+	cursor: default;
+}
+
 .contentus-main {
 	min-width: 0;
 	padding: var(--tc-space-12) 0 var(--tc-space-24);

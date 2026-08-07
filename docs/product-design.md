@@ -482,6 +482,17 @@ Contentus-owned components offered upstream once proven on an instance
 `src/lib/shell/MobileTabBar.svelte`, `src/lib/shell/Sheet.svelte`, and the
 compose-side content-warning field.
 
+Gaps filed from the 2026-08-06 design & accessibility audit remediation
+(2026-08-07, on branch `contentus/audit-remediation`):
+
+| Item                                                                                                          | Owner                | Status                                                                                              |
+| ------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
+| `formatDateTime` cannot pin a timezone; SSR (UTC) and hydrated client (local) render different visible text   | `greater-components` | Filed greater-components#1007 — true hydration mismatch; `<time datetime>` ISO is correct meanwhile |
+| Blog article card is one giant anchor; accessible name duplicates title when no distinct excerpt exists       | `greater-components` | Filed greater-components#1008 — contentus dropped its own `?? title` excerpt fallback               |
+| `gr-blog-author-card` and `.gr-menu` ship no `[data-theme='dark']` rules                                      | `greater-components` | Filed greater-components#1009 — residual after U-18 closed at v0.13.2; not forked locally           |
+| `greater update --all` OOMs on the default Node heap; needed 12 GB here                                        | `greater-components` | Filed greater-components#1010 — bounded batches (#1005) do not cover `update`                        |
+| No article search on the CMS read path; `client_ssr_host`'s query-suffixed import double-instantiates bundles | `lesser`             | Filed lesser#1342 — search stays out of the client per GraphQL-first; import hazard documented       |
+
 **SEC-2's disclosed advisory set is EMPTY as of the greater-v0.13.0 pin bump.**
 `pnpm audit --audit-level=high` reports nothing across the whole installed graph,
 not only `--prod`, and `gov-infra/planning/contentus-disclosed-upstream-findings.json`
