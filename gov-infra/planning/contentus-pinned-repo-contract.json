@@ -348,7 +348,7 @@
       {
         "file": "tests/ssr-probe.test.mjs",
         "min_test_points": 18,
-        "sha256": "bb539fa74b79a063d7293a7502ddf851a0d5f861b806c7a40d61c32407cb6b90"
+        "sha256": "0a4b90c2f89e2f02fb4cd7366b3031fb5ebd59136f9d1c5603b67dfafb18f42e"
       },
       {
         "file": "tests/origin.test.mjs",

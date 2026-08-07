@@ -400,6 +400,11 @@ test('a withheld body is absent from the SSR document too', async () => {
 	assert.match(value.html, /isn't available yet/i, 'the reason must still be stated');
 	// User-facing copy only: no issue-tracker language, no vendor attribution.
 	assert.doesNotMatch(value.html, /upstream gap|CMS contract|ActivityPub/i);
+	// The withhold header carries the article's date as a <time>, and the
+	// reader still offers the way back and keeps the nav's current marker.
+	assert.match(value.html, /<time datetime="2026-07-30T00:00:00Z">Jul 30, 2026<\/time>/);
+	assert.match(value.html, /Back to articles/);
+	assert.match(value.html, /aria-current="page"/);
 });
 
 test('a displayable body still reaches hydration, since the page shows it', async () => {

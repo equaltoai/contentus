@@ -21,7 +21,7 @@ that quietly prints Markdown source.
 	import { ArticleReader as BlogArticleReader } from '$lib/greater/faces/blog/components/Article/index.js';
 
 	import { toBlogFaceArticle } from '$lib/cms/articles';
-	import { seriesHref } from '../../facetheory/routing';
+	import { href as appHref, seriesHref } from '../../facetheory/routing';
 	import type { AppPageDescriptor, ArticleReaderData } from '../../facetheory/types';
 	import Notice from './Notice.svelte';
 
@@ -38,6 +38,18 @@ that quietly prints Markdown source.
 	const body = $derived(data.body);
 	const faceArticle = $derived(
 		data.article && body ? toBlogFaceArticle(data.article, body) : null
+	);
+
+	// UTC-pinned and date-only, deliberately: formatting must be identical on
+	// the server and after hydration, and a date carries no clock-time for a
+	// zone to move. (The vendored face header's own formatter cannot pin a
+	// zone at v0.13.2 — that mismatch is upstream, greater-components#1007.)
+	const publishedLabel = $derived(
+		data.article?.publishedAt
+			? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' }).format(
+					new Date(data.article.publishedAt)
+				)
+			: null
 	);
 </script>
 
@@ -59,6 +71,9 @@ that quietly prints Markdown source.
 	/>
 {:else}
 	<article class="contentus-reader">
+		<!-- Orientation on a page with no breadcrumb trail upstream: the list
+		     is the only way back, so it is stated rather than assumed. -->
+		<p class="contentus-meta"><a href={appHref('/')}>← Back to articles</a></p>
 		{#if body?.kind === 'render' && faceArticle}
 			<BlogArticleReader
 				article={faceArticle}
@@ -80,6 +95,9 @@ that quietly prints Markdown source.
 				<p class="contentus-meta">
 					{#if data.article.author?.displayName || data.article.author?.username}
 						{data.article.author.displayName ?? `@${data.article.author.username}`} ·
+					{/if}
+					{#if publishedLabel}
+						<time datetime={data.article.publishedAt}>{publishedLabel}</time> ·
 					{/if}
 					{data.article.readingTimeMinutes} min read · {data.article.wordCount} words
 				</p>
