@@ -113,7 +113,7 @@ twice, not two navigation systems.
 		<a class="contentus-brand" href={appHref('/')} aria-label="Contentus home">
 			<img
 				class="contentus-brand__wordmark"
-				src="/l/_assets/brand/wordmark-theory-cloud.svg"
+				src="/l/_assets/brand/wordmark-theory-cloud-light.svg"
 				alt="Theory Cloud"
 				width="160"
 				height="22"
