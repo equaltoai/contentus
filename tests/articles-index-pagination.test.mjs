@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { ARTICLES_PAGE_SIZE, fetchArticlesPage } from '../src/lib/cms/pagination.ts';
-import { AUDIT_ROUTES, loadHandler, renderRoute, withStubbedGraphql } from '../scripts/render-routes.mjs';
+import {
+	AUDIT_ROUTES,
+	loadHandler,
+	renderRoute,
+	withStubbedGraphql,
+} from '../scripts/render-routes.mjs';
 
 /**
  * P1-10 — the index pages. The first page is SSR like every other route; the
@@ -75,7 +80,11 @@ test('fetchArticlesPage sends the cursor and the resolved filter IDs, anonymousl
 	);
 
 	assert.equal(requests.length, 1);
-	assert.equal(requests[0].url, '/api/graphql', 'browser-style relative endpoint, no origin needed');
+	assert.equal(
+		requests[0].url,
+		'/api/graphql',
+		'browser-style relative endpoint, no origin needed'
+	);
 	assert.deepEqual(requests[0].variables, {
 		seriesId: null,
 		categoryId: 'cat-1',

@@ -107,9 +107,7 @@ export function schemaPinFromProvenance(provenance) {
 	const artifact = provenance?.artifact ?? {};
 	const repository = upstream.repository ?? '';
 	return {
-		repository: repository.startsWith('https://')
-			? repository
-			: `https://github.com/${repository}`,
+		repository: repository.startsWith('https://') ? repository : `https://github.com/${repository}`,
 		ref: upstream.ref,
 		upstream_path: upstream.path,
 		pinned_path: artifact.path,

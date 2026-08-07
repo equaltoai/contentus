@@ -623,7 +623,10 @@ const app = createFaceApp({
 		log: (event: { level: string; event: string; path?: string; routePattern?: string }) => {
 			if (event.level === 'error') console.error('[facetheory]', JSON.stringify(event));
 		},
-		onError: (error: unknown, ctx: { path?: string; routePattern?: string; phase?: string; errorClass?: string }) => {
+		onError: (
+			error: unknown,
+			ctx: { path?: string; routePattern?: string; phase?: string; errorClass?: string }
+		) => {
 			console.error(
 				'[facetheory] render error',
 				JSON.stringify({
