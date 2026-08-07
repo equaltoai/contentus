@@ -25,6 +25,7 @@
 
   /* Secondary neutrals */
   --tc-steel:          #6F7D95;  /* neutral UI linework */
+  --tc-steel-bright:   #8593AB;  /* steel lifted for tertiary TEXT: 4.48:1 on Midnight fails AA, so linework and text no longer share one literal */
   --tc-mist:           #DCE6F5;  /* soft background tint; quiet body text */
   --tc-graphite:       #1C2433;  /* light-mode dark text; subtle inverse */
 
@@ -74,7 +75,7 @@
 
   --tc-fg:                var(--tc-ice-white);  /* primary text on dark */
   --tc-fg-muted:          var(--tc-mist);       /* secondary text */
-  --tc-fg-dim:            var(--tc-steel);      /* tertiary / disabled */
+  --tc-fg-dim:            var(--tc-steel-bright); /* tertiary text — AA on bg and every surface it sits on */
   --tc-fg-inverse:        var(--tc-graphite);   /* text on inverse surfaces */
 
   --tc-outline:           var(--tc-steel);
