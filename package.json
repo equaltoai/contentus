@@ -22,6 +22,7 @@
     "validate": "pnpm run validate:graphql && pnpm run validate:renderer-authority && pnpm run validate:csp && pnpm run validate:seam-graph",
     "validate:csp": "node scripts/audit-csp.mjs",
     "validate:graphql": "node scripts/audit-graphql-documents.mjs",
+    "validate:schema-provenance": "node scripts/verify-schema-provenance.mjs",
     "validate:renderer-authority": "node scripts/audit-renderer-authority.mjs",
     "validate:seam-graph": "node scripts/audit-seam-graph.mjs",
     "test": "node --test --experimental-strip-types 'tests/*.test.mjs' 'scripts/*.test.mjs'"

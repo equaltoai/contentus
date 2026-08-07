@@ -3,8 +3,8 @@
  * LIVE CONTRACT PROBE — the documents contentus really sends, against a real
  * lesser instance.
  *
- * WHY THIS EXISTS. `scripts/audit-graphql-contract.mjs` proves the documents match
- * the schema this repository pinned. That is a statement about a file. It cannot
+ * WHY THIS EXISTS. `pnpm run validate:graphql` proves the documents match the
+ * schema this repository pinned. That is a statement about a file. It cannot
  * tell you whether a running instance accepts them, and the milestone's acceptance
  * contract asks exactly that.
  *
