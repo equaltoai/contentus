@@ -43,7 +43,8 @@ import type {
 	MessagesHandlers,
 	MessagesRealtimeCallbacks,
 } from '../components/messaging/context.svelte.js';
-import { subscriptionEndpoint, type SubscriptionState } from '../timelines/subscription.ts';
+import { getCachedInstanceInfo } from '../instance/info.ts';
+import type { SubscriptionState } from '../timelines/subscription.ts';
 import {
 	createMessagingAdapter,
 	MessagingAuthError,
@@ -119,8 +120,16 @@ export interface MessagingBindingConfig {
 	 */
 	accessToken: () => string | null;
 	endpoint?: string | null;
-	/** Origin the page was served from, used to derive the socket host. */
-	origin?: string | null;
+	/**
+	 * The socket URL resolver, injectable for probes.
+	 *
+	 * Defaults below to the page-load-cached `InstanceInfo` read: lesser v1.6.4
+	 * serves `subscriptionUrl`, and the cache asks once per page load and shares
+	 * the answer with every other realtime surface on the route. A probe passes
+	 * its own so the socket path is driven without the module-level cache
+	 * crossing tests — the same reason `socketFactory` is injectable.
+	 */
+	resolveSubscriptionEndpoint?: () => Promise<string | null>;
 	onPartial?: (operation: string) => void;
 	onRealtimeState?: (state: SubscriptionState) => void;
 	/** The reconciliation state after a reconnect. */
@@ -234,7 +243,14 @@ export function createMessagingBinding(config: MessagingBindingConfig): Messagin
 	const adapter = createMessagingAdapter({
 		accessToken: config.accessToken,
 		endpoint: config.endpoint ?? null,
-		subscriptionEndpoint: subscriptionEndpoint(config.origin ?? null),
+		// The socket URL is lesser-served now, not derived: v1.6.4's
+		// `InstanceInfo.subscriptionUrl`, through the page-load cache. Anonymous —
+		// `instance` is a public field — and relative-pathed, which is right:
+		// realtime only ever starts in the browser, so `config.endpoint` (the
+		// absolute URL a server pass needs) has no role here.
+		resolveSubscriptionEndpoint:
+			config.resolveSubscriptionEndpoint ??
+			(async () => (await getCachedInstanceInfo())?.subscriptionUrl ?? null),
 		signal: requests.signal,
 		...(reportPartial ? { onPartial: reportPartial } : {}),
 		...(reportRealtime ? { onRealtimeState: reportRealtime } : {}),

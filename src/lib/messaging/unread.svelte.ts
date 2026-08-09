@@ -27,7 +27,6 @@
 
 import { accessTokenOrNull, isAuthenticated } from '../auth/session.ts';
 import { sessionGeneration } from '../auth/session-events.ts';
-import { resolveBrowserOrigin } from '../cms/origin.ts';
 import { unreadConversationCount } from './contract.ts';
 import { createMessagingBinding } from './handlers.ts';
 import { createSessionScope } from '../auth/session-scope.ts';
@@ -102,7 +101,6 @@ class UnreadStore {
 		try {
 			const { handlers } = createMessagingBinding({
 				accessToken: accessTokenOrNull,
-				origin: resolveBrowserOrigin(),
 			});
 			const conversations = await handlers.onFetchConversations?.('INBOX');
 			if (!this.#scope.holds(dispatched)) {

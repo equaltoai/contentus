@@ -93,7 +93,8 @@ write face's job, not a stub's.
 		type FeedItems,
 	} from './feed-state';
 	import { fetchTimelinePage } from './transport';
-	import { subscribe, subscriptionEndpoint, type SubscriptionState } from './subscription';
+	import { getCachedInstanceInfo } from '../instance/info';
+	import { subscribe, type SubscriptionState } from './subscription';
 
 	interface Props {
 		type: ContentusTimelineType;
@@ -270,11 +271,22 @@ write face's job, not a stub's.
 		const scroller = scrollRoot?.querySelector('.timeline-scroll');
 		scroller?.addEventListener('scroll', onScroll, { passive: true });
 
+		// The socket URL is ASKED for, not derived: lesser v1.6.4 serves it as
+		// `InstanceInfo.subscriptionUrl`, and the page-load cache answers once for
+		// every realtime surface on the route. Until the answer lands the strip
+		// stays `idle` — a beat of no-copy, not a spinner — and a null answer
+		// degrades to `unavailable`, which has copy and a refresh. An unmount
+		// landing mid-fetch must not open a socket afterwards: `realtimeCancelled`
+		// is the teardown half of that, set in the cleanup below.
+		let realtimeCancelled = false;
 		if (realtimeMode === 'available') {
-			const endpoint = subscriptionEndpoint(window.location.origin);
-			if (!endpoint) {
-				liveState = 'unavailable';
-			} else {
+			void getCachedInstanceInfo().then((info) => {
+				if (realtimeCancelled) return;
+				const endpoint = info?.subscriptionUrl ?? null;
+				if (!endpoint) {
+					liveState = 'unavailable';
+					return;
+				}
 				stopLive = subscribe<{ timelineUpdates?: unknown }>({
 					endpoint,
 					query: TIMELINE_UPDATES_SUBSCRIPTION,
@@ -288,12 +300,13 @@ write face's job, not a stub's.
 						if (status) feed = acceptLiveStatus(feed, status, { atTop });
 					},
 				});
-			}
+			});
 		} else if (realtimeMode === 'requires-auth') {
 			liveState = 'requires-auth';
 		}
 
 		return () => {
+			realtimeCancelled = true;
 			scroller?.removeEventListener('scroll', onScroll);
 			stopLive?.();
 		};

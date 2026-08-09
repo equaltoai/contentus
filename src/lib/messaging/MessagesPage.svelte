@@ -32,7 +32,6 @@ new `Root`, so there is nothing of the previous session left to observe.
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 	import { accessTokenOrNull, isAuthenticated, startLogin } from '$lib/auth/session';
 	import { onSessionChange } from '$lib/auth/session-events';
-	import { resolveBrowserOrigin } from '$lib/cms/origin';
 	import type { SubscriptionState } from '$lib/timelines/subscription';
 	import MessagingSurface from './MessagingSurface.svelte';
 	import {
@@ -95,7 +94,6 @@ new `Root`, so there is nothing of the previous session left to observe.
 			// drivable against a stubbed fetch. Passed as a FUNCTION so a token
 			// refreshed mid-session is the one the next request carries.
 			accessToken: accessTokenOrNull,
-			origin: resolveBrowserOrigin(),
 			onRealtimeState: (state) => {
 				realtime = state;
 			},

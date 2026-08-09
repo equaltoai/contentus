@@ -105,8 +105,18 @@ export interface MessagingAdapterConfig {
 	 * that. This is the half that stops the request.
 	 */
 	signal?: AbortSignal;
-	/** `wss://ws.<domain>` for this instance, or null when it cannot be derived. */
-	subscriptionEndpoint?: string | null;
+	/**
+	 * The socket URL, ASKED for at subscribe time rather than captured at build
+	 * time.
+	 *
+	 * lesser v1.6.4 serves it (`InstanceInfo.subscriptionUrl`, read through
+	 * `$lib/instance/info`), so the answer is a promise — and a null answer is
+	 * the instance not saying, which takes the same `unsupported` path an
+	 * absent endpoint always did. Asking late also means the value is the one
+	 * current when the socket opens, not the one that was current when the
+	 * adapter was built.
+	 */
+	resolveSubscriptionEndpoint?: () => Promise<string | null>;
 	/**
 	 * A read that returned data AND errors.
 	 *
@@ -367,8 +377,8 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 		},
 
 		subscribeToConversationUpdates: ({ onConversationId, onState }) => {
-			const endpoint = config.subscriptionEndpoint ?? null;
-			if (!endpoint) {
+			const resolve = config.resolveSubscriptionEndpoint;
+			if (!resolve) {
 				// No socket is possible, and saying so immediately beats a status that
 				// sits on "connecting" forever.
 				onState('unsupported');
@@ -376,20 +386,49 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 				return () => {};
 			}
 
-			return subscribe<{ conversationUpdates?: { id?: string } | null }>({
-				endpoint,
-				query: CONVERSATION_UPDATES_SUBSCRIPTION,
-				accessToken: config.accessToken(),
-				...(config.socketFactory ? { socketFactory: config.socketFactory } : {}),
-				onData: (data) => {
-					const id = data?.conversationUpdates?.id;
-					if (id) onConversationId(id);
-				},
-				onState: (state) => {
-					config.onRealtimeState?.(state);
-					onState(state);
-				},
-			});
+			// The endpoint is a promise now, and the promise can land AFTER the
+			// binding was torn down: `teardown` calls the stop below through
+			// `activeStops` while the ask is still in flight. `stopped` is what
+			// keeps that race from opening an authorized socket with nothing left
+			// to read it — the same guard the vendored context's late `onDestroy`
+			// needed the binding-level teardown for.
+			let stopped = false;
+			let stopSocket: (() => void) | null = null;
+
+			const unsupported = () => {
+				if (stopped) return;
+				onState('unsupported');
+				config.onRealtimeState?.('unsupported');
+			};
+
+			void resolve().then((endpoint) => {
+				if (stopped) return;
+				if (!endpoint) {
+					// The instance did not say. Same immediate answer as no resolver
+					// at all: unsupported, on both callbacks, never a spinner.
+					unsupported();
+					return;
+				}
+				stopSocket = subscribe<{ conversationUpdates?: { id?: string } | null }>({
+					endpoint,
+					query: CONVERSATION_UPDATES_SUBSCRIPTION,
+					accessToken: config.accessToken(),
+					...(config.socketFactory ? { socketFactory: config.socketFactory } : {}),
+					onData: (data) => {
+						const id = data?.conversationUpdates?.id;
+						if (id) onConversationId(id);
+					},
+					onState: (state) => {
+						config.onRealtimeState?.(state);
+						onState(state);
+					},
+				});
+			}, unsupported);
+
+			return () => {
+				stopped = true;
+				stopSocket?.();
+			};
 		},
 	};
 }

@@ -176,6 +176,11 @@ function startBinding({
 	respond = () => ({ data: { conversation: null } }),
 	token = 'token-1',
 	onPartial,
+	// Injected by default so these probes drive the socket path without the
+	// page-load InstanceInfo cache crossing tests. `resolver: null` selects the
+	// production default — the cached anonymous read of what lesser serves —
+	// and is what the instance-read probe below uses.
+	resolver = async () => 'wss://realtime.contentus.test',
 } = {}) {
 	const sockets = [];
 	const requests = [];
@@ -201,7 +206,7 @@ function startBinding({
 
 	const binding = createMessagingBinding({
 		accessToken: () => token,
-		origin: 'https://contentus.test',
+		...(resolver ? { resolveSubscriptionEndpoint: resolver } : {}),
 		onRealtimeState: (state) => realtimeStates.push(state),
 		...(onPartial ? { onPartial } : {}),
 		socketFactory: (url, protocols) => {
@@ -223,13 +228,18 @@ function startBinding({
 }
 
 /** Subscribe the way the vendored context does, recording what it was told. */
-function subscribe(binding) {
+async function subscribe(binding) {
 	const statuses = [];
 	const updates = [];
 	const stop = binding.handlers.onSubscribeToConversationUpdates({
 		onConversationUpdate: (update) => updates.push(update),
 		onConnectionStatusChange: (status, reason) => statuses.push({ status, reason }),
 	});
+	// The socket endpoint is RESOLVED now — lesser v1.6.4 serves it, so the
+	// answer is a promise — and the socket does not exist synchronously the way
+	// it did when the host was a derived config value. Settle before handing
+	// back: probes drive `sockets[0]` immediately after this returns.
+	await settle();
 	return { stop, statuses, updates };
 }
 
@@ -239,7 +249,7 @@ test('signing out closes the socket and ends the stream', async () => {
 	});
 
 	try {
-		const { updates } = subscribe(probe.binding);
+		const { updates } = await subscribe(probe.binding);
 		probe.sockets[0].open();
 		probe.sockets[0].deliver({ type: 'connection_ack' });
 		probe.sockets[0].publish('conv-1');
@@ -278,7 +288,7 @@ test('a re-read already in flight at sign-out delivers nothing when it lands', a
 	});
 
 	try {
-		const { updates } = subscribe(probe.binding);
+		const { updates } = await subscribe(probe.binding);
 		probe.sockets[0].open();
 		probe.sockets[0].deliver({ type: 'connection_ack' });
 		probe.sockets[0].publish('conv-1');
@@ -304,7 +314,7 @@ test('the next reader gets a new binding, and the previous one stays silent', as
 
 	let second;
 	try {
-		const firstSubscription = subscribe(first.binding);
+		const firstSubscription = await subscribe(first.binding);
 		first.sockets[0].open();
 		first.sockets[0].deliver({ type: 'connection_ack' });
 		await settle();
@@ -324,7 +334,7 @@ test('the next reader gets a new binding, and the previous one stays silent', as
 			respond: ({ variables }) => ({ data: { conversation: conversation(variables.id) } }),
 			token: 'token-bob',
 		});
-		const secondSubscription = subscribe(second.binding);
+		const secondSubscription = await subscribe(second.binding);
 		second.sockets[0].open();
 		second.sockets[0].deliver({ type: 'connection_ack' });
 		second.sockets[0].publish('conv-9');
@@ -352,14 +362,93 @@ test('the next reader gets a new binding, and the previous one stays silent', as
 	}
 });
 
-test('a torn-down binding opens no socket for a late subscribe', () => {
+test('a torn-down binding opens no socket for a late subscribe', async () => {
 	const probe = startBinding();
 	try {
 		probe.binding.teardown();
-		const { statuses } = subscribe(probe.binding);
+		const { statuses } = await subscribe(probe.binding);
 
 		assert.equal(probe.sockets.length, 0, 'no socket may be opened after teardown');
 		assert.equal(statuses.length, 0, 'and nothing is reported to a context that no longer exists');
+	} finally {
+		probe.restore();
+	}
+});
+
+test('a binding torn down while the endpoint is still resolving opens no socket', async () => {
+	// The endpoint is a promise now (lesser serves it), and the promise can land
+	// AFTER the teardown: `teardown` stops every subscription through
+	// `activeStops` while the ask is still in flight. The adapter's `stopped`
+	// guard is what keeps that race from opening an authorized socket with
+	// nothing left to read it.
+	let release;
+	const probe = startBinding({
+		resolver: () =>
+			new Promise((resolve) => {
+				release = () => resolve('wss://realtime.contentus.test');
+			}),
+	});
+	try {
+		const pending = subscribe(probe.binding); // the resolution is deliberately held open
+		probe.binding.teardown();
+		release();
+		await pending;
+
+		assert.equal(probe.sockets.length, 0, 'a teardown mid-resolve must not open a socket afterwards');
+	} finally {
+		probe.restore();
+	}
+});
+
+/** A full, valid `instance` answer, as lesser v1.6.4 serves one. */
+function instancePayload() {
+	return {
+		subscriptionUrl: 'wss://served-by-lesser.invalid/graphql',
+		maxUploadSizeBytes: 10485760,
+		maxStatusCharacters: 5000,
+		cmsFeatures: {
+			longForm: true,
+			drafts: true,
+			revisions: true,
+			scheduling: false,
+			series: true,
+			categories: true,
+		},
+	};
+}
+
+test('the default endpoint resolver reads the served InstanceInfo, once and anonymously', async () => {
+	// No injected resolver: the production default asks lesser for
+	// `InstanceInfo` through the page-load cache, and the socket goes to the URL
+	// lesser SERVED — the wiring the injected-resolver probes above bypass.
+	const probe = startBinding({
+		resolver: null,
+		respond: ({ operation }) =>
+			operation === 'ContentusInstanceInfo'
+				? { data: { instance: instancePayload() } }
+				: { data: { conversation: null } },
+	});
+	try {
+		await subscribe(probe.binding);
+
+		assert.equal(
+			probe.sockets[0]?.url,
+			'wss://served-by-lesser.invalid/graphql',
+			'the socket goes to the URL lesser served, not a derived host'
+		);
+
+		const instanceReads = () => probe.requests.filter((r) => r.operation === 'ContentusInstanceInfo');
+		assert.equal(instanceReads().length, 1, 'the binding asked for the instance info');
+		assert.equal(
+			instanceReads()[0].authorization ?? null,
+			null,
+			'`instance` is a public field — no credential is attached, even here'
+		);
+
+		// A second subscription on the same page load does not ask again: the
+		// timelines feed and this binding share the one read.
+		await subscribe(probe.binding);
+		assert.equal(instanceReads().length, 1, 'the page-load cache answers once');
 	} finally {
 		probe.restore();
 	}

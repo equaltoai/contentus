@@ -90,6 +90,10 @@ export const DOCUMENT_INVENTORY = [
 		],
 	},
 	{
+		module: 'src/lib/instance/info.ts',
+		documents: ['INSTANCE_INFO_QUERY'],
+	},
+	{
 		module: 'src/lib/messaging/queries.ts',
 		documents: [
 			'CONVERSATIONS_QUERY',

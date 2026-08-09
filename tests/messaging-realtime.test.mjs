@@ -131,7 +131,11 @@ function startBinding({ respond = () => ({ data: { conversation: null } }) } = {
 
 	const binding = createMessagingBinding({
 		accessToken: () => 'token-abc',
-		origin: 'https://contentus.test',
+		// The endpoint resolver is INJECTED so these probes drive the socket path
+		// without the page-load InstanceInfo cache crossing tests — the default
+		// (the cached anonymous read of what lesser serves) is pinned separately
+		// in `tests/messaging-session.test.mjs`.
+		resolveSubscriptionEndpoint: async () => 'wss://realtime.contentus.test',
 		onRealtimeState: (state) => realtimeStates.push(state),
 		onCatchUp: (state) => catchUps.push(state),
 		onRereadState: (state) => rereads.push(state),
@@ -156,13 +160,18 @@ function startBinding({ respond = () => ({ data: { conversation: null } }) } = {
 }
 
 /** Subscribe the way the vendored context does, recording what it was told. */
-function subscribe(binding) {
+async function subscribe(binding) {
 	const statuses = [];
 	const updates = [];
 	const stop = binding.handlers.onSubscribeToConversationUpdates({
 		onConversationUpdate: (update) => updates.push(update),
 		onConnectionStatusChange: (status, reason) => statuses.push({ status, reason }),
 	});
+	// The socket endpoint is RESOLVED now — lesser v1.6.4 serves it, so the
+	// answer is a promise — and the socket does not exist synchronously the way
+	// it did when the host was a derived config value. Settle before handing
+	// back: probes drive `sockets[0]` immediately after this returns.
+	await settle();
 	return { stop, statuses, updates, reported: () => statuses.map((entry) => entry.status) };
 }
 
@@ -180,7 +189,7 @@ test('the first live connection is reported without a re-read behind it', async 
 	});
 
 	try {
-		const subscription = subscribe(probe.binding);
+		const subscription = await subscribe(probe.binding);
 		probe.sockets[0].live();
 		await settle();
 
@@ -204,7 +213,7 @@ test('a reconnect says "catching up" and does not say "live" until it has', asyn
 	});
 
 	try {
-		const first = subscribe(probe.binding);
+		const first = await subscribe(probe.binding);
 		probe.sockets[0].live();
 		await settle();
 		assert.deepEqual(first.reported(), ['connecting', 'connected']);
@@ -214,7 +223,7 @@ test('a reconnect says "catching up" and does not say "live" until it has', asyn
 		probe.sockets[0].drop();
 		first.stop();
 
-		const second = subscribe(probe.binding);
+		const second = await subscribe(probe.binding);
 		probe.sockets[1].live();
 		await settle();
 
@@ -242,12 +251,12 @@ test('a reconciliation that fails is named, not quietly dropped', async () => {
 	});
 
 	try {
-		const first = subscribe(probe.binding);
+		const first = await subscribe(probe.binding);
 		probe.sockets[0].live();
 		await settle();
 		first.stop();
 
-		subscribe(probe.binding);
+		await subscribe(probe.binding);
 		probe.sockets[1].live();
 		await settle();
 
@@ -266,12 +275,12 @@ test('a reconnect with nothing registered to re-read with does not claim reconci
 	const probe = startBinding();
 
 	try {
-		const first = subscribe(probe.binding);
+		const first = await subscribe(probe.binding);
 		probe.sockets[0].live();
 		await settle();
 		first.stop();
 
-		subscribe(probe.binding);
+		await subscribe(probe.binding);
 		probe.sockets[1].live();
 		await settle();
 
@@ -292,7 +301,7 @@ test('a burst of events for one conversation collapses into a bounded number of 
 	});
 
 	try {
-		subscribe(probe.binding);
+		await subscribe(probe.binding);
 		probe.sockets[0].live();
 
 		for (let index = 0; index < 5; index += 1) probe.sockets[0].publish('conv-1');
@@ -325,7 +334,7 @@ test('the trailing read is issued last, so the newest state is the one that land
 	});
 
 	try {
-		const subscription = subscribe(probe.binding);
+		const subscription = await subscribe(probe.binding);
 		probe.sockets[0].live();
 
 		probe.sockets[0].publish('conv-1');
@@ -355,7 +364,7 @@ test('events for different conversations are not collapsed into each other', asy
 	});
 
 	try {
-		subscribe(probe.binding);
+		await subscribe(probe.binding);
 		probe.sockets[0].live();
 
 		probe.sockets[0].publish('conv-1');
@@ -481,7 +490,7 @@ test('a burst across many conversations is globally bounded through the real bin
 	});
 
 	try {
-		const subscription = subscribe(probe.binding);
+		const subscription = await subscribe(probe.binding);
 		probe.sockets[0].live();
 
 		for (let index = 0; index < 100; index += 1) probe.sockets[0].publish(`conv-${index}`);
@@ -518,7 +527,7 @@ test('a failed re-read reaches the reader instead of an empty catch', async () =
 	});
 
 	try {
-		subscribe(probe.binding);
+		await subscribe(probe.binding);
 		probe.sockets[0].live();
 		probe.sockets[0].publish('conv-1');
 		await settle();
@@ -539,7 +548,7 @@ test('a re-read refused for the session surfaces the sign-in state and stops the
 	});
 
 	try {
-		const subscription = subscribe(probe.binding);
+		const subscription = await subscribe(probe.binding);
 		probe.sockets[0].live();
 		probe.sockets[0].publish('conv-1');
 		await settle();
@@ -550,7 +559,7 @@ test('a re-read refused for the session surfaces the sign-in state and stops the
 		// And the context's own reconnect finds a closed door: a token lesser has
 		// already rejected is not offered again every twenty seconds.
 		subscription.stop();
-		const retry = subscribe(probe.binding);
+		const retry = await subscribe(probe.binding);
 		assert.equal(probe.sockets.length, 1, 'no socket may be opened for a rejected session');
 		assert.equal(retry.statuses.at(-1).status, 'error');
 		assert.match(retry.statuses.at(-1).reason ?? '', /sign in again/i);
@@ -563,7 +572,7 @@ test('a socket refused for the session is not retried either', async () => {
 	const probe = startBinding();
 
 	try {
-		const subscription = subscribe(probe.binding);
+		const subscription = await subscribe(probe.binding);
 		probe.sockets[0].open();
 		probe.sockets[0].deliver({
 			type: 'connection_error',
@@ -574,7 +583,7 @@ test('a socket refused for the session is not retried either', async () => {
 		assert.equal(probe.realtimeStates.at(-1), 'requires-auth');
 		subscription.stop();
 
-		subscribe(probe.binding);
+		await subscribe(probe.binding);
 		assert.equal(probe.sockets.length, 1, 'the refused credential must not open a second socket');
 	} finally {
 		probe.restore();

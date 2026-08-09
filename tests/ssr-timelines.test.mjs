@@ -80,6 +80,28 @@ function timelineEnvelope(nodes) {
 	};
 }
 
+/**
+ * The instance-info payload the CSP probe below serves. The subscription URL's
+ * host shares NO domain with the page host, so a connect-src entry matching it
+ * can only have come from lesser's served `InstanceInfo.subscriptionUrl` —
+ * the old `wss://ws.<page-host>` derivation would produce a different origin.
+ */
+function instanceInfoPayload() {
+	return {
+		subscriptionUrl: 'wss://realtime.served-elsewhere.invalid/graphql',
+		maxUploadSizeBytes: 10_485_760,
+		maxStatusCharacters: 5_000,
+		cmsFeatures: {
+			longForm: true,
+			drafts: true,
+			revisions: true,
+			scheduling: false,
+			series: true,
+			categories: true,
+		},
+	};
+}
+
 /** A lesser `Actor` shaped as `actor(username:)` returns one. */
 function actor(overrides = {}) {
 	return {
@@ -488,20 +510,43 @@ test('the anonymous document asserts no viewer state', async () => {
  * CSP — the subscription origin, and only where a socket opens
  * ------------------------------------------------------------------------ */
 
-test('the timelines route permits exactly one wss origin, derived from the request host', async () => {
+test('the timelines route permits exactly one wss origin, SERVED by lesser, on an unrelated host', async () => {
 	const handler = await loadHandler();
-	const rendered = await renderRoute(handler, route('timelines-instance'));
-	const csp = rendered.headers['content-security-policy'];
+
+	// A fresh host: the built handler's server-side instance cache is
+	// module-level with a 60-second TTL keyed by endpoint, and earlier tests in
+	// this file settle the default audit host's entry (to null — their stubs do
+	// not answer the instance query). A unique host is a cold cache.
+	const host = 'contentus-audit-served.invalid';
+	const { value } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusInstanceInfo' ? { data: { instance: instanceInfoPayload() } } : { data: null },
+		() =>
+			renderRoute(handler, {
+				...route('timelines-instance'),
+				headers: {
+					host,
+					'x-lesser-forwarded-host': host,
+					'x-lesser-forwarded-proto': 'https',
+				},
+			})
+	);
+	const csp = value.headers['content-security-policy'];
 	const connect = csp.split(';').find((directive) => directive.trim().startsWith('connect-src'));
 
 	assert.ok(connect, 'connect-src must be present');
-	// The host is the audit host injected as `x-lesser-forwarded-host`, so this
-	// also proves the origin is DERIVED rather than configured or hard-coded.
-	assert.match(connect, /wss:\/\/ws\.contentus-audit\.invalid/);
+	// The fixture's host shares no domain with the page host, so this match is
+	// proof the origin came from the SERVED `InstanceInfo.subscriptionUrl` at
+	// lesser v1.6.4 — the old derivation would have emitted
+	// `wss://ws.contentus-audit-served.invalid` and failed here.
+	assert.match(connect, /wss:\/\/realtime\.served-elsewhere\.invalid/);
+	// CSP source expressions are origins; the served URL's `/graphql` path must
+	// not leak into the directive.
+	assert.ok(!/\/graphql/.test(connect), 'connect-src must carry the origin, not the URL path');
 	assert.equal(
 		connect.trim().split(/\s+/).length,
 		3,
-		"connect-src must be exactly 'self' plus the one subscription origin"
+		"connect-src must be exactly 'self' plus the one served subscription origin"
 	);
 
 	// Widening connect-src must not have widened anything else.
