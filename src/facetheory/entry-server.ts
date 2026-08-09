@@ -517,7 +517,10 @@ async function cspOptionsForRoute(props: RouteProps, endpoint: string | null) {
  * is invisible to its own server. Routed rather than left silent; see
  * `docs/consumption/auth-boundary.md`.
  */
-async function headersForRoute(props: RouteProps, origin: string | null): Promise<Record<string, string>> {
+async function headersForRoute(
+	props: RouteProps,
+	origin: string | null
+): Promise<Record<string, string>> {
 	// The same endpoint derivation `createRouteProps` uses for its reads: the
 	// instance info that steers the socket-route CSP addition is asked of the
 	// same host the page's own data was.

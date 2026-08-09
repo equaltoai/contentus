@@ -145,7 +145,13 @@ test('any missing or wrong-typed field is a contract violation, not data', () =>
 		},
 		'a feature missing outright': {
 			instance: instancePayload({
-				cmsFeatures: { longForm: true, drafts: true, revisions: true, series: true, categories: true },
+				cmsFeatures: {
+					longForm: true,
+					drafts: true,
+					revisions: true,
+					series: true,
+					categories: true,
+				},
 			}),
 		},
 	};
@@ -183,7 +189,10 @@ test('a non-GraphQL HTTP answer is null, not a throw', async () => {
 
 test('a GraphQL error set is null, even with data beside it', async () => {
 	const { value } = await withStubbedFetch(
-		() => ({ data: { instance: instancePayload() }, errors: [{ message: 'subscriptionUrl failed' }] }),
+		() => ({
+			data: { instance: instancePayload() },
+			errors: [{ message: 'subscriptionUrl failed' }],
+		}),
 		() => fetchInstanceInfo()
 	);
 	// An errored answer cannot be complete — every field is non-null — and

@@ -520,7 +520,9 @@ test('the timelines route permits exactly one wss origin, SERVED by lesser, on a
 	const host = 'contentus-audit-served.invalid';
 	const { value } = await withStubbedGraphql(
 		({ operation }) =>
-			operation === 'ContentusInstanceInfo' ? { data: { instance: instanceInfoPayload() } } : { data: null },
+			operation === 'ContentusInstanceInfo'
+				? { data: { instance: instanceInfoPayload() } }
+				: { data: null },
 		() =>
 			renderRoute(handler, {
 				...route('timelines-instance'),

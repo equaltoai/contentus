@@ -378,7 +378,7 @@ The server ships the route, its folder and the conversation id. Asserted in
    SUBSTANCE at lesser v1.6.4 + greater-v0.13.4.** The vendored adapter now
    reads the served `conversation.unreadCount` (`?? (unread ? 1 : 0)` for
    pre-v1.6.4 instances), so the summed number under `aria-label="N unread
-   messages"` is messages, as labelled. Contentus keeps its own badge because
+messages"` is messages, as labelled. Contentus keeps its own badge because
    its unit — conversations with unread activity — is a deliberate design
    choice, not because upstream's is wrong (see §1).
 

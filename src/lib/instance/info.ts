@@ -140,9 +140,13 @@ export async function fetchInstanceInfo(
 ): Promise<InstanceInfo | null> {
 	let result;
 	try {
-		result = await graphqlRequest<{ instance?: unknown }>(INSTANCE_INFO_QUERY, {}, {
-			endpoint: options.endpoint ?? null,
-		});
+		result = await graphqlRequest<{ instance?: unknown }>(
+			INSTANCE_INFO_QUERY,
+			{},
+			{
+				endpoint: options.endpoint ?? null,
+			}
+		);
 	} catch {
 		return null;
 	}

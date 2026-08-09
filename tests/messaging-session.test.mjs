@@ -394,7 +394,11 @@ test('a binding torn down while the endpoint is still resolving opens no socket'
 		release();
 		await pending;
 
-		assert.equal(probe.sockets.length, 0, 'a teardown mid-resolve must not open a socket afterwards');
+		assert.equal(
+			probe.sockets.length,
+			0,
+			'a teardown mid-resolve must not open a socket afterwards'
+		);
 	} finally {
 		probe.restore();
 	}
@@ -437,7 +441,8 @@ test('the default endpoint resolver reads the served InstanceInfo, once and anon
 			'the socket goes to the URL lesser served, not a derived host'
 		);
 
-		const instanceReads = () => probe.requests.filter((r) => r.operation === 'ContentusInstanceInfo');
+		const instanceReads = () =>
+			probe.requests.filter((r) => r.operation === 'ContentusInstanceInfo');
 		assert.equal(instanceReads().length, 1, 'the binding asked for the instance info');
 		assert.equal(
 			instanceReads()[0].authorization ?? null,

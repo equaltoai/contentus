@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { DEFAULT_STATUS_BYTE_LIMIT, statusByteLength, statusByteLimit } from '../src/lib/compose/budget.ts';
+import {
+	DEFAULT_STATUS_BYTE_LIMIT,
+	statusByteLength,
+	statusByteLimit,
+} from '../src/lib/compose/budget.ts';
 import {
 	AGENT_TRIGGER_DEFAULT,
 	AGENT_TRIGGER_TYPES,
@@ -898,7 +902,10 @@ test('an instance that does not answer gets no gate at all', () => {
 	// The pre-v1.6.4 shape, preserved exactly: the client does not guess, the
 	// upload goes ahead, and the instance's refusal is shown verbatim.
 	assert.equal(
-		oversizeUploadMessage({ name: 'clip.mov', type: 'video/quicktime', size: 50 * 1024 * 1024 }, null),
+		oversizeUploadMessage(
+			{ name: 'clip.mov', type: 'video/quicktime', size: 50 * 1024 * 1024 },
+			null
+		),
 		null
 	);
 });

@@ -108,8 +108,8 @@ const instanceInfoPayload = () => ({
 		revisions: true,
 		scheduling: false,
 		series: true,
-		categories: true
-	}
+		categories: true,
+	},
 });
 
 /**
@@ -125,7 +125,7 @@ const freshHostHeaders = (marker) => {
 	return {
 		host,
 		'x-lesser-forwarded-host': host,
-		'x-lesser-forwarded-proto': 'https'
+		'x-lesser-forwarded-proto': 'https',
 	};
 };
 
@@ -138,7 +138,7 @@ test('the server issues EXACTLY ONE request on a messaging route — the anonymo
 			() =>
 				renderRoute(handler, {
 					...route(name),
-					headers: freshHostHeaders(`one-read-${name}`)
+					headers: freshHostHeaders(`one-read-${name}`),
 				})
 		);
 
@@ -177,7 +177,7 @@ test('no messaging route sends an Authorization header from the server', async (
 			() =>
 				renderRoute(handler, {
 					...route(name),
-					headers: freshHostHeaders(`anon-${name}`)
+					headers: freshHostHeaders(`anon-${name}`),
 				})
 		);
 
@@ -225,8 +225,8 @@ test('a request carrying a credential still makes the server read only the publi
 					headers: {
 						...freshHostHeaders(`cred-${name}`),
 						authorization: INBOUND_CREDENTIAL,
-						cookie: 'contentus_probe=should-not-be-read'
-					}
+						cookie: 'contentus_probe=should-not-be-read',
+					},
 				})
 		);
 
@@ -401,7 +401,7 @@ test('the messaging routes permit the SERVED subscription origin and nothing wid
 			() =>
 				renderRoute(handler, {
 					...route(name),
-					headers: freshHostHeaders(`csp-${name}`)
+					headers: freshHostHeaders(`csp-${name}`),
 				})
 		);
 		const csp = value.headers['content-security-policy'] ?? '';
@@ -442,7 +442,7 @@ test('a messaging route whose instance query fails widens NOTHING', async () => 
 			() =>
 				renderRoute(handler, {
 					...route(name),
-					headers: freshHostHeaders(`csp-fail-${name}`)
+					headers: freshHostHeaders(`csp-fail-${name}`),
 				})
 		);
 		const csp = value.headers['content-security-policy'] ?? '';

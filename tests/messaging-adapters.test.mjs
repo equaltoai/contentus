@@ -59,7 +59,10 @@ function object(id, content, who = 'ada', createdAt = '2026-07-01T10:00:00Z') {
 	};
 }
 
-function conversation(id, { requestState = 'ACCEPTED', unread = false, unreadCount = 0, last = null } = {}) {
+function conversation(
+	id,
+	{ requestState = 'ACCEPTED', unread = false, unreadCount = 0, last = null } = {}
+) {
 	return {
 		id,
 		unread,
