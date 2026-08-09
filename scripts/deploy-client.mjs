@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { constants } from 'node:fs';
+import { constants, existsSync, readFileSync } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,15 +29,16 @@ export function usage() {
 		'Usage:',
 		'  pnpm run deploy -- --app <slug> --base-domain <domain> --stage <dev|staging|live> --aws-profile <profile> [options]',
 		'',
-		'Required instance parameters:',
+		'Requirstance parameters:',
 		'  --app <slug>          Lesser instance slug.',
 		'  --base-domain <name>  Lesser instance base domain.',
 		'  --stage <stage>       One of dev, staging, or live.',
 		'  --aws-profile <name>  AWS profile for the deployed instance.',
 		'',
 		'Options:',
-		'  --state <path>        Lesser deployment receipt. Defaults to',
-		'                        ~/.lesser/<app>/<base-domain>/state.json.',
+		'  --state <path>        Lesser deployment receipt. Defaults to the receipt in',
+		'                        ~/.lesser/<app>/<base-domain>/ that contains the stage:',
+		'                        state.json, state.<stage>.json, or state-<stage>.json.',
 		'  --dry-run             Validate local inputs and print the resolved plan only.',
 		'  --skip-install        Skip pnpm install --frozen-lockfile.',
 		'  --skip-check          With --skip-build, skip the standalone svelte-check.',
@@ -172,10 +173,32 @@ export function stageOrigin(stage, baseDomain) {
 	return `https://${stage === 'live' ? baseDomain : `${stage}.${baseDomain}`}`;
 }
 
+export function stateCandidateNames(stage) {
+	return ['state.json', `state.${stage}.json`, `state-${stage}.json`];
+}
+
+function receiptSelectsStage(file, options) {
+	try {
+		const receipt = JSON.parse(readFileSync(file, 'utf8'));
+		return (
+			receipt?.app === options.app &&
+			receipt?.base_domain === options.baseDomain &&
+			Boolean(receipt?.stages?.[options.stage])
+		);
+	} catch {
+		return false;
+	}
+}
+
 export function resolveStatePath(options, { cwd = process.cwd(), home = os.homedir() } = {}) {
 	if (options.state) return path.resolve(cwd, options.state);
 	if (!home) throw new Error('Could not resolve the home directory for the default --state path');
-	return path.join(home, '.lesser', options.app, options.baseDomain, 'state.json');
+	const directory = path.join(home, '.lesser', options.app, options.baseDomain);
+	const candidates = stateCandidateNames(options.stage).map((name) => path.join(directory, name));
+	for (const candidate of candidates) {
+		if (existsSync(candidate) && receiptSelectsStage(candidate, options)) return candidate;
+	}
+	return candidates[0];
 }
 
 export function buildPlan(options, context = {}) {
