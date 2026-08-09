@@ -33,7 +33,12 @@ Apollo client it does not otherwise need.
 
 <script lang="ts">
 	import VerdictActions from '$lib/components/Review/VerdictActions.svelte';
-	import { REVIEW_STATE_QUALIFIER, resolveReviewState } from '$lib/components/Review/state.js';
+	import {
+		REVIEW_STATE_QUALIFIER,
+		formatReviewDateTime,
+		resolveReviewState,
+		reviewActorName,
+	} from '$lib/components/Review/state.js';
 	import { createSubmitVerdictHandler } from '$lib/cms/review';
 	import { describeVerdictOffer } from '$lib/review/verdict-offer';
 	import type { DraftReviewData } from '$lib/blog-types';
@@ -56,6 +61,8 @@ Apollo client it does not otherwise need.
 	const onSubmit = $derived(createSubmitVerdictHandler(onRecorded));
 
 	const state = $derived(resolveReviewState(review));
+
+	const verdicts = $derived(review.verdicts ?? []);
 </script>
 
 <section class="contentus-review-verdict" aria-label="Record a verdict">
@@ -64,6 +71,27 @@ Apollo client it does not otherwise need.
 	<p class="contentus-review-note">
 		{state.label}{state.source === 'none' ? '' : ` — ${REVIEW_STATE_QUALIFIER}`}
 	</p>
+
+	{#if verdicts.length > 0}
+		<!-- The recorded history, as lesser returned it. A verdict marked `stale`
+		     is lesser's own comparison saying the draft changed after this verdict
+		     (or its grant left the active set) — the qualifier renders that flag;
+		     nothing here recomputes it from hashes. -->
+		<ul class="contentus-review-history">
+			{#each verdicts as verdict, index (index)}
+				{@const when = formatReviewDateTime(verdict.recordedAt)}
+				<li>
+					{verdict.verdict === 'APPROVED' ? 'Approved' : 'Changes requested'} by {reviewActorName(
+						verdict.reviewer
+					)}{when.label ? ` · ${when.label}` : ''}{#if verdict.stale === true}
+						<span class="contentus-review-note">
+							— the draft changed after this verdict, so it no longer counts toward publication</span
+						>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+	{/if}
 
 	{#if offer.offer}
 		<VerdictActions draftId={review.draftId} {onSubmit} />

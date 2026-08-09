@@ -18,14 +18,20 @@
  * and it is same-origin, so strict CSP's `connect-src` covers it unchanged.
  *
  * lesser caps the upload at `MaxUploadSize` (10 MiB by default,
- * `graph/mutation_resolvers_media.go`) and does not advertise the value on its
- * GraphQL surface — the same shape of gap as the status length limit. The
- * client does not guess: an oversized file is refused by the instance and the
- * message is shown as-is.
+ * `graph/mutation_resolvers_media.go`). Since lesser v1.6.4 the value is no
+ * longer unadvertised: `InstanceInfo.maxUploadSizeBytes` serves it on the
+ * public `instance` field, so when the instance's answer is known an oversized
+ * file is refused BEFORE the multipart POST leaves, with the served number in
+ * the message (`oversizeUploadMessage` in `compose/media-policy.ts`). When the
+ * answer is not known the behaviour is exactly what it has always been — the
+ * client does not guess: no gate here, the instance refuses, and its message
+ * is shown as-is.
  */
 
 import { accessTokenOrNull } from '$lib/auth/session';
 
+import { oversizeUploadMessage } from '../compose/media-policy.ts';
+import { getCachedInstanceInfo } from '../instance/info.ts';
 import type { ComposeFailure, ComposeResult } from './compose';
 import { graphqlRequest, GraphQLTransportError } from './graphql';
 import { GRAPHQL_PATH } from './origin';
@@ -152,17 +158,28 @@ const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
  * upload loop, and one file that could not be sent should not take the others
  * with it.
  */
-export function uploadMedia(
+export async function uploadMedia(
 	file: File,
 	options: UploadMediaOptions = {},
 	onProgress?: (percent: number) => void
 ): Promise<ComposeResult<UploadedMedia>> {
 	const accessToken = accessTokenOrNull();
 	if (!accessToken) {
-		return Promise.resolve({
+		return {
 			ok: false,
 			failure: { reason: 'unauthenticated', message: 'Sign in to attach media.' },
-		});
+		};
+	}
+
+	// The pre-wire size gate. Since lesser v1.6.4 the instance serves its own
+	// cap (`InstanceInfo.maxUploadSizeBytes`), and when that answer is known an
+	// oversized file is refused HERE — one anonymous read shared per page load,
+	// no upload attempted, the instance's own number in the message. When the
+	// answer is not known the helper returns null and everything below is
+	// unchanged: the instance refuses and its message is shown verbatim.
+	const oversize = oversizeUploadMessage(file, await getCachedInstanceInfo());
+	if (oversize) {
+		return { ok: false, failure: { reason: 'rejected', message: oversize } };
 	}
 
 	return new Promise((resolve) => {

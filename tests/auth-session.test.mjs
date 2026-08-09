@@ -9,7 +9,13 @@
  * `createOAuthClientAndRespond` in `cmd/api/handlers/apps.go`), INCLUDING the
  * `client_secret` that `CreateOAuthClientGeneric`
  * (`pkg/storage/repositories/oauth_helpers.go:137`) generates for every client
- * it stores — public or not. `lesserTokenResponse()` is
+ * it stores — public or not. That is the PRE-v1.6.4 shape: `0ede06f50` stopped
+ * minting secrets for public clients, so a v1.6.4+ instance answers with the
+ * field empty. The historical shape stays as the fixture because the behavior
+ * it proves — the secret is never selected, stored, retransmitted, logged or
+ * redirected, whatever the response carries — is the property that matters
+ * against any instance, older or otherwise.
+ * `lesserTokenResponse()` is
  * `models.OAuthTokenResponse` (`cmd/api/models/oauth.go:72`).
  *
  * The previous version of this file asserted contentus's own invented policy:

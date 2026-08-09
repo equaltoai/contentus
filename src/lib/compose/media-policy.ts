@@ -1,13 +1,14 @@
 /**
  * What the file picker offers, and what to say when it drops something.
  *
- * WHO DECIDES WHAT AN INSTANCE ACCEPTS. lesser does, and it does not
- * advertise the answer: `MaxUploadSize` (10 MiB by default,
- * `graph/mutation_resolvers_media.go`) and the accepted media types are
- * server-side facts with no GraphQL field exposing them, the same shape of gap
- * as the status length limit. `cms/media.ts` has always said the client must
- * not guess, and the upload path does not — an oversized or unwanted file is
- * refused by the instance and the message is shown as-is.
+ * WHO DECIDES WHAT AN INSTANCE ACCEPTS. lesser does. Since lesser v1.6.4 the
+ * size answer is even advertised — `InstanceInfo.maxUploadSizeBytes` on the
+ * public `instance` field — so `cms/media.ts` refuses an oversized file BEFORE
+ * the wire with the instance's own number in the message (`oversizeUploadMessage`
+ * below), and only an instance that did not answer falls back to the old shape:
+ * no client gate, the instance refuses, its message is shown as-is. The accepted
+ * media TYPES remain server-side facts with no GraphQL field exposing them.
+ * What the client must still not do is guess either value.
  *
  * The composer was guessing anyway, one layer up. The vendored
  * `patterns/MediaComposer` validates before it ever calls `onUpload`, and its
@@ -64,6 +65,8 @@
  * condition, and they fired.
  */
 
+import type { InstanceInfo } from '../instance/info.ts';
+
 /**
  * MIME types the picker offers, spanning lesser's `MediaCategory` vocabulary.
  *
@@ -113,6 +116,45 @@ export const NO_CLIENT_SIZE_CEILING = Number.MAX_SAFE_INTEGER;
 export interface PickedFile {
 	name: string;
 	type: string;
+}
+
+/**
+ * A byte count as a poster reads it.
+ *
+ * Exact MiB when the count divides evenly (lesser's own defaults do), bytes
+ * otherwise — never a rounded decimal, because the number in the refusal
+ * message is the instance's own stated limit, and rounding it would be the
+ * client inventing precision the instance did not speak.
+ */
+function describeBytes(bytes: number): string {
+	const MIB = 1024 * 1024;
+	if (bytes >= MIB && bytes % MIB === 0) return `${bytes / MIB} MiB`;
+	return `${bytes} bytes`;
+}
+
+/**
+ * The pre-wire size refusal, or null when there is nothing to refuse.
+ *
+ * lesser v1.6.4 serves the upload cap as `InstanceInfo.maxUploadSizeBytes`
+ * (resolved to bytes from the same configuration as `MaxUploadSize`,
+ * `graph/mutation_resolvers_media.go`), so when the instance's answer is known
+ * an oversized file is refused before the multipart POST leaves — the message
+ * names the SERVED limit, the instance's own number, which is not the client
+ * guessing that `cms/media.ts` has always refused to do. When the answer is
+ * not known (a pre-v1.6.4 instance, a failed read) the result is null and the
+ * upload goes ahead exactly as it always has: no client gate, the instance
+ * refuses, its message is shown verbatim.
+ */
+export function oversizeUploadMessage(
+	file: PickedFile & { size: number },
+	info: InstanceInfo | null
+): string | null {
+	if (!info || file.size <= info.maxUploadSizeBytes) return null;
+
+	return (
+		`${file.name || 'The file'} was not sent: at ${describeBytes(file.size)} it is over the ` +
+		`${describeBytes(info.maxUploadSizeBytes)} this instance says it accepts.`
+	);
 }
 
 /**

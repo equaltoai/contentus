@@ -2,7 +2,10 @@
 
 Status: recorded at M2 (2026-08-06), against lesser `main` at
 `cbe9787f9b97c1cc6472183834cfd066e61801b2` and greater-components
-**greater-v0.13.1** (`fb6ee927`).
+**greater-v0.13.1** (`fb6ee927`). The pin moved to **lesser v1.6.4**
+(`38034eef6`) and **greater-v0.13.4** at the 2026-08-09 contract sync; the
+inventory counts below are current (eleven modules, forty-six documents), and
+every document now validates against the v1.6.4 schema.
 
 A thin consumption note. Contentus owns no GraphQL contract; this records what it
 reads, what it pinned, and what it now refuses to ship.
@@ -73,7 +76,7 @@ its pin had been able to choose its own examiner.
 
 `pnpm run validate:graphql`, part of `pnpm run build`.
 
-An **explicit inventory** — nine modules, forty-six documents, listed by name in
+An **explicit inventory** — eleven modules, forty-six documents, listed by name in
 `scripts/lib/graphql-inventory.mjs` — parsed and validated by `graphql-js`. No
 GraphQL parser was written; writing one is where a contract check would go wrong most
 quietly.

@@ -13,9 +13,12 @@
  * These decisions deliberately mirror greater's own
  * `createLesserMessagesHandlers`, which contentus cannot call (its config type
  * hard-references the Apollo-bound `LesserGraphQLAdapter`; see the header of
- * `./handlers`). Participant id canonicalization, handle construction, folder
- * derivation from `viewerMetadata.requestState` and the flattening of `unread`
- * all match it, so the two clients behave the same way against one instance.
+ * `./handlers`). Participant id canonicalization, handle construction and
+ * folder derivation from `viewerMetadata.requestState` all match it, so the
+ * two clients behave the same way against one instance. The ONE deliberate
+ * divergence is `unreadCount`: greater still flattens `unread` to 1/0, while
+ * lesser v1.6.4 serves the real per-conversation count and contentus reads it
+ * (see `toConversation`).
  *
  * TWO OF THESE PROJECTIONS EXIST BECAUSE THE HANDLER INTERFACE CANNOT EXPRESS
  * THEM AT ALL, and both are routed upstream
@@ -25,10 +28,11 @@
  *      (a folder at a time) and nothing that resolves ONE conversation. Face 5
  *      routes the thread as its own address — `/messages/{conversationId}`,
  *      which product design §5 requires for the mobile two-pane collapse — so a
- *      cold deep link has an id and no list. Walking the list instead is not a
- *      substitute: `conversations` takes an `after: Cursor` argument but
- *      returns a BARE LIST with no cursor or `pageInfo` anywhere in the
- *      selection, so there is no second page to walk to.
+ *      cold deep link has an id and no list. Walking the list instead is still
+ *      not a substitute: lesser v1.6.4's `conversationConnection` IS a proper
+ *      connection with per-edge cursors, but the handler interface's list
+ *      channel carries no cursor, so there is no second page reachable
+ *      THROUGH IT.
  *
  *   2. **A page of messages with its cursor.** `onFetchMessages` accepts a
  *      cursor and returns `DirectMessage[]`, discarding `pageInfo.endCursor`
@@ -79,6 +83,8 @@ export interface LesserObject {
 export interface LesserConversation {
 	id: string;
 	unread: boolean;
+	/** Messages unread by the current viewer, served for real at lesser v1.6.4. */
+	unreadCount: number;
 	updatedAt: string;
 	accounts: readonly LesserActorSummary[];
 	lastStatus?: LesserObject | null;
@@ -176,12 +182,13 @@ export function folderForRequestState(requestState: DmRequestState): Conversatio
 /**
  * A conversation, in the shape the components read.
  *
- * `unreadCount: unread ? 1 : 0` mirrors greater exactly, and it is worth being
- * explicit about what that number is NOT. lesser's `conversations` selection
- * carries `unread: Boolean` — there is no per-conversation message count in the
- * contract — so the 1 means "this conversation has unread activity", not "one
- * unread message". Every contentus surface that shows a total therefore counts
- * CONVERSATIONS and says so in its label; see `unreadConversationCount`.
+ * `unreadCount` is lesser's REAL per-conversation count of messages unread by
+ * the current viewer, served at v1.6.4 (`Conversation.unreadCount: Int!`). It
+ * replaces the `unread ? 1 : 0` flattening greater's own handler still
+ * performs, where the 1 meant "this conversation has unread activity", not
+ * "one unread message". What has NOT changed is what the badge counts: every
+ * contentus surface that shows a total still counts CONVERSATIONS with unread
+ * activity, by design, and says so in its label — see `unreadConversationCount`.
  */
 export function toConversation(
 	conversation: LesserConversation,
@@ -198,7 +205,7 @@ export function toConversation(
 		lastMessage: conversation.lastStatus
 			? toDirectMessage(conversation.lastStatus, conversation.id)
 			: undefined,
-		unreadCount: conversation.unread ? 1 : 0,
+		unreadCount: conversation.unreadCount,
 		updatedAt: conversation.updatedAt,
 	};
 }

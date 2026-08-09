@@ -7,12 +7,21 @@
  * evidence.
  *
  * THE CENTRAL CLAIM, and it is stricter here than on any earlier face: the
- * server renders `/messages` and `/messages/{id}` WITHOUT READING ANYTHING.
- * These props are serialized verbatim into contentus's PUBLIC hydration
- * endpoint, and a direct message is the one kind of content on this instance
- * that was never meant to be public in any form. So the probes below assert
- * both halves — no conversation, participant or message in the document, and no
- * outbound fetch at all while producing it.
+ * server renders `/messages` and `/messages/{id}` WITHOUT READING ANY PART OF
+ * THE DM SURFACE. These props are serialized verbatim into contentus's PUBLIC
+ * hydration endpoint, and a direct message is the one kind of content on this
+ * instance that was never meant to be public in any form. So the probes below
+ * assert both halves — no conversation, participant or message in the document,
+ * and no request that names one while producing it.
+ *
+ * WHAT CHANGED AT lesser v1.6.4. The old pin was "no outbound request at all",
+ * and it was true because the socket host was DERIVED from the request origin —
+ * there was nothing to ask. v1.6.4 serves `InstanceInfo.subscriptionUrl`, and
+ * these routes' CSP `connect-src` is now the origin of that SERVED value, so
+ * the server pass may issue EXACTLY ONE request: the anonymous instance query,
+ * carrying no credential and no variable naming a conversation, a participant
+ * or a message. The pin below says exactly that, and the rest of the old claim
+ * is unchanged.
  *
  * The stub records the `authorization` header it actually saw (the N1 fix from
  * M4). That is what makes "the server made no authenticated fetch" an assertion
@@ -39,8 +48,8 @@ const route = (name) => AUDIT_ROUTES.find((entry) => entry.name === name);
  * bag, which has no `Authorization` — so the whole file was evidence about the
  * ANONYMOUS request only. A future "fetch only when the caller is
  * authenticated" path would have walked straight past it, and the claim these
- * tests make ("the server reads nothing on this surface") would have quietly
- * become "the server reads nothing when nobody is signed in". lesser's edge does
+ * tests make ("the server reads only the public instance info on this surface")
+ * would have quietly become "...when nobody is signed in". lesser's edge does
  * forward request headers, so an authenticated reader's own document request can
  * carry one.
  *
@@ -83,23 +92,78 @@ test('every messaging route in the audit table is probed here', () => {
 	);
 });
 
-test('the server makes NO request while rendering any messaging route', async () => {
+/**
+ * The instance-info payload every stubbed render in this file serves. The
+ * subscription URL lives on a DELIBERATELY DIFFERENT host from the page host,
+ * so any code path that still derives the socket origin from the request host
+ * would fail the CSP assertion below.
+ */
+const instanceInfoPayload = () => ({
+	subscriptionUrl: 'wss://realtime.served-lesser.invalid/graphql',
+	maxUploadSizeBytes: 10_485_760,
+	maxStatusCharacters: 5_000,
+	cmsFeatures: {
+		longForm: true,
+		drafts: true,
+		revisions: true,
+		scheduling: false,
+		series: true,
+		categories: true,
+	},
+});
+
+/**
+ * A fresh, unique host per test. The built handler's server-side instance cache
+ * is module-level with a 60-second TTL keyed by endpoint, so two stubbed renders
+ * through the same host in one process would share the first render's (possibly
+ * failed or differently-fixtured) entry. Unique hosts give each test a cold
+ * cache — the same trick the request-forwarding probes use to pin `endpoint`,
+ * at the cache-key layer.
+ */
+const freshHostHeaders = (marker) => {
+	const host = `contentus-audit-${marker}.invalid`;
+	return {
+		host,
+		'x-lesser-forwarded-host': host,
+		'x-lesser-forwarded-proto': 'https',
+	};
+};
+
+test('the server issues EXACTLY ONE request on a messaging route — the anonymous instance query', async () => {
 	const handler = await loadHandler();
 
 	for (const name of MESSAGING_ROUTES) {
 		const { requests } = await withStubbedGraphql(
-			() => {
-				// Reaching here at all is the failure: this surface has nothing the
-				// server is allowed to ask for.
-				assert.fail(`${name} made a GraphQL request during the server render`);
-			},
-			() => renderRoute(handler, route(name))
+			() => ({ data: { instance: instanceInfoPayload() } }),
+			() =>
+				renderRoute(handler, {
+					...route(name),
+					headers: freshHostHeaders(`one-read-${name}`),
+				})
 		);
 
+		// Asserted on the RECORDED requests, not inside the stub: an assertion
+		// thrown in `respond` would be swallowed by `fetchInstanceInfo`'s
+		// never-throws contract and surface as a spurious pass.
 		assert.equal(
 			requests.length,
-			0,
-			`${name} must make no outbound request on the server pass; saw ${requests.length}`
+			1,
+			`${name} must make exactly one outbound request on the server pass; saw ${requests.length}`
+		);
+		assert.equal(
+			requests[0].operation,
+			'ContentusInstanceInfo',
+			`${name}'s one request must be the instance query; saw ${requests[0].operation}`
+		);
+		assert.deepEqual(
+			requests[0].variables ?? {},
+			{},
+			`${name}'s instance query must carry no variable — nothing names a conversation, participant or message`
+		);
+		assert.equal(
+			requests[0].authorization ?? null,
+			null,
+			`${name}'s instance query carried an Authorization header`
 		);
 	}
 });
@@ -109,15 +173,25 @@ test('no messaging route sends an Authorization header from the server', async (
 
 	for (const name of MESSAGING_ROUTES) {
 		const { requests } = await withStubbedGraphql(
-			() => ({ data: null }),
-			() => renderRoute(handler, route(name))
+			() => ({ data: { instance: instanceInfoPayload() } }),
+			() =>
+				renderRoute(handler, {
+					...route(name),
+					headers: freshHostHeaders(`anon-${name}`),
+				})
 		);
 
-		// Belt and braces against the previous test: if a request is ever added
-		// here deliberately, it still must not carry a credential. The stub RECORDS
-		// the header it saw, so this compares an observation with null rather than
-		// two absences — the vacuous-probe defect codex found in M4.
+		// Belt and braces against the previous test: the one request now allowed
+		// here is the instance query, and it still must not carry a credential.
+		// The stub RECORDS the header it saw, so this compares an observation
+		// with null rather than two absences — the vacuous-probe defect codex
+		// found in M4.
 		for (const request of requests) {
+			assert.equal(
+				request.operation,
+				'ContentusInstanceInfo',
+				`${name} made an unexpected request: ${request.operation}`
+			);
 			assert.equal(
 				request.authorization ?? null,
 				null,
@@ -139,21 +213,43 @@ const SECRETS = [
 	'conversationMessages',
 ];
 
-test('a request carrying a credential still makes the server read nothing', async () => {
+test('a request carrying a credential still makes the server read only the public instance info', async () => {
 	const handler = await loadHandler();
 
 	for (const name of MESSAGING_ROUTES) {
 		const { value, requests } = await withStubbedGraphql(
-			() => {
-				// Reaching here at all is the failure, and this is the version of that
-				// failure the anonymous probe above could never see: a server that
-				// fetches only when the caller presented a token.
-				assert.fail(`${name} made a GraphQL request for an authenticated caller`);
-			},
-			() => renderRoute(handler, { ...route(name), headers: AUTHENTICATED_HEADERS })
+			() => ({ data: { instance: instanceInfoPayload() } }),
+			() =>
+				renderRoute(handler, {
+					...route(name),
+					headers: {
+						...freshHostHeaders(`cred-${name}`),
+						authorization: INBOUND_CREDENTIAL,
+						cookie: 'contentus_probe=should-not-be-read',
+					},
+				})
 		);
 
-		assert.equal(requests.length, 0, `${name} fetched on behalf of an authenticated caller`);
+		// The authenticated-callers-only read this probe exists to catch would be
+		// a SECOND request, or an instance query that grew a credential. Neither
+		// is permitted: the instance query is anonymous BY CONSTRUCTION — the
+		// fetch helper takes no token parameter, so a forwarded credential here
+		// means the boundary itself broke, not that a caller misused it.
+		assert.equal(
+			requests.length,
+			1,
+			`${name} fetched on behalf of an authenticated caller; saw ${requests.length} requests`
+		);
+		assert.equal(
+			requests[0].operation,
+			'ContentusInstanceInfo',
+			`${name}'s authenticated render made an unexpected request: ${requests[0].operation}`
+		);
+		assert.equal(
+			requests[0].authorization ?? null,
+			null,
+			`${name} forwarded the inbound credential to lesser`
+		);
 		assert.equal(value.status, 200);
 		assert.ok(
 			!value.html.includes('probe-token-never-to-be-forwarded'),
@@ -296,20 +392,35 @@ test('the anonymous render explains the sign-in rather than showing an empty inb
 	);
 });
 
-test('the messaging routes permit the subscription origin and nothing wider', async () => {
+test('the messaging routes permit the SERVED subscription origin and nothing wider', async () => {
 	const handler = await loadHandler();
 
 	for (const name of MESSAGING_ROUTES) {
-		const rendered = await renderRoute(handler, route(name));
-		const csp = rendered.headers['content-security-policy'] ?? '';
+		const { value } = await withStubbedGraphql(
+			() => ({ data: { instance: instanceInfoPayload() } }),
+			() =>
+				renderRoute(handler, {
+					...route(name),
+					headers: freshHostHeaders(`csp-${name}`),
+				})
+		);
+		const csp = value.headers['content-security-policy'] ?? '';
 
-		// `conversationUpdates` is served from `wss://ws.<domain>`, a sibling host
-		// of the one serving the page, so `connect-src 'self'` alone would block
-		// the socket before it opened. The widening is ONE derived origin.
+		// The fixture's subscription host is NOT a sibling of the page host — it
+		// shares no domain with `contentus-audit-csp-*.invalid` at all — so this
+		// passing is proof the origin came from lesser v1.6.4's served
+		// `InstanceInfo.subscriptionUrl`. The old derivation
+		// (`wss://ws.<page-host>`) would put a different origin here and fail.
 		assert.match(
 			csp,
-			/connect-src[^;]*wss:\/\/ws\.contentus-audit\.invalid/,
-			`${name} must permit the derived subscription origin`
+			/connect-src[^;]*wss:\/\/realtime\.served-lesser\.invalid/,
+			`${name} must permit the served subscription origin`
+		);
+		// CSP source expressions are origins: the `/graphql` path of the served
+		// URL must NOT leak into the directive.
+		assert.ok(
+			!/connect-src[^;]*\/graphql/.test(csp),
+			`${name} CSP leaked the subscription URL's path into connect-src`
 		);
 
 		// And it stays strict everywhere else. These are the directives a widening
@@ -317,6 +428,34 @@ test('the messaging routes permit the subscription origin and nothing wider', as
 		assert.ok(!/unsafe-inline/.test(csp), `${name} CSP contains unsafe-inline`);
 		assert.ok(!/unsafe-eval/.test(csp), `${name} CSP contains unsafe-eval`);
 		assert.match(csp, /script-src[^;]*'self'/, `${name} script-src should be self`);
+	}
+});
+
+test('a messaging route whose instance query fails widens NOTHING', async () => {
+	const handler = await loadHandler();
+
+	for (const name of MESSAGING_ROUTES) {
+		// `data: null` fails the instance-info shape check closed, exactly as a
+		// transport error, a 500, or a pre-v1.6.4 lesser would.
+		const { value } = await withStubbedGraphql(
+			() => ({ data: null }),
+			() =>
+				renderRoute(handler, {
+					...route(name),
+					headers: freshHostHeaders(`csp-fail-${name}`),
+				})
+		);
+		const csp = value.headers['content-security-policy'] ?? '';
+
+		// Fail-closed at the CSP layer: no served subscriptionUrl, no addition.
+		// The page still renders — the client reports realtime unavailable — but
+		// the document never grows a connect-src lesser did not vouch for.
+		const connectSrc = csp.match(/connect-src[^;]*/)?.[0] ?? '';
+		assert.equal(
+			connectSrc.trim(),
+			"connect-src 'self'",
+			`${name} widened connect-src despite a failed instance query: "${connectSrc.trim()}"`
+		);
 	}
 });
 

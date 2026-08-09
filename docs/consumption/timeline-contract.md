@@ -195,12 +195,13 @@ FaceTheory's strict policy is `connect-src 'self'`, which was right for every
 surface before face 4. lesser's GraphQL subscriptions are served from a sibling
 host, so without an addition the browser blocks the socket before it opens.
 
-The addition is one origin, **derived** from the request that was served rather
-than configured, added **only** on `/timelines`, and touching nothing else — no
+The addition is one origin, **read from the instance** — lesser v1.6.4's
+`InstanceInfo.subscriptionUrl`, fetched anonymously and fail-closed — added
+**only** on `/timelines`, and touching nothing else — no
 `script-src`, no `style-src`, no `unsafe-*`. `/profiles/{username}` opens no
 socket (`timelineUpdates` takes a type and a listId, not an actor) and gets no
-widening. A request with no trusted forwarded host gets none either, because
-`resolveRequestOrigin` fails closed and this fails closed with it.
+widening. A failed or malformed instance read adds nothing, because the
+instance cache fails closed and this fails closed with it.
 
 ### The feed's collections are bounded by refusing to grow, never by evicting
 
@@ -418,14 +419,14 @@ no marker on it.
    around a server contradiction, and it should be deleted when the contradiction
    is resolved rather than becoming the shape other clients copy.
 
-2. **No contract-served GraphQL subscription endpoint.**
-   `InstanceInfo.streamingUrl` looks like the field for it and is not — it
-   resolves to `r.Config.BaseURL()`, the instance's HTTP origin, where
-   Mastodon's `urls.streaming_api` is the WebSocket URL. Clients therefore have
-   to derive `wss://ws.<host>` from a documented topology convention rather than
-   read a value the instance stated. Ask: publish the subscription endpoint on
-   `InstanceInfo` (or make `streamingUrl` the WebSocket URL, as Mastodon parity
-   would suggest).
+2. ~~**No contract-served GraphQL subscription endpoint.**~~ **CLOSED at
+   lesser v1.6.4 (#1348).** `InstanceInfo.subscriptionUrl` publishes the
+   graphql-transport-ws endpoint — exactly this ask. The `ws.`-prefix
+   derivation is deleted; the socket origin is read from the instance
+   (anonymous, fail-closed) by `src/lib/instance/info.ts`, and the CSP
+   addition below is now the origin of the URL lesser returned.
+   (`streamingUrl` still resolves to the HTTP origin; it is simply no longer
+   the field anyone needs.)
 
 3. **Timeline errors carry no extension codes.** The resolvers return plain
    `errors.New` values, so `classifyTimelineFailure` matches on message text to

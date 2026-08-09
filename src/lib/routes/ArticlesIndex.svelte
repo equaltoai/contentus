@@ -10,6 +10,8 @@ reach a listing.
 -->
 
 <script lang="ts">
+	import { untrack } from 'svelte';
+
 	import { ArticleIndexCard } from '$lib/greater/faces/blog/components/Article/index.js';
 
 	import { toBlogFaceArticle } from '$lib/cms/articles';
@@ -33,10 +35,12 @@ reach a listing.
 	// IDs and the cursor both come from the loader, and the fetch is anonymous
 	// for the same reason the initial load is. `data` never changes after
 	// hydration (a filter change is a navigation, not a prop update), so local
-	// state seeded from it is the source of truth from the first click on.
-	let articles = $state(data.articles);
-	let endCursor = $state(data.endCursor);
-	let hasNextPage = $state(data.hasNextPage);
+	// state seeded from it is the source of truth from the first click on. The
+	// untrack calls say exactly that to the compiler: the capture is deliberate,
+	// not a derived that forgot to be one.
+	let articles = $state(untrack(() => data.articles));
+	let endCursor = $state(untrack(() => data.endCursor));
+	let hasNextPage = $state(untrack(() => data.hasNextPage));
 	let loadingMore = $state(false);
 	let loadMoreFailed = $state(false);
 	let pageStatus = $state('');

@@ -80,14 +80,18 @@ export const DOCUMENT_INVENTORY = [
 		module: 'src/lib/cms/review-contract.ts',
 		documents: [
 			'SHARED_DRAFT_REVIEWS_QUERY',
+			'MY_DRAFT_REVIEWS_QUERY',
 			'DRAFT_REVIEW_QUERY',
-			'MY_DRAFTS_QUERY',
 			'DRAFT_PREVIEW_QUERY',
 			'DRAFT_OWNERSHIP_QUERY',
 			'SUBMIT_DRAFT_REVIEW_MUTATION',
 			'PUBLISH_DRAFT_MUTATION',
 			'SCHEDULE_DRAFT_MUTATION',
 		],
+	},
+	{
+		module: 'src/lib/instance/info.ts',
+		documents: ['INSTANCE_INFO_QUERY'],
 	},
 	{
 		module: 'src/lib/messaging/queries.ts',
@@ -112,12 +116,7 @@ export const DOCUMENT_INVENTORY = [
 	},
 	{
 		module: 'src/lib/agents/contract.ts',
-		documents: [
-			'AGENTS_ROSTER_QUERY',
-			'AGENT_DETAIL_QUERY',
-			'AGENT_DETAIL_OWNER_QUERY',
-			'MY_AGENTS_QUERY',
-		],
+		documents: ['AGENTS_ROSTER_QUERY', 'AGENT_DETAIL_QUERY', 'MY_AGENTS_QUERY'],
 	},
 	{
 		module: 'src/lib/drones/contract.ts',

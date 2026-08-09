@@ -6,7 +6,12 @@ import { test } from 'node:test';
 
 import { parse } from 'svelte/compiler';
 
-import { fetchMyAgents, MY_AGENTS_QUERY } from '../src/lib/agents/contract.ts';
+import {
+	AGENT_DETAIL_QUERY,
+	fetchAgent,
+	fetchMyAgents,
+	MY_AGENTS_QUERY,
+} from '../src/lib/agents/contract.ts';
 import { notifySessionChange, sessionGeneration } from '../src/lib/auth/session-events.ts';
 import { createSessionScope } from '../src/lib/auth/session-scope.ts';
 import {
@@ -35,6 +40,10 @@ function agentNode(overrides = {}) {
 		quarantineActive: false,
 		createdAt: '2026-01-01T00:00:00Z',
 		activityCount: 12,
+		// The detail route's server pass is anonymous, and lesser v1.6.4 states
+		// the redaction in the answer (commit 7aad73d5a) — so the shape lesser
+		// serves this surface carries the boolean set to false.
+		viewerCanSeePrivateFields: false,
 		agentCapabilities: {
 			canPost: true,
 			canReply: true,
@@ -204,11 +213,75 @@ test('myAgents is never fetched on the server pass', async () => {
 	assert.equal(requests.filter((r) => r.operation === 'ContentusAgents').length, 1);
 });
 
-test('the owned view asks for the owner-only fields the public roster does not', () => {
-	// `myAgents` is answered AS the owner, so it is the one read where
-	// `agentOwner` and `delegatedScopes` come back real rather than redacted.
+test('the detail read is one document, with lesser deciding what each viewer sees', () => {
+	// lesser v1.6.4 admits anonymous `agent` reads (commit 1df0358b8) and
+	// redacts the private fields rather than erroring on them (commit
+	// 7aad73d5a), so the anonymous/owner document split is gone: every viewer
+	// gets the same selection, and `viewerCanSeePrivateFields` in the answer
+	// says which case they are in.
+	assert.match(AGENT_DETAIL_QUERY, /query ContentusAgent\(/);
+	assert.match(AGENT_DETAIL_QUERY, /agentOwner/);
+	assert.match(AGENT_DETAIL_QUERY, /delegatedScopes/);
+	assert.match(AGENT_DETAIL_QUERY, /viewerCanSeePrivateFields/);
+});
+
+test('fetchAgent reads ownership from the served boolean, not from the token', async () => {
+	// The inference this replaces: "we sent a token and `agentOwner` came back
+	// non-null". A token says what was ASKED; redacted values say nothing at
+	// all. lesser now answers the question directly, and the answer — not the
+	// request — decides what the view shows.
+	const seen = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init = {}) => {
+		const payload = init.body ? JSON.parse(init.body) : {};
+		seen.push({
+			operation: /(?:query|mutation)\s+([A-Za-z0-9_]+)/.exec(payload.query ?? '')?.[1] ?? '',
+			authorization: new Headers(init.headers).get('authorization'),
+		});
+		return new Response(
+			JSON.stringify({
+				data: {
+					// A NON-OWNER WITH A TOKEN: lesser redacts and says so. The
+					// token must not turn the blanks into an owner view.
+					agent: agentNode({
+						agentOwner: null,
+						delegatedScopes: [],
+						viewerCanSeePrivateFields: false,
+					}),
+				},
+			}),
+			{ status: 200, headers: { 'content-type': 'application/json' } }
+		);
+	};
+
+	try {
+		const asNonOwner = await fetchAgent({ accessToken: 'token-bob' }, 'weatherbot');
+		assert.equal(asNonOwner.ok, true);
+		assert.equal(asNonOwner.agent.owner, null);
+		assert.equal(asNonOwner.agent.redaction.viewerIsOwner, false);
+
+		// Anonymous gets the same document: one read, lesser decides visibility.
+		const anonymous = await fetchAgent({}, 'weatherbot');
+		assert.equal(anonymous.ok, true);
+		assert.deepEqual(
+			seen.map((r) => r.operation),
+			['ContentusAgent', 'ContentusAgent']
+		);
+		assert.equal(seen[0].authorization, 'Bearer token-bob');
+		assert.equal(seen[1].authorization, null);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test('the owned view asks for the private fields and lesser’s visibility statement', () => {
+	// `myAgents` is answered AS the owner, so `agentOwner` and
+	// `delegatedScopes` come back real rather than redacted — and
+	// `viewerCanSeePrivateFields` comes back true, which is the statement the
+	// view model reads before showing them.
 	assert.match(MY_AGENTS_QUERY, /agentOwner/);
 	assert.match(MY_AGENTS_QUERY, /delegatedScopes/);
+	assert.match(MY_AGENTS_QUERY, /viewerCanSeePrivateFields/);
 });
 
 test('the owned view is gated on a session, not on the roster failing', () => {
@@ -275,6 +348,7 @@ const OWNED = {
 	activityCount: 3,
 	agentOwner: 'https://example.invalid/users/ada',
 	delegatedScopes: ['read', 'write'],
+	viewerCanSeePrivateFields: true,
 };
 
 test('an owned-agent read that lands after sign-out publishes nothing', async () => {

@@ -330,40 +330,24 @@ test('the publish controls are 44px wherever they render', () => {
 /* ---------------------------------------------------------------------------
  * The verdict controls, asserted on the selectors that actually render
  *
- * The finding this section exists for: the test above asserted only the
+ * The finding this section exists for: an earlier suite asserted only the
  * `.contentus-review-publish__*` pair — contentus's own controls. The VERDICT
- * controls are the vendored `Review.VerdictActions`, which renders every one of
- * its buttons at `size="sm"`, and the vendored primitives theme sizes that
- * variant `min-height: 2rem`. So the two decisions a reviewer makes were 32px
- * targets, on selectors no assertion here named, and the suite was green.
+ * controls are the vendored `Review.VerdictActions`, which then rendered every
+ * one of its buttons at `size="sm"` (32px), so the two decisions a reviewer
+ * makes were sub-floor targets on selectors no assertion named. Contentus
+ * carried a sizing bridge in `src/lib/brand/bridge.css` and these probes
+ * pinned it — with the sunset written into both: when greater sizes its
+ * verdict controls to the floor itself, the bridge and its assertions go.
  *
- * The lesson is in the shape of these probes, not just their subject: a
- * stylesheet assertion is only worth its selector, so each one below reads the
- * class list out of the SHIPPED COMPONENT first and then requires the sheet to
- * size exactly that.
+ * greater-v0.13.4 did exactly that (upstream #1018): every control the
+ * component renders — the verdict pair, the dialog's Cancel and confirm, is
+ * now `size="lg"`, and the vendored primitives theme sizes that variant
+ * `min-height: 3rem` (48px), above the 44px floor on its own. The bridge is
+ * deleted; what these probes pin now is the NATIVE floor, so a future
+ * regression back below it fails here rather than shipping silently.
  * ------------------------------------------------------------------------ */
 
-/** The first rule whose selector list names `.<className>`, with its body. */
-function ruleNaming(css, className) {
-	const marker = `.${className}`;
-	const at = css.indexOf(marker);
-	if (at === -1) return null;
-
-	const open = css.indexOf('{', at);
-	const close = css.indexOf('}', open);
-	if (open === -1 || close === -1) return null;
-
-	// Walk back to the start of the selector list so the whole list is visible.
-	const selectorStart = Math.max(css.lastIndexOf('}', at), css.lastIndexOf('*/', at)) + 1;
-
-	return {
-		index: at,
-		selector: css.slice(selectorStart, open).trim(),
-		declarations: css.slice(open + 1, close),
-	};
-}
-
-test('the verdict controls the component renders are the ones the stylesheet sizes', () => {
+test('the verdict controls the component renders meet the touch floor natively', () => {
 	const component = readFileSync('src/lib/components/Review/VerdictActions.svelte', 'utf8');
 
 	// What ships. Read from the component so a renamed class breaks this test
@@ -377,50 +361,47 @@ test('the verdict controls the component renders are the ones the stylesheet siz
 		);
 	}
 
-	// The vendored size the bridge exists to lift, confirmed rather than assumed:
-	// if upstream ever raises `--sm` to the floor, this is the assertion that
-	// says the bridge can go.
-	assert.match(component, /size="sm"/, 'the vendored controls still render at the sm size');
-	const smallVariant = ruleNaming(stylesheet, 'gr-button--sm');
-	assert.ok(smallVariant, 'the vendored primitives theme must define the sm size variant');
-	assert.match(smallVariant.declarations, /min-height:\s*2rem/);
+	// The native size, confirmed rather than assumed: every control renders at
+	// `size="lg"` (upstream #1018), never `size="sm"`.
+	assert.match(component, /size="lg"/, 'the vendored controls must render at the lg size');
+	assert.doesNotMatch(
+		component,
+		/size="sm"/,
+		'a control back at size="sm" is a regression below the touch floor'
+	);
 
-	// And the sheet must raise each emitted selector to the floor.
-	for (const className of emitted) {
-		const rule = ruleNaming(stylesheet, className);
-		assert.ok(rule, `the stylesheet must carry a rule naming .${className}`);
-		assert.match(
-			rule.declarations,
-			/min-height:\s*44px/,
-			`.${className} must meet the 44px touch floor`
-		);
-		assert.ok(
-			rule.index > smallVariant.index,
-			'the contentus sizing bridge must cascade after the vendored size variant'
-		);
-		// Descendant-qualified, so it wins on specificity rather than on order.
-		assert.match(rule.selector, /\.gr-blog-review-verdict\s+\.gr-blog-review-verdict__approve/);
-	}
+	// And the vendored theme must size that variant at or above the floor.
+	const marker = '.gr-button--lg';
+	const at = stylesheet.indexOf(marker);
+	assert.ok(at !== -1, 'the vendored primitives theme must define the lg size variant');
+	const open = stylesheet.indexOf('{', at);
+	const close = stylesheet.indexOf('}', open);
+	const declarations = stylesheet.slice(open + 1, close);
+	assert.match(
+		declarations,
+		/min-height:\s*3rem/,
+		'the lg variant must meet the 44px touch floor (3rem = 48px)'
+	);
 });
 
 test('the verdict confirmation dialog controls meet the same floor', () => {
 	const component = readFileSync('src/lib/components/Review/VerdictActions.svelte', 'utf8');
 
-	// The dialog is where the verdict is actually confirmed, and its Cancel and
-	// confirm buttons are `size="sm"` too. The class the sheet hooks is the one
-	// the component hands the Modal.
+	// The dialog is where the verdict is actually confirmed; its class is the
+	// one the component hands the Modal.
 	assert.match(component, /class="gr-blog-review-verdict__dialog"/);
 
-	const rule = ruleNaming(stylesheet, 'gr-blog-review-verdict__approve');
+	// Its Cancel and confirm buttons render at `size="lg"` like the verdict
+	// pair (upstream #1018) — the floor holds inside the dialog too.
 	assert.match(
-		rule.selector,
-		/\.gr-blog-review-verdict__dialog\s+\.gr-modal__footer\s+\.gr-button/,
-		"the dialog's own buttons must be sized by the same rule"
+		component,
+		/variant="ghost" size="lg"[^>]*>Cancel<\/Button>/,
+		'the dialog Cancel control must render at the lg size'
 	);
-	assert.match(
-		rule.selector,
-		/\.gr-blog-review-verdict__dialog\s+\.gr-modal__close/,
-		'and so must its close control'
+	const lgCount = (component.match(/size="lg"/g) || []).length;
+	assert.ok(
+		lgCount >= 4,
+		`expected at least four lg controls (verdict pair, Cancel, confirm); found ${lgCount}`
 	);
 });
 

@@ -13,12 +13,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import * as subscriptionModule from '../src/lib/timelines/subscription.ts';
 import {
 	CLOSE_ACK_TIMEOUT,
 	CLOSE_INVALID_FRAME,
 	GRAPHQL_TRANSPORT_WS,
 	subscribe,
-	subscriptionEndpoint,
 } from '../src/lib/timelines/subscription.ts';
 
 /** Minimal WebSocket stand-in with the constants the module reads. */
@@ -106,34 +106,23 @@ function start(options = {}) {
 globalThis.WebSocket = globalThis.WebSocket ?? FakeSocket;
 
 /* ---------------------------------------------------------------------------
- * Endpoint derivation
+ * The endpoint is served now — the derivation is gone
  * ------------------------------------------------------------------------ */
 
-test('the subscription host is derived by prefixing ws. onto the served origin', () => {
-	// lesser serves GraphQL subscriptions from `wss://ws.<stage-domain>`. No
-	// instance domain is hard-coded anywhere; the host comes from the request.
-	assert.equal(subscriptionEndpoint('https://social.example.test'), 'wss://ws.social.example.test');
-	assert.equal(
-		subscriptionEndpoint('https://trenchcoat.lesser.host'),
-		'wss://ws.trenchcoat.lesser.host'
+test('the module exports no endpoint derivation at all', () => {
+	// THE PIN THAT REPLACED FOUR. The deleted probes pinned `subscriptionEndpoint`
+	// prefixing `ws.` onto the served origin — a client reading a topology
+	// convention because no contract value existed. lesser v1.6.4 (commit
+	// 789e18bdb) serves `InstanceInfo.subscriptionUrl`, `$lib/instance/info`
+	// reads it, and the derivation was deleted rather than left to drift. What
+	// is worth pinning now is the absence itself: if a derivation ever comes
+	// back under any name, it must do so deliberately, in the open, with its
+	// own probes — not slip in as an unexamined export.
+	assert.ok(
+		!('subscriptionEndpoint' in subscriptionModule),
+		'the endpoint comes from the served InstanceInfo, never from a client-side derivation'
 	);
-});
-
-test('an http origin maps to ws, and a port survives', () => {
-	assert.equal(subscriptionEndpoint('http://localhost:5173'), 'ws://ws.localhost:5173');
-});
-
-test('an origin that is already a ws host does not get a second prefix', () => {
-	assert.equal(subscriptionEndpoint('https://ws.example.test'), 'wss://ws.example.test');
-});
-
-test('an unusable origin yields null rather than a fabricated URL', () => {
-	// The null is load-bearing: callers degrade to "live updates unavailable",
-	// which is honest, where a guessed URL produces a failure a reader cannot act
-	// on. `resolveRequestOrigin` already fails closed for the same reason.
-	for (const bad of [null, undefined, '', 'not a url', '://missing-scheme']) {
-		assert.equal(subscriptionEndpoint(bad), null, `${JSON.stringify(bad)} must not produce a URL`);
-	}
+	assert.equal(typeof subscriptionModule.subscribe, 'function', 'the transport itself stays');
 });
 
 /* ---------------------------------------------------------------------------

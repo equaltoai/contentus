@@ -10,7 +10,6 @@ import {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toOwnDraftReview,
 	toPreviewFaceArticle,
 	toReviewActor,
 	toVerdictRecord,
@@ -84,8 +83,8 @@ test('the ownership probe selects an identifier and nothing else', () => {
 
 test('every document names the operation lesser actually exposes', () => {
 	assert.match(REVIEW_DOCUMENTS.SHARED_DRAFT_REVIEWS_QUERY, /sharedDraftReviews\(/);
+	assert.match(REVIEW_DOCUMENTS.MY_DRAFT_REVIEWS_QUERY, /myDraftReviews\(/);
 	assert.match(REVIEW_DOCUMENTS.DRAFT_REVIEW_QUERY, /draftReview\(id: \$id\)/);
-	assert.match(REVIEW_DOCUMENTS.MY_DRAFTS_QUERY, /myDrafts\(contentType: ARTICLE/);
 	assert.match(REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY, /draftPreview\(id: \$id\)/);
 	assert.match(REVIEW_DOCUMENTS.SUBMIT_DRAFT_REVIEW_MUTATION, /submitDraftReview\(draftId:/);
 	assert.match(REVIEW_DOCUMENTS.PUBLISH_DRAFT_MUTATION, /publishDraft\(id: \$id\)/);
@@ -138,6 +137,58 @@ test('a missing draft is not-found and an expired session is unauthenticated', (
 	);
 });
 
+test("v1.6.4's typed error codes classify ahead of any message text", () => {
+	// lesser commit e93388ab7 types the CMS surface: the code is the
+	// machine-readable discriminator, and the message rides along verbatim.
+	const coded = (code, message = 'whatever lesser said') => [{ message, extensions: { code } }];
+
+	const disabled = failureFromErrors(coded('FEATURE_DISABLED', 'cms drafts are disabled'));
+	assert.equal(disabled.reason, 'cms-disabled');
+	assert.equal(disabled.message, 'cms drafts are disabled');
+
+	const missing = failureFromErrors(coded('NOT_FOUND'));
+	assert.equal(missing.reason, 'not-found');
+
+	const refused = failureFromErrors(coded('FORBIDDEN'));
+	assert.equal(refused.reason, 'forbidden');
+
+	const invalid = failureFromErrors(coded('VALIDATION', 'scheduled time must be in the future'));
+	assert.equal(invalid.reason, 'rejected');
+	assert.equal(invalid.message, 'scheduled time must be in the future');
+});
+
+test('a typed code wins over message text that would classify differently', () => {
+	// The upstream classifier (`cmd/graphql/main.go`) tags "draft owner cannot
+	// review their own draft" FORBIDDEN. On a v1.6.4 instance the typed answer
+	// is the one rendered; the `self-review` substring branch remains for
+	// pre-v1.6.4 instances, pinned by the test above.
+	const failure = failureFromErrors([
+		{
+			message: 'draft scheduling is not enabled on this instance',
+			extensions: { code: 'VALIDATION' },
+		},
+	]);
+	assert.equal(failure.reason, 'rejected', 'the code, not the substring, decides');
+	assert.equal(failure.message, 'draft scheduling is not enabled on this instance');
+});
+
+test('unmapped typed codes fall through to the substring classification', () => {
+	// lesser's classifier tags the review-gate refusals INTERNAL_ERROR, which
+	// this taxonomy deliberately does not map — the gate text still reaches the
+	// `gated` branch, exactly as on a pre-v1.6.4 instance.
+	const failure = failureFromErrors([
+		{
+			message: 'generated draft requires an active approval from the instance principal',
+			extensions: { code: 'INTERNAL_ERROR' },
+		},
+	]);
+	assert.equal(failure.reason, 'gated');
+	assert.equal(
+		failure.message,
+		'generated draft requires an active approval from the instance principal'
+	);
+});
+
 test('an unrecognised error is reported plainly, never as a permission decision', () => {
 	const failure = failureFromErrors(errorsWith('the wombat subsystem is on fire'));
 	assert.equal(failure.reason, 'rejected');
@@ -176,32 +227,48 @@ test('a DraftReview projects with its grant and verdict history', () => {
 	assert.equal(review.generatedBy.isAgent, true);
 });
 
-test('an own draft projects with no review activity INVENTED, and none implied', () => {
-	// lesser's `Draft` carries no reviewStatus, editorNotes, grant, or verdict
-	// history. They stay absent — nothing is fabricated — and the entry built
-	// from this shape is marked `listing-only` so the absence is never read as
-	// an answer. See the `listing-only` cases below.
-	const review = toOwnDraftReview({
-		id: 'draft-2',
-		title: 'Mine',
-		status: 'DRAFT',
+test('a DraftReview projects its gate evaluation and staleness markers (v1.6.4)', () => {
+	// All of these are lesser's own fields, passed through unread: the chrome
+	// renders the server's evaluation and never re-derives it.
+	const review = toDraftReview({
+		draftId: 'draft-2',
 		updatedAt: '2026-07-31T10:00:00Z',
-		generatedBy: actor(),
-		// lesser sets `reviewedBy` and `reviewStatus` TOGETHER on every verdict
-		// (`draft_review.go`), so this listing describes a draft that HAS been
-		// reviewed — and carries not one field that says what the verdict was.
-		reviewedBy: actor({ id: 'r1', username: 'ed', isAgent: false }),
+		contentHash: 'sha256:abc',
+		revision: 3,
+		activeReviewerIds: ['actor-r1', 'actor-r2'],
+		publishEligibility: {
+			eligible: false,
+			blockingReasons: ['draft requires approval from every active reviewer'],
+			reviewersApproved: false,
+			principalApprovalRequired: true,
+			principalApproved: false,
+		},
+		verdicts: [
+			{
+				verdict: 'APPROVED',
+				notes: null,
+				contentHash: 'sha256:older',
+				current: false,
+				stale: true,
+				recordedAt: '2026-07-30T09:00:00Z',
+				reviewer: actor({ id: 'r1', username: 'ed', isAgent: false }),
+			},
+		],
 	});
 
-	assert.equal(review.draftId, 'draft-2');
-	assert.equal(review.reviewStatus, undefined);
-	assert.equal(review.editorNotes, undefined);
-	assert.equal(review.grant, undefined);
-	assert.deepEqual(review.verdicts, []);
-
-	// The projection knows a reviewer ruled on this draft and nothing about the
-	// ruling. That gap is precisely why this shape may not drive a state badge.
-	assert.equal(review.reviewedBy.username, 'ed');
+	assert.equal(review.contentHash, 'sha256:abc');
+	assert.equal(review.revision, 3);
+	assert.deepEqual(review.activeReviewerIds, ['actor-r1', 'actor-r2']);
+	assert.deepEqual(review.publishEligibility, {
+		eligible: false,
+		blockingReasons: ['draft requires approval from every active reviewer'],
+		reviewersApproved: false,
+		principalApprovalRequired: true,
+		principalApproved: false,
+	});
+	assert.equal(review.verdicts[0].contentHash, 'sha256:older');
+	assert.equal(review.verdicts[0].current, false);
+	assert.equal(review.verdicts[0].stale, true);
 });
 
 test('a verdict row with an unknown verdict value is dropped, not coerced', () => {
@@ -276,11 +343,8 @@ test('a successful preview renders as html, unpublished, with the generator as a
 
 const stub = (draftId, extra = {}) => ({ draftId, updatedAt: '', verdicts: [], ...extra });
 
-/** An own-draft entry, with the projection it was built from. */
-const owned = (draftId, projection = 'review', extra = {}) => ({
-	review: stub(draftId, { generatedBy: actor(), ...extra }),
-	projection,
-});
+/** An own-draft entry, agent-generated as the queue's own half requires. */
+const owned = (draftId, extra = {}) => stub(draftId, { generatedBy: actor(), ...extra });
 
 test('shared drafts come before the viewer own agent drafts', () => {
 	const entries = orderQueueEntries([stub('shared-a'), stub('shared-b')], [owned('own-a')]);
@@ -296,31 +360,22 @@ test('shared drafts come before the viewer own agent drafts', () => {
 });
 
 test('a draft that is both shared and owned appears once, on the shared side', () => {
-	// The shared projection is the one carrying the grant and the verdict
-	// history, so it is the one worth keeping.
 	const entries = orderQueueEntries([stub('both')], [owned('both')]);
 
 	assert.equal(entries.length, 1);
 	assert.equal(entries[0].source, 'shared-with-me');
 });
 
-test('every entry carries WHICH projection its review came from', () => {
-	// The shared half is `DraftReview` by construction. The own half is whatever
-	// arrived — and an entry that only got the `myDrafts` listing must say so,
-	// because that shape cannot support a review-state claim either way.
-	const entries = orderQueueEntries(
-		[stub('shared-a')],
-		[owned('own-full', 'review'), owned('own-thin', 'listing-only')]
-	);
+test('every queue entry is a full review projection, from either half', () => {
+	// Since lesser v1.6.4 both connections return `DraftReview` — the thin
+	// `myDrafts` listing shape can no longer reach the queue, so there is no
+	// "which projection arrived" marker left to assert.
+	const entries = orderQueueEntries([stub('shared-a')], [owned('own-a')]);
 
-	assert.deepEqual(
-		entries.map((entry) => [entry.review.draftId, entry.projection]),
-		[
-			['shared-a', 'review'],
-			['own-full', 'review'],
-			['own-thin', 'listing-only'],
-		]
-	);
+	assert.equal(entries.length, 2);
+	for (const entry of entries) {
+		assert.equal(entry.projection, undefined, 'no projection marker exists to carry');
+	}
 });
 
 test('only drafts with a recorded generator count as agent-generated', () => {
@@ -368,8 +423,8 @@ test('a loaded-and-complete half is allowed the definite sentence', () => {
 });
 
 test('a loaded half with more to come speaks only about what was scanned', () => {
-	// `myDrafts` filters after it paginates, so an empty page is not an empty
-	// set — and the same caution applies to a shared page that has a next one.
+	// The own half is walked with a page budget and the shared half pages, so an
+	// empty result after a truncated walk is not an empty set.
 	for (const source of ['shared-with-me', 'my-agent-draft']) {
 		const copy = emptyHalfCopy({ status: 'loaded', more: true }, source);
 		assert.match(copy, /loaded so far/);
