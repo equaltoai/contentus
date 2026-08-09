@@ -73,8 +73,6 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 	} from './requests';
 	import {
 		deepLinkVerdict,
-		isNewConversationOpenIntent,
-		isNewConversationOpenKeyIntent,
 		mergeForConversation,
 		resolutionAfterReaderChoice,
 		retainOwnSummaries,
@@ -647,43 +645,22 @@ full page load that lesser's no-SPA-fallback routing gives us anyway.
 			<header class="contentus-messages__list-head">
 				<h2 class="contentus-messages__list-title">Messages</h2>
 				<!--
-				WRAPPED, because the open is a reader act the selection cannot show.
-				The vendored `NewConversation` owns its trigger and exposes no
-				callback until after it has created and selected a conversation, so
-				opening the modal — and searching or picking a recipient inside it —
-				leaves the selection at null with nothing for the observer to count,
-				while a cold deep link may still be pending. The click is delegated
-				here, in owned source and in the capture phase, and stamped only when
-				it is the real open intent: the trigger with the modal not already
-				open. Clicks inside the modal (search, a result, cancel) and a
-				no-op re-press of the trigger stamp nothing — a canceled modal must
-				not stale the link, the same discipline as the current-folder
-				re-click. Vendored source is never edited; a supported open-intent
-				hook on `NewConversation` is the upstream ask
-				(docs/consumption/messaging-contract.md).
-
-				KEYDOWNS TOO, because the vendored button activates on Enter/Space
-				by calling its click handler DIRECTLY on a constructed MouseEvent
-				that is never dispatched — the keyboard open opens the modal without
-				ever traversing the click capture above. The keydown itself is a
-				real, dispatched event and does traverse, so the same gate judges
-				it, keyed to exactly the activation keys the vendored button honors;
-				every other key chooses nothing and stamps nothing.
+				STAMPED THROUGH THE VENDORED HOOK. Opening the modal — and
+				searching or picking a recipient inside it — leaves the
+				selection at null with nothing for the observer to count, while
+				a cold deep link may still be pending. greater-v0.13.4 (#1014)
+				shipped the open-intent hook this wrapper used to delegate
+				clicks and keydowns for: `onOpenIntent` fires from the vendored
+				trigger's own open path, which the keyboard activation reaches
+				through the same handler, so both input families stamp here and
+				the capture-phase gate in `$lib/messaging/selection` is retired.
+				Clicks inside the modal never pass through the trigger's open
+				path, so a canceled modal stamps nothing — the same no-op
+				discipline as the current-folder re-click.
 				-->
-				<div
-					class="contentus-messages__new-conversation"
-					onclickcapture={(event) => {
-						if (isNewConversationOpenIntent(event.currentTarget, event.target)) {
-							selectionRevisions.act();
-						}
-					}}
-					onkeydowncapture={(event) => {
-						if (isNewConversationOpenKeyIntent(event.currentTarget, event.target, event.key)) {
-							selectionRevisions.act();
-						}
-					}}
-				>
+				<div class="contentus-messages__new-conversation">
 					<NewConversation
+						onOpenIntent={() => selectionRevisions.act()}
 						onConversationCreated={() => {
 							// The vendored component has already selected what it created.
 							// A not-found/failed answer LANDED for the abandoned link is

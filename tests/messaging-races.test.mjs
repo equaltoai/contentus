@@ -477,34 +477,26 @@ test('a folder switch while the link loads is a reader act, even when the select
 });
 
 test('opening New Message while the link loads is a reader act, even though the selection never moves', () => {
-	// THE UNSTAMPED COMPETITOR. A cold deep link for C on a wide two-pane
-	// viewport: the vendored `NewConversation` trigger is usable while the
-	// by-id read is pending, and everything the reader does next — open the
-	// modal, search, pick a recipient — leaves `selectedConversation` at the
-	// null it already holds. The component exposes no callback until AFTER it
-	// has created and internally selected a conversation, so none of it
-	// reaches the observer, and an unstamped open leaves the pending link
-	// admissible: the late missing/failed answer writes a resolution the
-	// render branches never reset, and the thread the reader goes on to create
-	// stays hidden behind the link they had already abandoned — while a late
-	// found answer selects C behind the modal. The open is stamped at the
-	// surface's own wrapper, and every completion family then loses to it.
+	// THE UNSTAMPED COMPETITOR, STAMPED THROUGH THE VENDORED HOOK. A cold deep
+	// link for C on a wide two-pane viewport: the `NewConversation` trigger is
+	// usable while the by-id read is pending, and everything the reader does
+	// next — open the modal, search, pick a recipient — leaves
+	// `selectedConversation` at the null it already holds. Until greater-v0.13.4
+	// the component exposed no callback until AFTER it had created and selected
+	// a conversation, so the surface delegated clicks and keydowns in the
+	// capture phase to stamp the open. #1014 shipped `onOpenIntent`, fired from
+	// the trigger's own open path, and the surface now stamps through it —
+	// simulated here as the hook firing, which is what the vendored component
+	// does for both the click and the keyboard activation (pinned below against
+	// the real vendored button). Every completion family then loses to the act.
 	for (const outcome of ['found', 'missing', 'failed']) {
 		const revisions = trackSelectionRevisions(null);
 		const atDispatch = revisions.capture();
 		// Searching and picking a recipient, presented to the observer as the
 		// same null: by themselves they count nothing, which is exactly the gap.
 		revisions.observe(null);
-		// The trigger click with the modal not yet open, judged by the surface's
-		// owned gate. Optional on purpose: against a ref with no gate this probe
-		// still reaches the verdict, and the verdict is the old code's real
-		// answer — the completion acts over the reader's New Message intent,
-		// which is the defect.
-		const wrapper = { querySelector: () => null };
-		const triggerClick = {
-			closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
-		};
-		if (selection.isNewConversationOpenIntent?.(wrapper, triggerClick)) revisions.act();
+		// The vendored `onOpenIntent` firing, wired by the surface to the stamp.
+		revisions.act();
 		assert.equal(
 			deepLinkVerdict(revisions, atDispatch, null, outcome),
 			'stale',
@@ -513,43 +505,28 @@ test('opening New Message while the link loads is a reader act, even though the 
 	}
 });
 
-test('a canceled or no-change New Message modal does not stale the link — only the open stamps', () => {
-	// The no-op discipline, same as the current-folder re-click: an act that
-	// chooses nothing must not take the pending link away from its answer. A
-	// click INSIDE the modal — the search field, a result, the cancel button —
-	// is a continuation of the act the open already stamped (or, here, no act
-	// at all), and re-pressing the trigger while the modal is already open
-	// changes nothing. Neither stamps, so the link stays admissible and its
-	// missing answer still earns the not-found surface.
-	const modalOpen = {
-		querySelector: (selector) => (selector === '.new-conversation__modal' ? {} : null),
-	};
-	const modalClick = { closest: () => null };
-	const triggerClick = {
-		closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
-	};
-
-	for (const [click, label] of [
-		[modalClick, 'a click inside the modal'],
-		[triggerClick, 'a trigger re-press while the modal is open'],
-	]) {
-		// Strict equality, not truthiness: the gate must exist and answer false —
-		// an absent gate is the defect the previous test pins, not a pass here.
-		assert.equal(
-			selection.isNewConversationOpenIntent?.(modalOpen, click),
-			false,
-			`${label} must not be judged an open intent`
-		);
-
-		const revisions = trackSelectionRevisions(null);
-		const atDispatch = revisions.capture();
-		if (selection.isNewConversationOpenIntent?.(modalOpen, click)) revisions.act();
-		assert.equal(
-			deepLinkVerdict(revisions, atDispatch, null, 'missing'),
-			'not-found',
-			`${label} chooses nothing, so the link's own answer must still stand`
-		);
-	}
+test('the vendored open-intent hook lives only on the trigger open path — modal acts cannot stamp', () => {
+	// THE NO-OP DISCIPLINE, NOW UPSTREAM'S. The delegated gate used to read the
+	// DOM to tell the trigger from a click inside the modal; the vendored hook
+	// makes that structural: `onOpenIntent` is invoked exactly once in the
+	// component, inside `openButton`'s onClick — the path the trigger's open
+	// takes and nothing else does. The search field, a result, and the cancel
+	// button never pass through it, so a canceled modal stamps nothing, the
+	// same discipline as the current-folder re-click.
+	const component = readFileSync('src/lib/components/messaging/NewConversation.svelte', 'utf8');
+	const invocations = component.match(/onOpenIntent\?\.\(\)/g) ?? [];
+	assert.equal(
+		invocations.length,
+		1,
+		'onOpenIntent must be invoked exactly once — a second call site is a path that could stamp a non-open'
+	);
+	const openButton = component.match(/const openButton = createButton\(\{([\s\S]*?)\}\);/);
+	assert.ok(openButton, 'could not read the vendored openButton definition');
+	assert.match(
+		openButton[1],
+		/onOpenIntent\?\.\(\)/,
+		'the single onOpenIntent invocation must be inside the trigger open path'
+	);
 });
 
 /* ============================================================
@@ -670,15 +647,14 @@ function fakeButtonElement() {
 	};
 }
 
-test('keyboard activation opens New Message through a path the click gate cannot hear — the keydown gate stamps it', () => {
-	// THE VENDORED BYPASS, driven through the real button: a keydown Enter on
-	// the focused trigger, delivered to the listeners the vendored action
-	// registered. The handler preventDefaults, constructs a MouseEvent, and
-	// invokes its click handler DIRECTLY — so the modal opens while no click
-	// event ever exists for the wrapper's capture listener to hear. A keyboard
-	// reader on a wide cold deep link then gets exactly the unstamped-open
-	// race: search while the by-id read is pending, and the late
-	// found/missing/failed completion stays admissible.
+test('the keyboard open reaches the same onClick that fires the open-intent hook', () => {
+	// THE VENDORED KEYBOARD PATH, driven through the real button: a keydown
+	// Enter on the focused trigger, delivered to the listeners the vendored
+	// action registered. The handler preventDefaults, constructs a MouseEvent,
+	// and invokes its click handler DIRECTLY — nothing is dispatched, which
+	// defeated the retired capture-phase click gate, but the vendored
+	// `NewConversation` fires `onOpenIntent` from that very click handler, so
+	// the keyboard open stamps through the same hook the mouse open does.
 	const activations = [];
 	const button = vendoredButton.createButton({ onClick: () => activations.push('open') });
 	const node = fakeButtonElement();
@@ -686,33 +662,24 @@ test('keyboard activation opens New Message through a path the click gate cannot
 
 	node.emit('keydown', keydownEvent('Enter'));
 
-	assert.deepEqual(activations, ['open'], 'the vendored button opened the modal on Enter');
-	assert.deepEqual(
-		node.dispatchedEvents,
-		[],
-		'the vendored keyboard activation dispatches NOTHING, so the click gate cannot hear it. ' +
-			'GOOD NEWS IF THIS FAILS: upstream now dispatches the activation and the click gate ' +
-			'covers the keyboard path — re-check whether the keydown gate is still needed.'
-	);
+	assert.deepEqual(activations, ['open'], 'the vendored button runs its click handler on Enter');
 
-	// The owned gate must therefore judge the open intent from the keydown
-	// itself. Optional on purpose: against a ref with no keydown gate this
-	// probe still reaches the verdict, and the verdict is the old code's real
-	// answer — the keyboard open stamps nothing and every completion family
-	// acts over it, which is the defect.
+	// And in the vendored component that handler is openButton's onClick — the
+	// single place `onOpenIntent` is invoked (pinned in the group above), so
+	// the keyboard activation fires it too.
+	const component = readFileSync('src/lib/components/messaging/NewConversation.svelte', 'utf8');
+	const openButton = component.match(/const openButton = createButton\(\{([\s\S]*?)\}\);/);
+	assert.ok(openButton, 'could not read the vendored openButton definition');
+	assert.match(openButton[1], /onOpenIntent\?\.\(\)/);
+
 	for (const outcome of ['found', 'missing', 'failed']) {
 		const revisions = trackSelectionRevisions(null);
 		const atDispatch = revisions.capture();
 		// Searching inside the open modal, presented to the observer as the
 		// same null: by itself this counts nothing, which is exactly the gap.
 		revisions.observe(null);
-		const wrapper = { querySelector: () => null };
-		const triggerKeydown = {
-			closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
-		};
-		if (selection.isNewConversationOpenKeyIntent?.(wrapper, triggerKeydown, 'Enter')) {
-			revisions.act();
-		}
+		// The vendored `onOpenIntent` firing for the keyboard open.
+		revisions.act();
 		assert.equal(
 			deepLinkVerdict(revisions, atDispatch, null, outcome),
 			'stale',
@@ -721,13 +688,13 @@ test('keyboard activation opens New Message through a path the click gate cannot
 	}
 });
 
-test('the keydown gate mirrors exactly the keys the real vendored button activates on', () => {
-	// The vendored button is the authority on what activates it, so drive
-	// every candidate key through BOTH: what the real button opens on, the
-	// gate must stamp; what it ignores, the gate must not. The mirror in
-	// `$lib/messaging/selection` exists because the vendored util does not
-	// resolve in this runner, and this is what keeps the mirror honest —
-	// including 'Spacebar', the legacy key the vendored set still honors.
+test('the vendored trigger activates on exactly Enter, Space, and the legacy Spacebar', () => {
+	// THE ACTIVATION SET ITSELF, pinned against the real button: these are the
+	// keys whose open fires the hook, and every other key — Tab past the
+	// trigger, a letter reaching the search it would type into, Escape —
+	// chooses nothing and stamps nothing. The retired gate mirrored this set
+	// by hand; now the set is only what the vendored button does, and this
+	// probe fails loudly if upstream moves it.
 	for (const key of ['Enter', ' ', 'Spacebar', 'Tab', 'ArrowDown', 'a', 'Escape']) {
 		const activations = [];
 		const button = vendoredButton.createButton({ onClick: () => activations.push('open') });
@@ -735,55 +702,10 @@ test('the keydown gate mirrors exactly the keys the real vendored button activat
 		button.actions.button(node);
 		node.emit('keydown', keydownEvent(key));
 		const vendoredOpens = activations.length === 1;
-
-		const wrapper = { querySelector: () => null };
-		const triggerKeydown = {
-			closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
-		};
 		assert.equal(
-			selection.isNewConversationOpenKeyIntent?.(wrapper, triggerKeydown, key) ?? false,
 			vendoredOpens,
-			`the gate and the real vendored button disagree on ${JSON.stringify(key)}`
-		);
-	}
-});
-
-test('a no-op keydown stamps nothing — non-activation keys, keys inside the modal, a re-press while open', () => {
-	// The keyboard half of the no-op discipline: an act that chooses nothing
-	// must not take the pending link away from its answer. Tab past the
-	// trigger, Enter typed into the modal's search, Enter on the trigger with
-	// the modal already open — none of them open anything, so none of them
-	// stamp, and the link's own missing answer still earns its surface.
-	const modalOpen = {
-		querySelector: (selector) => (selector === '.new-conversation__modal' ? {} : null),
-	};
-	const wrapper = { querySelector: () => null };
-	const trigger = {
-		closest: (selector) => (selector === '.new-conversation__trigger' ? {} : null),
-	};
-	const searchInput = { closest: () => null };
-
-	for (const [root, target, key, label] of [
-		[wrapper, trigger, 'Tab', 'Tab moving focus past the trigger'],
-		[modalOpen, searchInput, 'Enter', 'Enter inside the open modal'],
-		[modalOpen, trigger, 'Enter', 'a trigger re-press while the modal is open'],
-	]) {
-		// Strict equality, not truthiness: the gate must exist and answer false —
-		// an absent gate is the defect the first test of this group pins, not a
-		// pass here.
-		assert.equal(
-			selection.isNewConversationOpenKeyIntent?.(root, target, key),
-			false,
-			`${label} must not be judged an open intent`
-		);
-
-		const revisions = trackSelectionRevisions(null);
-		const atDispatch = revisions.capture();
-		if (selection.isNewConversationOpenKeyIntent?.(root, target, key)) revisions.act();
-		assert.equal(
-			deepLinkVerdict(revisions, atDispatch, null, 'missing'),
-			'not-found',
-			`${label} chooses nothing, so the link's own answer must still stand`
+			['Enter', ' ', 'Spacebar'].includes(key),
+			`the vendored button's activation answer changed for ${JSON.stringify(key)}`
 		);
 	}
 });
@@ -963,36 +885,29 @@ test('the surface stamps the reader intents a selected-id transition cannot show
 	);
 });
 
-test('the New Message open is stamped through the owned gate, not by editing the vendored trigger', () => {
-	// STRUCTURAL, same caveat as above. The vendored `NewConversation` owns its
-	// trigger and exposes no open callback, so the open intent — a reader act
-	// the selection never shows — is judged and stamped at the surface's own
-	// wrapper, in owned source. Counted over the WHOLE tree: the delegation
-	// handler is inline in the markup.
+test('the New Message open is stamped through the vendored onOpenIntent hook', () => {
+	// STRUCTURAL, same caveat as above. The open intent is a reader act the
+	// selection never shows, so it must be stamped explicitly — through the
+	// hook greater-v0.13.4 (#1014) shipped, wired by the surface to the tracker's
+	// act. Counted over the WHOLE tree: the prop is inline in the markup.
+	const components = [...walk(surface.fragment)].filter(
+		(node) => node.type === 'Component' && node.name === 'NewConversation'
+	);
+	assert.equal(components.length, 1, 'expected exactly one NewConversation in the surface');
+	const hasOpenIntent = components[0].attributes.some(
+		(attribute) => attribute.type === 'Attribute' && attribute.name === 'onOpenIntent'
+	);
 	assert.ok(
-		calls(surface, 'isNewConversationOpenIntent'),
-		'the New Conversation wrapper must judge the click through the owned gate in $lib/messaging/selection'
+		hasOpenIntent,
+		'NewConversation must receive onOpenIntent, or the reader open cannot stamp the deep-link revision'
 	);
 	assert.ok(
 		countCalls(surface, 'act') >= 3,
 		'folder switch, list select, AND the New Message open must stamp the reader act explicitly'
 	);
-});
-
-test('the surface gates the keyboard open through the owned keydown gate too', () => {
-	// STRUCTURAL, same caveat as above. The vendored button's keyboard
-	// activation never dispatches a click, so the wrapper must judge the
-	// keydown through the owned gate — a wrapper listening only for clicks
-	// leaves the keyboard reader exactly the unstamped-open race. Counted over
-	// the WHOLE tree: the delegation handler is inline in the markup.
-	assert.ok(
-		calls(surface, 'isNewConversationOpenKeyIntent'),
-		'the New Conversation wrapper must judge the keydown through the owned gate in $lib/messaging/selection'
-	);
-	assert.ok(
-		countCalls(surface, 'act') >= 4,
-		'folder switch, list select, the New Message click open, AND the New Message keyboard open must stamp'
-	);
+	// The keyboard open needs nothing more: the vendored button's keyboard
+	// activation invokes the same onClick that fires onOpenIntent — pinned
+	// against the real vendored button in the keyboard group below.
 });
 
 test('the surface clears a landed terminal resolution on both explicit later acts', () => {
@@ -1022,11 +937,12 @@ test('the surface clears a landed terminal resolution on both explicit later act
 	);
 });
 
-test('the vendored NewConversation still has no open-intent hook', () => {
-	// INVERTED, like the composer pin: it describes the upstream gap that makes
-	// the delegated wrapper necessary, and fails the day upstream ships an open
-	// hook — at which point the wrapper can stamp through the component's own
-	// callback instead of delegating the click.
+test('the vendored NewConversation ships the open-intent hook, and the surface stamps through it', () => {
+	// POSITIVE PIN, the day the inverted one predicted: greater-v0.13.4 (#1014)
+	// shipped `open`, `onOpenIntent`, and `onOpenChange`, and the surface now
+	// stamps the reader's open through `onOpenIntent` instead of delegating
+	// clicks and keydowns in the capture phase. If this Props surface changes
+	// again, re-check the wiring rather than reaching for a gate.
 	const component = readFileSync('src/lib/components/messaging/NewConversation.svelte', 'utf8');
 	const props = component.match(/interface Props \{([\s\S]*?)\n\t\}/);
 	assert.ok(props, 'could not read the Props interface');
@@ -1034,8 +950,15 @@ test('the vendored NewConversation still has no open-intent hook', () => {
 	const names = [...props[1].matchAll(/^\s*(\w+)[?:]/gm)].map((match) => match[1]);
 	assert.deepEqual(
 		names.sort(),
-		['class', 'initialParticipants', 'onConversationCreated'],
-		'the NewConversation Props surface changed — check whether an open-intent hook appeared'
+		[
+			'class',
+			'initialParticipants',
+			'onConversationCreated',
+			'onOpenChange',
+			'onOpenIntent',
+			'open',
+		],
+		'the NewConversation Props surface changed — re-check how the surface stamps the open'
 	);
 });
 
@@ -1061,10 +984,14 @@ test('the surface never routes a request through the context methods that ignore
 	);
 });
 
-test('the vendored composer still has no conversation of its own', () => {
-	// INVERTED, like the renderer-authority pins: it describes the upstream gap
-	// that makes the key necessary, and fails the day upstream closes it — at
-	// which point the key can go and per-conversation drafts become possible.
+test('the vendored composer can target a conversation, but its draft is still component-local', () => {
+	// HALF CLOSED at greater-v0.13.4 (#1014): the composer gained a
+	// `conversation` prop and targets that conversation at SEND time, so a
+	// consumer can pin the recipient explicitly. The draft half is NOT closed:
+	// the text is still a bare component-local string, so the surface's `{#key}`
+	// on the selected conversation stays — it is what keeps one person's unsent
+	// words from rendering under the next person's name. If the draft prop ever
+	// ships, re-check the keying, as this test says.
 	const composer = readFileSync('src/lib/components/messaging/Composer.svelte', 'utf8');
 	const props = composer.match(/interface Props \{([\s\S]*?)\n\t\}/);
 	assert.ok(props, 'could not read the Props interface');
@@ -1072,8 +999,8 @@ test('the vendored composer still has no conversation of its own', () => {
 	const names = [...props[1].matchAll(/^\s*(\w+)[?:]/gm)].map((match) => match[1]);
 	assert.deepEqual(
 		names.sort(),
-		['class'],
-		'the composer Props surface changed — check whether a conversation or draft prop appeared'
+		['class', 'conversation'],
+		'the composer Props surface changed — re-check the keying and the send target'
 	);
 
 	assert.match(

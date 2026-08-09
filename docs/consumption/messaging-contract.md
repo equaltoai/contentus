@@ -420,10 +420,21 @@ The server ships the route, its folder and the conversation id. Asserted in
     contentus's interim appearance layer, with a stated sunset.
 
 12. **`Messages.NewConversation` has no open-intent hook — and its keyboard
-    activation never dispatches a click.** Its `Props` are `class`,
-    `initialParticipants`, and `onConversationCreated` — and the last
-    fires only AFTER the component has created and internally selected the
-    conversation. Opening the modal, searching, and picking a recipient all
+    activation never dispatches a click.** **CLOSED at greater-v0.13.4
+    (#1014).** The component now ships `open` (bindable), `onOpenIntent`, and
+    `onOpenChange`; `onOpenIntent` fires from the trigger's own open path,
+    which the keyboard activation reaches through the same click handler, so
+    both input families are covered by the one hook. Contentus's capture-phase
+    click/keydown gate in `$lib/messaging/selection` is retired and the
+    surface stamps the reader's open through `onOpenIntent` directly.
+    `tests/messaging-races.test.mjs` now pins the hook positively: the Props
+    surface, the single invocation inside `openButton`'s onClick, and the
+    vendored activation key set.
+
+    ~~Its `Props` are `class`,~~
+    ~~`initialParticipants`, and `onConversationCreated` — and the last~~
+    ~~fires only AFTER the component has created and internally selected the~~
+    ~~conversation.~~ Opening the modal, searching, and picking a recipient all
     happen with the selection untouched and no parent callback, so a client
     that counts reader choices (contentus's selection revision, which a pending
     `/messages/{id}` deep-link completion is judged against) cannot see the

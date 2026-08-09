@@ -193,10 +193,19 @@ refusal, feature-gate refusal, and not-found/forbidden.
 
 ### D. `Review.VerdictActions` sizes its controls below the touch floor
 
-**Where:** `equaltoai/greater-components`, `review` registry entry,
-`Review/VerdictActions.svelte` (first seen at greater-v0.12.0; still present at
-the current **greater-v0.13.1** pin, where every control is `size="sm"` — the
-component's bytes are unchanged from 0.13.0).
+**CLOSED at greater-v0.13.4 (upstream #1018).** Every control the component
+renders — both verdict buttons, the dialog's Cancel and confirm — is now
+`size="lg"`, and the vendored primitives theme sizes that variant
+`min-height: 3rem` (48px), above the 44px floor natively. The sizing bridge in
+`src/lib/brand/bridge.css` is deleted per its own swap-to-vendored header, and
+`tests/mobile-chrome.test.mjs` now pins the native floor: the component must
+render `size="lg"` (never `size="sm"`) and the `gr-button--lg` variant must
+stay at or above 3rem.
+
+~~**Where:** `equaltoai/greater-components`, `review` registry entry,~~
+~~`Review/VerdictActions.svelte` (first seen at greater-v0.12.0; still present at~~
+~~the current **greater-v0.13.1** pin, where every control is `size="sm"` — the~~
+~~component's bytes are unchanged from 0.13.0).~~
 
 Every control the component renders is `size="sm"` — both verdict buttons, both
 dialog buttons, and the dialog's close control — and the vendored primitives
@@ -209,12 +218,11 @@ design §4 sets a 44px floor, and contentus's own controls beside them
 as a prop on `VerdictActions` so a consumer can. The buttons are a decision
 surface, not a toolbar.
 
-**What contentus did while this is open:** a **sizing bridge** in
-`src/lib/brand/bridge.css` — the pattern `src/lib/brand/compose.css` established
-at M3 — raising the vendored selectors to 44px. Appearance only; the component
-is not edited and stays CLI-managed. The block carries a swap-to-vendored header
-and is deleted when this ask lands. Asserted in `tests/mobile-chrome.test.mjs`
-against the selectors the component actually emits.
+**What contentus did while this was open:** a **sizing bridge** in
+`src/lib/brand/bridge.css` raised the vendored selectors to 44px, appearance
+only, the component never edited. The upstream fix landed the first half of
+the ask (`size="lg"` across the chrome), so the bridge is deleted and the
+probes assert the native floor instead.
 
 ### E. `resolveReviewState` renders an absent projection as a decided absence
 
