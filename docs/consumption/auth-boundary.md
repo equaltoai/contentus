@@ -161,6 +161,15 @@ though no conformant client is harmed by it. Contentus does not depend on the
 fix: ignoring the field is the correct client behaviour either way, so this is
 an upstream report rather than a blocker.
 
+**CLOSED UPSTREAM at lesser v1.6.4** (`0ede06f50`, "stop minting secrets for
+public OAuth clients"): a public registration is now answered with an empty
+`client_secret` and `Confidential=false`. Nothing in this client changed for
+it — the response field was never read — which is exactly the behaviour the
+paragraphs above defend: the fix landed upstream and contentus was already
+correct either way. The historical defect description stays because the sweep
+and the five negatives are still the properties that matter against any other
+instance.
+
 **Deliberate differences from simulacrum**, all local, none on the wire, each
 one also stated in the module header: no `VITE_PUBLIC_OAUTH_CLIENT_ID` override
 (contentus takes no config injection); no RFC 8707 `resource` parameter

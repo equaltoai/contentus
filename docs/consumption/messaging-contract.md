@@ -12,48 +12,51 @@ writing, so nothing below rests on a round trip that did not happen.
 
 ## Contract facts that changed the UI
 
-### 1. `unread` is a BOOLEAN, and there is no message count anywhere
+### 1. `unread` is a BOOLEAN — and v1.6.4 added the real count beside it
 
-`conversations` selects `unread: Boolean` per conversation. There is no
-`unreadCount`, no per-conversation message total, and `conversationMessages`
-carries `totalCount` for the WHOLE thread rather than for its unread tail.
+**Updated at lesser v1.6.4.** `Conversation.unreadCount: Int!` now serves the
+real per-conversation count of messages the viewer has not read, and contentus
+selects and reads it (`toConversation`). What follows is what did NOT change.
 
-So a client cannot honestly say "3 unread messages" about anything. What it can
-say is how many conversations have unread activity, and that is what every
-count in contentus does:
+The nav badge still counts **conversations with unread activity**, not
+messages — a design choice, no longer a contract limitation:
 
-- the conversation card shows a **dot**, not a numeral — a "1" there reads as a
-  message count, and it would be one contentus made up;
+- the conversation card shows a **dot**, not a numeral — the numeral the
+  contract could now supply is a thread-level fact the card does not otherwise
+  display, and a count that only exists on the card invites a reading the
+  surface does not support;
 - the nav badge counts CONVERSATIONS, and its accessible label says
   `"N conversations with unread messages"` (`unreadBadgeLabel`);
 - `unreadConversationCount` is the single place the total is derived.
 
-greater's own `UnreadIndicator` sums the same per-conversation values under an
-`aria-label` reading `"N unread messages"`. That mislabel is **routed
-upstream**; contentus renders its own badge rather than shipping the wrong unit
-to a screen reader.
+greater's own `UnreadIndicator` sums `conversation.unreadCount` under an
+`aria-label` reading `"N unread messages"`. At v1.6.4 + greater-v0.13.4 that
+label is now **true**: the vendored adapter reads the served count
+(`conversation.unreadCount ?? (unread ? 1 : 0)`), so the number is messages,
+as labelled. Contentus still renders its own badge, because its unit is the
+deliberate one above, not because upstream's is wrong anymore.
 
-Asserted in `tests/messaging-adapters.test.mjs` → _"unread is a
-per-conversation boolean, and every count says conversations"_.
+Asserted in `tests/messaging-adapters.test.mjs` → _"the real unread count
+flows through, and every badge count still says conversations"_.
 
-### 2. `conversations` accepts a cursor it never issues
+### 2. `conversationConnection` landed at v1.6.4; the residual gap is greater's
 
-The operation signature is `conversations(folder, first, after: Cursor)`. The
-selection returns a **bare list** — no `pageInfo`, no `edges`, no per-item
-cursor. So `after` is undrivable: there is no value any client could obtain to
-pass back.
+**Updated at lesser v1.6.4.** lesser shipped `conversationConnection(folder,
+first, after)` with `edges { cursor node }` and `pageInfo { hasNextPage
+endCursor }`, and deprecated the bare list in the schema's own words ("Prefer
+this over the legacy list-valued conversations field"). Contentus queries the
+connection and reads `pageInfo` for honesty of presence.
 
-The consequence is not cosmetic. `first` is not "the first page", it is **the
-whole list a reader can reach**. Contentus asks for 50 (`CONVERSATION_PAGE_SIZE`)
-and ships no "load more" control on the list, because a control that cannot
-advance is worse than none. A reader with more than 50 conversations cannot
-reach the rest, and that is a real limit rather than a rendering choice.
+Pagination is still not drivable end-to-end, but the missing link moved: the
+vendored `MessagesHandlers` list interface has no cursor channel — no handler
+a "load more" control could call — so `first` (50, `CONVERSATION_PAGE_SIZE`)
+is still the whole list a reader can reach and no `after` is declared. The
+remaining ask is on **greater-components**, not lesser.
 
-Contentus deliberately does not send `after`. **Routed upstream** as an ask for
-a proper connection. Pinned by `tests/messaging-queries.test.mjs` → _"the
-conversation list document sends no cursor, because lesser returns none"_, which
-fails if upstream ever adds `pageInfo` — at which point contentus should
-paginate.
+Pinned by `tests/messaging-queries.test.mjs`, which asserts both halves: the
+document targets `conversationConnection` with edges and pageInfo, and the
+vendored 0.13.4 AST still targets legacy `conversations` — so a greater bump
+adopting the connection fails the pin and the client revisits.
 
 ### 3. `conversationMessages` IS a proper connection
 
@@ -371,9 +374,13 @@ The server ships the route, its folder and the conversation id. Asserted in
    `Array.isArray(conversations) ? conversations : []` turns a failure into a
    false empty. Suggested: propagate the failure and let the caller decide.
 
-6. **`UnreadIndicator` labels conversations as messages.** It sums
-   `conversation.unreadCount` — which upstream itself derives as `unread ? 1 :
-0` — under `aria-label="N unread messages"`. The number is conversations.
+6. ~~**`UnreadIndicator` labels conversations as messages.**~~ **RESOLVED IN
+   SUBSTANCE at lesser v1.6.4 + greater-v0.13.4.** The vendored adapter now
+   reads the served `conversation.unreadCount` (`?? (unread ? 1 : 0)` for
+   pre-v1.6.4 instances), so the summed number under `aria-label="N unread
+   messages"` is messages, as labelled. Contentus keeps its own badge because
+   its unit — conversations with unread activity — is a deliberate design
+   choice, not because upstream's is wrong (see §1).
 
 7. **`Messages.Conversations` cannot be told which folder to open**, and its
    card has no action slot. See the decision above; both block §5's addressable
@@ -454,10 +461,12 @@ The server ships the route, its folder and the conversation id. Asserted in
 
 ### To `equaltoai/lesser`
 
-1. **`conversations` accepts `after: Cursor` and returns no cursor.** The
-   argument is undrivable and `first` is a hard ceiling on what a reader can
-   reach. Suggested: make it a connection, consistent with
-   `conversationMessages`.
+1. ~~**`conversations` accepts `after: Cursor` and returns no cursor.**~~
+   **CLOSED at lesser v1.6.4 (#1346/#1347).** `conversationConnection` is a
+   proper connection with `edges { cursor node }` and `pageInfo`, and the
+   schema itself deprecates the legacy list in its description. Contentus
+   queries the connection; see finding 2 above for why pagination still ends
+   at the vendored handler interface.
 
 2. **`conversationMessages` does not state its edge order.** Clients must guess
    or re-sort; contentus re-sorts. Suggested: document it, or state it in the
@@ -468,33 +477,30 @@ The server ships the route, its folder and the conversation id. Asserted in
    the event stream alone. Suggested: publish the message, or at minimum the
    conversation's new `updatedAt` and `viewerMetadata`.
 
-4. **There is no per-conversation unread COUNT.** `unread: Boolean` is the whole
-   contract, so no client can render the message count a badge conventionally
-   implies. Suggested: `unreadCount: Int`.
+4. ~~**There is no per-conversation unread COUNT.**~~ **CLOSED at lesser
+   v1.6.4.** `Conversation.unreadCount: Int!` serves it; contentus selects and
+   reads it. The badge still counts conversations by design (finding 1).
 
-5. **No contract-served subscription endpoint.** Unchanged from M4 and repeated
-   here because face 5 inherits it: the socket host is derived by prefixing
-   `ws.` onto the request origin, which is lesser's documented topology but not
-   a value the instance states. Confined to `subscriptionEndpoint` so there is
-   one place to delete.
+5. ~~**No contract-served subscription endpoint.**~~ **CLOSED at lesser
+   v1.6.4 (#1348).** `InstanceInfo.subscriptionUrl` publishes the
+   graphql-transport-ws endpoint, and the `ws.`-prefix derivation confined to
+   `subscriptionEndpoint` is deleted — the one place there was to delete. The
+   socket origin is now read from the instance (anonymous, fail-closed) by
+   `src/lib/instance/info.ts`, and strict CSP's `connect-src` addition is the
+   origin of the URL lesser returned.
 
-6. **`conversation(id)` answers "not yours" and "not here" with different
-   envelopes.** `graph/query_resolvers_conversations.go` returns a clean
-   `(nil, nil)` when the store reports not-found, and `(nil, ErrAccessDenied)`
-   when the conversation EXISTS but the viewer is not a participant. Both leave
-   `data.conversation` null and neither leaks a body — but the difference is an
-   existence oracle: a caller who can type a URL can distinguish "this
-   conversation exists" from "it does not", one guessed id at a time, purely
-   from the presence of the error. Suggested fix: answer a non-participant
-   exactly as a missing id is answered.
+6. ~~**`conversation(id)` answers "not yours" and "not here" with different
+   envelopes.**~~ **CLOSED at lesser v1.6.4 (21b82399a).** Both cases now
+   return the identical `ErrAccessDenied` envelope with `data.conversation`
+   null — the existence oracle is gone at the source.
 
-   Contentus declines to relay it: `adapter.fetchConversation` suppresses the
-   partial-read disclosure when the conversation is null, so both answers reach
-   the surface as the same value, on the same path, in the same one round trip,
-   and render one "this conversation is not available" state.
-   **Pinned** by `tests/messaging-adapters.test.mjs`, which drives both
-   envelopes through the real adapter and asserts the value, the disclosure and
-   the request count are identical.
+   Contentus's suppression stays as defense-in-depth and for pre-v1.6.4
+   instances: `adapter.fetchConversation` still withholds the partial-read
+   disclosure when the conversation is null, so both answers reach the surface
+   as the same value on the same path.
+   **Pinned** by `tests/messaging-adapters.test.mjs`, which now stubs both
+   hidden cases with the identical v1.6.4 envelope and asserts the value, the
+   disclosure and the request count are identical.
 
 ---
 

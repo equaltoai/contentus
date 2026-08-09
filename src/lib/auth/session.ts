@@ -416,14 +416,16 @@ const NOT_A_PUBLIC_CLIENT =
  * The two fields contentus reads out of lesser's registration response, and the
  * one thing it will not accept.
  *
- * THE OMISSION IS STILL THE POINT. lesser returns a `client_secret` for a public
- * client — a proven defect in the instance, filed as such, and one that is
- * simply not this client's business. Naming what IS selected here, in one place,
- * is what keeps "the secret is ignored" a property of the code's shape: nothing
- * downstream is handed an object the secret survives into. What that does NOT
- * claim is that the field never existed — `registerOAuthClient` holds the whole
- * decoded body for the length of this call, and no client-side projection can
- * unmake that. See the header for the five negatives that ARE proven.
+ * THE OMISSION IS STILL THE POINT. lesser returned a `client_secret` for a
+ * public client until v1.6.4 (`0ede06f50`, which stopped minting secrets for
+ * public clients) — a defect that was simply not this client's business, and
+ * whose fix changed nothing here because the field was never read. Naming
+ * what IS selected here, in one place, is what keeps "the secret is ignored"
+ * a property of the code's shape: nothing downstream is handed an object the
+ * secret survives into. What that does NOT claim is that the field never
+ * existed — `registerOAuthClient` holds the whole decoded body for the length
+ * of this call, and no client-side projection can unmake that. See the header
+ * for the five negatives that ARE proven.
  *
  * `client_id` is read as DATA. `token_endpoint_auth_method` is read as a GATE:
  * absent is sim's `?? 'none'` — unreachable against a conformant lesser, kept

@@ -234,7 +234,7 @@ test('every inventoried document parses and validates against the pinned schema'
 	const { documents, problems } = readInventory(trackedSrc());
 
 	assert.deepEqual(problems, [], 'the inventory matches the source in both directions');
-	assert.ok(documents.length >= 45, `expected the full document set, got ${documents.length}`);
+	assert.ok(documents.length >= 46, `expected the full document set, got ${documents.length}`);
 
 	for (const document of documents) {
 		const errors = validate(schema, parse(document.text), specifiedRules);

@@ -6,13 +6,12 @@ review chrome moved to **greater-v0.13.0** (`ce8f3d9d`) at the M6 pin bump, and
 both open asks below were re-read there: both still reproduce, so each names the
 release it reproduces at rather than the one it was first seen at.
 
-The vendored tree is now at **greater-v0.13.1** (`fb6ee927`), bumped at M2 for
-`greater update`'s new obsolete-file pruning. That release changed the CLI and
-nothing else: comparing `ce8f3d9d…fb6ee927` upstream shows no file under
-`packages/*/src` outside `packages/cli` moved, and re-running the CLI over this
-consumer rewrote 104 managed files to byte-identical content. So every
-observation below reproduces at 0.13.1 unchanged — stated because "still
-reproduces" is worth nothing when nobody checked whether the subject moved.
+The vendored tree is now at **greater-v0.13.4** and the schema pin at **lesser
+v1.6.4** (2026-08-09 contract sync). Three of the routed asks below — B
+(capability signal), C (typed error codes) and F (batch review projection) —
+are **answered at lesser v1.6.4** and are marked closed in place; the consuming
+code moved with them. Ask D (verdict control sizing) closed at greater-v0.13.4.
+A and E remain open and still name the release they reproduce at.
 
 A thin consumption note, not a redefinition of anyone's contract. It records
 what contentus observed while wiring Face 2, what it decided, and what it did
@@ -87,24 +86,20 @@ decision now lives in `src/lib/review/verdict-offer.ts` and reads `grant` alone.
 Contentus cannot see who the principal is, does not guess, and lets lesser
 authorize.
 
-### 2b. `myDrafts` carries no review projection at all
+### 2b. `myDrafts` carries no review projection at all — superseded at v1.6.4
 
-`type Draft` (`graph/phase1.graphql`) exposes `generatedBy` and `reviewedBy` and
-**nothing else about review**: no `reviewStatus`, no `editorNotes`, no `grant`,
-no verdict history. `type DraftReview` carries all five.
+**Superseded at lesser v1.6.4.** `myDraftReviews(first, after)` returns a full
+`DraftReview` for every review assignment the caller created — ask F below,
+answered. The queue's own half is now a bounded connection walk on `pageInfo`,
+the per-draft `draftReview(id)` fan-out is deleted, and the `listing-only`
+fallback is gone with it: every own entry renders lesser's own projection.
 
-lesser sets `Draft.ReviewedBy` and `Draft.ReviewStatus` together, on every
-`SubmitDraftReview` (`draft_review.go`). So a draft a reviewer has already ruled
-on comes back from the listing with a reviewer and no verdicts — indistinguishable,
-in the fields the queue actually reads, from one nobody has touched.
-
-The queue therefore loads `draftReview(id)` for each of the viewer's own
-agent-generated drafts. `DraftReviewForCaller` authorizes it for the **owner** as
-well as for an active grantee, so the viewer is entitled to every one of them,
-and asking is reading the contract rather than working around it. A draft whose
-projection does not arrive keeps its listing shape, is marked `listing-only`, and
-is rendered as an unknown review state — never as a decided absence. See upstream
-ask E below for the chrome half of this, and ask F for the fan-out.
+The historical observation stays because it shaped the code that was just
+replaced: `type Draft` exposes `generatedBy` and `reviewedBy` and nothing else
+about review, and lesser sets `ReviewedBy`/`ReviewStatus` together on every
+`SubmitDraftReview`, so the listing alone could not distinguish "ruled on"
+from "untouched". That remains true of `type Draft`; it no longer matters to
+the queue, which does not read the listing.
 
 ### 3. `myDrafts` filters after it paginates
 
@@ -117,18 +112,25 @@ The queue walks a bounded number of pages and, when more remain, says "none in
 what was scanned" rather than "none". The distinction is the difference between
 a true statement and a false one.
 
-### 4. The publication gate is cumulative, and the client cannot compute it
+### 4. The publication gate is cumulative, and v1.6.4 serves lesser's own evaluation
 
-`PublishDraft` requires unanimous approval from every reviewer holding an active
-grant, and — for any draft that records a generator — the instance principal's
-approval as well. Both, not either.
+**Updated at lesser v1.6.4.** `PublishDraft` still requires unanimous approval
+from every reviewer holding an active grant, and — for any draft that records
+a generator — the instance principal's approval as well. What changed is that
+lesser now serves its own evaluation of that rule: `DraftReview.publishEligibility
+{ eligible blockingReasons reviewersApproved principalApprovalRequired
+principalApproved }`, with `contentHash`/`revision` binding it to exact draft
+content and `verdicts[].current/stale` marking verdicts a later edit
+invalidated.
 
-Contentus never evaluates that. The vendored `describeApprovalRequirement`
-states which rules are in force; `resolveReviewState` renders `reviewStatus` as
-**latest activity** with `REVIEW_STATE_QUALIFIER` beside it; and publish
-enablement comes from lesser's answer to the mutation. The inputs the rule needs
-— the active-grant set, the principal's identity — are not in the projection, so
-any client-side "3 of 3" would be invented.
+Contentus still never evaluates the gate itself — it READS lesser's. The
+publish action is disabled on a served `eligible: false` with
+`blockingReasons` rendered verbatim, and the mutation refusal remains the
+final word (an eligibility read can be stale between load and click). The
+vendored `describeApprovalRequirement` states which rules are in force;
+`resolveReviewState` renders `reviewStatus` as **latest activity** with
+`REVIEW_STATE_QUALIFIER` beside it, deliberately remaining an activity badge
+now that the canonical gate lives in `publishEligibility`.
 
 ## Upstream asks, routed rather than worked around
 
@@ -162,34 +164,29 @@ drafts in any case.
 
 ### B. No readable capability signal for the CMS mode gates
 
+**CLOSED at lesser v1.6.4 (#1348).** `InstanceInfo.cmsFeatures { longForm
+drafts revisions scheduling series categories }` is the public,
+unauthenticated-safe capability field this ask proposed. Contentus reads it:
+the schedule control initializes from `cmsFeatures.scheduling` (unavailable on
+a served `false`, with no `scheduleDraft` attempted), and the typed
+`FEATURE_DISABLED` refusal remains the final word against a stale read.
+
 **Where:** `equaltoai/lesser`, GraphQL contract.
-
-`scheduleDraft` sits behind `requireCMSSchedulingEnabled`, and `revisions` /
-`restoreRevision` behind `requireCMSRevisionsEnabled`, but the public schema
-exposes no field a client can read to discover which are on — the flags live on
-the admin-scoped `AdminInstanceConfig` / `InstanceConfigFeature`.
-
-Product design §5 asks for mode-gated features to be hidden unless enabled. A
-client cannot do that without a signal, so contentus offers the control, treats
-the feature-gate error as a product state, and stops offering it for the rest of
-the session.
-
-**Ask:** a public, unauthenticated-safe capability field — for example
-`instanceInfo.cmsFeatures { longForm scheduling revisions }`.
 
 ### C. CMS errors carry no machine-readable code
 
+**CLOSED at lesser v1.6.4 (e93388ab7).** CMS errors now carry
+`extensions.code` — `FEATURE_DISABLED`, `NOT_FOUND`, `FORBIDDEN`,
+`VALIDATION`, `UNAUTHENTICATED` — and `failureFromErrors` matches the code
+first. The message-substring matching stays as the fallback for pre-v1.6.4
+instances, and it still does the work for the approval-gate refusal, which
+lesser's classifier tags `INTERNAL_ERROR` (unmapped) — the `gated`
+classification therefore still rides the message text there, by examination
+of the upstream classifier rather than by accident. The classification
+remains presentational: a miss degrades to a plainer message, never to a
+wrong permission decision.
+
 **Where:** `equaltoai/lesser`, CMS resolvers.
-
-The CMS resolvers return bare `errors.New(...)` values with no
-`extensions.code`, so a client distinguishing "the gate refused" from "the draft
-is gone" from "the instance is unwell" has only the message text to go on.
-`src/lib/cms/review.ts` classifies on message substrings and says so in a
-comment; the classification is presentational, so a miss degrades to a plainer
-message rather than to a wrong permission decision.
-
-**Ask:** an `extensions.code` on CMS errors — at minimum for the approval-gate
-refusal, feature-gate refusal, and not-found/forbidden.
 
 ### D. `Review.VerdictActions` sizes its controls below the touch floor
 
@@ -248,16 +245,13 @@ file is edited.
 
 ### F. No batch review projection for a caller's own drafts
 
+**CLOSED at lesser v1.6.4 (5d5a278a2).** `myDraftReviews(first, after)` is the
+connection this ask proposed, returning a full `DraftReview` per assignment
+the caller created. The queue consumes it as a bounded `pageInfo` walk; the
+per-draft `draftReview(id)` fan-out, the `listing-only` fallback, and the
+`myDrafts` listing read are deleted from the queue path.
+
 **Where:** `equaltoai/lesser`, GraphQL contract.
-
-`draftReview(id)` is per draft. A queue that wants the review state of the
-viewer's own drafts must fan out one query per draft, which is what contentus
-now does (bounded concurrency, nothing dropped).
-
-**Ask:** either review fields on `type Draft` for the owner — `reviewStatus`,
-`verdicts` — or a `myDraftReviews(...)` connection returning `DraftReview` for
-the caller's own drafts. `DraftReviewForCaller` already authorizes the owner for
-each of them individually, so this exposes no new access.
 
 ## M2d.5 — the completion-gate round trip, and what was actually verified
 
