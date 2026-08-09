@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { STATUS_BYTE_LIMIT, statusByteLength } from '../src/lib/compose/budget.ts';
+import { DEFAULT_STATUS_BYTE_LIMIT, statusByteLength, statusByteLimit } from '../src/lib/compose/budget.ts';
 import {
 	AGENT_TRIGGER_DEFAULT,
 	AGENT_TRIGGER_TYPES,
@@ -23,9 +23,28 @@ import { buildComposeSubmission } from '../src/lib/compose/submission.ts';
 import {
 	NO_CLIENT_SIZE_CEILING,
 	PICKER_MEDIA_TYPES,
+	oversizeUploadMessage,
 	rejectionMessage,
 } from '../src/lib/compose/media-policy.ts';
 import { loadHandler, renderRoute, withStubbedGraphql } from '../scripts/render-routes.mjs';
+
+/** A full `InstanceInfo` as lesser v1.6.4 serves one, bent per case. */
+function instanceInfo(overrides = {}) {
+	return {
+		subscriptionUrl: 'wss://ws.instance.example.com/graphql',
+		maxUploadSizeBytes: 10 * 1024 * 1024,
+		maxStatusCharacters: 5000,
+		cmsFeatures: {
+			longForm: true,
+			drafts: true,
+			revisions: true,
+			scheduling: true,
+			series: true,
+			categories: true,
+		},
+		...overrides,
+	};
+}
 
 /**
  * Face 3 probes (M3.2–M3.5, extended in the PR #53 round-2 rework).
@@ -217,6 +236,7 @@ test('a reply to a DIRECT status sends DIRECT', () => {
 		mode: 'reply',
 		form: { content: 'answering you', visibility: seed.visibility },
 		extras: emptyExtras({ inReplyToId: SOURCE_ID }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	assert.equal(submission.kind, 'create');
@@ -232,6 +252,7 @@ test('a reply to a FOLLOWERS status sends FOLLOWERS', () => {
 		mode: 'reply',
 		form: { content: 'answering you', visibility: seed.visibility },
 		extras: emptyExtras({ inReplyToId: SOURCE_ID }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	assert.equal(createNoteVariables(submission.input).input.visibility, 'FOLLOWERS');
@@ -245,6 +266,7 @@ test('a scheduled reply carries the inherited reach too', () => {
 		mode: 'reply',
 		form: { content: 'later', visibility: seed.visibility },
 		extras: emptyExtras({ inReplyToId: SOURCE_ID, scheduledAt: '2026-08-01T00:00:00Z' }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	assert.equal(submission.kind, 'schedule');
@@ -259,6 +281,7 @@ test('a poster who widens past the parent still gets what they asked for', () =>
 		mode: 'reply',
 		form: { content: 'answering you', visibility: 'public' },
 		extras: emptyExtras({ inReplyToId: SOURCE_ID }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	assert.equal(createNoteVariables(submission.input).input.visibility, 'PUBLIC');
@@ -291,6 +314,7 @@ test('leaving an edit alone changes neither the gate nor the warning', () => {
 			contentWarning: seed.contentWarning,
 		},
 		extras: emptyExtras({ sensitive: seed.sensitive, editingStatusId: SOURCE_ID }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	assert.equal(submission.kind, 'update');
@@ -313,6 +337,7 @@ test('removing the warning on an edit sends an explicit empty spoiler', () => {
 		// is off, which is exactly what the operator removing it produces.
 		form: { content: seed.content, visibility: seed.visibility, contentWarning: undefined },
 		extras: emptyExtras({ editingStatusId: SOURCE_ID }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	const { input } = updateStatusVariables(submission.id, submission.input);
@@ -328,6 +353,7 @@ test('turning the sensitive gate off on an edit sends false, not nothing', () =>
 		mode: 'edit',
 		form: { content: 'unchanged', visibility: 'public', contentWarning: undefined },
 		extras: emptyExtras({ sensitive: false, editingStatusId: SOURCE_ID }),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	const { input } = updateStatusVariables(submission.id, submission.input);
@@ -342,6 +368,7 @@ test('a new post with no warning sends no spoiler at all', () => {
 		mode: 'new',
 		form: { content: 'hello', visibility: 'public', contentWarning: undefined },
 		extras: emptyExtras(),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	const { input } = createNoteVariables(submission.input);
@@ -367,10 +394,14 @@ test('the byte guard refuses before choosing a mutation', () => {
 		mode: 'new',
 		form: { content: '🌍'.repeat(200), visibility: 'public' },
 		extras: emptyExtras(),
+		byteLimit: DEFAULT_STATUS_BYTE_LIMIT,
 	});
 
 	assert.equal(submission.kind, 'rejected');
 	assert.match(submission.message, /800 bytes/);
+	// The refusal names "the limit in effect", not "the instance accepts": when
+	// the budget is the documented default, the instance never stated it.
+	assert.match(submission.message, /the limit in effect is 500 bytes/);
 });
 
 /* -------------------------------------------------------------------------
@@ -392,15 +423,91 @@ test('a post the character counter calls short can still exceed the budget', () 
 	// counter — and 800 bytes to the instance.
 	const text = '🌍'.repeat(200);
 
-	assert.ok(text.length < STATUS_BYTE_LIMIT, 'the vendored counter would call this under limit');
 	assert.ok(
-		statusByteLength(text) > STATUS_BYTE_LIMIT,
+		text.length < DEFAULT_STATUS_BYTE_LIMIT,
+		'the vendored counter would call this under limit'
+	);
+	assert.ok(
+		statusByteLength(text) > DEFAULT_STATUS_BYTE_LIMIT,
 		'while lesser measures it as over the limit'
 	);
 });
 
 test('the content warning is counted, because the composer counts it', () => {
 	assert.equal(statusByteLength('ab', 'cd'), 4);
+});
+
+test('the served maxStatusCharacters is the budget when the instance answers', () => {
+	// lesser v1.6.4 serves the limit; the number is one budget either way
+	// because enforcement is bytes (`len(content)`) regardless of the field's
+	// "characters" name — the mismatch is routed upstream, not litigated here.
+	assert.equal(statusByteLimit(instanceInfo({ maxStatusCharacters: 5000 })), 5000);
+
+	// And it WINS over the default: the 800-byte post the default refuses is
+	// accepted against an instance that says 5000.
+	const submission = buildComposeSubmission({
+		mode: 'new',
+		form: { content: '🌍'.repeat(200), visibility: 'public' },
+		extras: emptyExtras(),
+		byteLimit: statusByteLimit(instanceInfo({ maxStatusCharacters: 5000 })),
+	});
+
+	assert.equal(submission.kind, 'create');
+});
+
+test('an instance that does not answer gets lessers documented default, not a guess', () => {
+	assert.equal(statusByteLimit(null), DEFAULT_STATUS_BYTE_LIMIT);
+	assert.equal(statusByteLimit(null), 500, 'the documented MaxStatusLength default');
+});
+
+test('the vendored composer never sees a cap below the instance real one', () => {
+	// SOURCE-SHAPE, and it says so: `Compose.Root` fixes `characterLimit` at
+	// construction and `node --test` has no DOM to mount it. What is asserted
+	// is the wiring that makes a stale-or-default cap impossible: the budget is
+	// settled from the instance read BEFORE any seed is applied, and the
+	// composer subtree — the only place the cap is consumed — does not exist
+	// until it is.
+	const source = readFileSync(new URL('../src/lib/routes/Compose.svelte', import.meta.url), 'utf8');
+
+	assert.match(source, /characterLimit: byteBudget\.limit/, 'the cap is the resolved budget');
+	assert.doesNotMatch(
+		source,
+		/(?<!DEFAULT_)STATUS_BYTE_LIMIT/,
+		'no mirrored constant survives on the route'
+	);
+	assert.match(
+		source,
+		/\{:else if !seed \|\| !byteBudget\}/,
+		'the composer is held until the budget is settled'
+	);
+
+	const budgetSettled = source.indexOf('byteBudget = { limit: statusByteLimit(');
+	const firstSeed = source.indexOf('applySeed(composeSeed(mode, source))');
+	assert.ok(budgetSettled !== -1 && firstSeed !== -1);
+	assert.ok(
+		budgetSettled < firstSeed,
+		'the budget is resolved before the first seed, so before the composer exists'
+	);
+});
+
+test('the budget notice says whose number it is showing', () => {
+	// SOURCE-SHAPE, and it says so. A served limit is the instance's own
+	// statement; the default standing in must be named as lesser's default —
+	// presenting it as something this instance stated would be a claim the
+	// instance never made.
+	const source = readFileSync(
+		new URL('../src/lib/compose/ComposeBudget.svelte', import.meta.url),
+		'utf8'
+	);
+
+	assert.match(source, /served: boolean/, 'the provenance arrives as a prop');
+	assert.match(source, /the instance accepts \{byteLimit\}/, 'served: the instance said it');
+	assert.match(source, /documented default of \{byteLimit\}/, 'default: named as lessers own');
+	assert.doesNotMatch(
+		source,
+		/(?<!DEFAULT_)STATUS_BYTE_LIMIT/,
+		'no mirrored constant survives here either'
+	);
 });
 
 /* -------------------------------------------------------------------------
@@ -751,6 +858,69 @@ test('the upload sets a timeout, so a stalled transfer cannot hang the UI', () =
 });
 
 /* -------------------------------------------------------------------------
+ * The pre-wire size gate: the instance's own number, when it says one (v1.6.4)
+ * ---------------------------------------------------------------------- */
+
+test('an oversized file is refused before the wire, naming the served limit', () => {
+	// lesser v1.6.4 serves `InstanceInfo.maxUploadSizeBytes`, and the refusal
+	// names THAT number — the instance's own statement, not a client guess.
+	const message = oversizeUploadMessage(
+		{ name: 'clip.mov', type: 'video/quicktime', size: 12 * 1024 * 1024 },
+		instanceInfo({ maxUploadSizeBytes: 10 * 1024 * 1024 })
+	);
+
+	assert.ok(message, 'there must be a refusal');
+	assert.match(message, /clip\.mov/, 'the file is named');
+	assert.match(message, /10 MiB/, 'the served limit is named, in the instance own number');
+	assert.match(message, /this instance says it accepts/, 'as something the instance stated');
+});
+
+test('a file under the served limit passes the gate', () => {
+	assert.equal(
+		oversizeUploadMessage(
+			{ name: 'clip.mov', type: 'video/quicktime', size: 9 * 1024 * 1024 },
+			instanceInfo({ maxUploadSizeBytes: 10 * 1024 * 1024 })
+		),
+		null
+	);
+
+	// And exactly AT the limit: lesser rejects `len > max`, so equal is accepted.
+	assert.equal(
+		oversizeUploadMessage(
+			{ name: 'clip.mov', type: 'video/quicktime', size: 10 * 1024 * 1024 },
+			instanceInfo({ maxUploadSizeBytes: 10 * 1024 * 1024 })
+		),
+		null
+	);
+});
+
+test('an instance that does not answer gets no gate at all', () => {
+	// The pre-v1.6.4 shape, preserved exactly: the client does not guess, the
+	// upload goes ahead, and the instance's refusal is shown verbatim.
+	assert.equal(
+		oversizeUploadMessage({ name: 'clip.mov', type: 'video/quicktime', size: 50 * 1024 * 1024 }, null),
+		null
+	);
+});
+
+test('the gate runs before the upload request is constructed', () => {
+	// SOURCE-SHAPE, and it says so: `media.ts` imports `$lib/auth/session`,
+	// which node --test cannot resolve, so the module cannot be executed here.
+	// What is asserted is the order inside `uploadMedia`: the shared page-load
+	// instance read and the refusal both precede `new XMLHttpRequest` — a gate
+	// that ran after would have already sent the file it exists to stop.
+	const source = readFileSync(new URL('../src/lib/cms/media.ts', import.meta.url), 'utf8');
+
+	const upload = source.slice(source.indexOf('export async function uploadMedia'));
+	const gate = upload.indexOf('oversizeUploadMessage(file, await getCachedInstanceInfo())');
+	const request = upload.indexOf('new XMLHttpRequest()');
+
+	assert.ok(gate !== -1, 'the gate consults the shared page-load instance read');
+	assert.ok(request !== -1, 'the upload itself is still there');
+	assert.ok(gate < request, 'the refusal is decided before any request exists');
+});
+
+/* -------------------------------------------------------------------------
  * The wiring the pure probes above cannot reach
  * ---------------------------------------------------------------------- */
 
@@ -780,10 +950,16 @@ test('the composer does not exist until its seed does', () => {
 	// SOURCE-SHAPE, and it says so. The hold is what removes the window in
 	// which a poster could type into a composer that has not learned its reach
 	// — and what guarantees no seed can overwrite typing, because the subtree
-	// that would hold the typing is not mounted yet.
+	// that would hold the typing is not mounted yet. Since the byte-budget
+	// adoption the same hold covers the vendored counter's cap: it is fixed at
+	// construction, so the subtree waits for the settled budget too.
 	const source = readFileSync(new URL('../src/lib/routes/Compose.svelte', import.meta.url), 'utf8');
 
-	assert.match(source, /\{:else if !seed\}/, 'an unsettled seed renders a holding state');
+	assert.match(
+		source,
+		/\{:else if !seed \|\| !byteBudget\}/,
+		'an unsettled seed or budget renders a holding state'
+	);
 	assert.match(source, /\{:else if sourceUnavailable\}/, 'and an unloadable target is refused');
 	assert.match(
 		source,

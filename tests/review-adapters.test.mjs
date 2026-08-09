@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import {
@@ -9,6 +10,7 @@ import {
 	scheduleDraft,
 	submitDraftReview,
 } from '../src/lib/cms/review-transport.ts';
+import { initialSchedulingOffer } from '../src/lib/review/scheduling-offer.ts';
 
 /**
  * The review ADAPTERS, driven for real.
@@ -293,6 +295,57 @@ test('scheduleDraft carries the instant, and a feature-gated instance says so', 
 		() => scheduleDraft(TOKEN, DRAFT_ID, at)
 	);
 	assert.equal(gated.value.failure.reason, 'cms-disabled');
+});
+
+/** A full `InstanceInfo` as lesser v1.6.4 serves one, bent per case. */
+const instanceInfoWith = (scheduling) => ({
+	subscriptionUrl: 'wss://ws.instance.test/graphql',
+	maxUploadSizeBytes: 10 * 1024 * 1024,
+	maxStatusCharacters: 500,
+	cmsFeatures: {
+		longForm: true,
+		drafts: true,
+		revisions: true,
+		scheduling,
+		series: true,
+		categories: true,
+	},
+});
+
+test('a served scheduling: false starts the control unavailable — no refusal needed first', () => {
+	// The capability field lesser v1.6.4 added IS the answer the feature-gate
+	// refusal above used to deliver after an attempt. Served `false`: the
+	// control starts unavailable, and with no control offered there is no path
+	// that makes a scheduleDraft request at all.
+	assert.equal(initialSchedulingOffer(instanceInfoWith(false)), false);
+
+	// Served `true` and an instance that did not answer (pre-v1.6.4, or a
+	// failed read) both keep the pre-v1.6.4 behaviour: offer, and let the
+	// typed FEATURE_DISABLED refusal remain the final word — a served `true`
+	// can still be stale by click time.
+	assert.equal(initialSchedulingOffer(instanceInfoWith(true)), true);
+	assert.equal(initialSchedulingOffer(null), true);
+});
+
+test('the publish action wires the served answer in, and the refusal still ends the offer', () => {
+	// SOURCE-SHAPE, and it says so: `node --test` has no DOM to mount
+	// PublishAction in, so what is asserted is the wiring itself — the control
+	// starts from the instance read rather than from a hard-coded offer, and
+	// the flip on a `cms-disabled` refusal survives beside it.
+	const source = readFileSync('src/lib/review/PublishAction.svelte', 'utf8');
+
+	assert.match(source, /getCachedInstanceInfo/, 'the capability is read from the instance');
+	assert.match(source, /initialSchedulingOffer/, 'through the shared rule');
+	assert.doesNotMatch(
+		source,
+		/schedulingAvailable\s*=\s*\$state\(true\)/,
+		'the hard-coded initial offer is gone: a served false must start unavailable'
+	);
+	assert.match(
+		source,
+		/failure\.reason === 'cms-disabled'\) schedulingAvailable = false/,
+		'the flip on refusal stays — a served true can be stale by click time'
+	);
 });
 
 test('loadDraftPreview shows lesser rendered output, and nothing when it failed', async () => {

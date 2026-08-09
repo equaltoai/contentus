@@ -35,6 +35,8 @@ the single most consequential fact on this screen.
 -->
 
 <script lang="ts">
+	import { onMount } from 'svelte';
+
 	import Modal from '$lib/greater/primitives/components/Modal.svelte';
 	import {
 		publishDraft,
@@ -44,6 +46,9 @@ the single most consequential fact on this screen.
 	} from '$lib/cms/review';
 	import type { DraftReviewData } from '$lib/blog-types';
 	import { reviewActorName } from '$lib/components/Review/state.js';
+	import { getCachedInstanceInfo } from '$lib/instance/info';
+
+	import { initialSchedulingOffer } from './scheduling-offer';
 
 	interface Props {
 		review: DraftReviewData;
@@ -64,17 +69,30 @@ the single most consequential fact on this screen.
 	let scheduledAt = $state('');
 
 	/**
-	 * Whether this instance has scheduling switched on.
+	 * Whether this instance has scheduling switched on — null until the
+	 * instance's own answer (or its absence) has arrived.
 	 *
-	 * Starts `true` because lesser's public schema exposes no capability field to
-	 * ask (the flags live on the admin-scoped config), so the honest options are
-	 * "offer it and find out" or "never offer it". Once an attempt comes back
-	 * with the feature-gate error the control stops being offered for the rest of
-	 * the session — a refusal is an answer, and repeating a question lesser has
-	 * already declined is not useful. Recorded as an upstream ask in
-	 * docs/consumption/review-contract.md.
+	 * lesser v1.6.4 serves the capability (`InstanceInfo.cmsFeatures.scheduling`),
+	 * so the control starts from lesser's statement rather than from a guess: a
+	 * served `false` means the control is never offered and no schedule attempt
+	 * is made — the same answer the feature-gate refusal used to deliver after
+	 * the fact. A served `true`, or an instance that did not answer, keeps the
+	 * pre-v1.6.4 behaviour: offer, and flip off if an attempt comes back
+	 * `cms-disabled`, because a served `true` can still be stale by click time
+	 * and the typed FEATURE_DISABLED refusal remains the final word.
+	 *
+	 * The control is HELD while the read is in flight rather than offered and
+	 * then withdrawn, and the hold cannot stick: `getCachedInstanceInfo`
+	 * resolves null on any failure, which `initialSchedulingOffer` reads as
+	 * "offer" — the pre-v1.6.4 default.
 	 */
-	let schedulingAvailable = $state(true);
+	let schedulingAvailable = $state<boolean | null>(null);
+
+	onMount(() => {
+		void getCachedInstanceInfo().then((info) => {
+			schedulingAvailable = initialSchedulingOffer(info);
+		});
+	});
 
 	const generatorName = $derived(reviewActorName(review.generatedBy));
 	const hasGenerator = $derived(Boolean(review.generatedBy));

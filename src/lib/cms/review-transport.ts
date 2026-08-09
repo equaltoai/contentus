@@ -430,14 +430,17 @@ export interface ScheduledDraft {
 /**
  * Schedule a draft for later publication.
  *
- * `scheduleDraft` sits behind `requireCMSSchedulingEnabled`, and lesser's public
- * schema exposes no capability field a client could read first — the flags live
- * on the admin-scoped `AdminInstanceConfig`. So the control is offered, and an
- * instance with scheduling off answers with the feature-gate error, which the
- * workspace renders as a product state and then stops offering. Guessing
- * instead would either hide a working feature or promise a missing one; a
- * readable capability signal is an upstream ask recorded in
- * `docs/consumption/review-contract.md`.
+ * `scheduleDraft` sits behind `requireCMSSchedulingEnabled`. lesser v1.6.4
+ * answers the capability ask this comment used to record:
+ * `InstanceInfo.cmsFeatures.scheduling` is served on the public `instance`
+ * field, and `PublishAction.svelte` reads it (via `$lib/instance/info`) so an
+ * instance with scheduling off never offers the control and this mutation is
+ * never attempted. What the served flag does NOT do is retire the refusal
+ * path: a served `true` can be stale by click time, so the typed
+ * FEATURE_DISABLED error an attempt can still come back with remains the
+ * final word, and the workspace stops offering the control for the rest of
+ * the session when it arrives — a refusal is an answer, and repeating a
+ * question lesser has already declined is not useful.
  *
  * Scheduling is not an approval. lesser evaluates the same gate when the
  * scheduled moment arrives.

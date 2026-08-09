@@ -63,10 +63,11 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	import ScheduleField from '$lib/compose/ScheduleField.svelte';
 	import SensitiveField from '$lib/compose/SensitiveField.svelte';
 	import SourceContext from '$lib/compose/SourceContext.svelte';
-	import { STATUS_BYTE_LIMIT } from '$lib/compose/budget';
+	import { DEFAULT_STATUS_BYTE_LIMIT, statusByteLimit } from '$lib/compose/budget';
 	import { createComposeExtras } from '$lib/compose/extras.svelte';
 	import { composeSeed, type ComposeSeed } from '$lib/compose/seed';
 	import { buildComposeSubmission } from '$lib/compose/submission';
+	import { getCachedInstanceInfo } from '$lib/instance/info';
 	import {
 		createNote,
 		loadComposeViewer,
@@ -154,6 +155,20 @@ reviewer/publisher workflow, and nothing on this page touches them.
 	 */
 	let seed = $state<ComposeSeed | null>(null);
 
+	/**
+	 * The byte budget the composer enforces, with its provenance — or null
+	 * while the instance's answer is still in flight.
+	 *
+	 * The vendored `Compose.Root` fixes its counter cap at construction, so the
+	 * budget is settled BEFORE the composer exists (the template holds the
+	 * subtree until this is set, exactly as it does for the seed): the
+	 * instance's served `maxStatusCharacters` when it answers, lesser's
+	 * documented default when it does not. `getCachedInstanceInfo` resolves
+	 * null on any failure rather than throwing, so the hold cannot stick — an
+	 * unanswered read simply means the default applies.
+	 */
+	let byteBudget = $state<{ limit: number; served: boolean } | null>(null);
+
 	/** A target intent whose status could not be loaded. Not composable. */
 	let sourceUnavailable = $state(false);
 
@@ -161,6 +176,16 @@ reviewer/publisher workflow, and nothing on this page touches them.
 		session = isAuthenticated() ? 'authenticated' : 'anonymous';
 
 		if (session !== 'authenticated') return;
+
+		// Settle the byte budget BEFORE any seed is applied: the vendored
+		// counter's cap is fixed when `Compose.Root` is constructed, and the
+		// composer mounts the moment `seed` is set — so a budget learned after
+		// seeding would be a budget the composer never had. The instance's
+		// served `maxStatusCharacters` wins when it answers (lesser v1.6.4);
+		// the read resolves null on any failure rather than throwing, and
+		// `statusByteLimit` then stands lesser's documented default in.
+		const instanceInfo = await getCachedInstanceInfo();
+		byteBudget = { limit: statusByteLimit(instanceInfo), served: instanceInfo !== null };
 
 		// Seed straight away when nothing has to be fetched first: a new post has
 		// no parent to inherit reach from, and a target the anonymous server pass
@@ -257,10 +282,15 @@ reviewer/publisher workflow, and nothing on this page touches them.
 			// What gets sent is decided in one pure place (`$lib/compose/submission`)
 			// and awaited here. The route's job on this path is the awaiting, the
 			// failure display, and what to show afterwards — not the contract.
+			//
+			// `byteBudget` is settled before the composer can exist (the template
+			// holds the subtree until it is), so this handler cannot fire without
+			// it; the `??` keeps the type honest, it does not pick a second rule.
 			const submission = buildComposeSubmission({
 				mode,
 				form: formData,
 				extras: extras.state,
+				byteLimit: byteBudget?.limit ?? DEFAULT_STATUS_BYTE_LIMIT,
 			});
 
 			if (submission.kind === 'rejected') {
@@ -402,12 +432,16 @@ reviewer/publisher workflow, and nothing on this page touches them.
 				again, or open the original.
 			</p>
 		</section>
-	{:else if !seed}
+	{:else if !seed || !byteBudget}
 		<p class="contentus-compose-hint" role="status">Preparing the composer…</p>
 	{:else}
 		<ComposeRoot
 			config={{
-				characterLimit: STATUS_BYTE_LIMIT,
+				// The instance's own served limit when it answered, lesser's
+				// documented default when it did not — settled before this subtree
+				// exists, so the vendored counter never runs against a cap below
+				// the one the instance actually enforces.
+				characterLimit: byteBudget.limit,
 				placeholder: mode === 'reply' ? 'Write your reply…' : 'What do you want to say?',
 				allowMedia: true,
 				allowPolls: mode !== 'edit',
@@ -466,7 +500,7 @@ reviewer/publisher workflow, and nothing on this page touches them.
 
 			<AgentAttributionField {viewer} />
 
-			<ComposeBudget />
+			<ComposeBudget byteLimit={byteBudget.limit} served={byteBudget.served} />
 
 			<footer class="contentus-compose-actions">
 				<ComposeCharacterCount />

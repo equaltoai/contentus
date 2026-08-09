@@ -112,6 +112,12 @@ const OWNED_SOURCE_DIRS = [
 	'src/lib/cms',
 	'src/lib/compose',
 	'src/lib/config',
+	// The served-instance reader (v1.6.4 contract sync). Added WITH the
+	// directory, the rule check 5 enforces. This module reads instance metadata
+	// — the subscription endpoint, upload and status budgets, CMS feature
+	// flags — and renders nothing, so nothing in it has any business owning a
+	// renderer; an `{@html}` or a Markdown import here would be a defect.
+	'src/lib/instance',
 	// Face 5's contentus-owned messaging consumption (M5). Same rule as
 	// `src/lib/review` and `src/lib/timelines` below: added WITH the directory.
 	// The claim this audit is checking here is a sharp one — every message body
