@@ -79,10 +79,11 @@ together. That nesting is the one seam-to-seam import face 6 allows, and
 		</dl>
 
 		<!--
-			Owner and delegated scopes appear only when lesser ANSWERED them, which
-			it does for the agent's owner and for admins. For everyone else it
-			redacts to null and `[]`, and those blanks are indistinguishable from
-			real values — so the section is absent rather than showing "no owner".
+			Owner and delegated scopes appear only when lesser served
+			`viewerCanSeePrivateFields: true` for this viewer — the agent's owner
+			and admins. For everyone else lesser redacts the fields to null and
+			`[]`, and those blanks are indistinguishable from real values — so the
+			section is absent rather than showing "no owner".
 		-->
 		{#if agent.owner}
 			<dl class="contentus-mcp__facts">
