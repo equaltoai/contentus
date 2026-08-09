@@ -200,41 +200,41 @@ export function createMessagingAdapter(config: MessagingAdapterConfig): Messagin
 
 	return {
 		fetchConversations: async (folder, first) => {
-			const data = await run<{ conversations?: LesserConversation[] | null }>(
-				CONVERSATIONS_QUERY,
-				{ folder, first },
-				'the conversation list'
-			);
+			const data = await run<{
+				conversationConnection?: {
+					edges?: readonly { cursor?: string | null; node: LesserConversation }[] | null;
+				} | null;
+			}>(CONVERSATIONS_QUERY, { folder, first }, 'the conversation list');
 			// Where greater returns `[]`. A list that is ABSENT is not a list that is
-			// EMPTY, and only one of those is safe to render as "no messages".
-			if (!Array.isArray(data.conversations)) {
+			// EMPTY, and only one of those is safe to render as "no messages" — a
+			// connection without its edges is the page lesser did not return.
+			const edges = data.conversationConnection?.edges;
+			if (!Array.isArray(edges)) {
 				throw new MessagingUnavailableError('This instance did not return a conversation list.');
 			}
-			return data.conversations;
+			return edges.map((edge) => edge.node);
 		},
 
 		/**
 		 * One conversation by id, and the ONE read on this surface that must not
 		 * tell the caller which kind of "no" it got.
 		 *
-		 * lesser answers a conversation this reader may not see and a conversation
-		 * that does not exist with two DIFFERENT envelopes: a missing id is a clean
-		 * `{ conversation: null }`, while an id that exists and belongs to other
-		 * people is `{ conversation: null }` PLUS a participant error
-		 * (`graph/query_resolvers_conversations.go`). No body leaks either way —
-		 * but the difference between the two is an oracle: anybody who can type a
-		 * URL could ask "does this conversation exist?" and read the answer off the
-		 * partial-read notice, one guessed id at a time.
+		 * The existence oracle this used to relay is CLOSED upstream: at lesser
+		 * v1.6.4 (commit 21b82399a) a conversation this reader may not see and a
+		 * conversation that does not exist both return the SAME envelope — an
+		 * ErrAccessDenied error with `data.conversation` null — so the wire no
+		 * longer separates "it exists" from "it does not", one guessed id at a
+		 * time.
 		 *
-		 * So the partial signal is suppressed for a null conversation, and both
-		 * answers reach the surface as the same value, on the same path, in the
-		 * same one round trip: `null`, rendered as one "this conversation is not
-		 * available" state. A partial answer that DID carry a conversation is still
-		 * disclosed — the reader can see it, so it says nothing they do not have.
-		 *
-		 * The error-shape difference itself is lesser's to fix and is routed
-		 * upstream (docs/consumption/messaging-contract.md); this is contentus
-		 * declining to relay it.
+		 * The partial suppression below STAYS, as defense-in-depth and for
+		 * pre-v1.6.4 instances, which still answer the two cases with DIFFERENT
+		 * envelopes (a missing id is a clean `{ conversation: null }`, an id
+		 * belonging to other people is null plus a participant error). Either
+		 * way, both answers reach the surface as the same value, on the same
+		 * path, in the same one round trip: `null`, rendered as one "this
+		 * conversation is not available" state. A partial answer that DID carry
+		 * a conversation is still disclosed — the reader can see it, so it says
+		 * nothing they do not have.
 		 */
 		fetchConversation: async (id) => {
 			const data = await run<{ conversation?: LesserConversation | null }>(

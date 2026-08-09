@@ -111,6 +111,7 @@ function conversation(id, lastMessageId, updatedAt = '2026-07-01T09:00:00Z') {
 	return toConversation({
 		id,
 		unread: false,
+		unreadCount: 0,
 		createdAt: '2026-07-01T08:00:00Z',
 		updatedAt,
 		accounts: [actor],

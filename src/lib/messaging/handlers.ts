@@ -64,12 +64,12 @@ import { createSessionScope } from '../auth/session-scope.ts';
 /**
  * How many conversations a folder read asks for.
  *
- * lesser's own default is 20. Face 5 asks for more because `conversations`
- * exposes no cursor — the query accepts `after` but the selection returns a
- * bare list with no `pageInfo` — so this number is the whole list a reader can
- * reach, not the first page of one. Raising it is the only lever the contract
- * offers; the missing pagination is routed upstream rather than papered over
- * with a control that pretends to load more.
+ * lesser's own default is 20. Face 5 asks for more because the vendored
+ * `MessagesHandlers` list interface has no cursor channel: lesser v1.6.4
+ * shipped `conversationConnection` with `pageInfo` (and contentus queries
+ * it), but there is no handler a "load more" control could call, so this
+ * number is still the whole list a reader can reach rather than the first
+ * page of one. The remaining pagination gap is greater's, not lesser's.
  */
 export const CONVERSATION_PAGE_SIZE = 50;
 

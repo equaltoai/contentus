@@ -136,6 +136,7 @@ function conversation(id) {
 	return {
 		id,
 		unread: true,
+		unreadCount: 1,
 		createdAt: '2026-07-01T09:00:00Z',
 		updatedAt: '2026-07-01T10:00:00Z',
 		accounts: [
@@ -399,7 +400,12 @@ test('an in-flight folder read from the old session publishes nothing after sign
 		// The answer lands anyway — with data AND an error, the partial shape —
 		// for a session that no longer exists.
 		gates[0].resolve({
-			data: { conversations: [conversation('conv-ada')] },
+			data: {
+				conversationConnection: {
+					edges: [{ cursor: 'conv-ada-cursor', node: conversation('conv-ada') }],
+					pageInfo: { hasNextPage: false, endCursor: null },
+				},
+			},
 			errors: [{ message: 'partial failure' }],
 		});
 		await settle();

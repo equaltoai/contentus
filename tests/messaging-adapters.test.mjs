@@ -59,10 +59,11 @@ function object(id, content, who = 'ada', createdAt = '2026-07-01T10:00:00Z') {
 	};
 }
 
-function conversation(id, { requestState = 'ACCEPTED', unread = false, last = null } = {}) {
+function conversation(id, { requestState = 'ACCEPTED', unread = false, unreadCount = 0, last = null } = {}) {
 	return {
 		id,
 		unread,
+		unreadCount,
 		createdAt: '2026-07-01T09:00:00Z',
 		updatedAt: '2026-07-01T10:00:00Z',
 		accounts: [actor('ada'), actor('bob')],
@@ -72,6 +73,16 @@ function conversation(id, { requestState = 'ACCEPTED', unread = false, last = nu
 			requestedAt: requestState === 'PENDING' ? '2026-07-01T09:00:00Z' : null,
 			acceptedAt: requestState === 'ACCEPTED' ? '2026-07-01T09:30:00Z' : null,
 			declinedAt: null,
+		},
+	};
+}
+
+/** A folder page, in the `conversationConnection` shape lesser serves at v1.6.4. */
+function conversationConnection(conversations) {
+	return {
+		conversationConnection: {
+			edges: conversations.map((c) => ({ cursor: `${c.id}-cursor`, node: c })),
+			pageInfo: { hasNextPage: false, endCursor: null },
 		},
 	};
 }
@@ -159,7 +170,7 @@ test('an empty list that lesser genuinely returned is passed through', async () 
 	// The other half, and the reason the check is on presence rather than
 	// length: a real empty inbox must still render as empty.
 	const { value } = await withStubbedFetch(
-		() => ({ data: { conversations: [] } }),
+		() => ({ data: conversationConnection([]) }),
 		() => adapter.fetchConversations('INBOX', 50)
 	);
 	assert.deepEqual(value, []);
@@ -213,7 +224,7 @@ test('an auth refusal wins even when lesser also returned data', async () => {
 	// A partially-authorized response is still a session the reader has to renew.
 	await withStubbedFetch(
 		() => ({
-			data: { conversations: [conversation('c1')] },
+			data: conversationConnection([conversation('c1')]),
 			errors: [{ message: 'unauthorized' }],
 		}),
 		async () => {
@@ -245,7 +256,7 @@ test('data alongside errors is returned AND marked partial', async () => {
 
 	const { value } = await withStubbedFetch(
 		() => ({
-			data: { conversations: [conversation('c1')] },
+			data: conversationConnection([conversation('c1')]),
 			errors: [{ message: 'lastStatus resolver failed' }],
 		}),
 		() => adapter.fetchConversations('INBOX', 50)
@@ -262,7 +273,7 @@ test('a clean read is not marked partial', async () => {
 	const adapter = adapterFor({ onPartial: (operation) => seen.push(operation) });
 
 	await withStubbedFetch(
-		() => ({ data: { conversations: [conversation('c1')] } }),
+		() => ({ data: conversationConnection([conversation('c1')]) }),
 		() => adapter.fetchConversations('INBOX', 50)
 	);
 	assert.deepEqual(seen, [], 'a clean read must not raise the partial notice');
@@ -349,7 +360,7 @@ test('every conversation read carries the bearer token, read at call time', asyn
 	const adapter = adapterFor({ accessToken: () => token });
 
 	const { requests } = await withStubbedFetch(
-		() => ({ data: { conversations: [] } }),
+		() => ({ data: conversationConnection([]) }),
 		async () => {
 			await adapter.fetchConversations('INBOX', 50);
 			// The session can be replaced between two calls; an adapter holding the
@@ -367,7 +378,7 @@ test('an anonymous adapter sends no Authorization header at all', async () => {
 	const adapter = adapterFor({ accessToken: () => null });
 
 	const { requests } = await withStubbedFetch(
-		() => ({ data: { conversations: [] } }),
+		() => ({ data: conversationConnection([]) }),
 		() => adapter.fetchConversations('INBOX', 50)
 	);
 
@@ -405,20 +416,22 @@ test('folder is derived from viewerMetadata.requestState and nothing else', () =
 	assert.equal(toConversation(conversation('c3', { requestState: 'DECLINED' })).folder, 'INBOX');
 });
 
-test('unread is a per-conversation boolean, and every count says conversations', () => {
+test('unreadCount is lesser’s real per-conversation count, and the badge still counts conversations', () => {
 	const conversations = [
-		toConversation(conversation('c1', { unread: true })),
-		toConversation(conversation('c2', { unread: true })),
-		toConversation(conversation('c3', { unread: false })),
+		toConversation(conversation('c1', { unread: true, unreadCount: 3 })),
+		toConversation(conversation('c2', { unread: true, unreadCount: 1 })),
+		toConversation(conversation('c3')),
 	];
 
-	// Each conversation contributes at most 1, because lesser's contract carries
-	// one boolean and no message count. The number is conversations, and the
-	// labels built from it say so.
+	// lesser serves the real message count at v1.6.4, and it flows through
+	// unflattened — greater's own handler still collapses `unread` to 1/0.
 	assert.deepEqual(
 		conversations.map((c) => c.unreadCount),
-		[1, 1, 0]
+		[3, 1, 0]
 	);
+	// The badge still counts CONVERSATIONS with unread activity, by design, and
+	// its label says so: three unread messages in one conversation and one in
+	// another is "2 conversations", not "4 messages".
 	assert.equal(unreadConversationCount(conversations), 2);
 });
 
@@ -506,7 +519,7 @@ test('the folder a conversation is listed under is the folder that was asked for
 	const { handlers } = createMessagingBinding({ accessToken: () => 'token' });
 
 	const { value, requests } = await withStubbedFetch(
-		() => ({ data: { conversations: [conversation('c1', { requestState: 'PENDING' })] } }),
+		() => ({ data: conversationConnection([conversation('c1', { requestState: 'PENDING' })]) }),
 		() => handlers.onFetchConversations('REQUESTS')
 	);
 
@@ -578,8 +591,10 @@ test('a conversation lesser does not know is not-found, not a failure', async ()
 		() => binding.loadConversation('nope')
 	);
 
-	// Null with no errors means the instance answered and does not have it. That
-	// is a different screen from "the instance did not answer", which throws.
+	// A clean null with no errors is the PRE-v1.6.4 answer for a missing id;
+	// v1.6.4 answers with the ErrAccessDenied envelope covered below. Both mean
+	// the instance answered and does not have it — a different screen from "the
+	// instance did not answer", which throws.
 	assert.equal(value, null);
 });
 
@@ -588,13 +603,15 @@ test('a conversation lesser does not know is not-found, not a failure', async ()
    ============================================================ */
 
 test('a foreign conversation and a nonexistent one are indistinguishable to the caller', async () => {
-	// lesser answers the two with different ENVELOPES: a missing id is a clean
-	// `{ conversation: null }`, and an id that exists but belongs to other people
-	// is `{ conversation: null }` plus an access-denied error
-	// (`graph/query_resolvers_conversations.go`). No body leaks either way, but
-	// the difference is an existence oracle: anybody who can type a URL could
-	// read "this conversation exists" off the partial-read notice, one guessed id
-	// at a time. Both must present identically.
+	// At lesser v1.6.4 (commit 21b82399a) the two are the same envelope on the
+	// wire too: an ErrAccessDenied error with `data.conversation` null. Before
+	// that, lesser answered a missing id with a clean `{ conversation: null }`
+	// and an id belonging to other people with null PLUS a participant error —
+	// no body leaked, but the difference was an existence oracle: anybody who
+	// can type a URL could read "this conversation exists" off the partial-read
+	// notice, one guessed id at a time. The suppression under test is what
+	// keeps the two indistinguishable on PRE-v1.6.4 instances, and it stays as
+	// defense-in-depth now that lesser agrees. Both must present identically.
 	const missingPartials = [];
 	const missing = createMessagingBinding({
 		accessToken: () => 'token',
@@ -606,21 +623,17 @@ test('a foreign conversation and a nonexistent one are indistinguishable to the 
 		onPartial: (operation) => foreignPartials.push(operation),
 	});
 
+	// The v1.6.4 envelope, identical for "never existed" and "not yours".
+	const accessDenied = () => ({
+		data: { conversation: null },
+		errors: [{ message: 'access denied' }],
+	});
 	const { value: missingValue, requests: missingRequests } = await withStubbedFetch(
-		() => ({ data: { conversation: null } }),
+		accessDenied,
 		() => missing.loadConversation('never-existed')
 	);
 	const { value: foreignValue, requests: foreignRequests } = await withStubbedFetch(
-		() => ({
-			data: { conversation: null },
-			errors: [
-				{
-					message: 'Access denied',
-					path: ['conversation'],
-					extensions: { code: 'FORBIDDEN', resource_type: 'resource' },
-				},
-			],
-		}),
+		accessDenied,
 		() => foreign.loadConversation('somebody-elses')
 	);
 
@@ -785,13 +798,11 @@ test('the Requests badge counts what lesser listed as pending', async () => {
 
 	const { value } = await withStubbedFetch(
 		() => ({
-			data: {
-				conversations: [
-					conversation('c1', { requestState: 'PENDING' }),
-					conversation('c2', { requestState: 'PENDING' }),
-					conversation('c3', { requestState: 'ACCEPTED' }),
-				],
-			},
+			data: conversationConnection([
+				conversation('c1', { requestState: 'PENDING' }),
+				conversation('c2', { requestState: 'PENDING' }),
+				conversation('c3', { requestState: 'ACCEPTED' }),
+			]),
 		}),
 		() => handlers.onFetchConversations('REQUESTS')
 	);

@@ -29,7 +29,11 @@
  * the typecheck graph — and asserts that every operation name, argument and
  * variable type below matches upstream's, and that every field the mappers in
  * `contract.ts` read is selected. A pin bump that renames an argument fails
- * there rather than at runtime on somebody's instance.
+ * there rather than at runtime on somebody's instance. ONE deliberate lead is
+ * pinned there too, not hidden: the conversation list queries
+ * `conversationConnection` while the vendored adapter at greater 0.13.4 still
+ * targets the legacy list-valued `conversations`, because lesser v1.6.4 serves
+ * the connection and prefers it.
  *
  * The coupling itself is routed upstream: `createLesserMessagesHandlers` should
  * accept the structural interface it actually calls rather than the concrete
@@ -87,6 +91,7 @@ const MESSAGE_FIELDS = `
 const CONVERSATION_FIELDS = `
 	id
 	unread
+	unreadCount
 	createdAt
 	updatedAt
 	viewerMetadata {
@@ -100,18 +105,33 @@ const CONVERSATION_FIELDS = `
 `;
 
 /**
- * One folder's conversations.
+ * One folder's conversations, as a page of lesser's real connection.
  *
- * `after` is accepted by lesser and deliberately NOT sent: `conversations`
- * returns a bare list with no `pageInfo` and no per-edge cursor, so there is no
- * cursor a client could obtain to pass back. `first` is therefore the whole
- * list a reader can reach rather than the first page of one. Routed upstream as
- * an ask for a proper connection.
+ * `conversationConnection` landed in lesser v1.6.4 with edges, per-edge
+ * cursors and `pageInfo`, and lesser's own schema note says to prefer it over
+ * the legacy list-valued `conversations` field — the field whose `after:
+ * Cursor` argument was undrivable, because a bare list returns no cursor a
+ * client could ever pass back.
+ *
+ * `first` stays 50 (`CONVERSATION_PAGE_SIZE` in handlers.ts) and no `after`
+ * is declared: the vendored `MessagesHandlers` list interface has no cursor
+ * channel, so this page is still the whole list a reader can reach.
+ * `pageInfo` is selected for honesty of presence — the document asks for the
+ * page lesser actually answered — but it cannot yet drive a "load more"
+ * control. That remaining gap is an upstream ask on GREATER (a cursor-
+ * carrying list handler), not on lesser, which now serves the connection.
  */
 export const CONVERSATIONS_QUERY = `
 	query ContentusConversations($folder: ConversationFolder, $first: Int) {
-		conversations(folder: $folder, first: $first) {
-			${CONVERSATION_FIELDS}
+		conversationConnection(folder: $folder, first: $first) {
+			edges {
+				cursor
+				node { ${CONVERSATION_FIELDS} }
+			}
+			pageInfo {
+				hasNextPage
+				endCursor
+			}
 		}
 	}
 `;

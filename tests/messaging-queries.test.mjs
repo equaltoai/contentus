@@ -21,7 +21,13 @@
  * equality would fail on a difference that is the point. What must match is the
  * CONTRACT SURFACE — operation type, root field, argument names, variable types
  * — because those are lesser's and getting one wrong is a runtime error on
- * somebody's instance.
+ * somebody's instance. ONE root field is a pinned exception: contentus queries
+ * `conversationConnection` while the vendored adapter at greater 0.13.4 still
+ * targets the legacy list-valued `conversations`. lesser v1.6.4 serves the
+ * connection and its schema note prefers it — the legacy field's `after:
+ * Cursor` was undrivable because a bare list returns no cursor to pass back —
+ * so contentus moved ahead, and the divergence itself is pinned below rather
+ * than hidden.
  */
 
 import assert from 'node:assert/strict';
@@ -114,9 +120,17 @@ function contentusSurface(document) {
  * Every operation contentus sends, and the vendored document it mirrors.
  *
  * `sentArgs` is what contentus actually passes. It is smaller than upstream's
- * where contentus deliberately omits an argument — `conversations.after` is the
- * example, and the omission is the finding: lesser accepts a cursor there and
- * returns no cursor anywhere, so no client can supply one.
+ * where contentus deliberately omits an argument — `conversations.after` is
+ * the example: contentus asks only for the first page because the vendored
+ * `MessagesHandlers` list interface has no cursor channel to advance a second
+ * one with.
+ *
+ * `aheadOfVendored` marks the one operation where contentus deliberately LEADS
+ * the vendored adapter instead of mirroring it: the conversation list queries
+ * `conversationConnection` while the vendored document still targets the
+ * legacy list field. The assertion below pins both halves — contentus's root
+ * and the vendored one it moved ahead of — so a greater bump that adopts the
+ * connection fails here and the divergence notes come down with it.
  */
 const OPERATIONS = [
 	{
@@ -124,6 +138,7 @@ const OPERATIONS = [
 		document: queries.CONVERSATIONS_QUERY,
 		vendored: 'ConversationsDocument',
 		sentArgs: ['first', 'folder'],
+		aheadOfVendored: { rootField: 'conversationConnection', vendoredRootField: 'conversations' },
 	},
 	{
 		label: 'conversation',
@@ -203,6 +218,23 @@ test('every contentus messaging document targets upstream operation and root fie
 			theirs.operation,
 			`${entry.label}: contentus sends a ${mine.operation} where lesser defines a ${theirs.operation}`
 		);
+
+		if (entry.aheadOfVendored) {
+			// The pinned lead: contentus queries the connection lesser v1.6.4
+			// serves while the vendored adapter still targets the legacy field.
+			assert.equal(
+				mine.rootField,
+				entry.aheadOfVendored.rootField,
+				`${entry.label}: contentus should query ${entry.aheadOfVendored.rootField}, not ${mine.rootField}`
+			);
+			assert.equal(
+				theirs.rootField,
+				entry.aheadOfVendored.vendoredRootField,
+				`${entry.label}: the vendored adapter moved off ${entry.aheadOfVendored.vendoredRootField} — re-check whether contentus still needs to be ahead`
+			);
+			continue;
+		}
+
 		assert.equal(
 			mine.rootField,
 			theirs.rootField,
@@ -261,9 +293,17 @@ const REQUIRED_FIELDS = [
 	{
 		label: 'conversations',
 		document: queries.CONVERSATIONS_QUERY,
+		// The connection shell is required too: the adapter reads
+		// `conversationConnection.edges[].node`, and a document without
+		// `pageInfo` could not even say whether another page exists.
 		fields: [
+			'edges',
+			'cursor',
+			'node',
+			'pageInfo',
 			'id',
 			'unread',
+			'unreadCount',
 			'updatedAt',
 			'viewerMetadata',
 			'requestState',
@@ -317,25 +357,47 @@ test('each document selects every field the mappers dereference', () => {
 	}
 });
 
-test('the conversation list document sends no cursor, because lesser returns none', () => {
-	// A pinned FINDING rather than a preference. `conversations` accepts
-	// `after: Cursor` and its selection returns a bare list — no `pageInfo`, no
-	// per-edge cursor — so there is no value a client could ever pass back. If a
-	// future pin makes it a real connection, this assertion fails and the
-	// "conversations cannot be paginated" note in the consumption doc comes down
-	// with it.
+test('the conversation list document queries the connection lesser v1.6.4 serves', () => {
+	// lesser v1.6.4 shipped `conversationConnection` and its schema note says
+	// to prefer it over the legacy list-valued `conversations` — the field
+	// whose `after: Cursor` was undrivable, because a bare list returns no
+	// cursor a client could pass back. Contentus queries the connection, with
+	// the edges and pageInfo that make a page a page.
+	assert.match(
+		queries.CONVERSATIONS_QUERY,
+		/conversationConnection\(/,
+		'contentus should query conversationConnection, not the legacy list field'
+	);
+	for (const field of ['edges', 'cursor', 'node', 'pageInfo', 'hasNextPage', 'endCursor']) {
+		assert.match(
+			queries.CONVERSATIONS_QUERY,
+			new RegExp(`\\b${field}\\b`),
+			`the conversation page is not a connection without "${field}"`
+		);
+	}
+
+	// …and it does so AHEAD of the vendored adapter: at greater 0.13.4 the
+	// vendored document still targets the legacy list field. This pins that
+	// premise — if a greater bump moves the vendored document to the
+	// connection, this fails and every "ahead of the vendored adapter" note
+	// comes down with it.
 	const vendored = printDocument(vendoredDocument('ConversationsDocument'));
 	assert.ok(
-		vendored.includes('after: $after'),
-		'upstream stopped sending `after` on conversations — re-check the pagination note'
+		vendored.includes('conversations('),
+		'the vendored adapter moved off the legacy `conversations` field — re-check the divergence pin'
 	);
 	assert.ok(
-		!/conversations\([^)]*\)\s*\{[^}]*pageInfo/s.test(vendored),
-		'upstream `conversations` now returns pageInfo — it can be paginated, so contentus should'
+		!/conversationConnection/.test(vendored),
+		'the vendored adapter now queries conversationConnection too — contentus is no longer ahead of it'
 	);
+
+	// No `after` is declared even so: the vendored `MessagesHandlers` list
+	// interface has no cursor channel, so `pageInfo` cannot yet drive a "load
+	// more". That remaining ask is on GREATER, not lesser — lesser now serves
+	// the cursor.
 	assert.ok(
 		!queries.CONVERSATIONS_QUERY.includes('$after'),
-		'contentus sends a cursor lesser gives it no way to obtain'
+		'contentus declares a cursor the vendored handler interface gives it no way to advance'
 	);
 });
 

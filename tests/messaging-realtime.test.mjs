@@ -76,6 +76,7 @@ function conversation(id, updatedAt = '2026-07-01T10:00:00Z') {
 	return {
 		id,
 		unread: true,
+		unreadCount: 1,
 		createdAt: '2026-07-01T09:00:00Z',
 		updatedAt,
 		accounts: [
