@@ -20,7 +20,7 @@ svelte-check found 0 errors and 3 warnings in 1 file
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+[2Ktransforming...10:03:27 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 35:   // hydration (a filter change is a navigation, not a prop update), so local
 36:   // state seeded from it is the source of truth from the first click on.
@@ -28,7 +28,7 @@ https://svelte.dev/e/state_referenced_locally
                                 ^
 38:   let endCursor = $state(data.endCursor);
 39:   let hasNextPage = $state(data.hasNextPage);
-4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+10:03:27 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 36:   // state seeded from it is the source of truth from the first click on.
 37:   let articles = $state(data.articles);
@@ -36,7 +36,7 @@ https://svelte.dev/e/state_referenced_locally
                                  ^
 39:   let hasNextPage = $state(data.hasNextPage);
 40:   let loadingMore = $state(false);
-4:37:09 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+10:03:27 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 37:   let articles = $state(data.articles);
 38:   let endCursor = $state(data.endCursor);
@@ -50,7 +50,7 @@ computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-DLv5-bA9.js                695.65 kB │ gzip: 211.34 kB
+build/client/assets/entry-client-BIWEZUOS.js                697.42 kB │ gzip: 211.78 kB
 
 ✓ built in 1.07s
 [plugin builtin:vite-reporter] 
@@ -63,7 +63,7 @@ build/client/assets/entry-client-DLv5-bA9.js                695.65 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+[2Ktransforming...10:03:29 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 35:   // hydration (a filter change is a navigation, not a prop update), so local
 36:   // state seeded from it is the source of truth from the first click on.
@@ -71,7 +71,7 @@ https://svelte.dev/e/state_referenced_locally
                                 ^
 38:   let endCursor = $state(data.endCursor);
 39:   let hasNextPage = $state(data.hasNextPage);
-4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+10:03:29 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 36:   // state seeded from it is the source of truth from the first click on.
 37:   let articles = $state(data.articles);
@@ -79,7 +79,7 @@ https://svelte.dev/e/state_referenced_locally
                                  ^
 39:   let hasNextPage = $state(data.hasNextPage);
 40:   let loadingMore = $state(false);
-4:37:10 PM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
+10:03:29 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
 https://svelte.dev/e/state_referenced_locally
 37:   let articles = $state(data.articles);
 38:   let endCursor = $state(data.endCursor);
@@ -90,15 +90,15 @@ https://svelte.dev/e/state_referenced_locally
 ✓ 779 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,131.06 kB │ gzip: 271.10 kB
+build/server/handler.mjs  1,132.15 kB │ gzip: 271.43 kB
 
-✓ built in 1.04s
+✓ built in 1.02s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 338832 bytes, 144 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 337729 bytes, 144 --tc-* definitions, integrity assertions passed
 brand assets: copied 13 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -111,13 +111,13 @@ brand assets: copied 13 files to build/client/brand/
 # GraphQL contract audit
 
 Schema:     contracts/lesser/graphql-schema.graphql
-            108911 chars, sha256 fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064
-            equaltoai/lesser@f833ea0b6dea78c11a2b6da6289bf2305f770ebe:docs/contracts/graphql-schema.graphql
-            blob b907306de7b66bd6ab91665b59bb9b1f00897672 (contracts/lesser/provenance.json)
+            111736 chars, sha256 26759ec3d31040412afb60ba740541e9a6f645e1627af15af64b73fa7ed05a4c
+            equaltoai/lesser@38034eef671f70996b1364d154b200e5f167d4ec:docs/contracts/graphql-schema.graphql
+            blob 86413b135f0f833bf8e926a18900ec9c39e60c18 (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
 Documents:  46 in 9 inventoried module(s), 46 operation(s)
-Swept:      58 contentus-authored .ts module(s) under src/, out of 1715 tracked file(s) there
+Swept:      58 contentus-authored .ts module(s) under src/, out of 1718 tracked file(s) there
 
 graphql-contract: PASS
 
