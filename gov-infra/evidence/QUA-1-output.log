@@ -13,46 +13,21 @@
 Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 Getting Svelte diagnostics...
 
-====================================
-svelte-check found 0 errors and 3 warnings in 1 file
+svelte-check found 0 errors and 0 warnings
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...10:03:27 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
-https://svelte.dev/e/state_referenced_locally
-35:   // hydration (a filter change is a navigation, not a prop update), so local
-36:   // state seeded from it is the source of truth from the first click on.
-37:   let articles = $state(data.articles);
-                                ^
-38:   let endCursor = $state(data.endCursor);
-39:   let hasNextPage = $state(data.hasNextPage);
-10:03:27 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
-https://svelte.dev/e/state_referenced_locally
-36:   // state seeded from it is the source of truth from the first click on.
-37:   let articles = $state(data.articles);
-38:   let endCursor = $state(data.endCursor);
-                                 ^
-39:   let hasNextPage = $state(data.hasNextPage);
-40:   let loadingMore = $state(false);
-10:03:27 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
-https://svelte.dev/e/state_referenced_locally
-37:   let articles = $state(data.articles);
-38:   let endCursor = $state(data.endCursor);
-39:   let hasNextPage = $state(data.hasNextPage);
-                                   ^
-40:   let loadingMore = $state(false);
-41:   let loadMoreFailed = $state(false);
-✓ 803 modules transformed.
+[2Ktransforming...✓ 805 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-BIWEZUOS.js                697.42 kB │ gzip: 211.78 kB
+build/client/assets/entry-client-m5i7kaNK.js                700.46 kB │ gzip: 212.95 kB
 
-✓ built in 1.07s
+✓ built in 1.08s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -63,36 +38,12 @@ build/client/assets/entry-client-BIWEZUOS.js                697.42 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...10:03:29 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:37:23 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
-https://svelte.dev/e/state_referenced_locally
-35:   // hydration (a filter change is a navigation, not a prop update), so local
-36:   // state seeded from it is the source of truth from the first click on.
-37:   let articles = $state(data.articles);
-                                ^
-38:   let endCursor = $state(data.endCursor);
-39:   let hasNextPage = $state(data.hasNextPage);
-10:03:29 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:38:24 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
-https://svelte.dev/e/state_referenced_locally
-36:   // state seeded from it is the source of truth from the first click on.
-37:   let articles = $state(data.articles);
-38:   let endCursor = $state(data.endCursor);
-                                 ^
-39:   let hasNextPage = $state(data.hasNextPage);
-40:   let loadingMore = $state(false);
-10:03:29 AM [vite-plugin-svelte] src/lib/routes/ArticlesIndex.svelte:39:26 This reference only captures the initial value of `data`. Did you mean to reference it inside a derived instead?
-https://svelte.dev/e/state_referenced_locally
-37:   let articles = $state(data.articles);
-38:   let endCursor = $state(data.endCursor);
-39:   let hasNextPage = $state(data.hasNextPage);
-                                   ^
-40:   let loadingMore = $state(false);
-41:   let loadMoreFailed = $state(false);
-✓ 779 modules transformed.
+[2Ktransforming...✓ 781 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,132.15 kB │ gzip: 271.43 kB
+build/server/handler.mjs  1,143.62 kB │ gzip: 274.88 kB
 
-✓ built in 1.02s
+✓ built in 993ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -116,8 +67,8 @@ Schema:     contracts/lesser/graphql-schema.graphql
             blob 86413b135f0f833bf8e926a18900ec9c39e60c18 (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
-Documents:  46 in 9 inventoried module(s), 46 operation(s)
-Swept:      58 contentus-authored .ts module(s) under src/, out of 1718 tracked file(s) there
+Documents:  46 in 10 inventoried module(s), 46 operation(s)
+Swept:      60 contentus-authored .ts module(s) under src/, out of 1720 tracked file(s) there
 
 graphql-contract: PASS
 
@@ -133,7 +84,7 @@ graphql-contract: PASS
 - owned-source coverage: clean
 
 - Forbidden renderer packages checked: 17
-- Contentus-owned source roots scanned: 16
+- Contentus-owned source roots scanned: 17
 - Executable source extensions walked: ts, mts, cts, tsx, js, mjs, cjs, jsx, svelte
 
 Renderer-authority audit: clean.
@@ -182,9 +133,9 @@ CSP audit: clean.
 # Seam graph audit — faces 6–7 (src/lib/agents, src/lib/drones)
 
 - Build passes recorded: client, server
-- Modules the client build resolved / loaded: 802 / 802
-- Modules the server build resolved / loaded: 785 / 778
-- Dependency edges recorded: 4499
+- Modules the client build resolved / loaded: 804 / 804
+- Modules the server build resolved / loaded: 787 / 780
+- Dependency edges recorded: 4513
 - Distinct edges into the face: 33
 - Findings: 0
 

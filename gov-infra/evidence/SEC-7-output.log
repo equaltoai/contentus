@@ -8,8 +8,8 @@ greater CLI release asset: https://github.com/equaltoai/greater-components/relea
   extracted 183 files into a quarantine and re-verified every digest.
   runtime dependencies installed into the quarantine with --ignore-scripts.
   version=0.13.4, pinned 0.13.4
-greater doctor: 10/13 checks passed.
-  PASS Component Files — 228 file(s) verified
+greater doctor: 11/14 checks passed.
+  PASS Component Files — 227 file(s) verified
   PASS Orphaned Files — No orphaned component files detected
 
 Disclosed and unchanged, matched as (name, severity) tuples
