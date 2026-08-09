@@ -29,7 +29,7 @@ export function usage() {
 		'Usage:',
 		'  pnpm run deploy -- --app <slug> --base-domain <domain> --stage <dev|staging|live> --aws-profile <profile> [options]',
 		'',
-		'Requirstance parameters:',
+		'Required instance parameters:',
 		'  --app <slug>          Lesser instance slug.',
 		'  --base-domain <name>  Lesser instance base domain.',
 		'  --stage <stage>       One of dev, staging, or live.',
