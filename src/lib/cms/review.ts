@@ -1,6 +1,6 @@
 /**
  * Face 2's consumption of lesser's shareable-draft review contract
- * (product design §5, face 2; lesser release v1.5.32).
+ * (product design §5, face 2; lesser release v1.6.4).
  *
  * This module is the SESSION half, and it is deliberately thin: it reads the
  * access token out of `sessionStorage` and hands it to `cms/review-transport.ts`,
@@ -55,7 +55,7 @@ export {
 	DRAFT_OWNERSHIP_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_REVIEW_QUERY,
-	MY_DRAFTS_QUERY,
+	MY_DRAFT_REVIEWS_QUERY,
 	PUBLISH_DRAFT_MUTATION,
 	REVIEW_DOCUMENTS,
 	SCHEDULE_DRAFT_MUTATION,
@@ -67,15 +67,12 @@ export {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toOwnDraftReview,
 	toPreviewFaceArticle,
 	toReviewActor,
 	toVerdictRecord,
 } from './review-contract';
 export type {
 	DraftPreview,
-	EntryProjection,
-	OwnDraft,
 	PreviewFaceArticle,
 	QueueHalfState,
 	QueueSource,

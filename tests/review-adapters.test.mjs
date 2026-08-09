@@ -355,9 +355,12 @@ test('the ownership probe answers from whether lesser resolved it', async () => 
 /* ---------------------------------------------------------------------------
  * The queue, assembled by the shipped code
  *
- * Two findings meet here: a failed half must not read as an empty one, and an
- * own draft whose review projection is missing must not read as an unreviewed
- * one.
+ * Since lesser v1.6.4 the own half is a `myDraftReviews` connection walk:
+ * every edge's node is already a full `DraftReview`, so there is no per-draft
+ * `draftReview(id)` fan-out and no thin `listing-only` fallback. What remains
+ * worth asserting here: a failed half must not read as an empty one, the walk
+ * pages honestly within its budget, and truncation is reported rather than
+ * dropped.
  * ------------------------------------------------------------------------ */
 
 const sharedPage = (nodes, hasNextPage = false) => ({
@@ -370,26 +373,29 @@ const sharedPage = (nodes, hasNextPage = false) => ({
 	},
 });
 
-const myDraftsPage = (nodes, hasNextPage = false) => ({
+const myReviewsPage = (nodes, hasNextPage = false, endCursor = null) => ({
 	data: {
-		myDrafts: {
+		myDraftReviews: {
 			totalCount: nodes.length,
-			pageInfo: { hasNextPage, endCursor: hasNextPage ? 'next' : null },
+			pageInfo: { hasNextPage, endCursor },
 			edges: nodes.map((node, index) => ({ cursor: `m${index}`, node })),
 		},
 	},
 });
 
-const ownListing = (id, overrides = {}) => ({
-	id,
+const ownReview = (id, overrides = {}) => ({
+	draftId: id,
 	title: 'Something my agent drafted',
-	slug: 'something',
 	status: 'DRAFT',
 	contentFormat: 'MARKDOWN',
 	updatedAt: '2026-07-31T09:00:00Z',
 	createdAt: '2026-07-31T08:00:00Z',
 	generatedBy: agent,
 	reviewedBy: null,
+	reviewStatus: null,
+	editorNotes: null,
+	grant: null,
+	verdicts: [],
 	...overrides,
 });
 
@@ -401,7 +407,7 @@ test('a failed half of the queue is unavailable, never an empty one', async () =
 			if (operation === 'ContentusSharedDraftReviews') {
 				return { errors: [{ message: 'the wombat subsystem is on fire' }] };
 			}
-			return myDraftsPage([]);
+			return myReviewsPage([]);
 		},
 		() => loadReviewQueue(TOKEN)
 	);
@@ -415,7 +421,7 @@ test('a failed half of the queue is unavailable, never an empty one', async () =
 	assert.equal(value.failures[0].message, 'the wombat subsystem is on fire');
 
 	assert.ok(
-		calls.some((call) => call.operation === 'ContentusMyDrafts'),
+		calls.some((call) => call.operation === 'ContentusMyDraftReviews'),
 		'one half failing must not cancel the other'
 	);
 });
@@ -423,8 +429,8 @@ test('a failed half of the queue is unavailable, never an empty one', async () =
 test('the surviving half is still shown when the other one fails', async () => {
 	const { value } = await withGraphql(
 		({ operation }) => {
-			if (operation === 'ContentusMyDrafts') {
-				return { errors: [{ message: 'myDrafts is unwell' }] };
+			if (operation === 'ContentusMyDraftReviews') {
+				return { errors: [{ message: 'myDraftReviews is unwell' }] };
 			}
 			return sharedPage([
 				{
@@ -452,109 +458,124 @@ test('the surviving half is still shown when the other one fails', async () => {
 	assert.equal(value.entries[0].review.draftId, 'shared-1');
 });
 
-test('an own draft with a recorded verdict shows the recorded activity', async () => {
-	// `myDrafts` returns a listing that says a reviewer ruled and not what they
-	// ruled. The queue asks `draftReview(id)` — which `DraftReviewForCaller`
-	// authorizes for the OWNER — and the entry then carries lesser's own state.
+test('an own draft carries lesser review state straight from myDraftReviews', async () => {
+	// The pre-v1.6.4 shape walked `myDrafts` and then asked `draftReview(id)`
+	// per draft to fill in the state the listing lacked. The connection now
+	// returns the full projection, so the state arrives with the listing and no
+	// per-draft follow-up goes out.
 	const { value, calls } = await withGraphql(
-		({ operation, variables }) => {
+		({ operation }) => {
 			if (operation === 'ContentusSharedDraftReviews') return sharedPage([]);
-			if (operation === 'ContentusMyDrafts') {
-				return myDraftsPage([ownListing('own-reviewed', { reviewedBy: reviewer })]);
-			}
-
-			assert.equal(operation, 'ContentusDraftReview');
-			assert.equal(variables.id, 'own-reviewed');
-			return {
-				data: {
-					draftReview: {
-						draftId: 'own-reviewed',
-						title: 'Something my agent drafted',
-						status: 'DRAFT',
-						contentFormat: 'MARKDOWN',
-						updatedAt: '2026-07-31T09:00:00Z',
-						createdAt: '2026-07-31T08:00:00Z',
-						generatedBy: agent,
-						reviewedBy: reviewer,
-						reviewStatus: 'APPROVED',
-						editorNotes: null,
-						grant: null,
-						verdicts: [
-							{
-								verdict: 'APPROVED',
-								notes: null,
-								recordedAt: '2026-07-31T08:45:00Z',
-								reviewer,
-							},
-						],
-					},
-				},
-			};
+			return myReviewsPage([
+				ownReview('own-reviewed', {
+					reviewedBy: reviewer,
+					reviewStatus: 'APPROVED',
+					verdicts: [
+						{
+							verdict: 'APPROVED',
+							notes: null,
+							current: true,
+							stale: false,
+							recordedAt: '2026-07-31T08:45:00Z',
+							reviewer,
+						},
+					],
+				}),
+			]);
 		},
 		() => loadReviewQueue(TOKEN)
 	);
 
-	assert.ok(
-		calls.some((call) => call.operation === 'ContentusDraftReview'),
-		'the queue must ask for the projection that carries review activity'
+	assert.deepEqual(
+		calls.map((call) => call.operation),
+		['ContentusSharedDraftReviews', 'ContentusMyDraftReviews'],
+		'two connection queries and no per-draft fan-out'
 	);
 
 	assert.equal(value.entries.length, 1);
 	const [entry] = value.entries;
 
 	assert.equal(entry.source, 'my-agent-draft');
-	assert.equal(entry.projection, 'review', 'the full projection arrived');
-	assert.equal(entry.review.reviewStatus, 'APPROVED', "lesser's own state, not an absence");
+	assert.equal(entry.review.reviewStatus, 'APPROVED', "lesser's own state, with the listing");
 	assert.equal(entry.review.verdicts.length, 1);
+	assert.equal(entry.review.verdicts[0].stale, false);
 	assert.equal(entry.review.verdicts[0].reviewer.username, 'editor');
 });
 
-test('an own draft whose review projection is missing is unknown, not unreviewed', async () => {
-	const { value } = await withGraphql(
-		({ operation }) => {
+test('the own half walks pages until lesser says there are no more', async () => {
+	const { value, calls } = await withGraphql(
+		({ operation, variables }) => {
 			if (operation === 'ContentusSharedDraftReviews') return sharedPage([]);
-			if (operation === 'ContentusMyDrafts') {
-				return myDraftsPage([ownListing('own-thin', { reviewedBy: reviewer })]);
-			}
-			// The projection that would have said what the verdict was does not
-			// arrive. The draft is still real — the listing proved that.
-			return { errors: [{ message: 'draft review not found' }] };
+			assert.equal(operation, 'ContentusMyDraftReviews');
+			if (variables.after === null) return myReviewsPage([ownReview('own-1')], true, 'page-2');
+			assert.equal(variables.after, 'page-2', 'the walk follows pageInfo.endCursor');
+			return myReviewsPage([ownReview('own-2')], false, null);
 		},
 		() => loadReviewQueue(TOKEN)
 	);
 
-	assert.equal(value.entries.length, 1, 'the draft is still listed, not dropped');
-	const [entry] = value.entries;
+	const ownCalls = calls.filter((call) => call.operation === 'ContentusMyDraftReviews');
+	assert.equal(ownCalls.length, 2, 'the walk paged');
 
-	assert.equal(entry.projection, 'listing-only', 'and it is marked as the thin projection');
-	assert.equal(entry.review.reviewStatus, undefined, 'no review state is invented');
-	assert.deepEqual(entry.review.verdicts, [], 'and no verdict history is invented');
-
-	// The half itself loaded fine — one draft's projection failing is not a
-	// failure of the query that listed it.
+	assert.deepEqual(
+		value.entries.map((entry) => entry.review.draftId),
+		['own-1', 'own-2']
+	);
 	assert.deepEqual(value.own, { status: 'loaded', more: false });
 });
 
-test('the queue never asks for a review projection it is not entitled to', async () => {
-	// Only the viewer's OWN agent-generated drafts are enriched. A draft with no
-	// recorded generator is not in this half of the queue at all, so no
-	// `draftReview` goes out for it.
+test('a truncated walk reports more-to-come rather than claiming completeness', async () => {
+	// The budget is three pages; lesser has more behind them. `own.more` is the
+	// difference between "none of your drafts are agent-generated" and "none in
+	// what was scanned" — the queue's copy hangs off it.
 	const { value, calls } = await withGraphql(
 		({ operation }) => {
 			if (operation === 'ContentusSharedDraftReviews') return sharedPage([]);
-			if (operation === 'ContentusMyDrafts') {
-				return myDraftsPage([ownListing('hand-written', { generatedBy: null })]);
-			}
-			throw new Error('no draftReview should be sent for a draft with no generator');
+			// Every page is hand-written drafts (filtered out of this half) with
+			// another page always behind it.
+			return myReviewsPage([ownReview('hand-written', { generatedBy: null })], true, 'next');
+		},
+		() => loadReviewQueue(TOKEN)
+	);
+
+	const ownCalls = calls.filter((call) => call.operation === 'ContentusMyDraftReviews');
+	assert.equal(ownCalls.length, 3, 'the walk stopped at its page budget');
+
+	assert.deepEqual(value.entries, [], 'no agent-generated drafts in what was scanned');
+	assert.deepEqual(value.own, { status: 'loaded', more: true }, 'and it says so honestly');
+});
+
+test('a page failing mid-walk keeps what arrived and stays honest about the rest', async () => {
+	const { value } = await withGraphql(
+		({ operation, variables }) => {
+			if (operation === 'ContentusSharedDraftReviews') return sharedPage([]);
+			if (variables.after === null) return myReviewsPage([ownReview('own-1')], true, 'page-2');
+			return { errors: [{ message: 'the second page is unwell' }] };
+		},
+		() => loadReviewQueue(TOKEN)
+	);
+
+	assert.deepEqual(
+		value.entries.map((entry) => entry.review.draftId),
+		['own-1'],
+		'the first page is still shown'
+	);
+	assert.deepEqual(value.own, { status: 'loaded', more: true }, 'with completeness unclaimed');
+});
+
+test('drafts with no recorded generator are not in the own half at all', async () => {
+	// `myDraftReviews` returns every review the viewer owns; this half of the
+	// queue is only the ones an agent produced.
+	const { value } = await withGraphql(
+		({ operation }) => {
+			if (operation === 'ContentusSharedDraftReviews') return sharedPage([]);
+			return myReviewsPage([ownReview('hand-written', { generatedBy: null })]);
 		},
 		() => loadReviewQueue(TOKEN)
 	);
 
 	assert.deepEqual(value.entries, []);
-	assert.deepEqual(
-		calls.map((call) => call.operation).filter((name) => name === 'ContentusDraftReview'),
-		[]
-	);
+	assert.deepEqual(value.own, { status: 'loaded', more: false });
 });
 
 test('nothing in the queue is fetched without a session', async () => {

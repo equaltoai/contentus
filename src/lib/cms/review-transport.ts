@@ -37,7 +37,7 @@ import {
 	DRAFT_OWNERSHIP_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_REVIEW_QUERY,
-	MY_DRAFTS_QUERY,
+	MY_DRAFT_REVIEWS_QUERY,
 	PUBLISH_DRAFT_MUTATION,
 	SCHEDULE_DRAFT_MUTATION,
 	SHARED_DRAFT_REVIEWS_QUERY,
@@ -47,9 +47,7 @@ import {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toOwnDraftReview,
 	type DraftPreview,
-	type OwnDraft,
 	type QueueHalfState,
 	type ReviewFailure,
 	type ReviewQueue,
@@ -129,18 +127,14 @@ const str = (value: unknown): string | null => (typeof value === 'string' ? valu
 
 const QUEUE_PAGE_SIZE = 20;
 
-/** How many `myDrafts` pages to walk looking for agent-generated drafts. */
-const OWN_DRAFT_PAGE_BUDGET = 3;
-
 /**
- * How many own drafts have their review projection fetched at once.
+ * How many `myDraftReviews` pages to walk for the own half of the queue.
  *
- * `draftReview(id)` is per draft — lesser exposes no batch review projection for
- * `myDrafts` (recorded in `docs/consumption/review-contract.md`) — so the queue
- * fans out. Bounded so a reviewer with a page of agent drafts does not open
- * twenty simultaneous requests; nothing is dropped, it is only paced.
+ * The walk exists for honesty, not for completeness: the budget keeps a
+ * reviewer with a thousand drafts from waiting on all of them, and whatever
+ * it did not reach is reported as `hasNextPage` rather than silently dropped.
  */
-const OWN_DRAFT_ENRICH_CONCURRENCY = 4;
+const OWN_REVIEW_PAGE_BUDGET = 3;
 
 interface Connection<T> {
 	nodes: T[];
@@ -183,119 +177,74 @@ async function loadSharedPage(
 	);
 }
 
-async function loadOwnDraftsPage(
+async function loadOwnReviewsPage(
 	accessToken: AccessToken,
 	after: string | null
 ): Promise<ReviewResult<Connection<DraftReviewData>>> {
-	return authenticated(accessToken, MY_DRAFTS_QUERY, { first: QUEUE_PAGE_SIZE, after }, (data) => {
-		const connection = toConnection((data as { myDrafts?: unknown } | null)?.myDrafts);
-		return {
-			nodes: connection.nodes
-				.map(toOwnDraftReview)
-				.filter((review): review is DraftReviewData => review !== null),
-			hasNextPage: connection.hasNextPage,
-			endCursor: connection.endCursor,
-		};
-	});
-}
-
-/**
- * Ask lesser for the review projection of an own draft.
- *
- * `myDrafts` returns `type Draft`, which carries no `reviewStatus`, no grant,
- * and no verdict history — only `reviewedBy`. So a draft a reviewer has already
- * ruled on comes back from the listing indistinguishable from one nobody has
- * touched, and the vendored state badge reports that absence as "No review
- * activity recorded".
- *
- * `draftReview(id)` is the projection that does carry them, and
- * `DraftReviewForCaller` authorizes it for the draft's OWNER as well as for an
- * active grantee (`pkg/services/cms/draft_review.go`), so the viewer is entitled
- * to every one of these. Asking is therefore reading the contract, not working
- * around it.
- *
- * A draft whose projection does not arrive keeps its listing shape and is
- * marked `listing-only`, and the queue renders it as an unknown review state.
- * It is never dropped: the listing already proved the draft exists.
- */
-async function enrichOwnDraft(
-	accessToken: AccessToken,
-	listing: DraftReviewData
-): Promise<OwnDraft> {
-	const result = await loadDraftReview(accessToken, listing.draftId);
-	if (!result.ok) return { review: listing, projection: 'listing-only' };
-	return { review: result.value, projection: 'review' };
-}
-
-/** Run `task` over `items` with a bounded number in flight, preserving order. */
-async function mapWithConcurrency<T, R>(
-	items: readonly T[],
-	limit: number,
-	task: (item: T) => Promise<R>
-): Promise<R[]> {
-	const out: R[] = new Array(items.length);
-	let next = 0;
-
-	const worker = async () => {
-		for (;;) {
-			const index = next;
-			next += 1;
-			if (index >= items.length) return;
-			out[index] = await task(items[index] as T);
+	return authenticated(
+		accessToken,
+		MY_DRAFT_REVIEWS_QUERY,
+		{ first: QUEUE_PAGE_SIZE, after },
+		(data) => {
+			const connection = toConnection(
+				(data as { myDraftReviews?: unknown } | null)?.myDraftReviews
+			);
+			return {
+				nodes: connection.nodes
+					.map(toDraftReview)
+					.filter((review): review is DraftReviewData => review !== null),
+				hasNextPage: connection.hasNextPage,
+				endCursor: connection.endCursor,
+			};
 		}
-	};
-
-	await Promise.all(
-		Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => worker())
 	);
-	return out;
 }
 
 /**
- * Walk `myDrafts` for agent-generated drafts, within a page budget, and load the
- * review projection for each.
+ * Walk `myDraftReviews` for the viewer's agent-generated drafts, within a page
+ * budget.
  *
- * lesser filters `contentType` after paginating, and contentus filters
- * `generatedBy != null` after that, so the yield per page is not the page size
- * and a single page is a weak sample. Walking a few pages makes the queue
- * useful; the budget keeps a reviewer with a thousand drafts from waiting on
- * all of them, and whatever it did not reach is reported as `hasNextPage`
- * rather than silently dropped.
+ * lesser v1.6.4 added `myDraftReviews` — "review assignments created by the
+ * authenticated draft owner" — returning the SAME full `DraftReview`
+ * projection as `sharedDraftReviews`. This closes the recorded upstream ask
+ * for a batch review projection of own drafts: before it, the queue walked
+ * `myDrafts` (a listing with no `reviewStatus`, no grant, and no verdict
+ * history) and fanned out one `draftReview(id)` per draft, with a
+ * `listing-only` fallback for any projection that did not arrive. The fan-out,
+ * the fallback, and the `listing-only` marker are all gone — each edge's node
+ * already IS the full review, so one connection answers the whole half.
+ *
+ * The budget and the truncation honesty are unchanged: whatever the walk did
+ * not reach is reported as `hasNextPage`, so the queue never claims a
+ * completeness it does not have.
  */
 async function collectOwnAgentDrafts(
 	accessToken: AccessToken
-): Promise<ReviewResult<Connection<OwnDraft>>> {
-	const listings: DraftReviewData[] = [];
+): Promise<ReviewResult<Connection<DraftReviewData>>> {
+	const nodes: DraftReviewData[] = [];
 	let cursor: string | null = null;
 	let hasNextPage = false;
 	let truncated = false;
 
-	for (let page = 0; page < OWN_DRAFT_PAGE_BUDGET; page += 1) {
-		const result: ReviewResult<Connection<DraftReviewData>> = await loadOwnDraftsPage(
-			accessToken,
-			cursor
-		);
+	for (let page = 0; page < OWN_REVIEW_PAGE_BUDGET; page += 1) {
+		const result = await loadOwnReviewsPage(accessToken, cursor);
 		if (!result.ok) {
 			// A later page failing after earlier ones succeeded is still a partial
 			// answer worth showing, with more-to-load left true so the queue does
 			// not claim a completeness it does not have.
-			if (listings.length > 0) {
+			if (nodes.length > 0) {
 				truncated = true;
 				break;
 			}
 			return result;
 		}
 
-		listings.push(...result.value.nodes.filter(isAgentGenerated));
+		nodes.push(...result.value.nodes.filter(isAgentGenerated));
 		hasNextPage = result.value.hasNextPage;
 		cursor = result.value.endCursor;
 
 		if (!hasNextPage || !cursor) break;
 	}
-
-	const nodes = await mapWithConcurrency(listings, OWN_DRAFT_ENRICH_CONCURRENCY, (listing) =>
-		enrichOwnDraft(accessToken, listing)
-	);
 
 	return {
 		ok: true,
@@ -314,8 +263,8 @@ function halfState<T>(result: ReviewResult<Connection<T>>): QueueHalfState {
  * viewer's own agent-generated drafts.
  *
  * The two halves are loaded independently and neither can take the other down:
- * an instance that answers `sharedDraftReviews` but fails `myDrafts` shows the
- * shared queue and says what else it could not load.
+ * an instance that answers `sharedDraftReviews` but fails `myDraftReviews`
+ * shows the shared queue and says what else it could not load.
  *
  * A FAILED HALF IS NOT AN EMPTY HALF. It contributes no entries, but its state
  * is `unavailable` rather than a loaded-and-empty one, because the queue's copy
