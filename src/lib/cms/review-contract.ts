@@ -17,7 +17,7 @@
  * its own renderer. `tests/review.test.mjs` asserts that over every exported
  * document, so a field added in a hurry fails the build rather than shipping.
  *
- * Verified against lesser release v1.5.32.
+ * Verified against lesser release v1.6.4.
  */
 
 import type {
@@ -53,9 +53,16 @@ const REVIEW_ACTOR_FIELDS = `
  * `DraftReview`, in full.
  *
  * Note what is NOT here, because its absence is the contract rather than an
- * oversight: `DraftReview` carries no body field at all. lesser's review
- * projection deliberately exposes metadata and verdict history and makes
- * `draftPreview` the only path to content.
+ * oversight: `DraftReview` carries body fields (`content`, `renderedHtml`),
+ * and lesser's review projection deliberately makes `draftPreview` the only
+ * path to content. This selection asks for neither — it takes the metadata,
+ * the verdict history, and the gate evaluation, never the body.
+ *
+ * Since lesser v1.6.4 the selection also carries the fields that make a stale
+ * read identifiable (`contentHash`, `revision`, `activeReviewerIds`) and
+ * lesser's own publication-gate evaluation (`publishEligibility`), plus the
+ * per-verdict staleness markers (`current`, `stale`). All of them are read,
+ * never recomputed client-side.
  *
  * Depth check: `sharedDraftReviews → edges → node → grant → reviewer → username`
  * is 6, inside lesser's `GRAPHQL_MAX_DEPTH` of 12 for ordinary callers.
@@ -72,6 +79,16 @@ const DRAFT_REVIEW_FIELDS = `
 	createdAt
 	reviewStatus
 	editorNotes
+	contentHash
+	revision
+	activeReviewerIds
+	publishEligibility {
+		eligible
+		blockingReasons
+		reviewersApproved
+		principalApprovalRequired
+		principalApproved
+	}
 	generatedBy { ${REVIEW_ACTOR_FIELDS} }
 	reviewedBy { ${REVIEW_ACTOR_FIELDS} }
 	grant {
@@ -81,6 +98,9 @@ const DRAFT_REVIEW_FIELDS = `
 	verdicts {
 		verdict
 		notes
+		contentHash
+		current
+		stale
 		recordedAt
 		reviewer { ${REVIEW_ACTOR_FIELDS} }
 	}
@@ -99,41 +119,33 @@ export const SHARED_DRAFT_REVIEWS_QUERY = `
 	}
 `;
 
-export const DRAFT_REVIEW_QUERY = `
-	query ContentusDraftReview($id: ID!) {
-		draftReview(id: $id) { ${DRAFT_REVIEW_FIELDS} }
-	}
-`;
-
 /**
- * The viewer's own drafts.
+ * The viewer's own drafts, as full `DraftReview` projections.
  *
- * `content` is absent by construction — see the module header. `slug` is
- * selected because the workspace shows what address a publish would claim; it
- * is displayed, never edited (a published slug is immutable, and Article
- * identity is lesser's).
+ * lesser v1.6.4 added `myDraftReviews` — "review assignments created by the
+ * authenticated draft owner" — which returns the SAME `DraftReview` shape as
+ * `sharedDraftReviews`, closing the recorded upstream ask for a batch review
+ * projection of own drafts (`docs/consumption/review-contract.md`). Before it,
+ * the queue walked `myDrafts` (which carries no `reviewStatus`, no grant, and
+ * no verdict history) and fanned out one `draftReview(id)` per draft. Both the
+ * walk and the fan-out are gone; one connection now answers the whole half.
  */
-export const MY_DRAFTS_QUERY = `
-	query ContentusMyDrafts($first: Int, $after: Cursor) {
-		myDrafts(contentType: ARTICLE, first: $first, after: $after) {
+export const MY_DRAFT_REVIEWS_QUERY = `
+	query ContentusMyDraftReviews($first: Int, $after: Cursor) {
+		myDraftReviews(first: $first, after: $after) {
 			totalCount
 			pageInfo { hasNextPage endCursor }
 			edges {
 				cursor
-				node {
-					id
-					title
-					slug
-					status
-					scheduledAt
-					contentFormat
-					updatedAt
-					createdAt
-					generatedBy { ${REVIEW_ACTOR_FIELDS} }
-					reviewedBy { ${REVIEW_ACTOR_FIELDS} }
-				}
+				node { ${DRAFT_REVIEW_FIELDS} }
 			}
 		}
+	}
+`;
+
+export const DRAFT_REVIEW_QUERY = `
+	query ContentusDraftReview($id: ID!) {
+		draftReview(id: $id) { ${DRAFT_REVIEW_FIELDS} }
 	}
 `;
 
@@ -217,8 +229,8 @@ export const SCHEDULE_DRAFT_MUTATION = `
 /** Every document this face sends, so a probe can assert over all of them. */
 export const REVIEW_DOCUMENTS = {
 	SHARED_DRAFT_REVIEWS_QUERY,
+	MY_DRAFT_REVIEWS_QUERY,
 	DRAFT_REVIEW_QUERY,
-	MY_DRAFTS_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_OWNERSHIP_QUERY,
 	SUBMIT_DRAFT_REVIEW_MUTATION,
@@ -280,14 +292,19 @@ export function isAuthError(errors: readonly GraphQLError[]): boolean {
 /**
  * Classify a GraphQL error set from a review operation.
  *
- * Matching on message text is not a thing to be proud of, and it is here for a
- * stated reason: lesser's CMS resolvers return bare `errors.New(...)` values
- * without an `extensions.code`, so the wire carries no machine-readable
- * discriminator to switch on. The classification is presentational only —
+ * Since lesser v1.6.4 (commit e93388ab7) the CMS surface types its errors:
+ * `errors[].extensions.code` carries `UNAUTHENTICATED`, `FEATURE_DISABLED`,
+ * `NOT_FOUND`, `FORBIDDEN`, or `VALIDATION`, and the code is matched FIRST —
+ * it is the machine-readable discriminator this function always wanted.
+ *
+ * The substring matching below stays as a fallback for pre-v1.6.4 instances,
+ * and for the v1.6.4 codes this function deliberately does not map: lesser's
+ * classifier (`cmd/graphql/main.go`) tags the review-gate refusals
+ * `INTERNAL_ERROR`, so "draft requires approval from every active reviewer"
+ * still reaches the `gated` branch by its text. Matching on message text is
+ * not a thing to be proud of, but the classification is presentational only —
  * every branch shows the reviewer what lesser said, verbatim — so a miss
- * degrades to a plainer message rather than to a wrong permission decision. A
- * typed error code on the CMS surface is an upstream ask, recorded in
- * `docs/consumption/review-contract.md`.
+ * degrades to a plainer message rather than to a wrong permission decision.
  *
  * The strings matched are lesser's own, from `pkg/services/cms/draft_review.go`
  * and `draft_service.go`, and `tests/review.test.mjs` pins them.
@@ -298,6 +315,22 @@ export function failureFromErrors(errors: readonly GraphQLError[]): ReviewFailur
 			reason: 'unauthenticated',
 			message: 'Your session has expired. Sign in again to continue reviewing.',
 		};
+	}
+
+	// The typed codes, first. `UNAUTHENTICATED` is already settled above; the
+	// rest map onto the same reasons the substring fallback produces, with the
+	// coded error's own message preserved verbatim.
+	const TYPED_REASONS: Record<string, ReviewFailureReason> = {
+		feature_disabled: 'cms-disabled',
+		not_found: 'not-found',
+		forbidden: 'forbidden',
+		validation: 'rejected',
+	};
+	for (const error of errors) {
+		const reason = TYPED_REASONS[String(error.extensions?.['code'] ?? '').toLowerCase()];
+		if (reason) {
+			return { reason, message: String(error.message ?? 'The instance rejected this request.') };
+		}
 	}
 
 	const messages = errors.map((error) => String(error.message ?? '').toLowerCase());
@@ -381,6 +414,13 @@ export function toVerdictRecord(raw: unknown): ReviewVerdictRecordData | null {
 		notes: str(entry['notes']),
 		reviewer,
 		recordedAt: str(entry['recordedAt']) ?? '',
+		// lesser v1.6.4's staleness markers, passed through unread: `current` and
+		// `stale` are lesser's own comparison of this verdict against the current
+		// draft revision and active grant, so the chrome renders them and never
+		// recomputes them from the hashes.
+		...(typeof entry['contentHash'] === 'string' ? { contentHash: entry['contentHash'] } : {}),
+		...(typeof entry['current'] === 'boolean' ? { current: entry['current'] } : {}),
+		...(typeof entry['stale'] === 'boolean' ? { stale: entry['stale'] } : {}),
 	};
 }
 
@@ -419,6 +459,13 @@ export function toDraftReview(raw: unknown): DraftReviewData | null {
 	const status = toDraftStatus(node['status']);
 	const contentFormat = toContentFormat(node['contentFormat']);
 
+	const eligibility = record(node['publishEligibility']);
+	const blockingReasons = Array.isArray(eligibility?.['blockingReasons'])
+		? (eligibility['blockingReasons'] as unknown[])
+				.map((reason) => str(reason))
+				.filter((reason): reason is string => reason !== null)
+		: null;
+
 	return {
 		draftId,
 		title: str(node['title']),
@@ -433,62 +480,33 @@ export function toDraftReview(raw: unknown): DraftReviewData | null {
 		reviewedBy: toReviewActor(node['reviewedBy']),
 		reviewStatus: str(node['reviewStatus']),
 		editorNotes: str(node['editorNotes']),
+		...(str(node['contentHash']) ? { contentHash: str(node['contentHash'])! } : {}),
+		...(typeof node['revision'] === 'number' ? { revision: node['revision'] } : {}),
+		...(Array.isArray(node['activeReviewerIds'])
+			? {
+					activeReviewerIds: (node['activeReviewerIds'] as unknown[])
+						.map((id) => str(id))
+						.filter((id): id is string => id !== null),
+				}
+			: {}),
+		// lesser's own gate evaluation (v1.6.4), carried whole. The chrome renders
+		// it; nothing client-side re-derives eligibility from its parts.
+		...(eligibility && typeof eligibility['eligible'] === 'boolean'
+			? {
+					publishEligibility: {
+						eligible: eligibility['eligible'] as boolean,
+						blockingReasons: blockingReasons ?? [],
+						reviewersApproved: eligibility['reviewersApproved'] === true,
+						principalApprovalRequired: eligibility['principalApprovalRequired'] === true,
+						principalApproved: eligibility['principalApproved'] === true,
+					},
+				}
+			: {}),
 		grant:
 			grantReviewer && grant
 				? { reviewer: grantReviewer, grantedAt: str(grant['grantedAt']) ?? '' }
 				: null,
 		verdicts,
-	};
-}
-
-/**
- * A `Draft` the viewer owns, projected onto the same view model.
- *
- * `DraftReviewData` is explicitly a view model rather than a generated GraphQL
- * type — "every field is optional except the identity fields, so a consumer can
- * render partial query selections" — which is what makes this projection a use
- * of the contract rather than a fabrication of one.
- *
- * THIS PROJECTION IS INCOMPLETE, AND THAT IS THE WHOLE POINT OF SAYING SO.
- * lesser's `type Draft` carries no `reviewStatus`, no `editorNotes`, no `grant`,
- * and no verdict history — only `reviewedBy` (`graph/phase1.graphql`). Those
- * fields therefore stay ABSENT here, and nothing is invented in their place.
- *
- * What absence must NOT become is a claim. The vendored `resolveReviewState`
- * turns an empty verdict history plus a missing `reviewStatus` into the definite
- * label "No review activity recorded", which is false for any own draft that a
- * reviewer has already ruled on: lesser sets `Draft.ReviewedBy` AND
- * `Draft.ReviewStatus` together on every `SubmitDraftReview`
- * (`pkg/services/cms/draft_review.go`), so this listing can carry a reviewer and
- * still show no verdicts.
- *
- * So an entry built from this projection is marked `listing-only` (see
- * {@link OwnDraft}) and the queue is not allowed to render the vendored state
- * badge for it. The queue first tries `draftReview(id)` — which
- * `DraftReviewForCaller` authorizes for the draft's owner — and only falls back
- * to this shape when that answer did not arrive.
- */
-export function toOwnDraftReview(raw: unknown): DraftReviewData | null {
-	const node = record(raw);
-	if (!node) return null;
-
-	const draftId = str(node['id']);
-	if (!draftId) return null;
-
-	const status = toDraftStatus(node['status']);
-	const contentFormat = toContentFormat(node['contentFormat']);
-
-	return {
-		draftId,
-		title: str(node['title']),
-		...(contentFormat ? { contentFormat } : {}),
-		...(status ? { status } : {}),
-		scheduledAt: str(node['scheduledAt']),
-		updatedAt: str(node['updatedAt']) ?? '',
-		createdAt: str(node['createdAt']) ?? '',
-		generatedBy: toReviewActor(node['generatedBy']),
-		reviewedBy: toReviewActor(node['reviewedBy']),
-		verdicts: [],
 	};
 }
 
@@ -596,28 +614,19 @@ export function toPreviewFaceArticle(
 export type QueueSource = 'shared-with-me' | 'my-agent-draft';
 
 /**
- * Which of lesser's two projections an entry's `review` actually came from.
+ * One row of the queue.
  *
- * `review` is `DraftReview` — reviewStatus, grant, and the verdict history are
- * all present, so the vendored chrome's state badge is lesser's own answer.
- *
- * `listing-only` is the `myDrafts` shape, which carries none of them. The badge
- * would report absent data as a decided absence, so an entry marked this way is
- * rendered by contentus's own chrome and says the review state is not known
- * rather than that there is none.
+ * Both halves are `DraftReview` projections by construction since lesser
+ * v1.6.4: `sharedDraftReviews` for the shared half, `myDraftReviews` for the
+ * own half. There is deliberately no "which projection arrived" marker —
+ * before `myDraftReviews` existed, the own half could fall back to the thin
+ * `myDrafts` listing shape, and the queue had to mark and render that absence
+ * differently. The fallback and its marker are gone because the thin shape
+ * can no longer arrive.
  */
-export type EntryProjection = 'review' | 'listing-only';
-
 export interface ReviewQueueEntry {
 	review: DraftReviewData;
 	source: QueueSource;
-	projection: EntryProjection;
-}
-
-/** One of the viewer's own drafts, with the projection it was built from. */
-export interface OwnDraft {
-	review: DraftReviewData;
-	projection: EntryProjection;
 }
 
 /**
@@ -628,15 +637,14 @@ export interface OwnDraft {
  * the things this person set in motion (product design §5).
  *
  * A draft that is BOTH shared with the viewer and owned by them appears once,
- * on the shared side, because that projection is the one carrying the verdict
- * history and the grant.
+ * on the shared side.
  *
  * Pure, and separate from the fetching, so the ordering rule can be asserted
  * without a transport.
  */
 export function orderQueueEntries(
 	shared: readonly DraftReviewData[],
-	own: readonly OwnDraft[]
+	own: readonly DraftReviewData[]
 ): ReviewQueueEntry[] {
 	const entries: ReviewQueueEntry[] = [];
 	const seen = new Set<string>();
@@ -644,19 +652,13 @@ export function orderQueueEntries(
 	for (const review of shared) {
 		if (seen.has(review.draftId)) continue;
 		seen.add(review.draftId);
-		// The shared half is `DraftReview` by construction: `sharedDraftReviews`
-		// returns nothing else.
-		entries.push({ review, source: 'shared-with-me', projection: 'review' });
+		entries.push({ review, source: 'shared-with-me' });
 	}
 
-	for (const draft of own) {
-		if (seen.has(draft.review.draftId)) continue;
-		seen.add(draft.review.draftId);
-		entries.push({
-			review: draft.review,
-			source: 'my-agent-draft',
-			projection: draft.projection,
-		});
+	for (const review of own) {
+		if (seen.has(review.draftId)) continue;
+		seen.add(review.draftId);
+		entries.push({ review, source: 'my-agent-draft' });
 	}
 
 	return entries;
@@ -685,8 +687,9 @@ export type QueueHalfState = { status: 'loaded'; more: boolean } | { status: 'un
  *
  *   - loaded, nothing more     — a real, complete, empty answer. Definite.
  *   - loaded, more to come     — nothing in what was scanned. Not a claim about
- *                                the set, because `myDrafts` filters after it
- *                                paginates and `sharedDraftReviews` pages.
+ *                                the set: both connections paginate, and the
+ *                                own half is walked with a page budget, so an
+ *                                exhausted budget leaves more behind it.
  *   - unavailable              — no answer at all. The queue says so and says
  *                                nothing else; the failure itself is rendered
  *                                separately, above.
@@ -720,10 +723,11 @@ export interface ReviewQueue {
 	/**
 	 * The viewer's own agent-generated drafts.
 	 *
-	 * `more` is load-bearing for honesty, not just for a button: `myDrafts`
-	 * filters AFTER paginating (`graph/query_resolvers_cms.go`), so a page can
-	 * come back with nothing while more drafts wait behind it. "No
-	 * agent-generated drafts" and "none in the first N" are different claims.
+	 * `more` is load-bearing for honesty, not just for a button: `myDraftReviews`
+	 * is walked with a page budget (`OWN_REVIEW_PAGE_BUDGET` in
+	 * `cms/review-transport.ts`), so a truncated walk can come back with nothing
+	 * while more reviews wait behind it. "No agent-generated drafts" and "none
+	 * in the first N" are different claims.
 	 */
 	own: QueueHalfState;
 	/** Non-fatal partial failures, so one empty half never hides the other. */

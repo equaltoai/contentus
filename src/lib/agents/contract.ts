@@ -22,9 +22,13 @@
  *      scope, and — unless the caller is an admin — a value equal to their own
  *      username. Everything else on this connection is anonymous-safe.
  *   4. Non-owners get `agentOwner`, `delegatedScopes` and the soul fields
- *      REDACTED (`redactGraphAgentPrivateFields`) — to null, to `[]`, and to
- *      `UNBOUND`. Redaction that looks like data is the trap this module exists
- *      to keep out of the UI: see `AgentRedactedFields` below.
+ *      REDACTED (`redactGraphAgentPrivateFields`, lesser v1.6.4 commit
+ *      7aad73d5a) — to null, to `[]`, and to `UNBOUND` — and lesser says that
+ *      it did so in the same answer: `viewerCanSeePrivateFields` is false for
+ *      them and true for the owner and admins. Redaction that looks like data
+ *      is the trap this module exists to keep out of the UI, and the served
+ *      boolean — never the values, never the request — is what tells the two
+ *      cases apart: see `AgentRedactedFields` below.
  */
 
 // Explicit `.ts` extension, matching `cms/review-transport.ts`: this module is
@@ -91,10 +95,12 @@ export interface AgentCapabilities {
  * `UNBOUND` soul state — so a UI that renders them as facts reports "this agent
  * has no owner and no scopes" to every anonymous visitor, about every agent.
  *
- * `viewerIsOwner` is what lets a surface tell the two apart, and it is derived
- * from whether the read was authenticated AS the owner rather than from the
- * values themselves. When false, the affected fields are absent from the view
- * model entirely instead of present-and-empty.
+ * `viewerIsOwner` is what lets a surface tell the two apart, and it is lesser's
+ * own `viewerCanSeePrivateFields` carried through verbatim — the instance's
+ * statement of what it served, never a client inference from the values (which
+ * redaction makes ambiguous) or from whether a token was sent (which says what
+ * was asked, not what was answered). When false, the affected fields are absent
+ * from the view model entirely instead of present-and-empty.
  */
 export interface AgentRedactedFields {
 	viewerIsOwner: boolean;
@@ -198,17 +204,22 @@ const AGENT_SUMMARY_FIELDS = `
 `;
 
 /**
- * Owner-only fields, requested as a separate selection appended for
- * authenticated reads.
+ * The fields lesser redacts for any viewer who is not the agent's owner or an
+ * admin, plus lesser's own statement of which case this viewer is in.
  *
- * Kept apart from the summary because asking for them anonymously is not an
- * error — lesser answers with the redacted values — and a single selection
- * would make "we asked" indistinguishable from "we were told". A read that does
- * not ask cannot mistake a blank for an answer.
+ * Asking for them anonymously is not an error: lesser v1.6.4 admits anonymous
+ * `agent` reads (commit 1df0358b8) and answers with the redacted shape — null
+ * owner, empty scopes — alongside `viewerCanSeePrivateFields: false` (commit
+ * 7aad73d5a). The boolean is what allows one document to serve every viewer:
+ * the selection asks, lesser decides visibility per viewer, and says what it
+ * decided. Selected only on reads whose surface can be an owner's — the detail
+ * page and the owned view. The roster is anonymous-only on the server pass and
+ * renders no owner fields, so it does not ask the question at all.
  */
-const AGENT_OWNER_FIELDS = `
+const AGENT_PRIVATE_FIELDS = `
 	agentOwner
 	delegatedScopes
+	viewerCanSeePrivateFields
 `;
 
 export const AGENTS_ROSTER_QUERY = `
@@ -224,21 +235,19 @@ export const AGENTS_ROSTER_QUERY = `
 	}
 `;
 
+/**
+ * ONE DOCUMENT FOR EVERY VIEWER. There is no anonymous/owner split to make:
+ * lesser redacts the private fields rather than erroring on them, so the same
+ * selection is sent with or without a token and `viewerCanSeePrivateFields` in
+ * the answer states what this viewer was shown. The split this replaced gated a
+ * second document on token presence and inferred ownership from a non-null
+ * `agentOwner` — an inference over values redaction exists to make ambiguous.
+ */
 export const AGENT_DETAIL_QUERY = `
 	query ContentusAgent($username: String!) {
-		agent(username: $username) { ${AGENT_SUMMARY_FIELDS} }
-	}
-`;
-
-/**
- * The same detail read, authenticated, asking additionally for the owner-only
- * fields. Used only when a session exists.
- */
-export const AGENT_DETAIL_OWNER_QUERY = `
-	query ContentusAgentAsOwner($username: String!) {
 		agent(username: $username) {
 			${AGENT_SUMMARY_FIELDS}
-			${AGENT_OWNER_FIELDS}
+			${AGENT_PRIVATE_FIELDS}
 		}
 	}
 `;
@@ -247,7 +256,7 @@ export const MY_AGENTS_QUERY = `
 	query ContentusMyAgents {
 		myAgents {
 			${AGENT_SUMMARY_FIELDS}
-			${AGENT_OWNER_FIELDS}
+			${AGENT_PRIVATE_FIELDS}
 		}
 	}
 `;
@@ -311,12 +320,16 @@ export function toAgentCapabilities(raw: unknown): AgentCapabilities | null {
 }
 
 /**
- * `viewerIsOwner` is passed IN rather than sniffed from the payload. The
+ * `viewerIsOwner` is read from lesser's served `viewerCanSeePrivateFields`,
+ * never sniffed from the payload and never passed in by the caller. The
  * redacted shape and the genuine "this agent has no owner recorded" shape are
- * the same bytes, so the only sound source for the distinction is whether the
- * read that produced them was authorized to see the real thing.
+ * the same bytes, and "we sent a token" says what was asked rather than what
+ * was answered — so the only sound source for the distinction is the statement
+ * lesser makes alongside the values. A read that did not select the boolean
+ * (the anonymous roster, by design) normalizes its absence to false, the safe
+ * direction: owner fields hide rather than fabricate.
  */
-export function toAgentSummary(raw: unknown, viewerIsOwner = false): AgentSummary | null {
+export function toAgentSummary(raw: unknown): AgentSummary | null {
 	const node = record(raw);
 	if (!node) return null;
 
@@ -325,6 +338,7 @@ export function toAgentSummary(raw: unknown, viewerIsOwner = false): AgentSummar
 	if (!id || !username) return null;
 
 	const rawType = str(node.agentType);
+	const viewerIsOwner = node.viewerCanSeePrivateFields === true;
 
 	return {
 		id,
@@ -359,13 +373,13 @@ export function toAgentSummary(raw: unknown, viewerIsOwner = false): AgentSummar
 	};
 }
 
-export function toAgentRosterPage(raw: unknown, viewerIsOwner = false): AgentRosterPage {
+export function toAgentRosterPage(raw: unknown): AgentRosterPage {
 	const connection = record(raw);
 	const pageInfo = connection ? record(connection.pageInfo) : null;
 
 	const agents = Array.isArray(connection?.edges)
 		? connection.edges
-				.map((edge) => toAgentSummary(record(edge)?.node, viewerIsOwner))
+				.map((edge) => toAgentSummary(record(edge)?.node))
 				.filter((agent): agent is AgentSummary => agent !== null)
 		: [];
 
@@ -530,10 +544,11 @@ export type AgentDetailResult =
 /**
  * One agent.
  *
- * The owner-only selection is requested only when a token is present, and
- * `viewerIsOwner` is set only when lesser ANSWERED it with a real owner value.
- * lesser redacts silently rather than erroring, so "we sent a token" is not
- * evidence the token was the owner's — the answer is.
+ * The same document goes out with or without a token, because lesser v1.6.4
+ * made the split meaningless: anonymous `agent` reads are admitted (commit
+ * 1df0358b8), the private fields come back redacted rather than refused
+ * (commit 7aad73d5a), and `viewerCanSeePrivateFields` in the answer states
+ * which case this viewer is in. lesser decides visibility; this read asks once.
  */
 export async function fetchAgent(
 	ctx: AgentRequestContext,
@@ -545,9 +560,8 @@ export async function fetchAgent(
 	}
 
 	try {
-		const authenticated = Boolean(ctx.accessToken);
 		const result = await graphqlRequest<{ agent: unknown }>(
-			authenticated ? AGENT_DETAIL_OWNER_QUERY : AGENT_DETAIL_QUERY,
+			AGENT_DETAIL_QUERY,
 			{ username: handle },
 			requestOptions(ctx)
 		);
@@ -563,11 +577,11 @@ export async function fetchAgent(
 			};
 		}
 
-		// Redaction blanks `agentOwner` to null. A non-null value therefore means
-		// lesser decided this caller may see it, which is exactly the question
-		// `viewerIsOwner` asks.
-		const viewerIsOwner = authenticated && str(node.agentOwner) !== null;
-		const agent = toAgentSummary(node, viewerIsOwner);
+		// `toAgentSummary` takes `viewerIsOwner` from the served
+		// `viewerCanSeePrivateFields`. lesser redacts silently rather than
+		// erroring, so neither "we sent a token" nor a non-null `agentOwner`
+		// would be evidence of what this viewer was shown — the boolean is.
+		const agent = toAgentSummary(node);
 		if (!agent) {
 			return {
 				ok: false,
@@ -588,6 +602,11 @@ export type MyAgentsResult =
  * The caller's own agents. Authenticated by definition — lesser serves no
  * anonymous form of this — so a missing token is answered here rather than by
  * sending a request that can only be refused.
+ *
+ * lesser answers `myAgents` AS the owner, so `viewerCanSeePrivateFields` comes
+ * back true on every node and the owner projection is populated from it — the
+ * same served statement the detail read relies on, not an assumption this
+ * module makes from the query's name.
  */
 export async function fetchMyAgents(ctx: AgentRequestContext): Promise<MyAgentsResult> {
 	if (!ctx.accessToken) {
@@ -609,7 +628,7 @@ export async function fetchMyAgents(ctx: AgentRequestContext): Promise<MyAgentsR
 
 		const agents = Array.isArray(result.data?.myAgents)
 			? result.data.myAgents
-					.map((node) => toAgentSummary(node, true))
+					.map((node) => toAgentSummary(node))
 					.filter((agent): agent is AgentSummary => agent !== null)
 			: [];
 

@@ -24,17 +24,13 @@ registry entry untouched, and it owns the card: title, state badge, the
 timestamps. This route owns the queue AROUND it — grouping, order, empty
 states, and the honesty about what was not loaded.
 
-AND THE ONE PLACE THE CARD IS NOT USED. `resolveReviewState` turns a projection
-with no `reviewStatus` and no verdicts into the definite label "No review
-activity recorded". That is true of a `DraftReview`, which carries both fields
-and would have shown them. It is NOT true of the `myDrafts` listing, which
-carries neither — a draft a reviewer has already ruled on looks identical there
-to one nobody has touched. The queue therefore loads `draftReview(id)` for the
-viewer's own drafts, which lesser authorizes for the owner, and renders the
-vendored card whenever that answer arrived. When it did not, the entry gets
-contentus's own chrome, which says the review state is not known instead of
-saying there is none. Routed upstream as an ask on the vendored chrome; see
-`docs/consumption/review-contract.md`.
+EVERY ENTRY GETS THE CARD. Before lesser v1.6.4 the own half was built from
+the `myDrafts` listing, which carries no `reviewStatus` and no verdict history,
+and an entry whose `draftReview(id)` enrichment had not arrived could not
+honestly render the badge — those entries got contentus's own chrome saying
+the review state was unknown. `myDraftReviews` (v1.6.4) returns the same full
+`DraftReview` projection as `sharedDraftReviews`, so the thin shape can no
+longer arrive and the alternate chrome is gone.
 -->
 
 <script lang="ts">
@@ -213,32 +209,8 @@ saying there is none. Routed upstream as an ask on the vendored chrome; see
 {/if}
 
 {#snippet card(entry: ReviewQueueEntry)}
-	{#if entry.projection === 'review'}
-		<QueueCard review={entry.review} href={reviewDraftHref(entry.review.draftId)} headingLevel={3} />
-	{:else}
-		<!-- The listing projection only. The vendored card's state badge would read
-		     the missing `reviewStatus` and empty verdict history as a decided
-		     absence, so this entry says the true thing instead: the review state
-		     did not arrive. It is still listed and still opens — the listing proved
-		     the draft exists, and the workspace loads the projection that failed
-		     here. -->
-		<article class="gr-blog-review-card">
-			<div class="gr-blog-review-card__header">
-				<h3 class="gr-blog-review-card__title">
-					<a class="gr-blog-review-card__link" href={reviewDraftHref(entry.review.draftId)}>
-						{entry.review.title?.trim() || 'Untitled draft'}
-					</a>
-				</h3>
-				<div class="gr-blog-review-card__state-group">
-					<p class="gr-blog-review-card__state gr-blog-review-card__state--pending">
-						<span class="gr-blog-review-card__state-label">Review state unknown</span>
-					</p>
-				</div>
-			</div>
-			<p class="contentus-review-note">
-				This instance did not return the review activity for this draft, so nothing here says
-				whether it has been reviewed. Open it to load its review state.
-			</p>
-		</article>
-	{/if}
+	<!-- One path, on purpose: both halves are full `DraftReview` projections
+	     (see the header), so the vendored card's state badge is lesser's own
+	     answer for every entry. -->
+	<QueueCard review={entry.review} href={reviewDraftHref(entry.review.draftId)} headingLevel={3} />
 {/snippet}

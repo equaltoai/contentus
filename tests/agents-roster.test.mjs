@@ -97,6 +97,15 @@ test('the roster asks for the preferred field names, not the deprecated aliases'
 		!AGENTS_ROSTER_QUERY.includes('ownerUsername'),
 		'the anonymous roster must not send an argument lesser refuses anonymously'
 	);
+
+	// Nor the ownership question. The roster is anonymous-only on the server
+	// pass and its cards render no owner fields, so it selects neither the
+	// redacted fields nor the boolean that states their visibility — those
+	// belong to the detail and owned-view documents, whose surfaces can be an
+	// owner's.
+	assert.ok(!AGENTS_ROSTER_QUERY.includes('agentOwner'));
+	assert.ok(!AGENTS_ROSTER_QUERY.includes('delegatedScopes'));
+	assert.ok(!AGENTS_ROSTER_QUERY.includes('viewerCanSeePrivateFields'));
 });
 
 test('totalCount is carried as a per-page count, because that is what it is', () => {
@@ -121,18 +130,40 @@ test('hasNextPage comes from lesser, never from page length', () => {
 
 test('redacted owner fields are absent rather than empty', () => {
 	// lesser blanks `agentOwner` to null and `delegatedScopes` to [] for
-	// non-owners. Rendering those as facts would tell every anonymous visitor
-	// that every agent has no owner and no scopes.
-	const anonymous = toAgentSummary(agentNode({ agentOwner: null, delegatedScopes: [] }), false);
+	// non-owners, and says so in the same answer — `viewerCanSeePrivateFields:
+	// false` (v1.6.4, commit 7aad73d5a). Rendering the blanks as facts would
+	// tell every anonymous visitor that every agent has no owner and no scopes.
+	const anonymous = toAgentSummary(
+		agentNode({ agentOwner: null, delegatedScopes: [], viewerCanSeePrivateFields: false })
+	);
 	assert.equal(anonymous.owner, null);
 	assert.equal(anonymous.redaction.viewerIsOwner, false);
 
 	const asOwner = toAgentSummary(
-		agentNode({ agentOwner: 'https://example.invalid/users/ada', delegatedScopes: ['read'] }),
-		true
+		agentNode({
+			agentOwner: 'https://example.invalid/users/ada',
+			delegatedScopes: ['read'],
+			viewerCanSeePrivateFields: true,
+		})
 	);
+	assert.equal(asOwner.redaction.viewerIsOwner, true);
 	assert.equal(asOwner.owner.agentOwner, 'https://example.invalid/users/ada');
 	assert.deepEqual(asOwner.owner.delegatedScopes, ['read']);
+});
+
+test('viewerIsOwner is lesser’s served boolean, never a sniff of the values', () => {
+	// The inference this replaces: before lesser v1.6.4 the client guessed
+	// ownership from "we sent a token and a non-null agentOwner came back" —
+	// values redaction exists to make ambiguous. lesser now states the
+	// authorization directly, and a read that did not ask for the boolean (the
+	// anonymous roster, by design) normalizes its absence to false: the owner
+	// block hides rather than fabricates, even when the payload carries a
+	// real-looking value no served answer would produce.
+	const withoutBoolean = toAgentSummary(
+		agentNode({ agentOwner: 'https://example.invalid/users/ada', delegatedScopes: ['read'] })
+	);
+	assert.equal(withoutBoolean.redaction.viewerIsOwner, false);
+	assert.equal(withoutBoolean.owner, null);
 });
 
 test('an unknown agent type becomes CUSTOM, matching lesser’s own normaliser', () => {

@@ -1,4 +1,7 @@
-import { formatDateTime } from '../../../../utils/relativeTime';
+import {
+	formatDateTime,
+	type FormatDateTimeOptions,
+} from '../../../../utils/relativeTime';
 
 export interface ArticleFormattedDateTime {
 	label: string;
@@ -10,13 +13,14 @@ export interface ArticleFormattedDateTime {
  * datetime value for `<time>` elements.
  */
 export function formatArticleDateTime(
-	value: Date | string | number | null | undefined
+	value: Date | string | number | null | undefined,
+	options: FormatDateTimeOptions = {}
 ): ArticleFormattedDateTime {
 	if (value === null || value === undefined || value === '') {
 		return { label: '' };
 	}
 
-	const formatted = formatDateTime(value);
+	const formatted = formatDateTime(value, options);
 	return {
 		label: formatted.absolute,
 		iso: formatted.iso || undefined,

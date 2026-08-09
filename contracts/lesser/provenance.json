@@ -41,18 +41,18 @@
   "upstream": {
     "repository": "equaltoai/lesser",
     "path": "docs/contracts/graphql-schema.graphql",
-    "ref": "f833ea0b6dea78c11a2b6da6289bf2305f770ebe",
-    "ref_description": "equaltoai/lesser v1.6.3 release tag, published 2026-08-07",
-    "schema_last_modified_at": "0ac07c3f347902c591a6844a76cc6e4b29d96268"
+    "ref": "38034eef671f70996b1364d154b200e5f167d4ec",
+    "ref_description": "equaltoai/lesser v1.6.4 release tag, published 2026-08-08",
+    "schema_last_modified_at": "00b13324ebf11d965fe4d78ae341ffad18898f4c"
   },
   "artifact": {
     "path": "contracts/lesser/graphql-schema.graphql",
-    "bytes": 108911,
-    "sha256": "fe9f08ab9f91ebdf3560699d0ee8f45ffb180b5430ac48655f05ba18037b4064",
-    "blob_sha1": "b907306de7b66bd6ab91665b59bb9b1f00897672"
+    "bytes": 111736,
+    "sha256": "26759ec3d31040412afb60ba740541e9a6f645e1627af15af64b73fa7ed05a4c",
+    "blob_sha1": "86413b135f0f833bf8e926a18900ec9c39e60c18"
   },
   "inspected": {
-    "at": "2026-08-07",
-    "corroborating_source": "The only schema delta from the previous pin (v1.6.2, 9814bf8e) is additive: `search: String` on `Query.articles`, documented in-schema as 'List published articles, optionally filtering public article text with a case-insensitive substring search.' This is the upstream answer to contentus's lesser#1342 (index search + the client_ssr_host query-suffix hazard's contract half) — public article search arrives in lesser's contract rather than as a client-side invention. greater-v0.13.3 (#1011) regenerates its GraphQL adapters against the same optional argument. Verified against the v1.6.3 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.3 --jq .sha`."
+    "at": "2026-08-09",
+    "corroborating_source": "The schema delta from the previous pin (v1.6.3, f833ea0b) is entirely additive and is the client-facing answer to contentus's own filed batch: `instance.subscriptionUrl`/`maxUploadSizeBytes`/`maxStatusCharacters`/`cmsFeatures` (with the new `CMSFeatures` type) — lesser#1348; `Conversation.unreadCount`, `ConversationConnection`, and the `conversationConnection` query preferred over the legacy list field — the messaging halves of the #1346/#1347 family; `deleteMedia` — lesser#1352, with the UsageCount gate follow-up tracked as #1357; the owner review projection — `Draft.reviewVerdict`/`contentHash`/`revision`, `DraftReviewGrant.status`/`revokedAt`, verdict `current`/`stale`, `DraftPublishEligibility`, the full `DraftReview` grants/`publishEligible`/`publishBlockingReasons` block, and `myDraftReviews` — lesser#1350's three asks; and in-schema documentation that `CreateNoteInput.mentions`/`.tags` reject non-empty input — lesser#1351. greater-v0.13.4 (#1022) ships its adapter sync against this contract generation. Verified against the v1.6.4 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.4 --jq .sha`."
   }
 }

@@ -29,21 +29,23 @@
  * `subscription timelineUpdates`, so using it would be answering a different
  * contract than the one the milestone names.
  *
- * THE ONE PLACE THIS INFERS RATHER THAN READS — and it is routed upstream.
- * There is no contract-served value for the subscription endpoint.
- * `InstanceInfo.streamingUrl` looks like the field for it and is not: lesser
- * resolves it to `r.Config.BaseURL()`, the instance's HTTP origin, where
- * Mastodon's `urls.streaming_api` is the WebSocket URL. So the host below is
- * derived by prefixing `ws.` onto the origin the page was served from, which is
- * what lesser's own documentation describes and what its CDK builds — but it is
- * this client reading a topology convention, not a value the instance stated.
- * Filed as an ask on lesser to publish the endpoint; see
- * docs/consumption/timeline-contract.md. Until then the derivation is confined
- * to `subscriptionEndpoint` so there is one place to delete.
+ * THE ENDPOINT IS NOW READ, NOT INFERRED — the derivation this used to carry
+ * is deleted. Until lesser v1.6.4 there was no contract-served value for the
+ * subscription endpoint, and the host was derived here by prefixing `ws.`
+ * onto the origin the page was served from: this client reading a topology
+ * convention, filed upstream, and confined to one function so there was one
+ * place to delete. lesser v1.6.4 (commit 789e18bdb) added
+ * `InstanceInfo.subscriptionUrl` — "GraphQL subscription endpoint using the
+ * graphql-transport-ws protocol" — and `$lib/instance/info` reads it. The
+ * historical trap worth keeping on record: `InstanceInfo.streamingUrl` looks
+ * like the field for the socket and is not — lesser resolves it to
+ * `r.Config.BaseURL()`, the instance's HTTP origin, where Mastodon's
+ * `urls.streaming_api` is the WebSocket URL. See
+ * docs/consumption/timeline-contract.md.
  *
- * NO INSTANCE DOMAIN IS HARD-CODED anywhere here: the host comes from the
- * request that was actually served, so expanding past the dev instance stays a
- * configuration event.
+ * NO INSTANCE DOMAIN IS HARD-CODED anywhere here: the URL below comes from
+ * the instance that was actually asked, so expanding past the dev instance
+ * stays a configuration event.
  *
  * THE GATEWAY AND THE RESOLVER DISAGREE, AND THE GATEWAY WINS. lesser's
  * subscription RESOLVER admits an anonymous PUBLIC subscriber; its WebSocket
@@ -60,36 +62,6 @@
 
 /** The subprotocol lesser's `cmd/graphql-ws` negotiates. */
 export const GRAPHQL_TRANSPORT_WS = 'graphql-transport-ws';
-
-/**
- * The subscription endpoint for a page served from `origin`, or null.
- *
- * Returns null rather than guessing when the origin is unusable, and the null
- * is load-bearing: every caller degrades to "live updates unavailable", which
- * is honest, where a fabricated URL would produce a socket that fails in a way
- * the reader cannot act on.
- *
- * `http:` origins map to `ws:` so a local or non-TLS instance is reachable;
- * everything else is `wss:`.
- */
-export function subscriptionEndpoint(origin: string | null | undefined): string | null {
-	if (!origin) return null;
-
-	let url: URL;
-	try {
-		url = new URL(origin);
-	} catch {
-		return null;
-	}
-
-	if (!url.hostname) return null;
-	// Already a ws host — do not stack another prefix onto it.
-	const host = url.hostname.startsWith('ws.') ? url.hostname : `ws.${url.hostname}`;
-	const scheme = url.protocol === 'http:' ? 'ws:' : 'wss:';
-	const port = url.port ? `:${url.port}` : '';
-
-	return `${scheme}//${host}${port}`;
-}
 
 /**
  * Why a live connection is not running. Each is a different thing to tell a

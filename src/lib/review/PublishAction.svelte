@@ -2,18 +2,29 @@
 Publish or schedule a reviewed draft, behind a confirmation that states what
 publishing does.
 
-THE GATE IS NOT EVALUATED HERE. lesser decides — unanimous approval from every
-reviewer holding an active grant, plus the instance principal's approval for any
-draft that records a generator, cumulatively. Neither this component nor
-anything it calls reconstructs that: the inputs (the active-grant set, the
-principal's identity) are not in lesser's projection, so a client-side "ready to
-publish" badge would be a guess dressed as a fact. The button is offered, the
-mutation is called, and lesser's answer is what appears.
+THE GATE IS LESSER'S, AND SINCE v1.6.4 LESSER SAYS WHAT IT EVALUATED. The rule
+itself is unchanged — unanimous approval from every reviewer holding an active
+grant, plus the instance principal's approval for any draft that records a
+generator, cumulatively — and neither this component nor anything it calls
+reconstructs that arithmetic. What v1.6.4 added is `DraftReview.publishEligibility`:
+lesser's OWN evaluation of its gate, with `eligible` and its own
+`blockingReasons`. Reading that projection is not the client computing the
+gate; it is the client rendering the server's answer. When it says
+`eligible: false`, the publish action is disabled and lesser's blocking
+reasons are shown verbatim — they are lesser's words about its own rule, not
+client-computed gate logic.
 
-That is also why the button is never disabled on gate grounds. A disabled
-control with no explanation teaches an author that publishing is broken; a
-control that runs and comes back with "draft requires approval from every active
-reviewer" teaches them what the gate is. The refusal is the feature.
+That is also why the older rule — the button is never disabled on gate
+grounds — no longer applies. It predated the projection: back then the only
+signal available was the mutation's refusal, so a disabled control could only
+ever rest on a client-side guess. Now that lesser serves the evaluation, a
+disabled control backed by lesser's own reasons teaches the same thing the
+refusal did, earlier.
+
+AND THE REFUSAL STILL HAS THE FINAL WORD. An eligibility read can be stale
+between load and click — a verdict recorded in another tab changes the answer.
+So the mutation's refusal path below is untouched: lesser re-evaluates the
+gate at publish time, and its answer is what appears.
 
 WHAT THE CONFIRMATION SAYS. Not "are you sure" — that is a question people
 answer reflexively. It says what changes: the draft becomes an Article at a
@@ -24,6 +35,8 @@ the single most consequential fact on this screen.
 -->
 
 <script lang="ts">
+	import { onMount } from 'svelte';
+
 	import Modal from '$lib/greater/primitives/components/Modal.svelte';
 	import {
 		publishDraft,
@@ -33,6 +46,9 @@ the single most consequential fact on this screen.
 	} from '$lib/cms/review';
 	import type { DraftReviewData } from '$lib/blog-types';
 	import { reviewActorName } from '$lib/components/Review/state.js';
+	import { getCachedInstanceInfo } from '$lib/instance/info';
+
+	import { initialSchedulingOffer } from './scheduling-offer';
 
 	interface Props {
 		review: DraftReviewData;
@@ -53,20 +69,48 @@ the single most consequential fact on this screen.
 	let scheduledAt = $state('');
 
 	/**
-	 * Whether this instance has scheduling switched on.
+	 * Whether this instance has scheduling switched on — null until the
+	 * instance's own answer (or its absence) has arrived.
 	 *
-	 * Starts `true` because lesser's public schema exposes no capability field to
-	 * ask (the flags live on the admin-scoped config), so the honest options are
-	 * "offer it and find out" or "never offer it". Once an attempt comes back
-	 * with the feature-gate error the control stops being offered for the rest of
-	 * the session — a refusal is an answer, and repeating a question lesser has
-	 * already declined is not useful. Recorded as an upstream ask in
-	 * docs/consumption/review-contract.md.
+	 * lesser v1.6.4 serves the capability (`InstanceInfo.cmsFeatures.scheduling`),
+	 * so the control starts from lesser's statement rather than from a guess: a
+	 * served `false` means the control is never offered and no schedule attempt
+	 * is made — the same answer the feature-gate refusal used to deliver after
+	 * the fact. A served `true`, or an instance that did not answer, keeps the
+	 * pre-v1.6.4 behaviour: offer, and flip off if an attempt comes back
+	 * `cms-disabled`, because a served `true` can still be stale by click time
+	 * and the typed FEATURE_DISABLED refusal remains the final word.
+	 *
+	 * The control is HELD while the read is in flight rather than offered and
+	 * then withdrawn, and the hold cannot stick: `getCachedInstanceInfo`
+	 * resolves null on any failure, which `initialSchedulingOffer` reads as
+	 * "offer" — the pre-v1.6.4 default.
 	 */
-	let schedulingAvailable = $state(true);
+	let schedulingAvailable = $state<boolean | null>(null);
+
+	onMount(() => {
+		void getCachedInstanceInfo().then((info) => {
+			schedulingAvailable = initialSchedulingOffer(info);
+		});
+	});
 
 	const generatorName = $derived(reviewActorName(review.generatedBy));
 	const hasGenerator = $derived(Boolean(review.generatedBy));
+
+	/**
+	 * lesser's own gate evaluation, when the projection carried it.
+	 *
+	 * `eligible === false` disables the publish action and puts lesser's
+	 * `blockingReasons` on screen verbatim. An ABSENT projection (a pre-v1.6.4
+	 * instance, or a partial selection) changes nothing: the action is offered
+	 * and the mutation's refusal carries the explanation, as it always has.
+	 * `eligible === true` is likewise not a promise — lesser re-evaluates at
+	 * publish time, and its refusal still has the final word.
+	 */
+	const publishBlocked = $derived(review.publishEligibility?.eligible === false);
+	const blockingReasons = $derived(
+		publishBlocked ? (review.publishEligibility?.blockingReasons ?? []) : []
+	);
 
 	function openDialog(next: Intent) {
 		intent = next;
@@ -136,7 +180,7 @@ the single most consequential fact on this screen.
 		type="button"
 		class="contentus-review-publish__primary"
 		onclick={() => openDialog('publish')}
-		disabled={working}
+		disabled={working || publishBlocked}
 	>
 		Publish
 	</button>
@@ -152,6 +196,21 @@ the single most consequential fact on this screen.
 		</button>
 	{/if}
 </div>
+
+{#if publishBlocked}
+	<!-- lesser's own words about its own gate, verbatim. Paraphrasing them would
+	     put contentus's voice between the author and the only party that knows
+	     WHICH approval is missing. -->
+	<p class="contentus-review-note">This instance says this draft cannot publish yet:</p>
+	<ul class="contentus-review-errors">
+		{#each blockingReasons as reason, index (index)}
+			<li>{reason}</li>
+		{/each}
+	</ul>
+	{#if blockingReasons.length === 0}
+		<p class="contentus-meta">The instance reported the gate as unsatisfied without naming why.</p>
+	{/if}
+{/if}
 
 {#if hasGenerator}
 	<p class="contentus-review-note">

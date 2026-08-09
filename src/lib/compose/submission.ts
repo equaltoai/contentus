@@ -28,7 +28,7 @@ import type {
 	UpdateStatusInput,
 } from '../cms/compose-inputs';
 import { toLesserVisibility } from '../cms/visibility.ts';
-import { STATUS_BYTE_LIMIT, statusByteLength } from './budget.ts';
+import { statusByteLength } from './budget.ts';
 import type { ComposeExtrasState } from './extras.svelte';
 
 /** What `Compose.Root` hands its `onSubmit` handler. */
@@ -56,6 +56,16 @@ export interface ComposeSubmissionArgs {
 	mode: ComposeMode;
 	form: ComposeFormData;
 	extras: ComposeExtrasState;
+	/**
+	 * The byte budget the guard enforces, decided by the caller.
+	 *
+	 * Not read from a module constant here on purpose: since lesser v1.6.4 the
+	 * budget is the instance's served `maxStatusCharacters` when that answer is
+	 * known and lesser's documented default when it is not, and that choice
+	 * belongs to the route that holds the instance read (`Compose.svelte` via
+	 * `statusByteLimit`), not to the module that applies the number.
+	 */
+	byteLimit: number;
 }
 
 /**
@@ -65,7 +75,10 @@ export interface ComposeSubmissionArgs {
  * measures UTF-8 bytes (`len(content)` in Go) and the vendored counter
  * measures UTF-16 units, so a post can pass the on-screen counter and still be
  * rejected by the instance; refusing here means the composer's answer and the
- * instance's always agree.
+ * instance's always agree. The message names "the limit in effect" rather
+ * than "the instance accepts": when the budget is the documented default
+ * standing in for an instance that did not state one, the stronger phrasing
+ * would be a claim the instance never made.
  *
  * AN EDIT carries no visibility and no poll, because `UpdateStatusInput`
  * carries neither — lesser saying a posted status keeps its reach and a poll
@@ -88,12 +101,13 @@ export function buildComposeSubmission({
 	mode,
 	form,
 	extras,
+	byteLimit,
 }: ComposeSubmissionArgs): ComposeSubmission {
 	const bytes = statusByteLength(form.content, form.contentWarning ?? '');
-	if (bytes > STATUS_BYTE_LIMIT) {
+	if (bytes > byteLimit) {
 		return {
 			kind: 'rejected',
-			message: `This post is ${bytes} bytes and the instance accepts ${STATUS_BYTE_LIMIT}.`,
+			message: `This post is ${bytes} bytes and the limit in effect is ${byteLimit} bytes.`,
 		};
 	}
 

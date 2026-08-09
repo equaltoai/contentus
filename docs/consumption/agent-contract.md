@@ -47,13 +47,18 @@ what came back. Two consequences, both load-bearing:
   these filters" is said only when lesser reports no further pages; otherwise
   the empty state says matches may lie further along.
 
-**2. Redaction is indistinguishable from data.** `redactGraphAgentPrivateFields`
-blanks `agentOwner` to null, `delegatedScopes` to `[]`, and the soul fields to
-`UNBOUND` for anyone who is not the agent's owner or an admin. Rendering those
-would tell every anonymous visitor that every agent has no owner and no scopes.
-The view model omits them unless the read was authorized to see them, and
-`viewerIsOwner` is derived from what lesser **answered**, never from whether a
-token was sent.
+**2. Redaction is indistinguishable from data — so lesser says when it redacted.**
+`redactGraphAgentPrivateFields` blanks `agentOwner` to null, `delegatedScopes`
+to `[]`, and the soul fields to `UNBOUND` for anyone who is not the agent's
+owner or an admin (v1.6.4, commit `7aad73d5a`). Rendering those would tell
+every anonymous visitor that every agent has no owner and no scopes. The view
+model omits them unless lesser says the viewer may see them: `viewerIsOwner` is
+lesser's served `viewerCanSeePrivateFields` carried through, never inferred
+from whether a token was sent or from the values themselves. One detail
+document serves every viewer — anonymous `agent` reads are admitted (commit
+`1df0358b8`) and answered with the redacted shape plus
+`viewerCanSeePrivateFields: false`, so there is no anonymous/owner document
+split and lesser decides visibility per viewer.
 
 **3. `quarantineActive` is lesser's projection, not a date comparison.** It
 comes from `QuarantineSummaryAt` against lesser's own clock. contentus never

@@ -26,10 +26,12 @@ WHO DECIDES WHAT THE INSTANCE ACCEPTS. Not this component. The pattern's
 defaults — six MIME types and a 10 MiB ceiling, enforced with `console.warn`
 and a silent drop — are an invented policy that happens to resemble one
 instance's configuration, and `cms/media.ts` is explicit that lesser's real
-limits are unadvertised and must not be guessed. So the size ceiling is set
-where the check can never trip it, the type list is widened to lesser's own
-`MediaCategory` vocabulary, and anything the vendored validator still discards
-is named to the poster rather than swallowed.
+limits must not be guessed. So the size ceiling is set where the check can
+never trip it, the type list is widened to lesser's own `MediaCategory`
+vocabulary, and anything the vendored validator still discards is named to the
+poster rather than swallowed. Since lesser v1.6.4 the size answer itself is
+served (`InstanceInfo.maxUploadSizeBytes`), and the pre-wire refusal for it
+lives in `uploadMedia` — one layer down, where every upload path gets it.
 
 HOW THAT LAST PART IS DONE CHANGED AT greater-v0.13.0, and the change is a
 deletion. contentus used to RECOVER discarded files by diffing the poster's

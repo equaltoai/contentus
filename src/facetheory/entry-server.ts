@@ -26,7 +26,7 @@ import { loadArticleBySlug, loadArticlesIndex, loadFilteredIndex } from '$lib/cm
 import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
 import { fetchActor, fetchTimelinePage } from '$lib/timelines/transport';
 import { isServerFetchable, tabFor } from '$lib/timelines/tabs';
-import { subscriptionEndpoint } from '$lib/timelines/subscription';
+import { getServerInstanceInfo, subscriptionConnectOrigin } from '$lib/instance/info';
 
 import App from './App.svelte';
 import { queryFromSearchString } from './query-parser';
@@ -410,56 +410,73 @@ function headTagsForRoute(props: RouteProps, origin: string | null) {
  * FaceTheory's canonical policy is `connect-src 'self'`, which is right for
  * every surface contentus had before face 4: the GraphQL endpoint, the media
  * uploads and the hydration document are all same-origin. lesser's GraphQL
- * SUBSCRIPTIONS are not — they are served from `wss://ws.<domain>`, a sibling
- * host of the one serving this page — so without an addition here the browser
- * blocks the socket before it opens and realtime silently never works.
+ * SUBSCRIPTIONS are not — they are served from a sibling host of the one
+ * serving this page — so without an addition here the browser blocks the
+ * socket before it opens and realtime silently never works.
  *
  * The addition is as narrow as the policy allows and stays strict in every
- * other respect. It is ONE origin, DERIVED from the request that was actually
- * served rather than configured, added ONLY on the routes that open a socket,
- * and it never touches `script-src` or `style-src`: no `unsafe-inline`, no
- * `unsafe-eval`, no third-party origin. When the origin cannot be resolved the
- * policy is left exactly as it was — a page that cannot name its own instance
- * gets no widening at all.
+ * other respect. It is ONE origin, added ONLY on the routes that open a
+ * socket, and it never touches `script-src` or `style-src`: no
+ * `unsafe-inline`, no `unsafe-eval`, no third-party origin.
+ *
+ * THE ORIGIN IS SERVED, NOT DERIVED. Until lesser v1.6.4 there was no
+ * contract value for the socket host and this widened to `wss://ws.<domain>`
+ * derived from the request origin — a topology convention read by the client.
+ * lesser v1.6.4 (commit 789e18bdb) serves `InstanceInfo.subscriptionUrl`, so
+ * the addition is now the ORIGIN OF THE URL LESSER JUST RETURNED — the same
+ * shape as the agent-detail MCP addition below — fetched anonymously
+ * (`instance` is a public field) through the server cache in
+ * `$lib/instance/info`, whose 60s TTL keeps a render burst from costing an
+ * instance round trip per paint and bounds how long an instance move can be
+ * stale. A fetch that fails, an absent `subscriptionUrl`, or a served value
+ * that is not a parseable `ws:`/`wss:` URL all produce NO addition: the page
+ * renders, the browser fails the socket closed, and the liveness surface
+ * reports unavailable — an honest state with copy, never a guessed origin in
+ * a security header.
  *
  * `/profiles/{username}` deliberately does NOT get it: ACTOR timelines have no
  * subscription (lesser's `timelineUpdates` takes a type and a listId, not an
  * actor), so that route opens no socket and has no reason to permit one.
  *
  * The two messaging routes DO get it, for the same reason `/timelines` does:
- * `subscription conversationUpdates` is served from the same `wss://ws.<domain>`
- * sibling host, and both the list and the thread open one — an incoming message
- * has to reach the list a reader is looking at as well as the thread they have
+ * `subscription conversationUpdates` is served from the same subscription
+ * host, and both the list and the thread open one — an incoming message has
+ * to reach the list a reader is looking at as well as the thread they have
  * open (product design §5).
  */
 const SOCKET_ROUTES: ReadonlySet<string> = new Set(['timelines', 'messages', 'message-thread']);
 
 /**
  * `/agents/{username}` gets the same treatment for the same reason, one
- * milestone later and from a better source.
+ * milestone later.
  *
  * The MCP detail panel probes two discovery documents in the browser, and lesser
  * canonicalises MCP onto `api.<domain>` (`canonicalMCPResourceBaseURL`) — a
  * sibling of the host serving this page — so without an addition here the
  * browser blocks both probes before they leave.
  *
- * The addition is narrower than the socket one in the way that matters: the
- * origin is not derived from the request at all, it is the ORIGIN OF THE URL
- * LESSER JUST RETURNED for this agent. If lesser published no MCP endpoint,
- * there is nothing to probe and nothing is added. Still exactly one origin,
- * still only on the route that connects, and still never touching `script-src`
- * or `style-src`: no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
+ * The addition is narrower than a derived one in the way that matters: the
+ * origin is not inferred from the request at all, it is the ORIGIN OF THE URL
+ * LESSER JUST RETURNED for this agent — the rule the socket routes above now
+ * follow too, from `InstanceInfo.subscriptionUrl`. If lesser published no MCP
+ * endpoint, there is nothing to probe and nothing is added. Still exactly one
+ * origin, still only on the route that connects, and still never touching
+ * `script-src` or `style-src`: no `unsafe-inline`, no `unsafe-eval`, no
+ * third-party origin.
  */
-function cspOptionsForRoute(props: RouteProps, origin: string | null) {
+async function cspOptionsForRoute(props: RouteProps, endpoint: string | null) {
 	if (props.page.key === 'agent-detail') {
 		const mcpOrigin = mcpConnectOrigin(props.agentDetail?.agent?.mcpAccess);
 		return mcpOrigin ? { directives: { 'connect-src': [mcpOrigin] } } : {};
 	}
 
-	if (!SOCKET_ROUTES.has(props.page.key)) return {};
+	if (!SOCKET_ROUTES.has(props.page.key) || !endpoint) return {};
 
-	const endpoint = subscriptionEndpoint(origin);
-	return endpoint ? { directives: { 'connect-src': [endpoint] } } : {};
+	const info = await getServerInstanceInfo(endpoint);
+	// `subscriptionUrl` is a full URL and CSP is an origin list; a malformed or
+	// non-socket served value is the same as absent, and absent adds nothing.
+	const connectOrigin = subscriptionConnectOrigin(info?.subscriptionUrl);
+	return connectOrigin ? { directives: { 'connect-src': [connectOrigin] } } : {};
 }
 
 /**
@@ -500,9 +517,17 @@ function cspOptionsForRoute(props: RouteProps, origin: string | null) {
  * is invisible to its own server. Routed rather than left silent; see
  * `docs/consumption/auth-boundary.md`.
  */
-function headersForRoute(props: RouteProps, origin: string | null): Record<string, string> {
+async function headersForRoute(
+	props: RouteProps,
+	origin: string | null
+): Promise<Record<string, string>> {
+	// The same endpoint derivation `createRouteProps` uses for its reads: the
+	// instance info that steers the socket-route CSP addition is asked of the
+	// same host the page's own data was.
 	const headers: Record<string, string> = {
-		'content-security-policy': buildStrictCspHeader(cspOptionsForRoute(props, origin)),
+		'content-security-policy': buildStrictCspHeader(
+			await cspOptionsForRoute(props, graphqlEndpointForOrigin(origin))
+		),
 	};
 
 	if (props.page.requiresAuth) {
@@ -543,7 +568,7 @@ function createFaceForRoute(route: string) {
 			return {
 				status: statusForRoute(props),
 				csp: STRICT_CSP,
-				headers: headersForRoute(props, origin),
+				headers: await headersForRoute(props, origin),
 				// `data-theme="dark"` cannot be set here: FaceTheory v4.0.6's
 				// adapter pipeline (assembleFaceRenderResult) does not forward
 				// htmlAttrs from renderOptions, so these attributes would never

@@ -2,13 +2,14 @@
  * The unread signal behind the nav badge (product design §5, "Unread counts
  * feed the nav badge").
  *
- * WHAT THE NUMBER IS. lesser's `conversations` selection carries `unread:
- * Boolean` per conversation and no message count anywhere, so this counts
- * CONVERSATIONS WITH UNREAD ACTIVITY. Every label built from it says so. The
- * alternative — presenting it as a message count because that is what a badge
- * usually means — would be contentus inventing a number lesser never gave it,
- * and a reader who opens a badged conversation expecting three messages and
- * finds eleven has been told something false by a control that looked precise.
+ * WHAT THE NUMBER IS. lesser v1.6.4 serves a real per-conversation
+ * `unreadCount`, and the messaging surface reads it; this badge still counts
+ * CONVERSATIONS WITH UNREAD ACTIVITY, and every label built from it says so.
+ * Presenting the badge as a message count because that is what a badge
+ * usually means would promise a reader a number the chrome does not display
+ * anywhere else, and a reader who opens a badged conversation expecting
+ * three messages and finds eleven has been told something false by a
+ * control that looked precise.
  *
  * WHY IT IS A STORE AND NOT A PROP. The badge lives in the shell, which renders
  * on every route; the count comes from an authenticated read, which only the
@@ -26,7 +27,6 @@
 
 import { accessTokenOrNull, isAuthenticated } from '../auth/session.ts';
 import { sessionGeneration } from '../auth/session-events.ts';
-import { resolveBrowserOrigin } from '../cms/origin.ts';
 import { unreadConversationCount } from './contract.ts';
 import { createMessagingBinding } from './handlers.ts';
 import { createSessionScope } from '../auth/session-scope.ts';
@@ -101,7 +101,6 @@ class UnreadStore {
 		try {
 			const { handlers } = createMessagingBinding({
 				accessToken: accessTokenOrNull,
-				origin: resolveBrowserOrigin(),
 			});
 			const conversations = await handlers.onFetchConversations?.('INBOX');
 			if (!this.#scope.holds(dispatched)) {

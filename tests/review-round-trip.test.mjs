@@ -7,7 +7,6 @@ import {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toOwnDraftReview,
 	toPreviewFaceArticle,
 } from '../src/lib/cms/review-contract.ts';
 
@@ -124,23 +123,26 @@ test('round trip 1: a shared draft reaches the queue, above the viewer own draft
 				},
 			};
 		},
-		MY_DRAFTS_QUERY: () => ({
-			myDrafts: {
+		MY_DRAFT_REVIEWS_QUERY: () => ({
+			myDraftReviews: {
 				totalCount: 1,
 				pageInfo: { hasNextPage: false, endCursor: null },
 				edges: [
 					{
 						cursor: 'c2',
 						node: {
-							id: 'draft-of-my-own',
+							draftId: 'draft-of-my-own',
 							title: 'Something my agent drafted for me',
-							slug: 'something',
 							status: 'DRAFT',
 							contentFormat: 'MARKDOWN',
 							updatedAt: '2026-07-31T09:00:00Z',
 							createdAt: '2026-07-31T08:00:00Z',
 							generatedBy: agent,
 							reviewedBy: null,
+							reviewStatus: null,
+							editorNotes: null,
+							grant: null,
+							verdicts: [],
 						},
 					},
 				],
@@ -153,18 +155,13 @@ test('round trip 1: a shared draft reaches the queue, above the viewer own draft
 		after: null,
 	}).sharedDraftReviews.edges.map((edge) => toDraftReview(edge.node));
 
-	// `myDrafts` returns `type Draft`, which carries no reviewStatus, no grant,
-	// and no verdict history — so an entry built from it is `listing-only` and
-	// the queue is not allowed to render a review-state claim for it. The
-	// shipped queue then asks `draftReview(id)` to fill that in; that fan-out is
-	// driven for real in `tests/review-adapters.test.mjs`.
-	const own = ask(REVIEW_DOCUMENTS.MY_DRAFTS_QUERY, {
+	// `myDraftReviews` (lesser v1.6.4) returns the SAME full `DraftReview`
+	// projection as the shared connection, so the own half is projected through
+	// the same `toDraftReview` and carries no invented review activity.
+	const own = ask(REVIEW_DOCUMENTS.MY_DRAFT_REVIEWS_QUERY, {
 		first: 20,
 		after: null,
-	}).myDrafts.edges.map((edge) => ({
-		review: toOwnDraftReview(edge.node),
-		projection: 'listing-only',
-	}));
+	}).myDraftReviews.edges.map((edge) => toDraftReview(edge.node));
 
 	const entries = orderQueueEntries(shared, own);
 
@@ -180,12 +177,11 @@ test('round trip 1: a shared draft reaches the queue, above the viewer own draft
 	// The shared entry carries the reviewer's invitation, which is what the
 	// workspace reads to decide whether to offer the verdict controls.
 	assert.equal(entries[0].review.grant.reviewer.username, 'editor');
-	assert.equal(entries[0].projection, 'review');
 
-	// And the own entry carries no invented review activity — nor a claim that
-	// there is none, which is what `listing-only` exists to prevent.
+	// And the own entry carries no invented review activity — lesser said there
+	// is none, which is a claim only a full projection may make.
 	assert.deepEqual(entries[1].review.verdicts, []);
-	assert.equal(entries[1].projection, 'listing-only');
+	assert.equal(entries[1].review.reviewStatus, null);
 });
 
 /* ------------------------------------------------------------------------
@@ -360,6 +356,37 @@ test('round trip 5: once lesser allows it, publish returns the article identity 
 	assert.match(article.id, /^https:\/\/[^/]+\/articles\/what-the-agent-wrote$/);
 });
 
+test('round trip 5b: lesser own gate evaluation reaches the publish control unread', () => {
+	// Since v1.6.4 the publish control reads `publishEligibility` — lesser's own
+	// evaluation of its gate — and disables itself with lesser's blocking
+	// reasons when `eligible` is false. The harness drives projections, not
+	// components, so what is asserted here is the data the disabled rendering
+	// consumes: the evaluation survives `toDraftReview` whole and unrewritten.
+	const review = toDraftReview({
+		draftId: DRAFT_ID,
+		updatedAt: '2026-07-31T12:00:00Z',
+		generatedBy: agent,
+		verdicts: [],
+		publishEligibility: {
+			eligible: false,
+			blockingReasons: ['generated draft requires an active approval from the instance principal'],
+			reviewersApproved: true,
+			principalApprovalRequired: true,
+			principalApproved: false,
+		},
+	});
+
+	assert.equal(review.publishEligibility.eligible, false);
+	assert.deepEqual(review.publishEligibility.blockingReasons, [
+		'generated draft requires an active approval from the instance principal',
+	]);
+
+	// And the gate DOCUMENT asks for the evaluation — the disabled control is
+	// only as honest as the selection that feeds it.
+	assert.match(REVIEW_DOCUMENTS.DRAFT_REVIEW_QUERY, /publishEligibility\s*\{/);
+	assert.match(REVIEW_DOCUMENTS.DRAFT_REVIEW_QUERY, /blockingReasons/);
+});
+
 /* ------------------------------------------------------------------------
  * MCP parity — asserted where it is actually decidable from this repo
  * --------------------------------------------------------------------- */
@@ -386,7 +413,7 @@ test('MCP parity: both surfaces drive the same four lesser operations', () => {
 			'draft',
 			'draftPreview',
 			'draftReview',
-			'myDrafts',
+			'myDraftReviews',
 			'publishDraft',
 			'scheduleDraft',
 			'sharedDraftReviews',

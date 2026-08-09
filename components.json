@@ -1,7 +1,7 @@
 {
   "$schema": "https://greater.components.dev/schema.json",
   "version": "1.0.0",
-  "ref": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
+  "ref": "f3437d0aee7d44a0640b96ba0129354181538d9a",
   "installMode": "vendored",
   "style": "default",
   "rsc": false,
@@ -24,8 +24,8 @@
   "installed": [
     {
       "name": "social-types",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -36,8 +36,8 @@
     },
     {
       "name": "icons",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -3692,8 +3692,8 @@
     },
     {
       "name": "tokens",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -3756,8 +3756,8 @@
     },
     {
       "name": "utils",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -3968,8 +3968,8 @@
     },
     {
       "name": "social-renderers",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -3984,8 +3984,8 @@
     },
     {
       "name": "social-generics",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -4000,8 +4000,8 @@
     },
     {
       "name": "primitives",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -4780,8 +4780,8 @@
     },
     {
       "name": "adapters",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -4838,27 +4838,27 @@
         },
         {
           "path": "greater/adapters/graphql/client.d.ts",
-          "checksum": "sha256-flla8fzNoB0zTKoCPaE4qFXaRB/hjluSlSnsJlRB5i8="
+          "checksum": "sha256-3jFkOFmuDuQX6/kx8H9wIYdrB2A7KpRmQVE32ZHo13c="
         },
         {
           "path": "greater/adapters/graphql/client.d.ts.map",
-          "checksum": "sha256-04AauZ8eR88ta3iOwB5SAhbzceSk4aw8+2VPTzDDvss="
+          "checksum": "sha256-Ssv62Kczx19+0GwgiF0Mizvzd7hiabtKLmV4h/1/ZXY="
         },
         {
           "path": "greater/adapters/graphql/client.ts",
-          "checksum": "sha256-G2+gPI9iro/ZIwDjifxptx9QayzFu72OzsaArsw9M1c="
+          "checksum": "sha256-yRM0pSes5nnK91LXOxO2XvQBbj3GeXlBXaYz+DuxooQ="
         },
         {
           "path": "greater/adapters/graphql/generated/types.d.ts",
-          "checksum": "sha256-rH1evMTmlfStZqKI6obrcKWu504KSe5BvWvpk+GjA58="
+          "checksum": "sha256-Ab+oqMeIvIoq0DF6OBMf99WOcWVPdPm+23OTnby66QQ="
         },
         {
           "path": "greater/adapters/graphql/generated/types.d.ts.map",
-          "checksum": "sha256-xeQPMmDwGtXjQNL/2q/iItXdH40AluHN/1yWJ0BQmJk="
+          "checksum": "sha256-7tQJ9ASdLX+otfr5pqKhnen/YIkwFOI859ONicg9bF4="
         },
         {
           "path": "greater/adapters/graphql/generated/types.ts",
-          "checksum": "sha256-+XOZGP0T4yI4UkwfXy6Yw3VYBla1is5KY8iGYPaKTN4="
+          "checksum": "sha256-hrpeCHll+f29yzIFFmm6YRIKDYkzqmSpfBwKIhWFun8="
         },
         {
           "path": "greater/adapters/graphql/index.d.ts",
@@ -4874,15 +4874,15 @@
         },
         {
           "path": "greater/adapters/graphql/LesserGraphQLAdapter.d.ts",
-          "checksum": "sha256-Ygqsw+cFct65SmbG+VZOHcqr+fRWWFmxsfKXbbRH1jc="
+          "checksum": "sha256-CLStoGo1zTEJLsci7Tx3UpuFSvl4E7MuKTSTmJEtlpA="
         },
         {
           "path": "greater/adapters/graphql/LesserGraphQLAdapter.d.ts.map",
-          "checksum": "sha256-a2uKGCPUjb2fdfg2yr/3znXTunPqumIqd3bFs1RZv08="
+          "checksum": "sha256-+zjF+c/QdfknepoUKC0yoc4jmM99P1Ai9Zo9NUoqtvg="
         },
         {
           "path": "greater/adapters/graphql/LesserGraphQLAdapter.ts",
-          "checksum": "sha256-R9I41qls8ilPqgUIuW3s/wfRS+2278ou9kYHxKXD+Fk="
+          "checksum": "sha256-ixQDocQLz2mzbbpw9KLUebsdB3hCKSmKkLn6i+rNLCg="
         },
         {
           "path": "greater/adapters/graphql/optimistic.d.ts",
@@ -4910,15 +4910,15 @@
         },
         {
           "path": "greater/adapters/index.d.ts",
-          "checksum": "sha256-waycgHPE3YLWC4d6wxrDt3Lx6/6W7KvSDSMORIl3cLc="
+          "checksum": "sha256-Ep6L5eCKkQqZYjvqTrePpixKexQgnfdDkZS8+cUIw+M="
         },
         {
           "path": "greater/adapters/index.d.ts.map",
-          "checksum": "sha256-TMKewmk8YDeMNlPvytfg9qjhzoDlaICEkye+vnkwKaU="
+          "checksum": "sha256-9tZYUawJWDYg7JmFI242tRzYw6pLIIJtprat2d6ijDk="
         },
         {
           "path": "greater/adapters/index.ts",
-          "checksum": "sha256-xkBiSjdXZzk/ba8Cfax6AAgkIJFKn9kaI51ABAvTzZE="
+          "checksum": "sha256-CoWSfGE1ZHNBHae/yfWmcdcdKM/9M2m4OkdQC6tA0HM="
         },
         {
           "path": "greater/adapters/lesser/client.d.ts",
@@ -4974,11 +4974,11 @@
         },
         {
           "path": "greater/adapters/mappers/lesser/graphqlConverters.d.ts.map",
-          "checksum": "sha256-BhQKgOxv2KPq5DtkiCvzD9THeBbMisplJq+pMfCfAUs="
+          "checksum": "sha256-HppIXSLU7R/XPnDOIO2XoZ8+OJTI9vYe45gQPJ5JnQU="
         },
         {
           "path": "greater/adapters/mappers/lesser/graphqlConverters.ts",
-          "checksum": "sha256-12lFKiVlpPlUupNhFh3iCLftOfz4Yp4YAs+XiLRkZi0="
+          "checksum": "sha256-FyY0K2B74/rACKieYTcnPlISzOgTXKBnI77oNo8iW8k="
         },
         {
           "path": "greater/adapters/mappers/lesser/mappers.d.ts",
@@ -4990,19 +4990,19 @@
         },
         {
           "path": "greater/adapters/mappers/lesser/mappers.ts",
-          "checksum": "sha256-mzCTDQtSCIB1Y77N9qIrT3RsRIIfihk4l8EJlkGmMmU="
+          "checksum": "sha256-UCbDZxLQpjTpek6aAQSQdGuePoAqwbP/Tdd8gnycvSw="
         },
         {
           "path": "greater/adapters/mappers/lesser/types.d.ts",
-          "checksum": "sha256-nA8BqfVLYnFznLd9cvL1IFjJ+VUU7eppvraaIOUH828="
+          "checksum": "sha256-EH9vYrANJU5Sx8+fB3xxdMVSmC0vQlhPPezTY7U0BIE="
         },
         {
           "path": "greater/adapters/mappers/lesser/types.d.ts.map",
-          "checksum": "sha256-F2qArtKgjMhuxw9BmI8mJdu3E3AM9UAvEay5POTOD9Y="
+          "checksum": "sha256-mtRRp/qY/kFAepZdcMfTHtL/uIET5dHVBGs/k0KNiQU="
         },
         {
           "path": "greater/adapters/mappers/lesser/types.ts",
-          "checksum": "sha256-QAI7va1qEFj46RCYz6YKysM3e3X3ZaityB/U6fKcc9I="
+          "checksum": "sha256-nVYt/8yvinwWwZafpVfPzxO5haglEzoN0+mjRrZsixI="
         },
         {
           "path": "greater/adapters/mappers/mastodon/mappers.d.ts",
@@ -5030,39 +5030,39 @@
         },
         {
           "path": "greater/adapters/messaging/createLesserMessagesHandlers.d.ts",
-          "checksum": "sha256-ofjdpiklw7PXUzMA9RBeSpGzS6pIU3pZQhtE9pol6Qk="
+          "checksum": "sha256-RKC0wJ2huaLpjiwqj1y33TZnygR2nEL4t1lgQ9HpVtE="
         },
         {
           "path": "greater/adapters/messaging/createLesserMessagesHandlers.d.ts.map",
-          "checksum": "sha256-eLfC5CoP7j2ucaYHm3wYWGDuzngHm2YV814NqEFs6WQ="
+          "checksum": "sha256-DGl62Fh3JRmIY0qLVvvE9mQhokSXJFMzVZDMlYPlNKg="
         },
         {
           "path": "greater/adapters/messaging/createLesserMessagesHandlers.ts",
-          "checksum": "sha256-T3U/pek4JoLVDFxuGRFKz25HqOw2BZAZlXBVtav9Fn4="
+          "checksum": "sha256-UDuA/EFiTZO8AEl+F2AHfGwoPUAK4o/QjzbJ11wtZbk="
         },
         {
           "path": "greater/adapters/messaging/index.d.ts",
-          "checksum": "sha256-SEegWEaSJOfKMObaPo7I3y1QL8STNxm0Knn2cGq5VrI="
+          "checksum": "sha256-UsfbrWsJAI6Hxd2l6oKvDPY9IFVmpbqoG+4ypWRFmGQ="
         },
         {
           "path": "greater/adapters/messaging/index.d.ts.map",
-          "checksum": "sha256-iFG+UoT5bJLXlXJP7kAkvCSwlNBtK0duLx0+KnWJTSc="
+          "checksum": "sha256-vWMCp22aME0Q8ZXSetUCNYMnVmouHec/MSNyV7RWR50="
         },
         {
           "path": "greater/adapters/messaging/index.ts",
-          "checksum": "sha256-hIJPyGpRY8EhsYDn/PnzPbahiYpTH9sgPKS5VV9H0cc="
+          "checksum": "sha256-R0yJ7tlm+vY9QDBzgjxXZ/u3EURkubn1h5alprDQ6wM="
         },
         {
           "path": "greater/adapters/messaging/messagingOperations.d.ts",
-          "checksum": "sha256-9JVXXqbcFYEx18ALXp71JyttOgu+qDKEulbaDM/X08Q="
+          "checksum": "sha256-Jpq2h1GFIwiEdjSX2FUi4hU+O2SiZrLlLp3IAxdP1eY="
         },
         {
           "path": "greater/adapters/messaging/messagingOperations.d.ts.map",
-          "checksum": "sha256-Iu5JJHbH79dFisi15mGmlhaPVMzYRa/Od/+umI/JyVE="
+          "checksum": "sha256-kp43mCItImv1tuc2LpueIzWLhJrIWPZ148pHT4RYwKA="
         },
         {
           "path": "greater/adapters/messaging/messagingOperations.ts",
-          "checksum": "sha256-KlymQ8y2PhLoIRqvOZldwtuK+A7bJ/BSXv0WCeQrEK8="
+          "checksum": "sha256-edAalr7J0e6QSn8eMk1ZosQelnbFRIl1JCGXPX/Z1Pk="
         },
         {
           "path": "greater/adapters/models/unified.d.ts",
@@ -5078,15 +5078,15 @@
         },
         {
           "path": "greater/adapters/rest/generated/lesser-api.d.ts",
-          "checksum": "sha256-Nq2Lj89M2tZDPirCIvXDubaZqhbbBOKDSELREKVWIBQ="
+          "checksum": "sha256-Dg/H8RxAvXVAJhJtg1dLBvtnBwhHExoGbIxb70qsBq4="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-api.d.ts.map",
-          "checksum": "sha256-GaXVL94+swm+S8gS6I7zcl+Nx1Ic8ixPaZTSHnI3pSA="
+          "checksum": "sha256-5oYQ4USOoYVdkKgX2H5p8UPkPrlDKnpE+rmyTqvnH9c="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-api.ts",
-          "checksum": "sha256-86/7p4HS6jcfOleaO6QF2NORGXxF8hS2bQrsnu2IzHE="
+          "checksum": "sha256-RrprYPmuQTqU3fMtTto/Wa9WrkJvDnHmT36wTVLIpzE="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-host-api.d.ts",
@@ -5372,8 +5372,8 @@
     },
     {
       "name": "status",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5416,20 +5416,20 @@
     },
     {
       "name": "blog-types",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
           "path": "lib/blog-types.ts",
-          "checksum": "sha256-1Q5eYnYt4N92YyMa4M/aVn7a+4dmD7auukpXr35dWYg="
+          "checksum": "sha256-SNvhzPpHcY6YxbUXPbUWCRSbIAu2zrzYQxYX+/Nbtp0="
         }
       ]
     },
     {
       "name": "blog-share",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5440,8 +5440,8 @@
     },
     {
       "name": "content",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5460,8 +5460,8 @@
     },
     {
       "name": "headless",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5576,8 +5576,8 @@
     },
     {
       "name": "auth",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5643,13 +5643,17 @@
         {
           "path": "shared/auth/WebAuthnSetup.svelte",
           "checksum": "sha256-SlPCgsXOiwzoZiHXGIWF2m1KusgGUIMXa3VYLuxbFt8="
+        },
+        {
+          "path": "greater/faces/social/theme.css",
+          "checksum": "sha256-jWzBOQrht8wCb7IIO2aezpPjsAtLMPGMdJqbMn3jS5Y="
         }
       ]
     },
     {
       "name": "compose",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5666,7 +5670,7 @@
         },
         {
           "path": "shared/compose/context.ts",
-          "checksum": "sha256-R1Uq5AdLu02xqvbMbGLpJZQ8MmSO0oqaq6fmnldy+3o="
+          "checksum": "sha256-OfWSC6oB5t2nwTCU40moQTQU6JiHwT3QO9kjoZcvdbs="
         },
         {
           "path": "shared/compose/DraftManager.ts",
@@ -5686,7 +5690,7 @@
         },
         {
           "path": "shared/compose/GraphQLAdapter.ts",
-          "checksum": "sha256-3wrxtrUViIsH0zBMU0+Iznz80qt3puGsaD1ykyshSmo="
+          "checksum": "sha256-8I1IQrIUxc78ilXGXQVYffggypes+nUe3SN6Qd11/3Q="
         },
         {
           "path": "shared/compose/ImageEditor.svelte",
@@ -5694,7 +5698,7 @@
         },
         {
           "path": "shared/compose/index.ts",
-          "checksum": "sha256-AultexGFcwRrujaZYtuu6hJc7PMdJBvR/oznEEfOGw4="
+          "checksum": "sha256-uXh7CR5e4qHcRw68vcClId0ub645FBwUQM4eKJybVlg="
         },
         {
           "path": "shared/compose/MediaUpload.svelte",
@@ -5731,13 +5735,17 @@
         {
           "path": "shared/compose/VisibilitySelect.svelte",
           "checksum": "sha256-9PPOYRyxlhF5e5hQfs8P7PT8LSlqpepJqI1l3xEiG8Y="
+        },
+        {
+          "path": "greater/faces/social/theme.css",
+          "checksum": "sha256-jWzBOQrht8wCb7IIO2aezpPjsAtLMPGMdJqbMn3jS5Y="
         }
       ]
     },
     {
       "name": "notifications",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5799,13 +5807,17 @@
         {
           "path": "shared/notifications/WorkflowNotificationItem.svelte",
           "checksum": "sha256-TjqrKn4zuIpDrOdG6kCDN9/EOFYbtk06tyGuTNkNdjc="
+        },
+        {
+          "path": "greater/faces/social/theme.css",
+          "checksum": "sha256-jWzBOQrht8wCb7IIO2aezpPjsAtLMPGMdJqbMn3jS5Y="
         }
       ]
     },
     {
       "name": "search",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5847,13 +5859,17 @@
         {
           "path": "shared/search/TagResult.svelte",
           "checksum": "sha256-HxW5fPk+WPfsOR5QUMFC6tVNgSufQKLbTm5paEL1ypk="
+        },
+        {
+          "path": "greater/faces/social/theme.css",
+          "checksum": "sha256-jWzBOQrht8wCb7IIO2aezpPjsAtLMPGMdJqbMn3jS5Y="
         }
       ]
     },
     {
       "name": "thread-view",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5872,8 +5888,8 @@
     },
     {
       "name": "content-warning-handler",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5884,8 +5900,8 @@
     },
     {
       "name": "media-composer",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5896,8 +5912,8 @@
     },
     {
       "name": "bookmark-manager",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5908,13 +5924,13 @@
     },
     {
       "name": "article",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
           "path": "lib/components/Article/Card.svelte",
-          "checksum": "sha256-k5WTNsa241gQcMOvp4ZJ0yQt/46eK5qPY328YJY3lyc="
+          "checksum": "sha256-Kuy1MSjQ7Vu98zo1Q7BN4J6D6yENnqdb2SKLfGtoYf8="
         },
         {
           "path": "lib/components/Article/Root.svelte",
@@ -5922,7 +5938,7 @@
         },
         {
           "path": "lib/components/Article/Header.svelte",
-          "checksum": "sha256-79OpRsaaMgpdVQWzr/WF/w7U7X11+tCbepZ/Y7crtRg="
+          "checksum": "sha256-qcv23sv7dvzdqt/wNDfGUFl2cuB+e9uxIMil13tN7pA="
         },
         {
           "path": "lib/components/Article/Content.svelte",
@@ -5954,11 +5970,11 @@
         },
         {
           "path": "lib/components/Article/context.svelte.ts",
-          "checksum": "sha256-Z5n0Uyn60Fujy8vXyv4Ju+LjhsL2bIkK4PQUzAfTDUo="
+          "checksum": "sha256-71UojpHhvYbyhheAF3q76zuHsxZadpGsHnre+nqPBy4="
         },
         {
           "path": "lib/components/Article/date.ts",
-          "checksum": "sha256-kvxK/CPCapowx/eKS6qMAk2YYEPmpowikuVATwphcmQ="
+          "checksum": "sha256-xjbP1V7gzFPzVXbT1CWdTCrvEtGdm8bCw2pmkG7qHGo="
         },
         {
           "path": "lib/components/Article/index.ts",
@@ -5972,8 +5988,8 @@
     },
     {
       "name": "author",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -5996,8 +6012,8 @@
     },
     {
       "name": "publication",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -6024,8 +6040,8 @@
     },
     {
       "name": "navigation",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -6052,8 +6068,8 @@
     },
     {
       "name": "editor",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -6076,13 +6092,13 @@
     },
     {
       "name": "faces/blog",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
           "path": "greater/faces/blog/components/Article/Card.svelte",
-          "checksum": "sha256-MDbQQRCgpAGXG0gpOXuPRijejcYaBK8EtnvA+TvozyE="
+          "checksum": "sha256-pId01lpnrOa7DP+3VTg+QR7vfg0A0I9IavpzwEQ4bpk="
         },
         {
           "path": "greater/faces/blog/components/Article/Content.svelte",
@@ -6090,11 +6106,11 @@
         },
         {
           "path": "greater/faces/blog/components/Article/context.svelte.ts",
-          "checksum": "sha256-bYXS4NwSLcHdl8QnpVedTKNR94Tq1CjD+lUzj4zuwKI="
+          "checksum": "sha256-JF45FLiWF5gx8bNy3cSb0clbPjeyIr5csXeH9L9uYJk="
         },
         {
           "path": "greater/faces/blog/components/Article/date.ts",
-          "checksum": "sha256-HJXFzEJ8NoZo+a3T/ex03/Ze2KzkttMO304tULW/JNs="
+          "checksum": "sha256-nk+QnPLP+yqGC43rrjrpEITR4drWWPGj4v6i9tOOILc="
         },
         {
           "path": "greater/faces/blog/components/Article/Footer.svelte",
@@ -6102,7 +6118,7 @@
         },
         {
           "path": "greater/faces/blog/components/Article/Header.svelte",
-          "checksum": "sha256-79OpRsaaMgpdVQWzr/WF/w7U7X11+tCbepZ/Y7crtRg="
+          "checksum": "sha256-qcv23sv7dvzdqt/wNDfGUFl2cuB+e9uxIMil13tN7pA="
         },
         {
           "path": "greater/faces/blog/components/Article/index.ts",
@@ -6210,7 +6226,7 @@
         },
         {
           "path": "greater/faces/blog/components/Review/AttributionStrip.svelte",
-          "checksum": "sha256-vHXxL+rM3XnJlNnXcs6pMwXJqDlnXkdhCmQflElY1V8="
+          "checksum": "sha256-FwkN0WNPn9UByaI9ILByFA+VoQqMNVJUjUykYUgi6/U="
         },
         {
           "path": "greater/faces/blog/components/Review/index.ts",
@@ -6222,15 +6238,15 @@
         },
         {
           "path": "greater/faces/blog/components/Review/state.ts",
-          "checksum": "sha256-hHbciaXNLB5I7GMKDEY936A9VNkanqj6x7ixiNeqHYI="
+          "checksum": "sha256-+WT6Tag3YxMDfP/HMIZtbV6iVlv3gEs67/tfrPfk3zw="
         },
         {
           "path": "greater/faces/blog/components/Review/VerdictActions.svelte",
-          "checksum": "sha256-P8SZ7lcXLq9qB3TqCU9In9jArS+uOmXmQ4l81BXTE4I="
+          "checksum": "sha256-1EfJrfzQh6AAFUa8mNu3cRYLCy7YqaSp5FbgG2kAnio="
         },
         {
           "path": "greater/faces/blog/index.ts",
-          "checksum": "sha256-GnJM/z+KouLcZ7pk992s7hwhuI52RC0dLOFlAPo3X1o="
+          "checksum": "sha256-rZ8dBvZPSKXj76lTsZkGt4CJAT+SlPRN0ykH0ltC/94="
         },
         {
           "path": "greater/faces/blog/patterns/index.ts",
@@ -6246,16 +6262,24 @@
         },
         {
           "path": "greater/faces/blog/types.ts",
-          "checksum": "sha256-1Q5eYnYt4N92YyMa4M/aVn7a+4dmD7auukpXr35dWYg="
+          "checksum": "sha256-SNvhzPpHcY6YxbUXPbUWCRSbIAu2zrzYQxYX+/Nbtp0="
         }
       ]
     },
     {
       "name": "shell",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
+        {
+          "path": "greater/shell/components/BottomNav.css",
+          "checksum": "sha256-/FCtNnf2hGe2/F4u1xXbJXg+0gDqqD/vNrJTdomsJhM="
+        },
+        {
+          "path": "greater/shell/components/BottomNav.svelte",
+          "checksum": "sha256-l4d6qb+MOXn7D+Hd99U5rBs6b9RrUj/6Jls6S9DKHTE="
+        },
         {
           "path": "greater/shell/components/Breadcrumb.css",
           "checksum": "sha256-SW9UA4xhl8K1fKwS/h/Htyui7GujRdNCCznfRrPJ8qY="
@@ -6346,7 +6370,7 @@
         },
         {
           "path": "greater/shell/index.ts",
-          "checksum": "sha256-NLhn3AXDEWBZsC7ACM0NX2/1Uq0CzDuQwYjVG4zGXhw="
+          "checksum": "sha256-fBqTAy+lriasQEwSQKw/vRKV0VOWR1jbcBFl5iunDW0="
         },
         {
           "path": "greater/shell/styles/base.css",
@@ -6368,8 +6392,8 @@
     },
     {
       "name": "poll-composer",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -6380,8 +6404,8 @@
     },
     {
       "name": "custom-emoji-picker",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -6392,8 +6416,8 @@
     },
     {
       "name": "review",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
@@ -6402,15 +6426,15 @@
         },
         {
           "path": "lib/components/Review/AttributionStrip.svelte",
-          "checksum": "sha256-juxSUd6Fw4sb7bp7lg4BybXHCPT9T+XCCikQ2kzlbsA="
+          "checksum": "sha256-s3CsGSkr2FfTxtu+XyexpAz2PPqLxldTn5u7BcoguaU="
         },
         {
           "path": "lib/components/Review/VerdictActions.svelte",
-          "checksum": "sha256-CuMWBoIsAhpnk/cEF/gXXyNK7d/GpFWLtBahtnAzsO4="
+          "checksum": "sha256-Zu1VFCfZpmKjL+S0s3OJAsp9VMpcTrTPwmZPXEilBTE="
         },
         {
           "path": "lib/components/Review/state.ts",
-          "checksum": "sha256-AXHaTyPoK+jGvsrX24yLZTS4snqsSHt+crzk25j9F5Y="
+          "checksum": "sha256-niKFeccGZ3xI8+XbOBOpLYlxFAf1SZhSbp4R/hYW820="
         },
         {
           "path": "lib/components/Review/index.ts",
@@ -6420,17 +6444,17 @@
     },
     {
       "name": "messaging",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.188Z",
       "modified": false,
       "checksums": [
         {
           "path": "shared/messaging/Composer.svelte",
-          "checksum": "sha256-b6QB/rAwLQXU+oBpLOBHktWQjSG6Jojg5q9Zj9J+RTY="
+          "checksum": "sha256-y5dJYSwZoA7pGf361+sCF4egcUq/SdyJJ3KpPB8oB+c="
         },
         {
           "path": "shared/messaging/context.svelte.ts",
-          "checksum": "sha256-kyRfy1iaR4A1PtVf4c3+EIxHhrgjgBjR3XUNH9jpx7g="
+          "checksum": "sha256-aIzDLvTc265eCmPCh0ZAC0oWk1VXZWgrwfNCyj4lhAs="
         },
         {
           "path": "shared/messaging/ConversationPicker.svelte",
@@ -6446,7 +6470,7 @@
         },
         {
           "path": "shared/messaging/index.ts",
-          "checksum": "sha256-51SFnggIOSpqEXRczLt8ySe8GJM2LmokXYfhkNtVcp4="
+          "checksum": "sha256-5JB/ZLRI6kqeDMMKI/0jLml4dru6PWL2psirqfTPggE="
         },
         {
           "path": "shared/messaging/MediaUpload.svelte",
@@ -6458,7 +6482,7 @@
         },
         {
           "path": "shared/messaging/NewConversation.svelte",
-          "checksum": "sha256-kZOxWT2HOvF7BYmD7EoskPyEBSu5D7JyLbUJelgubaY="
+          "checksum": "sha256-gTtzKrtDA2Li67KHivW6noWPgRnjrH2s6Si5UC9Bn/g="
         },
         {
           "path": "shared/messaging/Root.svelte",
@@ -6487,13 +6511,17 @@
         {
           "path": "shared/messaging/WorkflowThreadMoment.svelte",
           "checksum": "sha256-FN/gYB5HCi3ltwxI0L3qjqep+jXwQE1zJSEAKtXnzlU="
+        },
+        {
+          "path": "greater/faces/social/theme.css",
+          "checksum": "sha256-jWzBOQrht8wCb7IIO2aezpPjsAtLMPGMdJqbMn3jS5Y="
         }
       ]
     },
     {
       "name": "timeline",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.189Z",
       "modified": false,
       "checksums": [
         {
@@ -6506,7 +6534,7 @@
         },
         {
           "path": "lib/components/Timeline/LoadMore.svelte",
-          "checksum": "sha256-PIERk4mEAb8eZLUInhsFBdAGW2M7KmrfMQH92x/ckH4="
+          "checksum": "sha256-rYVFwUazWtlaLgDwnWDUYhEYK5AMi10Czcl0BvyIzGM="
         },
         {
           "path": "lib/components/Timeline/EmptyState.svelte",
@@ -6518,7 +6546,7 @@
         },
         {
           "path": "lib/components/Timeline/context.ts",
-          "checksum": "sha256-BinWOPfjmv3f3QcNohVJYYyIrRlByE6jDTsP+YpsTQY="
+          "checksum": "sha256-AD/9WvG5LXgq0Q5LHjc7Yxf9hPTJfJUT/+K8R60+dNk="
         },
         {
           "path": "lib/components/Timeline/index.ts",
@@ -6528,8 +6556,8 @@
     },
     {
       "name": "social-status-card",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.189Z",
       "modified": false,
       "checksums": [
         {
@@ -6540,8 +6568,8 @@
     },
     {
       "name": "social-timeline",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.189Z",
       "modified": false,
       "checksums": [
         {
@@ -6596,8 +6624,8 @@
     },
     {
       "name": "profile",
-      "version": "a63a0ff8bcb84f1597788878384d1e8b145490e6",
-      "installedAt": "2026-08-07T19:53:52.521Z",
+      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+      "installedAt": "2026-08-09T12:58:13.189Z",
       "modified": false,
       "checksums": [
         {
