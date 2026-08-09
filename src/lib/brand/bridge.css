@@ -297,8 +297,16 @@ code {
 	position: sticky;
 	top: 0;
 	align-self: start;
+	/* `100dvh` where supported: classic `100vh` includes browser-chrome area
+	   on engines with dynamic toolbars, which pushed the session control at
+	   the bottom of this column behind the chrome and off screen. The dynamic
+	   unit tracks the visible area; the `vh` line is the fallback. */
 	height: 100vh;
-	padding: var(--tc-space-8) 0;
+	height: 100dvh;
+	/* Horizontal padding too: without it the compose action's border and the
+	   nav's hover backgrounds sat flush against this column's border-right
+	   line. */
+	padding: var(--tc-space-8) var(--tc-space-4);
 	border-right: 1px solid var(--tc-outline-variant);
 	display: flex;
 	flex-direction: column;
@@ -308,6 +316,7 @@ code {
 .contentus-brand {
 	display: inline-flex;
 	align-items: center;
+	flex-shrink: 0;
 	/* The wordmark image is 22px tall; the LINK must still meet WCAG 2.2's
 	   24px minimum target, so the box grows around it. */
 	min-height: 24px;
@@ -324,6 +333,13 @@ code {
 	display: flex;
 	flex-direction: column;
 	gap: var(--tc-space-1);
+	/* The nav is the one flex child allowed to shrink and scroll: if the
+	   column's content ever exceeds the viewport, the session control stays
+	   pinned in view and the nav scrolls between brand and session instead of
+	   pushing anything off screen. `min-height: 0` is what lets a flex item
+	   shrink below its content height. */
+	min-height: 0;
+	overflow-y: auto;
 }
 
 .contentus-nav__link {
@@ -382,6 +398,10 @@ code {
 
 .contentus-session {
 	margin-top: auto;
+	/* Pinned: never shrink away. The nav above is the only flex child allowed
+	   to shrink/scroll; if this block could shrink, a short viewport would
+	   crush the account control instead of scrolling the nav. */
+	flex-shrink: 0;
 	font-size: var(--tc-fs-body-sm);
 	color: var(--tc-fg-muted);
 }
