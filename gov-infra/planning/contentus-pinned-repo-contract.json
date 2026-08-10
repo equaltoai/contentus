@@ -143,7 +143,7 @@
     "unfollowable_loads_disclosed": [
       {
         "file": "scripts/deploy-client.mjs",
-        "line": 347,
+        "line": 370,
         "expression": "spawn",
         "reason": "Runs only the system `pnpm`, `lesser`, and `curl` binaries from the closed deployment plan assembled in this pinned file. No repository file is handed directly to `spawn`: pnpm's repository script delegation remains separately pinned by package_scripts.expected and this executable closure, while the three executable binaries are operator-installed PATH dependencies outside any repo-local hash boundary."
       },
@@ -256,8 +256,8 @@
       "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
-      "scripts/deploy-client.mjs": "882cb863ae6cbca75108c6890b077e5ab87649b523e70a845a30ad85d746e29c",
-      "scripts/deploy-client.test.mjs": "b30cc6eef47a0d59fad98dc16eda02cf638c3b021b807e9aeb63a2b934168f5f",
+      "scripts/deploy-client.mjs": "18e1d0d976a3b458d537b7a1bb333788cbadd328c9295d21bed7f00983499d52",
+      "scripts/deploy-client.test.mjs": "8aa5d6d33d8d7a2ab0475c71951ac0f0c37d1b2a23b8f3a59140d4edd71a060d",
       "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/graphql-inventory.mjs": "d154a92f6794d6485c3054cc9325be2836e50a23943fa99f550274c567722e45",
@@ -291,7 +291,7 @@
       "tests/messaging-races.test.mjs": "8f827104484cdef7a000f2aeb9284b95cd6f953a15c5e717825667d0004385f9",
       "tests/messaging-realtime.test.mjs": "333d76ae127788affac54451ec6f1735e64ce08519acd7b7f7ba836a862ef5fb",
       "tests/messaging-session.test.mjs": "4be22b812fc7b35b1ca66676aa73a4f9144e1fabdbe18f95f248ccae92c8d528",
-      "tests/mobile-chrome.test.mjs": "f2831857770799fdf5315fa5deea9fd4e0756d4865d94e06789dc847d0c53a9e",
+      "tests/mobile-chrome.test.mjs": "6a1ea66c9d4b298c4449a97312ad2a7fe9f6e743a25d039bad1959ef718c55a4",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
       "tests/renderer-authority-audit.test.mjs": "d8ed3deb435c7f2fb92f11ea9cec6adde7862152a0001ef0f728ac14c9cc5ba7",
       "tests/renderer-authority.test.mjs": "c246f85eb4b59937610b83ba0604a9678c65a8f32deb9f43582c0e02fcd3f1f6",

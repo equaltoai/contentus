@@ -12,6 +12,7 @@ import {
 	normalizeBaseDomain,
 	parseCliArgs,
 	preflight,
+	resolveStatePath,
 	stageOrigin,
 	validateReceipt,
 } from './deploy-client.mjs';
@@ -83,6 +84,38 @@ test('normalizes the domain and derives stage origins like lesser', () => {
 	assert.equal(stageOrigin('staging', 'example.test'), 'https://staging.example.test');
 	assert.equal(stageOrigin('live', 'example.test'), 'https://example.test');
 	assert.throws(() => normalizeBaseDomain('https://example.test'), /Invalid --base-domain/);
+});
+
+test('resolves the receipt containing the selected stage without --state', async (context) => {
+	const home = await mkdtemp(path.join(os.tmpdir(), 'contentus-deploy-home-'));
+	context.after(() => rm(home, { recursive: true, force: true }));
+	const directory = path.join(home, '.lesser', 'new-instance', 'example.test');
+	await mkdir(directory, { recursive: true });
+	const options = parseCliArgs([...required.slice(0, -4), '--stage', 'live', '--aws-profile', 'P']);
+	const devOnly = { app: 'new-instance', base_domain: 'example.test', stages: { dev: {} } };
+	const live = { app: 'new-instance', base_domain: 'example.test', stages: { live: {} } };
+
+	// No receipts at all: fall back to the conventional path for the error message.
+	assert.equal(resolveStatePath(options, { home }), path.join(directory, 'state.json'));
+
+	// state.json without the stage is skipped in favor of a stage-suffixed receipt.
+	await writeFile(path.join(directory, 'state.json'), JSON.stringify(devOnly));
+	await writeFile(path.join(directory, 'state-live.json'), JSON.stringify(live));
+	assert.equal(resolveStatePath(options, { home }), path.join(directory, 'state-live.json'));
+
+	// The dotted stage suffix takes preference over the dashed one.
+	await writeFile(path.join(directory, 'state.live.json'), JSON.stringify(live));
+	assert.equal(resolveStatePath(options, { home }), path.join(directory, 'state.live.json'));
+
+	// A state.json that does contain the stage stays the default.
+	await writeFile(path.join(directory, 'state.json'), JSON.stringify(live));
+	assert.equal(resolveStatePath(options, { home }), path.join(directory, 'state.json'));
+
+	// An explicit --state always wins.
+	assert.equal(
+		resolveStatePath({ ...options, state: './receipt.json' }, { home, cwd: '/operator/repo' }),
+		'/operator/repo/receipt.json'
+	);
 });
 
 test('builds the frozen install, check, build, lesser install, and verify plan', () => {

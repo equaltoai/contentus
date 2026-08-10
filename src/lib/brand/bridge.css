@@ -703,6 +703,24 @@ code {
 	overflow-wrap: anywhere;
 }
 
+/* The vendored `DefinitionItem` (greater primitives) switches to a two-column
+   label/value grid — `minmax(0, 14rem) minmax(0, 1fr)` — at 640px VIEWPORT
+   width. Inside the 22rem rail that leaves the value column roughly one
+   character wide, and `word-break: break-word` then stacks the attribution a
+   letter per line. The breakpoint cannot see its container, so in the rail
+   the strip keeps its stacked (sub-640px) form at every viewport. The
+   `grid-column` reset matters: the vendored media query pins the label to
+   column 1 and the content to column 2, which against a single track would
+   open an implicit second column and recreate the squeeze. */
+.contentus-review-rail .gr-definition-item {
+	grid-template-columns: 1fr;
+}
+
+.contentus-review-rail .gr-definition-item__label,
+.contentus-review-rail .gr-definition-item__content {
+	grid-column: auto;
+}
+
 .contentus-review-note {
 	color: var(--tc-fg-muted);
 	font-size: var(--tc-fs-body-sm);

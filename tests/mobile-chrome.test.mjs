@@ -279,6 +279,25 @@ test('the stylesheet shows one workspace panel at a time below the breakpoint', 
 	assert.match(block, /\.contentus-review-workspace\s*\{[^}]*grid-template-columns:\s*1fr/s);
 });
 
+test('the rail keeps the attribution strip stacked at every viewport', () => {
+	// The vendored DefinitionItem goes two-column (`minmax(0, 14rem) minmax(0,
+	// 1fr)`) at 640px VIEWPORT width. Inside the 22rem rail that leaves the
+	// value a character wide and it wraps a letter per line — on desktop. The
+	// override therefore lives OUTSIDE any media block, and it must also reset
+	// the vendored `grid-column` pins, which would otherwise open an implicit
+	// second column against the single track.
+	assert.match(
+		stylesheet,
+		/\.contentus-review-rail\s+\.gr-definition-item\s*\{[^}]*grid-template-columns:\s*1fr/s,
+		'the rail must override the vendored two-column definition item'
+	);
+	assert.match(
+		stylesheet,
+		/\.contentus-review-rail\s+\.gr-definition-item__label,[\s\S]*?grid-column:\s*auto/s,
+		'the rail must reset the vendored grid-column pins'
+	);
+});
+
 test('the stylesheet hides the segmented control where there is nothing to switch', () => {
 	// Above the breakpoint both panels are on screen, so the control is not in
 	// the layout at all rather than being a no-op the reviewer can press.

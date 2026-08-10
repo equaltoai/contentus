@@ -67,8 +67,10 @@ The instance must already have a lesser deployment receipt whose selected
 stage includes `FrontendDistributionId`. `ClientBucketName`,
 `ClientArtifactBucketName`, and `ClientInstallManifestKey` are advisory: the
 entrypoint reports their absence and lesser derives them. By default the
-entrypoint reads `~/.lesser/<app>/<base-domain>/state.json`; pass
-`--state <path>` for a receipt stored elsewhere. The current `lesser` binary,
+entrypoint discovers the receipt in `~/.lesser/<app>/<base-domain>/` that
+contains the selected stage — checking `state.json`, `state.<stage>.json`, and
+`state-<stage>.json` in that order; pass `--state <path>` only for a receipt
+stored elsewhere. The current `lesser` binary,
 receipt, checked-in manifest, and (when `--skip-build` reuses a build) all
 required artifacts are validated before any AWS operation. A missing
 prerequisite stops with its path or binary name. A dry run from a fresh clone
