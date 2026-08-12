@@ -24,11 +24,14 @@ A response already parsed is not un-parsed by an abort, so `session-scope` is
 what decides what publishes — the same discipline as the owned roster, on a
 smaller surface with the same private subject.
 
-HONEST DEGRADE, NOT A DEAD CONTROL. lesser v1.6.5 is the first version with
-these routes; an older instance answers 404, which is surfaced as "this
-instance does not support agent sharing" with NO form — never a control that
-looks live and cannot work. Any other failure is shown as the instance's own
-answer.
+HONEST DEGRADE, NOT A DEAD CONTROL, AND NOT AN INSTANCE-WIDE CLAIM. The
+vendored OpenAPI defines 404 as one of this route's normal responses on a
+SUPPORTING instance — "not this agent", not "no such route" — so a 404 here is
+reported as what lesser said: sharing is unavailable for this agent. The
+instance-level "does not support agent sharing" claim belongs to the
+shared-with-me panel alone, whose endpoint's response set has no 404, so a 404
+THERE is route absence and nothing else. This panel never claims the
+capability is missing from the instance on this route's word.
 -->
 
 <script lang="ts">
@@ -61,14 +64,13 @@ answer.
 	let session = $state<'unknown' | 'anonymous' | 'authenticated'>('unknown');
 
 	/**
-	 * The grant-list shareState. `unsupported` is the pre-v1.6.5 instance, answered by
-	 * lesser's router as a 404 — the honest signal, never inferred from anything
-	 * else. `unavailable` is every other refusal or failure, carried with the
-	 * instance's own message.
+	 * The grant-list state. `unavailable` carries the instance's own message;
+	 * a 404 is lesser's normal "not this agent" answer on a supporting
+	 * instance (the vendored contract defines it), surfaced as such — never
+	 * dressed up as a statement about the instance.
 	 */
 	type GrantState =
 		| { status: 'loading' }
-		| { status: 'unsupported' }
 		| { status: 'unavailable'; message: string }
 		| { status: 'ready' };
 
@@ -130,7 +132,10 @@ answer.
 			.catch((error: unknown) => {
 				if (!scope.holds(stamp)) return;
 				if (error instanceof ShareClientError && error.status === 404) {
-					shareState = { status: 'unsupported' };
+					// lesser's normal "not this agent" answer — deleted, suspended,
+					// or not visible to this caller — reported as what it is, never
+					// as a claim about the instance's capability.
+					shareState = { status: 'unavailable', message: 'Sharing is unavailable for this agent.' };
 					return;
 				}
 				shareState = {
@@ -231,8 +236,6 @@ answer.
 
 		{#if shareState.status === 'loading'}
 			<p class="contentus-agents__notice">Reading who this agent is shared with…</p>
-		{:else if shareState.status === 'unsupported'}
-			<p class="contentus-agents__notice">This instance does not support agent sharing.</p>
 		{:else if shareState.status === 'unavailable'}
 			<p class="contentus-agents__notice">{shareState.message}</p>
 		{:else}
