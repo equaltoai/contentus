@@ -41,18 +41,18 @@
   "upstream": {
     "repository": "equaltoai/lesser",
     "path": "docs/contracts/graphql-schema.graphql",
-    "ref": "38034eef671f70996b1364d154b200e5f167d4ec",
-    "ref_description": "equaltoai/lesser v1.6.4 release tag, published 2026-08-08",
-    "schema_last_modified_at": "00b13324ebf11d965fe4d78ae341ffad18898f4c"
+    "ref": "a1eb3c6740bd5aca99273130e2b52d3c4c5775ea",
+    "ref_description": "equaltoai/lesser v1.6.5 release tag, published 2026-08-12",
+    "schema_last_modified_at": "77ae1eb3131c7fb6d118ba079c47059e9de59b75"
   },
   "artifact": {
     "path": "contracts/lesser/graphql-schema.graphql",
-    "bytes": 111736,
-    "sha256": "26759ec3d31040412afb60ba740541e9a6f645e1627af15af64b73fa7ed05a4c",
-    "blob_sha1": "86413b135f0f833bf8e926a18900ec9c39e60c18"
+    "bytes": 112060,
+    "sha256": "3b57d1d3ed1646f6a44d83f705274ae96ad763b838c63c8013ac06ac504ee60e",
+    "blob_sha1": "aa6c9f03d87d86cb05510bc75407af148aaca3b5"
   },
   "inspected": {
-    "at": "2026-08-09",
-    "corroborating_source": "The schema delta from the previous pin (v1.6.3, f833ea0b) is entirely additive and is the client-facing answer to contentus's own filed batch: `instance.subscriptionUrl`/`maxUploadSizeBytes`/`maxStatusCharacters`/`cmsFeatures` (with the new `CMSFeatures` type) — lesser#1348; `Conversation.unreadCount`, `ConversationConnection`, and the `conversationConnection` query preferred over the legacy list field — the messaging halves of the #1346/#1347 family; `deleteMedia` — lesser#1352, with the UsageCount gate follow-up tracked as #1357; the owner review projection — `Draft.reviewVerdict`/`contentHash`/`revision`, `DraftReviewGrant.status`/`revokedAt`, verdict `current`/`stale`, `DraftPublishEligibility`, the full `DraftReview` grants/`publishEligible`/`publishBlockingReasons` block, and `myDraftReviews` — lesser#1350's three asks; and in-schema documentation that `CreateNoteInput.mentions`/`.tags` reject non-empty input — lesser#1351. greater-v0.13.4 (#1022) ships its adapter sync against this contract generation. Verified against the v1.6.4 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.4 --jq .sha`."
+    "at": "2026-08-12",
+    "corroborating_source": "The schema delta from the previous pin (v1.6.4, 38034eef) is exactly two additive fields: `Draft.actedBy` and `Article.actedBy` (both `Actor`, nullable) — the CMS caller-attribution carriers for agent share-grant act-as, per lesser's docs/contracts/agent-share-act-as.md. `Draft.actedBy` is documented as private CMS workflow attribution (author/admin viewers only), matching `generatedBy`/`reviewedBy`/`publishedBy` visibility. The act-as management surface itself (agent share-grant endpoints, the X-Lesser-Act-As header on 14 operations) is REST/OpenAPI and does not touch this schema; greater-v0.13.5 — already pinned on both channels here — ships its adapter sync against this contract generation (lesser v1.6.5 + lesser-host v1.6.5). This sync is phase 1 of the agent-share milestone (docs/planning/agent-share-act-as-m7.md) and unblocks GraphQL documents that select `actedBy`. Verified against the v1.6.5 tag object; the blob sha matches `gh api repos/equaltoai/lesser/contents/docs/contracts/graphql-schema.graphql?ref=v1.6.5 --jq .sha`."
   }
 }
