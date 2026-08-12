@@ -154,13 +154,20 @@ bandwidth, check the stamp for the correctness.
 	</Panel>
 
 	<!--
-		One sharing panel per owned agent, below the cards. It is client-only
-		like everything else in this block, and each panel reads its own grants
-		and ends with the session — the same discipline as the roster above,
-		because who may act as your agent is the sensitive half of the
-		capability.
+		One sharing panel per owned agent, below the cards. Mounted only where
+		lesser's OWN statement says this viewer owns the agent — `agent.owner`
+		is present exactly when `viewerCanSeePrivateFields` was served true,
+		and absent otherwise, because lesser redacts rather than reports
+		(contract.ts). Ownership is lesser's answer, never an inference from
+		which list the agent arrived in: `myAgents` carries no schema
+		description that membership means ownership, so the panel does not
+		derive it. Each panel is client-only like everything else in this
+		block, reads its own grants, and ends with the session — because who
+		may act as your agent is the sensitive half of the capability.
 	-->
 	{#each agents as agent (agent.id)}
-		<AgentSharingPanel {agent} />
+		{#if agent.owner}
+			<AgentSharingPanel {agent} />
+		{/if}
 	{/each}
 {/if}
