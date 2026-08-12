@@ -520,3 +520,49 @@ test('the sign-out path empties the panel rather than only hiding it', () => {
 		}
 	}
 });
+
+/** Every template node with its ancestor chain, from a parsed markup root. */
+function* walkTemplate(node, ancestors = []) {
+	if (!node || typeof node !== 'object') return;
+	if (Array.isArray(node)) {
+		for (const item of node) yield* walkTemplate(item, ancestors);
+		return;
+	}
+	yield { node, ancestors };
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'parent' || key === 'loc' || key === 'start' || key === 'end') continue;
+		yield* walkTemplate(value, [...ancestors, node]);
+	}
+}
+
+/** Whether an `{#if}` block tests exactly `agent.owner` — lesser's served statement. */
+function isOwnershipGate(node) {
+	return (
+		node.type === 'IfBlock' &&
+		node.test?.type === 'MemberExpression' &&
+		node.test.object?.name === 'agent' &&
+		node.test.property?.name === 'owner'
+	);
+}
+
+test("share management mounts only behind lesser's ownership statement", () => {
+	// STRUCTURAL, like the session probes above: the mount gate is one line whose
+	// removal is silent — a later rework of the `{#each}` that drops the
+	// `{#if agent.owner}` returns the defect the gate fixed, and every other
+	// check stays green. So the gate itself is the assertion.
+	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8'), {
+		modern: true,
+	});
+
+	const mounts = [];
+	for (const { node, ancestors } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'Component' || node.name !== 'AgentSharingPanel') continue;
+		mounts.push(ancestors.some(isOwnershipGate));
+	}
+
+	assert.ok(mounts.length > 0, 'MyAgents must mount a sharing panel at all');
+	assert.ok(
+		mounts.every(Boolean),
+		"and only behind {#if agent.owner} — lesser's served statement, never list membership"
+	);
+});
