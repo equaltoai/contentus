@@ -43,7 +43,7 @@ rendering chunks...
 computing gzip size...
 build/server/handler.mjs  1,150.23 kB │ gzip: 277.37 kB
 
-✓ built in 998ms
+✓ built in 1.01s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
