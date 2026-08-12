@@ -177,3 +177,22 @@ test('a grants field that is not an array is refused the same way', async () => 
 		stub.restore();
 	}
 });
+
+test('a grants array whose elements are not grant objects is refused', async () => {
+	// The container check alone would admit this; the consumers read fields off
+	// each element immediately (`grant.active`, `grant.grantee_username`), so
+	// `[null]` is the same crash one level down.
+	for (const grants of [[null], ['scribe'], [null, GRANT]]) {
+		const stub = stubFetch(() => jsonResponse({ grants }));
+		try {
+			await assert.rejects(listSharedWithMe(token), (error) => {
+				assert.ok(error instanceof ShareClientError);
+				assert.match(error.message, /not a grant list/);
+				return true;
+			});
+			await assert.rejects(listShareGrants('scribe', token), ShareClientError);
+		} finally {
+			stub.restore();
+		}
+	}
+});

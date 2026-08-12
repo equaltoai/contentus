@@ -112,11 +112,27 @@ async function shareRequest<T>(
  * `response.grants.length` — the same defense `graphqlRequest` applies to
  * non-JSON bodies a few modules over.
  */
-function grantsFrom(response: AgentShareGrantListResponse): AgentShareGrant[] {
-	if (!response || !Array.isArray(response.grants)) {
+function grantsFrom(response: unknown): AgentShareGrant[] {
+	if (
+		typeof response !== 'object' ||
+		response === null ||
+		!Array.isArray((response as { grants?: unknown }).grants)
+	) {
 		throw new ShareClientError('share response was not a grant list');
 	}
-	return response.grants;
+
+	const grants = (response as { grants: unknown[] }).grants;
+	// The container check is not the whole guard: every consumer reads fields
+	// off each element immediately (`grant.active`, `grant.grantee_username`,
+	// `grant.agent_username`), so an array whose elements are not objects is
+	// the same crash one level down. The docstring's promise — a malformed 200
+	// lands in `unavailable`, never in a render-time TypeError — has to hold
+	// for the contents too, not only for the container.
+	if (!grants.every((grant) => grant !== null && typeof grant === 'object')) {
+		throw new ShareClientError('share response was not a grant list');
+	}
+
+	return grants as AgentShareGrant[];
 }
 
 /** `GET /api/v1/agents/{username}/share` — the grants an agent owner has made. */
