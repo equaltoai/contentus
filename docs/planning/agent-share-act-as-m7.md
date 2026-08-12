@@ -1,8 +1,9 @@
 # Planning: Agent share-grants + act-as (M7.0)
 
-Status: in flight. Phase 1 (contract sync) merged as PR #88. Phases 2–4 were
-re-sequenced into ONE PR (see "Re-sequencing" below); its branch carries items
-2 and 3 and awaits items 4, 6, 7. Phase 5 stays its own PR.
+Status: in flight. Phase 1 (contract sync) merged as PR #88. Phases 2–4
+(items 2, 3, 4, 6, 7) landed on one branch per the re-sequencing below and are
+open as PR #89, targeting `staging`, awaiting operator merge. Phase 5 stays its
+own PR.
 
 This document consolidates the four planning artifacts for the milestone:
 scoped need, CMS-consumption audit, enumerated changes, roadmap. It records
@@ -107,6 +108,7 @@ principal-verified.
   **Merged (PR #88).**
 - **Phases 2–4, combined into one PR** — items 2, 3, 4, 6, 7 as single commits
   in dependency order (2 → 3 → 4 → 6, 7). See "Re-sequencing" below.
+  **Open as PR #89**, awaiting operator merge.
 - **Phase 5: review-surface act-as + attribution** — items 5, 8, 9
   (depend on 1, 2, 4). Cross-client adversarial review concentrates here.
 
@@ -123,43 +125,43 @@ per-commit — so the items land as separate commits on ONE branch, each
 arriving before its consumers, with the tree green at HEAD. Discovered
 2026-08-12 on branch `theorymcp/equaltoai/contentus/m7-transport-share-client`.
 
-### Handoff state (2026-08-12)
+### Handoff state (2026-08-12, end of the combined-PR session)
 
 Branch `theorymcp/equaltoai/contentus/m7-transport-share-client`, forked from
-staging at the PR #88 merge (`9207c92`), **unpushed**, carries:
+staging at the PR #88 merge (`9207c92`), **pushed**, open as **PR #89** to
+`staging` (awaiting operator merge — the steward never merges). Carries, in
+order:
 
 - `11533af` — item 2: `actAs` option on `src/lib/cms/graphql.ts`
   (`X-Lesser-Act-As` header) + `tests/cms-graphql.test.mjs` header tests.
 - `06d1104` — item 3: `src/lib/agents/share-client.ts`
   (list/grant/revoke/shared-with-me; types from the vendored generated
   OpenAPI types) + `tests/agent-share-client.test.mjs`.
-- This doc's re-sequencing note (committed after the above).
+- `fec5aa8` — this doc's re-sequencing note and original handoff.
+- `8e797a5` — item 4: `src/lib/agents/act-as.ts` (session-bound selection,
+  cleared on sign-out and on lesser's two forbidden spellings, the
+  `shared-with-me` derivation helper) + `tests/agent-act-as.test.mjs`.
+- `b0c17de` — item 6: `AgentSharingPanel.svelte` on the MyAgents surface
+  (list/grant/revoke per owned agent; 404 → "not supported by this
+  instance", no dead controls).
+- `5d0ecfb` — item 7: `AgentSharedWithMePanel.svelte` on the agents route
+  (candidates from `shared-with-me`, act-as selector, selection reconciled
+  against every fresh list, 403 clears the selection).
+- `b8854f2` — `chore(gov)`: CON-5 pin move for the changed/new gate files.
+- `119ece9` — `chore(gov)`: rubric evidence, 32 PASS / 0 FAIL / 0 BLOCKED,
+  `source.sha` `b8854f2`.
+- (this commit) — doc status update.
 
-Remaining for the combined PR, in order:
+Gates ran at the branch tip and are recorded in the PR body: full test suite,
+typecheck, svelte-check, lint, build (client+server+assets+validate, seam
+graph clean), rubric gate green, DCO verified with output pasted.
 
-1. Item 4 — session-scoped act-as context `src/lib/agents/act-as.ts`:
-   selection derived from `listSharedWithMe`, cleared on sign-out, cleared
-   when lesser says the grant is gone (GraphQL error extension `FORBIDDEN` —
-   arrives on HTTP 200 over GraphQL-HTTP — and 403 on REST).
-2. Items 6 + 7 — owner "Sharing" panel on the MyAgents surface; "Shared with
-   me" panel + act-as selector on the agents route. These are the consumers
-   that make items 3–4 build-loaded and the seam gate green. Panels ride the
-   existing `ensureAgentsEnabled` gate and degrade honestly ("not supported
-   by this instance") on pre-v1.6.5 instances — never a visible-but-dead
-   control. greater-components v0.13.5 (already pinned) ships the adapters.
-3. Gates before push, all at HEAD: `pnpm test`, `pnpm run typecheck`,
-   `pnpm run svelte-check`, `pnpm run lint`, `pnpm run validate`, `pnpm run
-build`, then `bash gov-infra/verifiers/gov-verify-rubric.sh` to fresh PASS
-   and a `chore(gov): rubric evidence` commit (report names the pre-evidence
-   HEAD as `source.sha`).
-4. DCO verify before push and paste output into the PR:
-   `git log --no-merges --format='%H %ae %(trailers:key=Signed-off-by,valueonly,separator=%x2C)' origin/staging..HEAD`
-   plus `node scripts/dco-check.mjs <staging-sha> HEAD`. Milestone commits are
-   LOCAL `git commit -s` as the authoring identity — never the governed
-   `github_commit_files` route (it breaks trailer recognition).
-5. Push, open PR to `staging` with the evidence. `gh`/`git` are always
-   available for PR work (checks, review-thread resolution via
-   `resolveReviewThread`).
+Remaining (phase 5, its own PR after #89 merges): items 5, 8, 9 —
+`actedBy` in review attribution, act-as threading through the review
+transport with FORBIDDEN-driven clear-and-notify, the act-as banner on the
+review queue and workspace. Item 10 (runbook share-flow verification steps)
+rides the post-merge install verification. Cross-client adversarial review
+concentrates on phase 5.
 
 Contract facts that bind items 4–7 (lesser v1.6.5, `agent-share-act-as.md`):
 
