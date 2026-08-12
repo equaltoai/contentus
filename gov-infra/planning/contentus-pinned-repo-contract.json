@@ -172,6 +172,12 @@
         "reason": "Installs a resolve hook that maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims, and resolves the TypeScript source extensions Vite supplies but Node does not. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probe drives the real auth session module. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
       },
       {
+        "file": "tests/agent-act-as.test.mjs",
+        "line": 19,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs the same resolve hook `tests/auth-session.test.mjs` discloses: it maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims and resolves the TypeScript source extensions Vite supplies but Node does not, because the act-as module imports the auth session module, which imports both aliases. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
         "file": "tests/vendored-messaging-render.test.mjs",
         "line": 40,
         "expression": "import { registerHooks } from 'node:module';",
@@ -191,25 +197,25 @@
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1198,
+        "line": 1203,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which initialises a scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1214,
+        "line": 1219,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which stages the fixture files the probe has just written into that scratch repository. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1248,
+        "line": 1253,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which initialises a second scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1251,
+        "line": 1256,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which stages one of the two fixture files, so the assertion can tell tracked from untracked. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
@@ -258,7 +264,7 @@
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
       "scripts/deploy-client.mjs": "18e1d0d976a3b458d537b7a1bb333788cbadd328c9295d21bed7f00983499d52",
       "scripts/deploy-client.test.mjs": "8aa5d6d33d8d7a2ab0475c71951ac0f0c37d1b2a23b8f3a59140d4edd71a060d",
-      "scripts/lib/agent-seams.mjs": "7648469ccb7d1e9ab332b3f549d4d752e58cebfa40d4f75699f40e505bc03a84",
+      "scripts/lib/agent-seams.mjs": "bad4396fc83962acfec1c6f14ed6a6b65ba9f01ecd96b0012502bac5532dba81",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/graphql-inventory.mjs": "d154a92f6794d6485c3054cc9325be2836e50a23943fa99f550274c567722e45",
       "scripts/lib/module-imports.mjs": "03ef1380e131c9ae8625d9d2ac6f7a66cc608cfce5e0c689c0a0f011a2e7cd5c",
@@ -267,14 +273,16 @@
       "scripts/probe-live-contract.mjs": "9b2f71f2d9dce3d4a829c2317586e8792265099a44f2e9b77afb25f20f625a5d",
       "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
       "scripts/verify-schema-provenance.mjs": "1cd2a9194bd63948296dede9f4c710af976a9d4a2266d00a56a858a15612f8d3",
+      "tests/agent-act-as.test.mjs": "9698b1cb3ac036b534ea5d153fac77dbcf19e6ebdba0290eee6838163b036327",
+      "tests/agent-share-client.test.mjs": "2773c19dd00587d38898321baa587702a57ad31e26c2f613041e4410c578a82f",
       "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
-      "tests/agents-mobile.test.mjs": "197973ced90dff1d1d20700b8d2850ab430888f8c60cd697ea675c371efd9608",
+      "tests/agents-mobile.test.mjs": "736573dcdf9ddb3e0da37475e27bee6b187ebfb2571ede95792df2be9216d986",
       "tests/agents-roster.test.mjs": "ccaf23ee8cd43e0475430fb7033499cd364849068871f89114b974fcc317919e",
       "tests/agents-trust.test.mjs": "e25ec861f0e7f06b91ad0f86c4f8f9b3e9fd48509c162ab2fc73acf7194fb2f3",
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
-      "tests/cms-graphql.test.mjs": "c2871c4297c15decfd9c149dd4cbfff511359dd74b9ea206ce050a3f67b9056c",
+      "tests/cms-graphql.test.mjs": "b68fd637f56b28001e226d68a964b2a3cedb8353640218c72a21d52550afdd7a",
       "tests/compose.test.mjs": "c13d10a0ef01b38bccbd0b662d04ccf75d0b9add5196a20472736509d4f964bf",
       "tests/contrast.test.mjs": "e3b270bb502be325d631b61363cd7fc3093dde4fba0e90d0758b9d08fe65136c",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
@@ -299,7 +307,7 @@
       "tests/review-round-trip.test.mjs": "8a3e525affd543cfcc1c5aae314f344e30821369bad86353deaa63bcff556285",
       "tests/review.test.mjs": "1f83db67c1dc699530bfa064e7f7f7492c350999feb13a0565675545a8627b1a",
       "tests/schema-provenance.test.mjs": "d0a48b24531d18200e94e8d6b466b668f042ed3a8efb216f241b943f78893a14",
-      "tests/seam-graph.test.mjs": "89b89e09b71c2e65d249f3592add793d6c627d66f1b5bb1c509ec389d3d9c5bb",
+      "tests/seam-graph.test.mjs": "77c49eb43fca10d209782e720029e4d24fdd50073151e88c298a10d387563524",
       "tests/ssr-messages.test.mjs": "e192d936c27ce5045bcd6bbfb4d258f6dbfe1e4a6b8c3b82e96d28c6c215a683",
       "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
       "tests/ssr-routes.test.mjs": "185043b629e875a2b66d2342468a348ca0cf524663beda637a39614d016acde4",
