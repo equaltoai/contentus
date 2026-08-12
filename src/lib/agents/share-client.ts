@@ -101,17 +101,36 @@ async function shareRequest<T>(
 	return (await response.json()) as T;
 }
 
+/**
+ * The grants array out of a list response, or an error when the body is not
+ * one.
+ *
+ * The response is typed by assertion at this boundary, which is a statement
+ * about what a conforming lesser sends, not a guard on what arrives. A
+ * malformed 200 must land in the `unavailable` state the panels already have
+ * rather than past it as a render-time `TypeError` on
+ * `response.grants.length` — the same defense `graphqlRequest` applies to
+ * non-JSON bodies a few modules over.
+ */
+function grantsFrom(response: AgentShareGrantListResponse): AgentShareGrant[] {
+	if (!response || !Array.isArray(response.grants)) {
+		throw new ShareClientError('share response was not a grant list');
+	}
+	return response.grants;
+}
+
 /** `GET /api/v1/agents/{username}/share` — the grants an agent owner has made. */
 export async function listShareGrants(
 	username: string,
 	options: ShareClientOptions
 ): Promise<AgentShareGrant[]> {
-	const response = await shareRequest<AgentShareGrantListResponse>(
-		`/${encodeURIComponent(username)}/share`,
-		'GET',
-		options
+	return grantsFrom(
+		await shareRequest<AgentShareGrantListResponse>(
+			`/${encodeURIComponent(username)}/share`,
+			'GET',
+			options
+		)
 	);
-	return response.grants;
 }
 
 /** `PUT /api/v1/agents/{username}/share/{grantee}` — grant a local account access. */
@@ -142,10 +161,7 @@ export async function revokeShare(
 
 /** `GET /api/v1/agents/shared-with-me` — agents the caller may act as. */
 export async function listSharedWithMe(options: ShareClientOptions): Promise<AgentShareGrant[]> {
-	const response = await shareRequest<AgentShareGrantListResponse>(
-		'/shared-with-me',
-		'GET',
-		options
+	return grantsFrom(
+		await shareRequest<AgentShareGrantListResponse>('/shared-with-me', 'GET', options)
 	);
-	return response.grants;
 }

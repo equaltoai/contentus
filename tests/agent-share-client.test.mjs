@@ -145,3 +145,35 @@ test('transport failure carries no status', async () => {
 		stub.restore();
 	}
 });
+
+test('a 200 whose body is not a grant list is an error, not a render-time crash', async () => {
+	// Defense-in-depth, not a claim about a conforming lesser: `grants` is
+	// required in the OpenAPI. The guard exists so a malformed answer lands in
+	// the panels' `unavailable` state instead of past it as a `TypeError` on
+	// `response.grants.length`.
+	const stub = stubFetch(() => jsonResponse({ ok: true }));
+	try {
+		await assert.rejects(listSharedWithMe(token), (error) => {
+			assert.ok(error instanceof ShareClientError);
+			assert.match(error.message, /not a grant list/);
+			return true;
+		});
+		await assert.rejects(listShareGrants('scribe', token), (error) => {
+			assert.ok(error instanceof ShareClientError);
+			assert.match(error.message, /not a grant list/);
+			return true;
+		});
+	} finally {
+		stub.restore();
+	}
+});
+
+test('a grants field that is not an array is refused the same way', async () => {
+	const stub = stubFetch(() => jsonResponse({ grants: 'all of them' }));
+	try {
+		await assert.rejects(listSharedWithMe(token), ShareClientError);
+		await assert.rejects(listShareGrants('scribe', token), ShareClientError);
+	} finally {
+		stub.restore();
+	}
+});
