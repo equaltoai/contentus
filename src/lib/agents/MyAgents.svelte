@@ -44,6 +44,7 @@ bandwidth, check the stamp for the correctness.
 	import { createSessionScope } from '$lib/auth/session-scope';
 
 	import AgentCard from './AgentCard.svelte';
+	import AgentSharingPanel from './AgentSharingPanel.svelte';
 	import { fetchMyAgents, type AgentSummary, type AgentUnavailable } from './contract';
 
 	/**
@@ -151,4 +152,15 @@ bandwidth, check the stamp for the correctness.
 			</ul>
 		{/if}
 	</Panel>
+
+	<!--
+		One sharing panel per owned agent, below the cards. It is client-only
+		like everything else in this block, and each panel reads its own grants
+		and ends with the session — the same discipline as the roster above,
+		because who may act as your agent is the sensitive half of the
+		capability.
+	-->
+	{#each agents as agent (agent.id)}
+		<AgentSharingPanel {agent} />
+	{/each}
 {/if}

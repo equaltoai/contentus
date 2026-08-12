@@ -140,6 +140,9 @@ test('every interactive target in the face clears 44px', () => {
 		'.contentus-agents__next',
 		'.contentus-copy__button',
 		'.contentus-accordion__summary',
+		'.contentus-sharing__input',
+		'.contentus-sharing__grant-btn',
+		'.contentus-sharing__revoke-btn',
 	]) {
 		const block = new RegExp(`\\${selector}[^{]*\\{([^}]*)\\}`).exec(agentsCss)?.[1] ?? '';
 		assert.match(block, /min-height:\s*44px/, `${selector} must clear the 44px floor`);
