@@ -5,6 +5,16 @@ Status: in flight. Phase 1 (contract sync) merged as PR #88. Phases 2–4
 open as PR #89, targeting `staging`, awaiting operator merge. Phase 5 stays its
 own PR.
 
+Provenance: the implementing client for this PR is the **contentus steward**
+(Kimi Code session, `kimi_code` install profile) — recorded here so the
+phase-5 review does not hit the same wall PR #89's review did. The adversarial
+review (Claude, `adversarial-pr-review`) posted COMMENT on PR #89 at head
+`c21c9b2`: 4 findings (1 medium — the panels' session-scope discipline was
+described but unprobed; 3 low — the per-agent 404 read as an instance-wide
+claim, the unguarded share-list response shape, and share panels mounted on
+list membership instead of lesser's served ownership statement) plus this
+provenance gap. All are closed by follow-up commits on the branch.
+
 This document consolidates the four planning artifacts for the milestone:
 scoped need, CMS-consumption audit, enumerated changes, roadmap. It records
 decisions; it is not a contract. lesser's `docs/contracts/agent-share-grants.md`
@@ -193,4 +203,9 @@ Rollback: revert the merge on `staging`, rebuild, reinstall. The feature is
 additive; grants live in lesser and are unaffected by a client rollback.
 
 Open questions: drones-face act-as (deferred; the transport option will be
-shared); a served capability flag (optional upstream ask, not filed).
+shared); a served capability flag (optional upstream ask, not filed); the
+`myAgents` membership guarantee — the pinned schema says only
+`myAgents: [Agent!]!` with no description that membership means ownership, so
+the sharing panels are mounted on lesser's served `viewerCanSeePrivateFields`
+rather than on list membership (adversarial review of PR #89, finding 4), and
+whether membership IS ownership is worth an upstream question to lesser.
