@@ -679,8 +679,6 @@ export interface ReviewVerdictRecordData {
 	reviewer: ReviewActorData;
 	/** ISO-8601 timestamp for when the verdict was recorded. */
 	recordedAt: string;
-	/** Digest of the draft content this verdict was recorded against. */
-	contentHash?: string;
 	/** Whether the verdict still applies to the current revision and grant. */
 	current?: boolean;
 	/** Whether the verdict belongs to an older revision or revoked grant. */
