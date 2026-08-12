@@ -440,37 +440,83 @@ function callsFn(ast, name) {
 	return false;
 }
 
+/**
+ * The three client-only panels on the agents route, each carrying private
+ * session-scoped subject matter and each required to end with the session.
+ *
+ * The fields listed are what `closeSession` must empty on each panel — the
+ * assertion below reads each body, and each entry is a field the panel would
+ * otherwise still be holding one sign-in away from the next reader's screen.
+ */
+const SESSION_SCOPED_PANELS = [
+	{
+		file: 'MyAgents.svelte',
+		subject: 'the owned roster',
+		emptied: [/session = 'anonymous'/, /agents = \[\]/, /failure = null/, /loading = false/],
+	},
+	{
+		file: 'AgentSharingPanel.svelte',
+		subject: 'the owner share grants',
+		emptied: [
+			/session = 'anonymous'/,
+			/grants = \[\]/,
+			/grantee = ''/,
+			/actionInFlight = false/,
+			/actionError = null/,
+		],
+	},
+	{
+		file: 'AgentSharedWithMePanel.svelte',
+		subject: 'the shared-with-me grants and the act-as selection',
+		emptied: [/session = 'anonymous'/, /grants = \[\]/, /selected = null/],
+	},
+];
+
 test('the owned view tracks the session rather than snapshotting it at mount', () => {
 	// STRUCTURAL, and labelled as one: the repo has no DOM harness, so this reads
-	// the component's parsed instance script rather than mounting it. What the
+	// each component's parsed instance script rather than mounting it. What the
 	// probes above prove about the guard, this proves is actually wired into the
-	// component that needs it.
-	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8'), {
-		modern: true,
-	});
+	// components that need it — all three of the route's session-scoped panels,
+	// not only the first one this check was written for.
+	for (const panel of SESSION_SCOPED_PANELS) {
+		const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents', panel.file), 'utf8'), {
+			modern: true,
+		});
 
-	assert.ok(
-		callsFn(ast.instance, 'onSessionChange'),
-		'MyAgents must hear the sign-out; emptying sessionStorage does nothing to a mounted panel'
-	);
-	assert.ok(callsFn(ast.instance, 'createSessionScope'), 'and stamp its reads against the session');
-	assert.ok(callsFn(ast.instance, 'stamp'), 'stamped at dispatch');
-	assert.ok(callsFn(ast.instance, 'holds'), 'and checked before anything is published');
-	assert.ok(callsFn(ast.instance, 'abort'), 'the in-flight read is cancelled, not merely ignored');
-	assert.ok(callsFn(ast.instance, 'end'), 'and the scope ends with the session');
+		assert.ok(
+			callsFn(ast.instance, 'onSessionChange'),
+			`${panel.file} must hear the sign-out; emptying sessionStorage does nothing to a mounted panel (${panel.subject})`
+		);
+		assert.ok(
+			callsFn(ast.instance, 'createSessionScope'),
+			'and stamp its reads against the session'
+		);
+		assert.ok(callsFn(ast.instance, 'stamp'), 'stamped at dispatch');
+		assert.ok(callsFn(ast.instance, 'holds'), 'and checked before anything is published');
+		assert.ok(
+			callsFn(ast.instance, 'abort'),
+			'the in-flight read is cancelled, not merely ignored'
+		);
+		assert.ok(callsFn(ast.instance, 'end'), 'and the scope ends with the session');
+	}
 });
 
 test('the sign-out path empties the panel rather than only hiding it', () => {
-	const source = readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8');
-	const close = source.slice(source.indexOf('function closeSession'));
-	const body = close.slice(0, close.indexOf('\n\t}'));
+	for (const panel of SESSION_SCOPED_PANELS) {
+		const source = readFileSync(join(repoRoot, 'src/lib/agents', panel.file), 'utf8');
+		const close = source.slice(source.indexOf('function closeSession'));
+		const body = close.slice(0, close.indexOf('\n\t}'));
 
-	// Hiding it behind `session === 'anonymous'` while the array stays populated
-	// would leave one operator's inventory one sign-in away from the next
-	// reader's screen. Each of these is asserted because each is a field the
-	// panel would otherwise still be holding.
-	assert.match(body, /session = 'anonymous'/);
-	assert.match(body, /agents = \[\]/);
-	assert.match(body, /failure = null/);
-	assert.match(body, /loading = false/);
+		// Hiding a panel behind `session === 'anonymous'` while its fields stay
+		// populated would leave one reader's private inventory one sign-in away
+		// from the next reader's screen. Each entry is asserted because each is a
+		// field the panel would otherwise still be holding.
+		for (const emptied of panel.emptied) {
+			assert.match(
+				body,
+				emptied,
+				`${panel.file} must empty ${emptied} on sign-out (${panel.subject})`
+			);
+		}
+	}
 });
