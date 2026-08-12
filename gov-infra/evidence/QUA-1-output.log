@@ -27,7 +27,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-m5i7kaNK.js                700.46 kB │ gzip: 212.95 kB
 
-✓ built in 1.05s
+✓ built in 1.08s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -43,7 +43,7 @@ rendering chunks...
 computing gzip size...
 build/server/handler.mjs  1,143.62 kB │ gzip: 274.88 kB
 
-✓ built in 1.00s
+✓ built in 981ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -62,9 +62,9 @@ brand assets: copied 13 files to build/client/brand/
 # GraphQL contract audit
 
 Schema:     contracts/lesser/graphql-schema.graphql
-            111736 chars, sha256 26759ec3d31040412afb60ba740541e9a6f645e1627af15af64b73fa7ed05a4c
-            equaltoai/lesser@38034eef671f70996b1364d154b200e5f167d4ec:docs/contracts/graphql-schema.graphql
-            blob 86413b135f0f833bf8e926a18900ec9c39e60c18 (contracts/lesser/provenance.json)
+            112060 chars, sha256 3b57d1d3ed1646f6a44d83f705274ae96ad763b838c63c8013ac06ac504ee60e
+            equaltoai/lesser@a1eb3c6740bd5aca99273130e2b52d3c4c5775ea:docs/contracts/graphql-schema.graphql
+            blob aa6c9f03d87d86cb05510bc75407af148aaca3b5 (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
 Documents:  46 in 10 inventoried module(s), 46 operation(s)
