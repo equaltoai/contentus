@@ -2,10 +2,10 @@ Scanning workflow directory: .github/workflows
 Lockfile is up to date, resolution step is skipped
 Already up to date
 
-Done in 198ms using pnpm v10.22.0
+Done in 201ms using pnpm v10.22.0
 Root package.json declares no un-allowlisted lifecycle hook.
 pnpm.onlyBuiltDependencies is absent or fully disclosed; no undisclosed pnpmfile.
-Scanned 414 installed package manifests; 76 declare a lifecycle hook.
+Scanned 383 installed package manifests; 76 declare a lifecycle hook.
 
 Screening is heuristic and is not the control. The control is that every install
 in this rubric and in CI runs with --ignore-scripts, so none of these hooks execute.

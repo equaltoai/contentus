@@ -1,4 +1,4 @@
-greater channels in lockstep at greater-v0.13.4, bound to the pin in gov-infra/planning/contentus-pinned-repo-contract.json.
-  TARBALL-PIN: 14 package.json pins at greater-v0.13.4
-  CLI-COPY:    components.json installMode=vendored ref=f3437d0aee7d44a0640b96ba0129354181538d9a
+greater channels in lockstep at greater-v0.13.5, bound to the pin in gov-infra/planning/contentus-pinned-repo-contract.json.
+  TARBALL-PIN: 14 package.json pins at greater-v0.13.5
+  CLI-COPY:    components.json installMode=vendored ref=6374ce9f8461c4dbbf529491d01db1b534144ffb
                36 vendored modules, all at the pinned ref, none modified
