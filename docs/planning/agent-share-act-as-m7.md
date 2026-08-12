@@ -23,10 +23,15 @@ contentus's actual surfaces:
 1. Owner grant management — grant/revoke/list, REST-only by lesser design
    (`GET`/`PUT`/`DELETE /api/v1/agents/{username}/share[/{grantee}]`).
 2. "Shared with me" discovery (`GET /api/v1/agents/shared-with-me`).
-3. Act-as on the CMS surface contentus actually has — the review workflow
-   (`sharedDraftReviews`, `myDraftReviews`, `draftReview`, `draftPreview`,
-   draft ownership, `submitDraftReview`, `shareDraftForReview`,
-   `publishDraft`) via the header on the GraphQL-HTTP endpoint.
+3. Act-as on the CMS surface contentus actually has — the review workflow —
+   via the header on the GraphQL-HTTP endpoint. lesser's enabled operations
+   are the reads `draft`, `draftPreview`, `myDrafts`, `sharedDraftReviews`,
+   `draftReview` and the writes `submitDraftReview`, `shareDraftForReview`,
+   `publishDraft`. On any unlisted operation the header is silently ignored
+   and the request runs with owner semantics — so `myDraftReviews` (which
+   contentus's queue uses for its own-drafts half) is NOT agent-scoped under
+   act-as, and the design must treat that as a stated limitation, never as
+   agent behavior.
 4. `actedBy` attribution display on the review surface.
 
 Driver: principal-direct. Classification: cms-client milestone with an
@@ -79,12 +84,15 @@ Key scoping facts:
 3. Share-grant REST client (`src/lib/agents/share-client.ts`, contentus-owned —
    `src/lib/greater/adapters/lesser/client.ts` is vendored and never hand-edited).
 4. Session-scoped act-as context (`src/lib/agents/act-as.ts`): selection derived
-   from `shared-with-me`, cleared on sign-out, cleared on a 403.
+   from `shared-with-me`, cleared on sign-out, cleared when lesser says the
+   grant is gone — error extension `FORBIDDEN` on GraphQL-HTTP, 403 on REST.
 5. `actedBy` in review attribution (query → mapping → attribution strip).
 6. Owner "Sharing" panel on the MyAgents surface.
 7. "Shared with me" panel + act-as selector on the agents route.
-8. Thread act-as through the review transport; on a 403, clear the selection
-   and notify — revocation mid-session is the designed case.
+8. Thread act-as through the review transport; when a CMS call returns error
+   extension `FORBIDDEN` (GraphQL-HTTP reports it on HTTP 200, not as a 403 —
+   that is the REST spelling), clear the selection and notify — revocation
+   mid-session is the designed case.
 9. Act-as banner on the review queue and workspace.
 10. Runbook share-flow verification steps + consumption note.
 
@@ -104,7 +112,8 @@ CSP audit, rubric gate, DCO) → operator merges to `staging` → steward builds
 and prepares the verification checklist → principal runs `lesser client
 install` on the dev instance (trenchcoat) and verifies the share flow
 (grant → discover → act-as verdict/publish → `actedBy` visible → revoke →
-403 clears the selection) or requests changes → steward records the receipt.
+the next act-as call fails `FORBIDDEN` and the selection clears) or requests
+changes → steward records the receipt.
 
 Rollout prerequisite: the dev instance must run lesser ≥ v1.6.5. The panels
 degrade honestly on older instances, but the share flow itself needs the real
