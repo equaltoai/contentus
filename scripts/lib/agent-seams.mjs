@@ -35,6 +35,7 @@ export const SEAMS = {
 		owns: [
 			'AgentCard.svelte',
 			'AgentRosterFilters.svelte',
+			'AgentSharedWithMePanel.svelte',
 			'AgentSharingPanel.svelte',
 			'MyAgents.svelte',
 		],

@@ -700,6 +700,96 @@
 	overflow-wrap: anywhere;
 }
 
+/* --- act-as (M7.0) ---------------------------------------------------- */
+
+.contentus-act-as__lede {
+	margin: 0 0 var(--tc-space-4);
+	color: var(--tc-fg-muted);
+	line-height: 1.6;
+	max-width: 70ch;
+}
+
+.contentus-act-as__list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-act-as__row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--tc-space-2) var(--tc-space-3);
+	padding: var(--tc-space-3);
+	background: var(--tc-bg);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+}
+
+/* The accent border names the selected row the same way the "Acting as" pill
+   does — a state a reader can see without decoding either alone. */
+.contentus-act-as__row--selected {
+	border-color: var(--tc-accent);
+}
+
+.contentus-act-as__agent {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
+	/* Pushes the controls to the far edge. */
+	margin-right: auto;
+	min-width: 0;
+}
+
+.contentus-act-as__handle {
+	font-family: var(--tc-font-mono);
+	font-weight: 600;
+	color: var(--tc-fg);
+	overflow-wrap: anywhere;
+}
+
+.contentus-act-as__meta {
+	color: var(--tc-fg-muted);
+	font-size: 0.8125rem;
+	overflow-wrap: anywhere;
+}
+
+.contentus-act-as__select-btn {
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: 0 var(--tc-space-5);
+	color: var(--tc-fg-inverse);
+	background: var(--tc-accent);
+	border: 1px solid transparent;
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-act-as__stop-btn {
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	color: var(--tc-fg);
+	background: transparent;
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font: inherit;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.contentus-act-as__stop-btn:hover,
+.contentus-act-as__stop-btn:focus-visible {
+	border-color: var(--tc-accent);
+	color: var(--tc-accent);
+}
+
 /* --- trust and capabilities ------------------------------------------- */
 
 .contentus-trust {
