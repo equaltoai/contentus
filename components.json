@@ -1,7 +1,7 @@
 {
   "$schema": "https://greater.components.dev/schema.json",
   "version": "1.0.0",
-  "ref": "f3437d0aee7d44a0640b96ba0129354181538d9a",
+  "ref": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
   "installMode": "vendored",
   "style": "default",
   "rsc": false,
@@ -24,8 +24,8 @@
   "installed": [
     {
       "name": "social-types",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -36,8 +36,8 @@
     },
     {
       "name": "icons",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -3692,8 +3692,8 @@
     },
     {
       "name": "tokens",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -3756,8 +3756,8 @@
     },
     {
       "name": "utils",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -3968,8 +3968,8 @@
     },
     {
       "name": "social-renderers",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -3984,8 +3984,8 @@
     },
     {
       "name": "social-generics",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -4000,8 +4000,8 @@
     },
     {
       "name": "primitives",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -4780,8 +4780,8 @@
     },
     {
       "name": "adapters",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -4850,15 +4850,15 @@
         },
         {
           "path": "greater/adapters/graphql/generated/types.d.ts",
-          "checksum": "sha256-Ab+oqMeIvIoq0DF6OBMf99WOcWVPdPm+23OTnby66QQ="
+          "checksum": "sha256-LX+EIfm1PKY6ODx76B+hbJz62zv7sN2gH2epJ6ilps4="
         },
         {
           "path": "greater/adapters/graphql/generated/types.d.ts.map",
-          "checksum": "sha256-7tQJ9ASdLX+otfr5pqKhnen/YIkwFOI859ONicg9bF4="
+          "checksum": "sha256-Z0f5NxESOYlHS6VswUnV+38QS0kg8trvNekyb+xAW4E="
         },
         {
           "path": "greater/adapters/graphql/generated/types.ts",
-          "checksum": "sha256-hrpeCHll+f29yzIFFmm6YRIKDYkzqmSpfBwKIhWFun8="
+          "checksum": "sha256-h1ogwrlWcGu2OUwjv8bulJYFJ8/ARPz1cAkArrvUKqw="
         },
         {
           "path": "greater/adapters/graphql/index.d.ts",
@@ -4878,7 +4878,7 @@
         },
         {
           "path": "greater/adapters/graphql/LesserGraphQLAdapter.d.ts.map",
-          "checksum": "sha256-+zjF+c/QdfknepoUKC0yoc4jmM99P1Ai9Zo9NUoqtvg="
+          "checksum": "sha256-f7N8cT7fFqG32B7MNk/DJ0wUlPZr5mlvnVASusvGcSM="
         },
         {
           "path": "greater/adapters/graphql/LesserGraphQLAdapter.ts",
@@ -5078,27 +5078,27 @@
         },
         {
           "path": "greater/adapters/rest/generated/lesser-api.d.ts",
-          "checksum": "sha256-Dg/H8RxAvXVAJhJtg1dLBvtnBwhHExoGbIxb70qsBq4="
+          "checksum": "sha256-XhAQ6lTrq9o1/2UcgP7leJZuSr2VVBvSIlB9+nBpOcM="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-api.d.ts.map",
-          "checksum": "sha256-5oYQ4USOoYVdkKgX2H5p8UPkPrlDKnpE+rmyTqvnH9c="
+          "checksum": "sha256-Bst2NRQlSXTU3lr/vJFup2xSBoHdPa/2TmHPQy3BApI="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-api.ts",
-          "checksum": "sha256-RrprYPmuQTqU3fMtTto/Wa9WrkJvDnHmT36wTVLIpzE="
+          "checksum": "sha256-zwUeWUMnEMHk+IHOrky3JqGQGWTwXQPNNnJXm5i5nKo="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-host-api.d.ts",
-          "checksum": "sha256-6BzQZn/9Ey01WhWodDo8+WnJ7szqA2g/TWbsr7KHrMk="
+          "checksum": "sha256-6cfj3o2W7vTSfFVHy9QRga5eQtM9iKRD2V+A2qoOOcM="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-host-api.d.ts.map",
-          "checksum": "sha256-36dFp6/b9WCHhHnYwQK7urYyPwp5ASvddLqZz8zcz20="
+          "checksum": "sha256-Qz09C/pj3i9GhhvtAxhtu8vABW1Zrxh6DmW8hjgKKHQ="
         },
         {
           "path": "greater/adapters/rest/generated/lesser-host-api.ts",
-          "checksum": "sha256-kfcOFwcF5O4WBKibOasSLWTSYqrQvh/U6kCqOxbJ/Eo="
+          "checksum": "sha256-lIuN82XqBdEmnWDxkw0e+4ftNwlPS+G82rRx5jQojIQ="
         },
         {
           "path": "greater/adapters/soul/bootstrap.d.ts",
@@ -5372,8 +5372,8 @@
     },
     {
       "name": "status",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5416,8 +5416,8 @@
     },
     {
       "name": "blog-types",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5428,8 +5428,8 @@
     },
     {
       "name": "blog-share",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5440,8 +5440,8 @@
     },
     {
       "name": "content",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5460,8 +5460,8 @@
     },
     {
       "name": "headless",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5576,8 +5576,8 @@
     },
     {
       "name": "auth",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5652,8 +5652,8 @@
     },
     {
       "name": "compose",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5744,8 +5744,8 @@
     },
     {
       "name": "notifications",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5816,8 +5816,8 @@
     },
     {
       "name": "search",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5868,8 +5868,8 @@
     },
     {
       "name": "thread-view",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5888,8 +5888,8 @@
     },
     {
       "name": "content-warning-handler",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5900,8 +5900,8 @@
     },
     {
       "name": "media-composer",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5912,8 +5912,8 @@
     },
     {
       "name": "bookmark-manager",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5924,8 +5924,8 @@
     },
     {
       "name": "article",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -5988,8 +5988,8 @@
     },
     {
       "name": "author",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6012,8 +6012,8 @@
     },
     {
       "name": "publication",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6040,8 +6040,8 @@
     },
     {
       "name": "navigation",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6068,8 +6068,8 @@
     },
     {
       "name": "editor",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6092,8 +6092,8 @@
     },
     {
       "name": "faces/blog",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6268,8 +6268,8 @@
     },
     {
       "name": "shell",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6392,8 +6392,8 @@
     },
     {
       "name": "poll-composer",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6404,8 +6404,8 @@
     },
     {
       "name": "custom-emoji-picker",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6416,8 +6416,8 @@
     },
     {
       "name": "review",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6444,8 +6444,8 @@
     },
     {
       "name": "messaging",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.188Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6520,8 +6520,8 @@
     },
     {
       "name": "timeline",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.189Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6556,8 +6556,8 @@
     },
     {
       "name": "social-status-card",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.189Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6568,8 +6568,8 @@
     },
     {
       "name": "social-timeline",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.189Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
@@ -6624,8 +6624,8 @@
     },
     {
       "name": "profile",
-      "version": "f3437d0aee7d44a0640b96ba0129354181538d9a",
-      "installedAt": "2026-08-09T12:58:13.189Z",
+      "version": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
+      "installedAt": "2026-08-12T14:50:06.162Z",
       "modified": false,
       "checksums": [
         {
