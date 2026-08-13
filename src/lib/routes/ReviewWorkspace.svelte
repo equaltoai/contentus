@@ -49,6 +49,7 @@ counting the verdict history instead would be wrong.
 	import AttributionStrip from '$lib/components/Review/AttributionStrip.svelte';
 	import { describeApprovalRequirement } from '$lib/components/Review/state.js';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
+	import ActAsBanner from '$lib/review/ActAsBanner.svelte';
 	import PublishAction from '$lib/review/PublishAction.svelte';
 	import VerdictPanel from '$lib/review/VerdictPanel.svelte';
 	import {
@@ -270,6 +271,12 @@ counting the verdict history instead would be wrong.
 			: null}
 	/>
 {:else if review}
+	<!-- Acting as a shared agent changes every write below — verdicts and
+	     publishes record the real caller beside the acting agent — and the
+	     banner is what makes that legible on the surface where the writes
+	     happen. Absent with no selection. -->
+	<ActAsBanner />
+
 	<!--
 		THE SEGMENTED CONTROL, and why it is in the document on every viewport.
 

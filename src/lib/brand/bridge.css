@@ -653,6 +653,31 @@ code {
 	border-top: 1px solid var(--tc-outline-variant);
 }
 
+/* The act-as banner above the review surfaces. The accent border is the same
+   signal the selected row on the agents route carries: acting as an agent is
+   always visible, never a silent restyle. Absence states nothing. */
+.contentus-act-as-banner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--tc-space-2) var(--tc-space-4);
+	margin: 0 0 var(--tc-space-4);
+	padding: var(--tc-space-3) var(--tc-space-4);
+	background: var(--tc-surface-1);
+	border: 1px solid var(--tc-accent);
+	border-radius: var(--tc-radius-md);
+	line-height: 1.55;
+}
+
+.contentus-act-as-banner__link {
+	color: var(--tc-accent);
+	font-weight: var(--tc-w-semibold);
+	/* 44px minimum touch target (product design §4). */
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+}
+
 .contentus-review-list {
 	list-style: none;
 	margin: 0;
