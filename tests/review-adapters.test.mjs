@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 import {
 	isDraftAuthor,
+	loadDraftActedBy,
 	loadDraftPreview,
 	loadReviewQueue,
 	publishDraft,
@@ -403,6 +404,53 @@ test('the ownership probe answers from whether lesser resolved it', async () => 
 		() => isDraftAuthor(TOKEN, DRAFT_ID)
 	);
 	assert.equal(notOwner.value, false);
+});
+
+/* ---------------------------------------------------------------------------
+ * loadDraftActedBy — lesser's Draft.actedBy attribution carrier
+ * ------------------------------------------------------------------------ */
+
+test('loadDraftActedBy sends the actedBy document with the draft id, and maps the actor', async () => {
+	const { value, calls } = await withGraphql(
+		() => ({ data: { draft: { actedBy: reviewer } } }),
+		() => loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+
+	assert.ok(value.ok);
+	assert.deepEqual(value.value, {
+		id: 'actor-human-1',
+		username: 'editor',
+		domain: null,
+		displayName: 'Editor',
+		avatar: null,
+		isAgent: false,
+	});
+	assert.equal(calls[0].operation, 'ContentusDraftActedBy');
+	assert.deepEqual(calls[0].variables, { id: DRAFT_ID });
+});
+
+test('an absent actedBy is a success with nothing to show, never a failure', async () => {
+	// The normal answer for a draft nobody has written under a grant. Reading
+	// it as a failure would put an error on screen for the common case; the
+	// display is presence-driven, and `ok: true, value: null` is what keeps it
+	// that way.
+	const { value } = await withGraphql(
+		() => ({ data: { draft: { actedBy: null } } }),
+		() => loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+
+	assert.ok(value.ok);
+	assert.equal(value.value, null);
+});
+
+test('an owner-only refusal is a failure the workspace hides, not a fabricated nobody', async () => {
+	const { value } = await withGraphql(
+		() => ({ errors: [{ message: 'draft is not yours', extensions: { code: 'FORBIDDEN' } }] }),
+		() => loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+
+	assert.equal(value.ok, false);
+	assert.equal(value.failure.reason, 'forbidden');
 });
 
 /* ---------------------------------------------------------------------------

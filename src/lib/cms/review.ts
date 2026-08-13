@@ -52,6 +52,7 @@ import * as transport from './review-transport';
 import type { ReviewQueue } from './review-contract';
 
 export {
+	DRAFT_ACTED_BY_QUERY,
 	DRAFT_OWNERSHIP_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_REVIEW_QUERY,
@@ -65,6 +66,7 @@ export {
 	failureFromErrors,
 	isAgentGenerated,
 	orderQueueEntries,
+	toDraftActedBy,
 	toDraftPreview,
 	toDraftReview,
 	toPreviewFaceArticle,
@@ -96,6 +98,8 @@ export const isDraftAuthor = (id: string) => transport.isDraftAuthor(accessToken
 export const loadDraftReview = (id: string) => transport.loadDraftReview(accessTokenOrNull(), id);
 
 export const loadDraftPreview = (id: string) => transport.loadDraftPreview(accessTokenOrNull(), id);
+
+export const loadDraftActedBy = (id: string) => transport.loadDraftActedBy(accessTokenOrNull(), id);
 
 export const submitDraftReview = (submission: transport.VerdictSubmissionInput) =>
 	transport.submitDraftReview(accessTokenOrNull(), submission);

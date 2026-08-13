@@ -644,6 +644,15 @@ code {
 	margin-bottom: var(--tc-space-8);
 }
 
+/* The contentus-owned act-as attribution row, below the vendored strip inside
+   the same panel. The border marks the seam: everything above is the vendored
+   chrome's; this row is contentus's and disappears with the field. */
+.contentus-review-acted-by {
+	margin-top: var(--tc-space-4);
+	padding-top: var(--tc-space-4);
+	border-top: 1px solid var(--tc-outline-variant);
+}
+
 .contentus-review-list {
 	list-style: none;
 	margin: 0;

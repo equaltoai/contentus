@@ -26,7 +26,7 @@
  * lesser's, and every operation is authenticated and therefore client-side.
  */
 
-import type { DraftReviewData, DraftReviewVerdict } from '../blog-types';
+import type { DraftReviewData, DraftReviewVerdict, ReviewActorData } from '../blog-types';
 
 // Explicit `.ts` extensions: this module and everything it pulls in at runtime
 // are loaded straight off disk by `node --test --experimental-strip-types`,
@@ -34,6 +34,7 @@ import type { DraftReviewData, DraftReviewVerdict } from '../blog-types';
 // (`allowImportingTsExtensions`) both accept the explicit form.
 import { graphqlRequest, GraphQLTransportError } from './graphql.ts';
 import {
+	DRAFT_ACTED_BY_QUERY,
 	DRAFT_OWNERSHIP_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_REVIEW_QUERY,
@@ -45,6 +46,7 @@ import {
 	failureFromErrors,
 	isAgentGenerated,
 	orderQueueEntries,
+	toDraftActedBy,
 	toDraftPreview,
 	toDraftReview,
 	type DraftPreview,
@@ -311,6 +313,46 @@ export async function isDraftAuthor(accessToken: AccessToken, id: string): Promi
 		str(record((data as { draft?: unknown } | null)?.draft)?.['id'])
 	);
 	return result.ok;
+}
+
+/**
+ * Who last wrote this draft on its author's behalf, from lesser's
+ * `Draft.actedBy`.
+ *
+ * A success with a null value is the normal answer — no act-as write has
+ * happened — and must not be confused with a failed read. A failed read
+ * (an owner-only `draft(id)` refused for a non-owner, for instance) is
+ * returned as a failure; the caller treats both the same way on screen:
+ * nothing to show, presence-driven.
+ */
+export async function loadDraftActedBy(
+	accessToken: AccessToken,
+	id: string
+): Promise<ReviewResult<ReviewActorData | null>> {
+	if (!id) {
+		return { ok: false, failure: { reason: 'not-found', message: 'No draft was requested.' } };
+	}
+	if (!accessToken) {
+		return {
+			ok: false,
+			failure: { reason: 'unauthenticated', message: 'Sign in to review drafts on this instance.' },
+		};
+	}
+
+	try {
+		const result = await graphqlRequest<unknown>(DRAFT_ACTED_BY_QUERY, { id }, { accessToken });
+
+		if (result.errors.length > 0) {
+			return { ok: false, failure: failureFromErrors(result.errors) };
+		}
+
+		return {
+			ok: true,
+			value: toDraftActedBy((result.data as { draft?: unknown } | null)?.draft),
+		};
+	} catch (error) {
+		return { ok: false, failure: failureFromThrown(error) };
+	}
 }
 
 export async function loadDraftReview(
