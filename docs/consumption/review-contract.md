@@ -285,6 +285,10 @@ input has no field to carry it. The queue shows no per-draft caller
 attribution until this ask lands; the act-as banner (phase 5) is what makes
 the acting identity legible there.
 
+**Escalated 2026-08-13:** routed to `factory.equaltoai@theorymcp.ai`
+(delivery-8d8cae4ac3204cdc) as an active lesser need, alongside the agent
+ownership-signal need.
+
 ## M2d.5 — the completion-gate round trip, and what was actually verified
 
 The operator's completion gate is: articles sharable as drafts for review, and
