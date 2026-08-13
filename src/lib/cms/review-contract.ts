@@ -196,6 +196,23 @@ export const DRAFT_OWNERSHIP_QUERY = `
 	}
 `;
 
+/**
+ * Who last wrote this draft on its author's behalf, from lesser's act-as
+ * attribution carrier.
+ *
+ * `actedBy` exists on `Draft` and `Article` only — that is the whole v1.6.5
+ * schema delta, recorded in `contracts/lesser/provenance.json` — and `draft(id)`
+ * is the owner-only read, agent-scoped under act-as. So the answer is served
+ * exactly where this face may show it: to the draft's owner, or to a grantee
+ * acting as the agent. The display is presence-driven: a null field and a
+ * refused read are both "nothing to show", never a fabricated "nobody".
+ */
+export const DRAFT_ACTED_BY_QUERY = `
+	query ContentusDraftActedBy($id: ID!) {
+		draft(id: $id) { actedBy { ${REVIEW_ACTOR_FIELDS} } }
+	}
+`;
+
 export const SUBMIT_DRAFT_REVIEW_MUTATION = `
 	mutation ContentusSubmitDraftReview($draftId: ID!, $verdict: DraftReviewVerdict!, $notes: String) {
 		submitDraftReview(draftId: $draftId, verdict: $verdict, notes: $notes) {
@@ -233,6 +250,7 @@ export const REVIEW_DOCUMENTS = {
 	DRAFT_REVIEW_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_OWNERSHIP_QUERY,
+	DRAFT_ACTED_BY_QUERY,
 	SUBMIT_DRAFT_REVIEW_MUTATION,
 	PUBLISH_DRAFT_MUTATION,
 	SCHEDULE_DRAFT_MUTATION,
@@ -256,6 +274,9 @@ export const REVIEW_DOCUMENTS = {
  *   - `no-grant` — the caller holds no active invitation on this draft. An
  *     invitation that was revoked lands here too, which is the point of it
  *     being revocable.
+ *   - `act-as-revoked` — the caller was acting as an agent whose share grant
+ *     was revoked mid-session. lesser answers the FORBIDDEN extension, the
+ *     act-as selection is cleared, and the surface says the acting ended.
  */
 export type ReviewFailureReason =
 	| 'unauthenticated'
@@ -266,7 +287,8 @@ export type ReviewFailureReason =
 	| 'not-found'
 	| 'cms-disabled'
 	| 'rejected'
-	| 'transport';
+	| 'transport'
+	| 'act-as-revoked';
 
 export interface ReviewFailure {
 	reason: ReviewFailureReason;
@@ -397,6 +419,18 @@ export function toReviewActor(raw: unknown): ReviewActorData | null {
 		avatar: str(actor['avatar']),
 		isAgent: actor['isAgent'] === true,
 	};
+}
+
+/**
+ * The actor under whose grant this draft was last written, or null.
+ *
+ * `Draft.actedBy` read through `toReviewActor`'s projection. Null is the
+ * normal answer — no act-as write has happened — and it is also what the
+ * projection produces for an absent or unreadable field, which is exactly why
+ * the display is presence-driven rather than a claim.
+ */
+export function toDraftActedBy(raw: unknown): ReviewActorData | null {
+	return toReviewActor(record(raw)?.actedBy);
 }
 
 export function toVerdictRecord(raw: unknown): ReviewVerdictRecordData | null {

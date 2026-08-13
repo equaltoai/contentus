@@ -49,10 +49,12 @@ counting the verdict history instead would be wrong.
 	import AttributionStrip from '$lib/components/Review/AttributionStrip.svelte';
 	import { describeApprovalRequirement } from '$lib/components/Review/state.js';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
+	import ActAsBanner from '$lib/review/ActAsBanner.svelte';
 	import PublishAction from '$lib/review/PublishAction.svelte';
 	import VerdictPanel from '$lib/review/VerdictPanel.svelte';
 	import {
 		isDraftAuthor,
+		loadDraftActedBy,
 		loadDraftPreview,
 		loadDraftReview,
 		toPreviewFaceArticle,
@@ -60,7 +62,7 @@ counting the verdict history instead would be wrong.
 		type PublishedArticle,
 		type ReviewFailure,
 	} from '$lib/cms/review';
-	import type { DraftReviewData } from '$lib/blog-types';
+	import type { DraftReviewData, ReviewActorData } from '$lib/blog-types';
 	import { isAuthenticated, startLogin } from '$lib/auth/session';
 
 	import type { AppPageDescriptor, ReviewPanel, ReviewRouteData } from '../../facetheory/types';
@@ -83,6 +85,15 @@ counting the verdict history instead would be wrong.
 	let previewFailure = $state<ReviewFailure | null>(null);
 	let loading = $state(false);
 	let signInError = $state<string | null>(null);
+
+	/**
+	 * Who last wrote this draft on its author's behalf (lesser's `Draft.actedBy`).
+	 *
+	 * Null is the normal answer — no act-as write has happened — and it is also
+	 * what a refused owner-only read produces. Presence-driven: shown only when
+	 * lesser served an actor, never a fabricated "nobody".
+	 */
+	let actedBy = $state<ReviewActorData | null>(null);
 
 	/**
 	 * Whether the viewer authored this draft, per lesser's own answer to a
@@ -142,10 +153,11 @@ counting the verdict history instead would be wrong.
 			// separately. A draft whose preview fails to render still has
 			// attribution worth showing, and a reviewer who can see the attribution
 			// but not the body should be told which of the two is missing.
-			const [reviewResult, previewResult, author] = await Promise.all([
+			const [reviewResult, previewResult, author, actedByResult] = await Promise.all([
 				loadDraftReview(draftId),
 				loadDraftPreview(draftId),
 				isDraftAuthor(draftId),
+				loadDraftActedBy(draftId),
 			]);
 
 			if (reviewResult.ok) review = reviewResult.value;
@@ -155,6 +167,10 @@ counting the verdict history instead would be wrong.
 			else previewFailure = previewResult.failure;
 
 			isAuthor = author;
+			// Null on either half is the same thing on screen: nothing to show.
+			// The field is lesser's and presence-driven; a refused owner-only read
+			// does not become a "nobody acted" claim.
+			actedBy = actedByResult.ok ? actedByResult.value : null;
 		} finally {
 			loading = false;
 		}
@@ -244,15 +260,23 @@ counting the verdict history instead would be wrong.
 	<Notice
 		title={reviewFailure.reason === 'not-found' || reviewFailure.reason === 'forbidden'
 			? 'This draft is not available to you'
-			: reviewFailure.reason === 'unauthenticated'
-				? 'Your session has expired'
-				: 'The draft could not be loaded'}
+			: reviewFailure.reason === 'act-as-revoked'
+				? 'Acting as that agent has ended'
+				: reviewFailure.reason === 'unauthenticated'
+					? 'Your session has expired'
+					: 'The draft could not be loaded'}
 		message={reviewFailure.message}
 		detail={reviewFailure.reason === 'not-found'
 			? 'A draft is visible to its author and to reviewers holding an active invitation. An invitation that has been revoked no longer grants access.'
 			: null}
 	/>
 {:else if review}
+	<!-- Acting as a shared agent changes every write below — verdicts and
+	     publishes record the real caller beside the acting agent — and the
+	     banner is what makes that legible on the surface where the writes
+	     happen. Absent with no selection. -->
+	<ActAsBanner />
+
 	<!--
 		THE SEGMENTED CONTROL, and why it is in the document on every viewport.
 
@@ -296,6 +320,25 @@ counting the verdict history instead would be wrong.
 		>
 			<Panel class="contentus-review-panel" padding="md" aria-label="Attribution">
 				<AttributionStrip {review} {approvalRequirement} />
+
+				<!--
+					`Draft.actedBy` is the act-as attribution carrier the pinned
+					contract serves this face — `DraftReview` has none (upstream ask G
+					in docs/consumption/review-contract.md) and the vendored strip's
+					input type cannot carry it. So the display is contentus-owned,
+					beside the strip, rendered only when lesser served an actor:
+					presence-driven, never a fabricated "nobody".
+				-->
+				{#if actedBy}
+					<dl class="contentus-review-meta contentus-review-acted-by">
+						<dt>Acted by</dt>
+						<dd>{actedBy.displayName} ({actedBy.username})</dd>
+					</dl>
+					<p class="contentus-review-note">
+						The instance attributes the last write to this caller, who acted on the author's
+						behalf under a share grant.
+					</p>
+				{/if}
 			</Panel>
 
 			<Panel class="contentus-review-panel" padding="md" aria-label="Draft details">

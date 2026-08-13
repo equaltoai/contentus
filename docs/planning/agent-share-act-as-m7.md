@@ -1,9 +1,10 @@
 # Planning: Agent share-grants + act-as (M7.0)
 
 Status: in flight. Phase 1 (contract sync) merged as PR #88. Phases 2–4
-(items 2, 3, 4, 6, 7) landed on one branch per the re-sequencing below and are
-open as PR #89, targeting `staging`, awaiting operator merge. Phase 5 stays its
-own PR.
+(items 2, 3, 4, 6, 7) merged as **PR #89** (`81c538d` on `staging`). Phase 5
+(items 5, 8, 9) is in flight on branch
+`theorymcp/equaltoai/contentus/m7-review-act-as-attribution`, targeting
+`staging`.
 
 Provenance: the implementing client for this PR is the **contentus steward**
 (Kimi Code session, `kimi_code` install profile) — recorded here so the
@@ -13,7 +14,10 @@ review (Claude, `adversarial-pr-review`) posted COMMENT on PR #89 at head
 described but unprobed; 3 low — the per-agent 404 read as an instance-wide
 claim, the unguarded share-list response shape, and share panels mounted on
 list membership instead of lesser's served ownership statement) plus this
-provenance gap. All are closed by follow-up commits on the branch.
+provenance gap. All were closed by follow-up commits; the re-review at
+`390a3bb` verified the closures by mutation and probe, raised 2 more lows
+(`grantsFrom` contents, the unprobed ownership gate), and those are closed
+too. Both passes and their closures are recorded in PR #89's body.
 
 This document consolidates the four planning artifacts for the milestone:
 scoped need, CMS-consumption audit, enumerated changes, roadmap. It records
@@ -121,6 +125,7 @@ principal-verified.
   **Open as PR #89**, awaiting operator merge.
 - **Phase 5: review-surface act-as + attribution** — items 5, 8, 9
   (depend on 1, 2, 4). Cross-client adversarial review concentrates here.
+  In flight on `theorymcp/equaltoai/contentus/m7-review-act-as-attribution`.
 
 ### Re-sequencing (why phases 2–4 are one PR)
 
@@ -135,43 +140,33 @@ per-commit — so the items land as separate commits on ONE branch, each
 arriving before its consumers, with the tree green at HEAD. Discovered
 2026-08-12 on branch `theorymcp/equaltoai/contentus/m7-transport-share-client`.
 
-### Handoff state (2026-08-12, end of the combined-PR session)
+### Handoff state (2026-08-12/13, phase 5)
 
-Branch `theorymcp/equaltoai/contentus/m7-transport-share-client`, forked from
-staging at the PR #88 merge (`9207c92`), **pushed**, open as **PR #89** to
-`staging` (awaiting operator merge — the steward never merges). Carries, in
-order:
+Branch `theorymcp/equaltoai/contentus/m7-review-act-as-attribution`, forked
+from staging at the PR #89 merge (`81c538d`), carries phase 5, in order:
 
-- `11533af` — item 2: `actAs` option on `src/lib/cms/graphql.ts`
-  (`X-Lesser-Act-As` header) + `tests/cms-graphql.test.mjs` header tests.
-- `06d1104` — item 3: `src/lib/agents/share-client.ts`
-  (list/grant/revoke/shared-with-me; types from the vendored generated
-  OpenAPI types) + `tests/agent-share-client.test.mjs`.
-- `fec5aa8` — this doc's re-sequencing note and original handoff.
-- `8e797a5` — item 4: `src/lib/agents/act-as.ts` (session-bound selection,
-  cleared on sign-out and on lesser's two forbidden spellings, the
-  `shared-with-me` derivation helper) + `tests/agent-act-as.test.mjs`.
-- `b0c17de` — item 6: `AgentSharingPanel.svelte` on the MyAgents surface
-  (list/grant/revoke per owned agent; 404 → "not supported by this
-  instance", no dead controls).
-- `5d0ecfb` — item 7: `AgentSharedWithMePanel.svelte` on the agents route
-  (candidates from `shared-with-me`, act-as selector, selection reconciled
-  against every fresh list, 403 clears the selection).
-- `b8854f2` — `chore(gov)`: CON-5 pin move for the changed/new gate files.
-- `119ece9` — `chore(gov)`: rubric evidence, 32 PASS / 0 FAIL / 0 BLOCKED,
-  `source.sha` `b8854f2`.
-- (this commit) — doc status update.
+- `45d5b77` — docs: phase-5 status, provenance, and the contract fact that
+  shapes item 5 (`DraftReview` has no `actedBy`; upstream ask G).
+- `be0faa9` — item 5: `Draft.actedBy` displayed on the review workspace via a
+  contentus-owned `draft(id)` read and a contentus-owned row beside the
+  vendored `AttributionStrip` (which cannot be edited and whose input type
+  cannot carry the field). Presence-driven throughout.
+- `045cf4b` — item 8: act-as threaded through the review transport on the
+  enabled operations; `myDraftReviews` and `scheduleDraft` opt out by design;
+  a FORBIDDEN extension on an act-as request clears the selection, announces,
+  and returns the named `act-as-revoked` failure. Adapter tests drive the real
+  transport with the loader the act-as module needs.
+- `a0bb04f` — item 9: `ActAsBanner.svelte` on the review queue and workspace,
+  live-subscribed, absent with no selection, pinned by a structural probe.
+- (this commit) — doc handoff update.
 
-Gates ran at the branch tip and are recorded in the PR body: full test suite,
-typecheck, svelte-check, lint, build (client+server+assets+validate, seam
-graph clean), rubric gate green, DCO verified with output pasted.
-
-Remaining (phase 5, its own PR after #89 merges): items 5, 8, 9 —
-`actedBy` in review attribution, act-as threading through the review
-transport with FORBIDDEN-driven clear-and-notify, the act-as banner on the
-review queue and workspace. Item 10 (runbook share-flow verification steps)
-rides the post-merge install verification. Cross-client adversarial review
-concentrates on phase 5.
+Remaining after this PR: item 10 (runbook share-flow verification steps) and
+the install verification on the dev instance — `install-contentus-instance`
+owns the build → operator-run `lesser client install` on trenchcoat →
+verify grant → discover → act-as verdict/publish → `actedBy` visible →
+revoke → next act-as call fails `FORBIDDEN` and the selection clears →
+steward records the receipt. Cross-client adversarial review concentrates on
+this PR.
 
 Contract facts that bind items 4–7 (lesser v1.6.5, `agent-share-act-as.md`):
 
@@ -208,4 +203,9 @@ shared); a served capability flag (optional upstream ask, not filed); the
 `myAgents: [Agent!]!` with no description that membership means ownership, so
 the sharing panels are mounted on lesser's served `viewerCanSeePrivateFields`
 rather than on list membership (adversarial review of PR #89, finding 4), and
-whether membership IS ownership is worth an upstream question to lesser.
+whether membership IS ownership is worth an upstream question to lesser;
+`DraftReview` carries no `actedBy` — the v1.6.5 schema delta is exactly
+`Draft.actedBy` + `Article.actedBy`, so the review surface's queue-level
+attribution has no carrier and phase 5 displays `Draft.actedBy` where the
+contract serves it (the owner's read) — recorded as upstream ask G in
+`docs/consumption/review-contract.md`.

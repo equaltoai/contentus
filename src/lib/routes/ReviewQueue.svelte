@@ -38,6 +38,7 @@ longer arrive and the alternate chrome is gone.
 
 	import QueueCard from '$lib/components/Review/QueueCard.svelte';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
+	import ActAsBanner from '$lib/review/ActAsBanner.svelte';
 	import {
 		emptyHalfCopy,
 		loadReviewQueue,
@@ -144,11 +145,18 @@ longer arrive and the alternate chrome is gone.
 	/>
 	<button class="contentus-session__button" type="button" onclick={onSignIn}>Sign in</button>
 {:else}
+	<!-- Acting as a shared agent changes who the queue is FOR — the shared
+	     half is agent-scoped — and the banner above the list is what makes
+	     that legible. Absent with no selection. -->
+	<ActAsBanner />
+
 	{#each failures as failure (failure.reason + failure.message)}
 		<Notice
 			title={failure.reason === 'cms-disabled'
 				? 'Long-form publishing is off'
-				: 'Part of the queue could not be loaded'}
+				: failure.reason === 'act-as-revoked'
+					? 'Acting as that agent has ended'
+					: 'Part of the queue could not be loaded'}
 			message={failure.message}
 		/>
 	{/each}
