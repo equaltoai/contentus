@@ -253,6 +253,38 @@ per-draft `draftReview(id)` fan-out, the `listing-only` fallback, and the
 
 **Where:** `equaltoai/lesser`, GraphQL contract.
 
+### G. `DraftReview` carries no `actedBy` carrier for the review surface
+
+**Where:** `equaltoai/lesser`, GraphQL contract.
+
+lesser v1.6.5's act-as contract (`docs/contracts/agent-share-act-as.md`)
+names `Draft.actedBy` and `Article.actedBy` as the CMS caller-attribution
+carriers — the v1.6.4→v1.6.5 schema delta is exactly those two fields.
+`DraftReview` — the projection the review queue and the review workspace
+consume, and the shape every act-as-enabled review operation returns
+(`sharedDraftReviews`, `draftReview`, `submitDraftReview`) — has none. A
+grantee acting as an agent therefore sees the agent in the verdict's
+`reviewer` position and the real caller nowhere in the review projection; the
+caller's attribution lives in the audit event
+(`cms.draft.review_verdict` metadata) and in `Draft.actedBy`, which is
+owner-only-readable (`draft(id)` resolves through `GetDraft`, and `Draft` is
+not selected on the queue path).
+
+**Ask:** expose the real-caller attribution on the review projection — a
+`DraftReview.actedBy` (or per-verdict `actedBy` on `DraftReviewVerdictRecord`)
+resolving the actor under whose grant the write was performed — so a
+grantee-facing review surface can show who actually acted, not only which
+agent they acted as.
+
+**What contentus did while this is open:** phase 5 displays the carrier that
+exists — `Draft.actedBy`, read through a contentus-owned `draft(id)` document
+on the workspace (owner-only, and agent-scoped under act-as) and rendered as
+a contentus-owned attribution row beside the vendored
+`Review.AttributionStrip`, which cannot be edited and whose `DraftReviewData`
+input has no field to carry it. The queue shows no per-draft caller
+attribution until this ask lands; the act-as banner (phase 5) is what makes
+the acting identity legible there.
+
 ## M2d.5 — the completion-gate round trip, and what was actually verified
 
 The operator's completion gate is: articles sharable as drafts for review, and

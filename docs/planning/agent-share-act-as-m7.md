@@ -1,9 +1,10 @@
 # Planning: Agent share-grants + act-as (M7.0)
 
 Status: in flight. Phase 1 (contract sync) merged as PR #88. Phases 2–4
-(items 2, 3, 4, 6, 7) landed on one branch per the re-sequencing below and are
-open as PR #89, targeting `staging`, awaiting operator merge. Phase 5 stays its
-own PR.
+(items 2, 3, 4, 6, 7) merged as **PR #89** (`81c538d` on `staging`). Phase 5
+(items 5, 8, 9) is in flight on branch
+`theorymcp/equaltoai/contentus/m7-review-act-as-attribution`, targeting
+`staging`.
 
 Provenance: the implementing client for this PR is the **contentus steward**
 (Kimi Code session, `kimi_code` install profile) — recorded here so the
@@ -13,7 +14,10 @@ review (Claude, `adversarial-pr-review`) posted COMMENT on PR #89 at head
 described but unprobed; 3 low — the per-agent 404 read as an instance-wide
 claim, the unguarded share-list response shape, and share panels mounted on
 list membership instead of lesser's served ownership statement) plus this
-provenance gap. All are closed by follow-up commits on the branch.
+provenance gap. All were closed by follow-up commits; the re-review at
+`390a3bb` verified the closures by mutation and probe, raised 2 more lows
+(`grantsFrom` contents, the unprobed ownership gate), and those are closed
+too. Both passes and their closures are recorded in PR #89's body.
 
 This document consolidates the four planning artifacts for the milestone:
 scoped need, CMS-consumption audit, enumerated changes, roadmap. It records
@@ -121,6 +125,7 @@ principal-verified.
   **Open as PR #89**, awaiting operator merge.
 - **Phase 5: review-surface act-as + attribution** — items 5, 8, 9
   (depend on 1, 2, 4). Cross-client adversarial review concentrates here.
+  In flight on `theorymcp/equaltoai/contentus/m7-review-act-as-attribution`.
 
 ### Re-sequencing (why phases 2–4 are one PR)
 
@@ -208,4 +213,9 @@ shared); a served capability flag (optional upstream ask, not filed); the
 `myAgents: [Agent!]!` with no description that membership means ownership, so
 the sharing panels are mounted on lesser's served `viewerCanSeePrivateFields`
 rather than on list membership (adversarial review of PR #89, finding 4), and
-whether membership IS ownership is worth an upstream question to lesser.
+whether membership IS ownership is worth an upstream question to lesser;
+`DraftReview` carries no `actedBy` — the v1.6.5 schema delta is exactly
+`Draft.actedBy` + `Article.actedBy`, so the review surface's queue-level
+attribution has no carrier and phase 5 displays `Draft.actedBy` where the
+contract serves it (the owner's read) — recorded as upstream ask G in
+`docs/consumption/review-contract.md`.
