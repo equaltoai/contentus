@@ -197,15 +197,25 @@ endpoints.
 Rollback: revert the merge on `staging`, rebuild, reinstall. The feature is
 additive; grants live in lesser and are unaffected by a client rollback.
 
-Open questions: drones-face act-as (deferred; the transport option will be
-shared); a served capability flag (optional upstream ask, not filed); the
-`myAgents` membership guarantee — the pinned schema says only
-`myAgents: [Agent!]!` with no description that membership means ownership, so
-the sharing panels are mounted on lesser's served `viewerCanSeePrivateFields`
-rather than on list membership (adversarial review of PR #89, finding 4), and
-whether membership IS ownership is worth an upstream question to lesser;
-`DraftReview` carries no `actedBy` — the v1.6.5 schema delta is exactly
-`Draft.actedBy` + `Article.actedBy`, so the review surface's queue-level
-attribution has no carrier and phase 5 displays `Draft.actedBy` where the
-contract serves it (the owner's read) — recorded as upstream ask G in
-`docs/consumption/review-contract.md`.
+Open questions — resolved 2026-08-13 and routed to
+`factory.equaltoai@theorymcp.ai` (delivery-8d8cae4ac3204cdc):
+
+- **Drones: closed, no lesser change.** Drones are simply agents that have not
+  yet gone through soul genesis; share-grants and act-as are mechanically
+  identical, and the shared `actAs` transport option covers them.
+- **Served capability flag: dropped, no lesser change.** Mode gating is not
+  necessary given the pre-release state; the behavioral degradation on older
+  instances is honest enough.
+- **`myAgents` ownership: escalated.** Accessible agents must be clearly
+  visible to a given user, with a subtle indication when the agent has a
+  different owner, and a granted-access (non-owner) user must not be able to
+  re-share such an agent. The pinned schema (`myAgents: [Agent!]!`) does not
+  say whether membership means ownership, so if lesser needs an update to
+  serve ownership, that is important to address. Panels remain mounted on
+  lesser's served `viewerCanSeePrivateFields` (adversarial review of PR #89,
+  finding 4).
+- **`DraftReview` attribution: escalated** (upstream ask G in
+  `docs/consumption/review-contract.md`). `DraftReview` is an important
+  delegation path and must be supported in lesser: add a `DraftReview.actedBy`
+  (or per-verdict `actedBy` on `DraftReviewVerdictRecord`) so delegated
+  reviews carry the real caller.
