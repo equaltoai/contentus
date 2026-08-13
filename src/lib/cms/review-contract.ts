@@ -274,6 +274,9 @@ export const REVIEW_DOCUMENTS = {
  *   - `no-grant` — the caller holds no active invitation on this draft. An
  *     invitation that was revoked lands here too, which is the point of it
  *     being revocable.
+ *   - `act-as-revoked` — the caller was acting as an agent whose share grant
+ *     was revoked mid-session. lesser answers the FORBIDDEN extension, the
+ *     act-as selection is cleared, and the surface says the acting ended.
  */
 export type ReviewFailureReason =
 	| 'unauthenticated'
@@ -284,7 +287,8 @@ export type ReviewFailureReason =
 	| 'not-found'
 	| 'cms-disabled'
 	| 'rejected'
-	| 'transport';
+	| 'transport'
+	| 'act-as-revoked';
 
 export interface ReviewFailure {
 	reason: ReviewFailureReason;

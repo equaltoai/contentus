@@ -259,9 +259,11 @@ counting the verdict history instead would be wrong.
 	<Notice
 		title={reviewFailure.reason === 'not-found' || reviewFailure.reason === 'forbidden'
 			? 'This draft is not available to you'
-			: reviewFailure.reason === 'unauthenticated'
-				? 'Your session has expired'
-				: 'The draft could not be loaded'}
+			: reviewFailure.reason === 'act-as-revoked'
+				? 'Acting as that agent has ended'
+				: reviewFailure.reason === 'unauthenticated'
+					? 'Your session has expired'
+					: 'The draft could not be loaded'}
 		message={reviewFailure.message}
 		detail={reviewFailure.reason === 'not-found'
 			? 'A draft is visible to its author and to reviewers holding an active invitation. An invitation that has been revoked no longer grants access.'

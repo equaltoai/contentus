@@ -148,7 +148,9 @@ longer arrive and the alternate chrome is gone.
 		<Notice
 			title={failure.reason === 'cms-disabled'
 				? 'Long-form publishing is off'
-				: 'Part of the queue could not be loaded'}
+				: failure.reason === 'act-as-revoked'
+					? 'Acting as that agent has ended'
+					: 'Part of the queue could not be loaded'}
 			message={failure.message}
 		/>
 	{/each}
