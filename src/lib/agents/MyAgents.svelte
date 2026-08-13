@@ -44,6 +44,7 @@ bandwidth, check the stamp for the correctness.
 	import { createSessionScope } from '$lib/auth/session-scope';
 
 	import AgentCard from './AgentCard.svelte';
+	import AgentSharingPanel from './AgentSharingPanel.svelte';
 	import { fetchMyAgents, type AgentSummary, type AgentUnavailable } from './contract';
 
 	/**
@@ -151,4 +152,24 @@ bandwidth, check the stamp for the correctness.
 			</ul>
 		{/if}
 	</Panel>
+
+	<!--
+		One sharing panel per owned agent, below the cards. Mounted only where
+		lesser says this viewer may see the agent's private fields —
+		`agent.owner` is present exactly when `viewerCanSeePrivateFields` was
+		served true, and absent otherwise, because lesser redacts rather than
+		reports (contract.ts). lesser serves that boolean true for owners AND
+		admins, so the accurate gloss of the gate is "may manage", never a
+		re-derived ownership claim. The mount is lesser's answer, never an
+		inference from which list the agent arrived in: `myAgents` carries no
+		schema description that membership means ownership, so the panel does
+		not derive it. Each panel is client-only like everything else in this
+		block, reads its own grants, and ends with the session — because who
+		may act as your agent is the sensitive half of the capability.
+	-->
+	{#each agents as agent (agent.id)}
+		{#if agent.owner}
+			<AgentSharingPanel {agent} />
+		{/if}
+	{/each}
 {/if}

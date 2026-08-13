@@ -300,10 +300,10 @@ test('a wildcard glob naming no component is still ten cross-seam edges', async 
 	// only the bundler goes and looks. One line of a face module quietly takes a
 	// dependency on every component behind every seam.
 	//
-	// The gate reports the ten it resolved to, each on its own line, which is also
-	// the answer the next steward needs: the shared badge is the one component this
-	// is allowed to reach, and every other name here is a swap this line would
-	// break.
+	// The gate reports the twelve it resolved to, each on its own line, which is
+	// also the answer the next steward needs: the shared badge is the one
+	// component this is allowed to reach, and every other name here is a swap
+	// this line would break.
 	const helper = './seam-probe.ts';
 	const pattern = './[A-Z]*.svelte';
 	assert.deepEqual(
@@ -319,6 +319,8 @@ test('a wildcard glob naming no component is still ten cross-seam edges', async 
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentMcpPanel.svelte (a seam imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentRoster.svelte (a seam imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentRosterFilters.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
+			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentSharedWithMePanel.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
+			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentSharingPanel.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentTrustDetail.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/MyAgents.svelte (owned by AgentRoster.svelte, imported from behind no seam)',

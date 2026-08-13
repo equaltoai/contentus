@@ -32,7 +32,13 @@ export const FACE_DIR = 'src/lib/agents';
 
 export const SEAMS = {
 	'AgentRoster.svelte': {
-		owns: ['AgentCard.svelte', 'AgentRosterFilters.svelte', 'MyAgents.svelte'],
+		owns: [
+			'AgentCard.svelte',
+			'AgentRosterFilters.svelte',
+			'AgentSharedWithMePanel.svelte',
+			'AgentSharingPanel.svelte',
+			'MyAgents.svelte',
+		],
 		nests: [],
 	},
 	'AgentDetail.svelte': {

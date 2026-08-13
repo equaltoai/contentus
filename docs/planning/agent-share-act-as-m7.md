@@ -1,6 +1,19 @@
 # Planning: Agent share-grants + act-as (M7.0)
 
-Status: planned. Phase 1 (contract sync) is the first PR; phases 2–5 follow.
+Status: in flight. Phase 1 (contract sync) merged as PR #88. Phases 2–4
+(items 2, 3, 4, 6, 7) landed on one branch per the re-sequencing below and are
+open as PR #89, targeting `staging`, awaiting operator merge. Phase 5 stays its
+own PR.
+
+Provenance: the implementing client for this PR is the **contentus steward**
+(Kimi Code session, `kimi_code` install profile) — recorded here so the
+phase-5 review does not hit the same wall PR #89's review did. The adversarial
+review (Claude, `adversarial-pr-review`) posted COMMENT on PR #89 at head
+`c21c9b2`: 4 findings (1 medium — the panels' session-scope discipline was
+described but unprobed; 3 low — the per-agent 404 read as an instance-wide
+claim, the unguarded share-list response shape, and share panels mounted on
+list membership instead of lesser's served ownership statement) plus this
+provenance gap. All are closed by follow-up commits on the branch.
 
 This document consolidates the four planning artifacts for the milestone:
 scoped need, CMS-consumption audit, enumerated changes, roadmap. It records
@@ -98,14 +111,81 @@ Key scoping facts:
 
 ## Roadmap
 
-Five phases; rollout is principal-deployed and principal-verified.
+Five phases became four PRs; rollout is principal-deployed and
+principal-verified.
 
 - **Phase 1: contract baseline** — item 1. Gates item 5's document validation.
-- **Phase 2: transport + share client** — items 2, 3 (parallel).
-- **Phase 3: act-as context** — item 4 (depends on 3).
-- **Phase 4: agents UI** — items 6, 7 (depend on 3, 4).
+  **Merged (PR #88).**
+- **Phases 2–4, combined into one PR** — items 2, 3, 4, 6, 7 as single commits
+  in dependency order (2 → 3 → 4 → 6, 7). See "Re-sequencing" below.
+  **Open as PR #89**, awaiting operator merge.
 - **Phase 5: review-surface act-as + attribution** — items 5, 8, 9
   (depend on 1, 2, 4). Cross-client adversarial review concentrates here.
+
+### Re-sequencing (why phases 2–4 are one PR)
+
+The seam-graph gate (`scripts/audit-seam-graph.mjs`, CI-core) fail-closes on
+any git-tracked file inside the face (`src/lib/agents`) that no build pass
+loads — "a face file the build never loads is a finding, not a silence". Items
+3 (`share-client.ts`) and 4 (`act-as.ts`) are library modules whose consumers
+are items 6 and 7; landing them a phase earlier leaves the gate red (23
+seam-graph tests fail on the single finding). Weakening the gate or declaring
+an exception is forbidden, and the gate binds at HEAD before push, not
+per-commit — so the items land as separate commits on ONE branch, each
+arriving before its consumers, with the tree green at HEAD. Discovered
+2026-08-12 on branch `theorymcp/equaltoai/contentus/m7-transport-share-client`.
+
+### Handoff state (2026-08-12, end of the combined-PR session)
+
+Branch `theorymcp/equaltoai/contentus/m7-transport-share-client`, forked from
+staging at the PR #88 merge (`9207c92`), **pushed**, open as **PR #89** to
+`staging` (awaiting operator merge — the steward never merges). Carries, in
+order:
+
+- `11533af` — item 2: `actAs` option on `src/lib/cms/graphql.ts`
+  (`X-Lesser-Act-As` header) + `tests/cms-graphql.test.mjs` header tests.
+- `06d1104` — item 3: `src/lib/agents/share-client.ts`
+  (list/grant/revoke/shared-with-me; types from the vendored generated
+  OpenAPI types) + `tests/agent-share-client.test.mjs`.
+- `fec5aa8` — this doc's re-sequencing note and original handoff.
+- `8e797a5` — item 4: `src/lib/agents/act-as.ts` (session-bound selection,
+  cleared on sign-out and on lesser's two forbidden spellings, the
+  `shared-with-me` derivation helper) + `tests/agent-act-as.test.mjs`.
+- `b0c17de` — item 6: `AgentSharingPanel.svelte` on the MyAgents surface
+  (list/grant/revoke per owned agent; 404 → "not supported by this
+  instance", no dead controls).
+- `5d0ecfb` — item 7: `AgentSharedWithMePanel.svelte` on the agents route
+  (candidates from `shared-with-me`, act-as selector, selection reconciled
+  against every fresh list, 403 clears the selection).
+- `b8854f2` — `chore(gov)`: CON-5 pin move for the changed/new gate files.
+- `119ece9` — `chore(gov)`: rubric evidence, 32 PASS / 0 FAIL / 0 BLOCKED,
+  `source.sha` `b8854f2`.
+- (this commit) — doc status update.
+
+Gates ran at the branch tip and are recorded in the PR body: full test suite,
+typecheck, svelte-check, lint, build (client+server+assets+validate, seam
+graph clean), rubric gate green, DCO verified with output pasted.
+
+Remaining (phase 5, its own PR after #89 merges): items 5, 8, 9 —
+`actedBy` in review attribution, act-as threading through the review
+transport with FORBIDDEN-driven clear-and-notify, the act-as banner on the
+review queue and workspace. Item 10 (runbook share-flow verification steps)
+rides the post-merge install verification. Cross-client adversarial review
+concentrates on phase 5.
+
+Contract facts that bind items 4–7 (lesser v1.6.5, `agent-share-act-as.md`):
+
+- Header `X-Lesser-Act-As: <agentUsername>` on GraphQL-HTTP; honored ONLY on
+  lesser's enabled operations (reads `draft`, `draftPreview`, `myDrafts`,
+  `sharedDraftReviews`, `draftReview`; writes `submitDraftReview`,
+  `shareDraftForReview`, `publishDraft`). Elsewhere it is silently ignored
+  and the request runs with OWNER semantics — `myDraftReviews` (the queue's
+  own-drafts half) is NOT agent-scoped; design treats that as a stated
+  limitation, never agent behavior.
+- `scheduleDraft` is deliberately not act-as-enabled; no threading reaches it.
+- Attribution only, never impersonation; lesser re-checks the grant per
+  request; revoke takes effect on the next one — mid-session revocation is
+  the designed case (item 8's clear-and-notify behavior, phase 5).
 
 Install rollout: CI gates green on the PR (lint, svelte-check, tests, build,
 CSP audit, rubric gate, DCO) → operator merges to `staging` → steward builds
@@ -123,4 +203,9 @@ Rollback: revert the merge on `staging`, rebuild, reinstall. The feature is
 additive; grants live in lesser and are unaffected by a client rollback.
 
 Open questions: drones-face act-as (deferred; the transport option will be
-shared); a served capability flag (optional upstream ask, not filed).
+shared); a served capability flag (optional upstream ask, not filed); the
+`myAgents` membership guarantee — the pinned schema says only
+`myAgents: [Agent!]!` with no description that membership means ownership, so
+the sharing panels are mounted on lesser's served `viewerCanSeePrivateFields`
+rather than on list membership (adversarial review of PR #89, finding 4), and
+whether membership IS ownership is worth an upstream question to lesser.
