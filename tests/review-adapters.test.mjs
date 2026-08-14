@@ -692,6 +692,76 @@ test('a FORBIDDEN without a selection is an ordinary refusal and touches nothing
 	assert.equal(actAsSelection(), null);
 });
 
+/** Where the act-as selection is stored — the key an earlier build wrote. */
+const ACT_AS_KEY = 'contentus:act_as';
+
+test('a selection stored before the control went never reaches lesser on a fresh load', async () => {
+	// M2.1 (equaltoai/contentus#92) removed the control that elects a selection,
+	// but a removal does not reach into a browser that already used one: the
+	// selection is in `sessionStorage`, so a grantee who selected an agent
+	// before the upgrade still holds it, and this transport is what would put it
+	// on the wire. Clearing it when `/agents` mounts is not enough — a grantee
+	// can load `/review` directly and never go there. This is that path.
+	signIn();
+
+	const session = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
+	// Planted through the storage key rather than `selectActAs`, because
+	// "written by a build that still had the control" is the entire scenario —
+	// and bound to the live session, so the read path would otherwise honour it.
+	sessionStorage.setItem(
+		ACT_AS_KEY,
+		JSON.stringify({
+			agentUsername: 'scribe',
+			sessionCreatedAt: session.createdAt,
+			sessionExpiresAt: session.expiresAt,
+		})
+	);
+	assert.deepEqual(
+		actAsSelection(),
+		{ agentUsername: 'scribe' },
+		'the plant must be a selection this build would otherwise honour, or the assertions below prove nothing'
+	);
+
+	// A fresh `/review` document. Both review routes import `$lib/cms/review`,
+	// so the transport's module graph evaluates before any surface mounts and
+	// before any operation can run; the query suffix is how a probe gets that
+	// second evaluation of a module this process already holds. It loads the
+	// same repository source, and shares the one act-as module every instance of
+	// it imports — which is why the assertions read through the selection this
+	// file already imported.
+	const fresh = await import('../src/lib/cms/review-transport.ts?fresh-document');
+
+	assert.equal(actAsSelection(), null, 'loading the transport must end the stored selection');
+	assert.equal(
+		sessionStorage.getItem(ACT_AS_KEY),
+		null,
+		'and remove it, rather than leaving it stored for the next reader'
+	);
+
+	// Both act-as read sites, driven for real: the shared entry every enabled
+	// operation runs through, and `loadDraftActedBy`, which reads the selection
+	// on its own.
+	const review = await withGraphql(
+		() => ({ data: { draftReview: { draftId: DRAFT_ID } } }),
+		() => fresh.loadDraftReview(TOKEN, DRAFT_ID)
+	);
+	assert.equal(
+		review.calls[0].headers['x-lesser-act-as'],
+		undefined,
+		'an enabled review operation must not act as the agent an earlier build selected'
+	);
+
+	const actedBy = await withGraphql(
+		() => ({ data: { draft: { id: DRAFT_ID, actedBy: null } } }),
+		() => fresh.loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+	assert.equal(
+		actedBy.calls[0].headers['x-lesser-act-as'],
+		undefined,
+		'and neither must the owner-only actedBy read, which reaches the selection by itself'
+	);
+});
+
 /* ---------------------------------------------------------------------------
  * The queue, assembled by the shipped code
  *

@@ -64,6 +64,39 @@ import {
 /** A caller's bearer token, or null when there is no session. */
 export type AccessToken = string | null;
 
+/**
+ * A selection stored before the act-as control was removed dies here, once,
+ * when this module loads.
+ *
+ * M2.1 (equaltoai/contentus#92) removed the control that let a person elect to
+ * act as a shared agent — sharing an agent grants ACCESS to it, and a human
+ * driving it from the web CMS was never what act-as meant. Removing a control
+ * does not reach into a browser that already used it: the selection lives in
+ * `sessionStorage`, so a grantee who selected an agent before the upgrade still
+ * holds one, and THIS module is what would otherwise put it on the wire.
+ *
+ * IT DIES BEFORE THE FIRST READ, AND NOT AT A SURFACE. Both act-as read sites
+ * are in this file — `authenticated` below and `loadDraftActedBy` further down
+ * — and module evaluation completes before either can be called: before a route
+ * asks for a queue, before the banner mounts. Clearing at a surface's mount
+ * instead would hold only for the surfaces that mount and only in the order
+ * they mount in; this holds for every load of every operation here.
+ *
+ * ONCE PER MODULE LOAD IS ONCE PER DOCUMENT, WHICH IS THE WHOLE WINDOW. Every
+ * navigation here is a fresh document (see `agents/act-as.ts` on why the
+ * selection is stored at all), so the next load runs this again — and nothing
+ * can put a selection back in between, because `selectActAs` is the only writer
+ * and no tracked module under `src/` calls it, which `tests/agents-trust.test.mjs`
+ * holds repository-wide. The two are one statement: nothing starts a selection,
+ * and nothing an earlier build started survives to be read.
+ *
+ * The act-as path itself is untouched. A selection made after this point — which
+ * is to say, in a probe — still rides `X-Lesser-Act-As` on exactly the operations
+ * lesser enables, and a FORBIDDEN answer still ends it. What no longer exists is
+ * a way for a person using this client to be the one who made it.
+ */
+clearActAs();
+
 function failureFromThrown(error: unknown): ReviewFailure {
 	if (error instanceof GraphQLTransportError) {
 		return {

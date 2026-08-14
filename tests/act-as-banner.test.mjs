@@ -83,6 +83,42 @@ test('the banner tracks the selection live, and renders nothing without one', ()
 	);
 });
 
+/** The mount callback of a parsed component, or null when it never mounts. */
+function mountBody(instance) {
+	let mounted = null;
+	for (const { node } of walkTemplate(instance)) {
+		if (node.type !== 'CallExpression') continue;
+		if (node.callee?.type !== 'Identifier' || node.callee.name !== 'onMount') continue;
+		mounted = node.arguments?.[0] ?? null;
+	}
+	return mounted;
+}
+
+test('the banner ends a stored selection before it reads one', () => {
+	// M2.1 (equaltoai/contentus#92) removed the control that elects a selection,
+	// so a stored one can only be an earlier build's — and this is the surface
+	// that would otherwise announce it to a grantee who loaded `/review`
+	// directly, without passing the panel that clears it. WHERE IN THE MOUNT
+	// matters, as it does for that panel: after the read, the announcement has
+	// already been made.
+	const ast = parse(source('src/lib/review/ActAsBanner.svelte'), { modern: true });
+
+	const mounted = mountBody(ast.instance);
+	assert.ok(mounted, 'the banner must mount at all');
+
+	const first = mounted.body?.body?.[0];
+	assert.equal(
+		first?.type,
+		'ExpressionStatement',
+		'the first thing the mount does must be a call, not a read or a branch'
+	);
+	assert.equal(
+		first.expression?.type === 'CallExpression' && first.expression.callee?.name,
+		'clearActAs',
+		'and that call must be clearActAs() — unconditional, and before the selection is read'
+	);
+});
+
 test('the probe can still see a violation', () => {
 	// Both directions, on planted sources, so the green above is a result
 	// rather than a property of a check that cannot fail.
@@ -101,4 +137,20 @@ test('the probe can still see a violation', () => {
 		{ modern: true }
 	);
 	assert.equal(callsFn(withoutSubscription.instance, 'onActAsChange'), false);
+
+	// A banner that reads the stored selection first and clears after would
+	// announce an earlier build's selection on its way out. The position is the
+	// assertion, so the planted violation is a mount in the wrong order rather
+	// than a mount with no clear in it at all.
+	const readsBeforeClearing = parse(
+		`<script lang="ts">\nonMount(() => {\nselection = actAsSelection();\nclearActAs();\n});\n</script>\n`,
+		{ modern: true }
+	);
+	const planted = mountBody(readsBeforeClearing.instance);
+	assert.ok(planted, 'the planted source must mount, or it tests nothing');
+	assert.notEqual(
+		planted.body?.body?.[0]?.expression?.type === 'CallExpression' &&
+			planted.body.body[0].expression.callee?.name,
+		'clearActAs'
+	);
 });
