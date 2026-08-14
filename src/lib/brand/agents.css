@@ -700,16 +700,23 @@
 	overflow-wrap: anywhere;
 }
 
-/* --- act-as (M7.0) ---------------------------------------------------- */
+/* --- shared with you (M7.0 item 7; renamed off `act-as` in M2.2) -------
 
-.contentus-act-as__lede {
+   The block was `contentus-act-as__` while this panel carried the act-as
+   selection control. The control went in M2.1 (equaltoai/contentus#92) and
+   M2.2 (equaltoai/contentus#93) gave the panel what a grant actually conveys —
+   MCP access — so a class named for act-as would now be naming the one thing
+   the panel exists to stop meaning. `contentus-act-as-banner__` is a different
+   block and is untouched: the banner really is about attribution. */
+
+.contentus-shared__lede {
 	margin: 0 0 var(--tc-space-4);
 	color: var(--tc-fg-muted);
 	line-height: 1.6;
 	max-width: 70ch;
 }
 
-.contentus-act-as__list {
+.contentus-shared__list {
 	display: flex;
 	flex-direction: column;
 	gap: var(--tc-space-2);
@@ -718,7 +725,7 @@
 	list-style: none;
 }
 
-.contentus-act-as__row {
+.contentus-shared__row {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -729,28 +736,67 @@
 	border-radius: var(--tc-radius-md);
 }
 
-.contentus-act-as__agent {
+.contentus-shared__agent {
 	display: flex;
 	flex-direction: column;
 	gap: var(--tc-space-1);
-	/* Holds the row's start edge; the row carried trailing controls until M2.1
-	   removed the act-as selection, and a later grantee-facing control belongs
-	   in the same place. */
+	/* Holds the row's start edge; the connect link is pushed to the far edge by
+	   this auto margin. */
 	margin-right: auto;
 	min-width: 0;
 }
 
-.contentus-act-as__handle {
+.contentus-shared__handle {
 	font-family: var(--tc-font-mono);
 	font-weight: 600;
 	color: var(--tc-fg);
 	overflow-wrap: anywhere;
 }
 
-.contentus-act-as__meta {
+.contentus-shared__meta {
 	color: var(--tc-fg-muted);
 	font-size: 0.8125rem;
 	overflow-wrap: anywhere;
+}
+
+.contentus-shared__endpoint-label {
+	margin-top: var(--tc-space-1);
+	color: var(--tc-fg-muted);
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.contentus-shared__endpoint {
+	/* An MCP endpoint is long and must wrap rather than push the column wide on
+	   a phone — the same floor `.contentus-copy__value` holds on the detail page,
+	   spelled again here because this row deliberately does NOT reuse `CopyBlock`
+	   (that component is behind the MCP-panel seam; see the panel's template). */
+	color: var(--tc-fg);
+	font-family: var(--tc-font-mono);
+	font-size: 0.8125rem;
+	overflow-wrap: anywhere;
+}
+
+.contentus-shared__connect {
+	/* 44px minimum touch target (product design §4). */
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
+	padding: 0 var(--tc-space-3);
+	color: var(--tc-fg);
+	border: 1px solid var(--tc-outline);
+	border-radius: var(--tc-radius-md);
+	font-size: 0.8125rem;
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.contentus-shared__connect:hover,
+.contentus-shared__connect:focus-visible {
+	border-color: var(--tc-accent);
+	color: var(--tc-accent);
 }
 
 /* The `--select-btn` and `--stop-btn` rules went with the act-as selection

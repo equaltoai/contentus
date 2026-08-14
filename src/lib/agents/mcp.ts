@@ -1,5 +1,13 @@
 /**
- * MCP discovery for face 6's detail panel.
+ * What this client says about an agent's MCP surface, from lesser's own bundle.
+ *
+ * TWO READERS, ONE RULE. The detail panel (`AgentMcpPanel`) shows the whole
+ * bundle and probes it; the grantee's "shared with you" list
+ * (`AgentSharedWithMePanel`, M2.2) shows the one line a grantee needs — the
+ * endpoint they connect to. Both read `Agent.mcpAccess`, and neither builds any
+ * part of a URL. The classifier the second one uses lives here rather than in
+ * the component because `node --test` can drive a module and cannot mount a
+ * component.
  *
  * PORTED FROM SIMULACRUM'S `AgentMcpPanel`, MINUS TWO THINGS, and both
  * subtractions are the point.
@@ -34,6 +42,8 @@
  * panel's substance — every URL, scope and guidance line — is lesser's and is
  * already in the server's paint; this only adds "and it answered".
  */
+
+import type { AgentMcpAccessResult } from './contract.ts';
 
 /** Everything the panel probes, resolved from lesser's own `mcpAccess`. */
 export interface McpProbeTargets {
@@ -103,6 +113,43 @@ export function mcpConnectOrigin(
 	} catch {
 		return null;
 	}
+}
+
+/* -------------------------------------------------------------------------
+ * What a grantee is shown about a shared agent's MCP
+ * ---------------------------------------------------------------------- */
+
+/**
+ * lesser's answer about one agent's MCP surface, reduced to the three things a
+ * grantee-facing row can say (M2.2, equaltoai/contentus#93).
+ *
+ * `none` and `unavailable` are separate on purpose, and keeping them apart is
+ * the whole reason this is a function rather than a truthiness check at the
+ * call site. "This instance publishes no MCP endpoint for this agent" is a
+ * SERVED FACT — `BuildPublicMCPAccessBundle` returns a guidance-only bundle
+ * with empty URLs when it cannot name a base URL or an actor — while
+ * "unavailable" is the instance not answering at all. A grantee who reads the
+ * first stops looking; one who reads the second tries again. Collapsing them
+ * tells one of the two the wrong thing.
+ */
+export type SharedMcpAccess =
+	| { status: 'published'; endpoint: string }
+	| { status: 'none' }
+	| { status: 'unavailable'; message: string };
+
+/**
+ * Classify that answer without adding to it.
+ *
+ * The endpoint is `mcpAccess.mcpURL` verbatim, and nothing is substituted when
+ * it is absent — no `window.location`, no `api.` prefix, no `/mcp/<actor>`
+ * path. Those are `pkg/auth/mcp_access.go`'s to decide and the instance's to
+ * publish; a client that filled the blank would be guessing at the one value
+ * the grantee is going to paste into a client.
+ */
+export function sharedMcpAccess(result: AgentMcpAccessResult): SharedMcpAccess {
+	if (!result.ok) return { status: 'unavailable', message: result.failure.message };
+	const endpoint = result.access?.mcpURL?.trim();
+	return endpoint ? { status: 'published', endpoint } : { status: 'none' };
 }
 
 /* -------------------------------------------------------------------------
