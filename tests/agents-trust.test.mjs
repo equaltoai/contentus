@@ -11,7 +11,9 @@ import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 import {
 	AGENT_DETAIL_QUERY,
+	AGENT_MCP_ACCESS_QUERY,
 	fetchAgent,
+	fetchAgentMcpAccess,
 	fetchMyAgents,
 	MY_AGENTS_QUERY,
 } from '../src/lib/agents/contract.ts';
@@ -275,6 +277,125 @@ test('fetchAgent reads ownership from the served boolean, not from the token', a
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
+});
+
+/* -------------------------------------------------------------------------
+ * The MCP access bundle a grant conveys (M2.2, equaltoai/contentus#93)
+ * ---------------------------------------------------------------------- */
+
+/** lesser's bundle for `weatherbot`, shaped as `BuildPublicMCPAccessBundle` fills it. */
+const BUNDLE = {
+	mcpURL: 'https://api.example.invalid/mcp/weatherbot',
+	protectedResourceURL:
+		'https://api.example.invalid/.well-known/oauth-protected-resource/mcp/weatherbot',
+	authorizationServerURL: 'https://example.invalid/.well-known/oauth-authorization-server',
+	registrationURL: 'https://example.invalid/oauth/register',
+	scopes: ['read', 'write', 'follow', 'push'],
+	guidance: ['Start from the actor-scoped MCP URL.'],
+};
+
+/** The empty bundle lesser returns when it cannot name a base URL or an actor. */
+const EMPTY_BUNDLE = {
+	mcpURL: '',
+	protectedResourceURL: '',
+	authorizationServerURL: '',
+	registrationURL: '',
+	scopes: ['read'],
+	guidance: ['Start from the actor-scoped MCP URL.'],
+};
+
+/** Drive one `fetchAgentMcpAccess` against a stubbed transport. */
+async function readAccess(answer, { accessToken } = {}) {
+	const seen = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init = {}) => {
+		const payload = init.body ? JSON.parse(init.body) : {};
+		seen.push({
+			query: payload.query ?? '',
+			variables: payload.variables ?? {},
+			authorization: new Headers(init.headers).get('authorization'),
+		});
+		return new Response(JSON.stringify(answer), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	};
+
+	try {
+		return {
+			seen,
+			result: await fetchAgentMcpAccess(accessToken ? { accessToken } : {}, 'weatherbot'),
+		};
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+}
+
+test('the access read asks for lesser’s bundle and for none of the private fields', () => {
+	// NARROWER THAN THE DETAIL READ, ON PURPOSE. This document is sent by the
+	// grantee's list about somebody else's agent, so it must not carry an
+	// ownership selection: every field asked for is a field a later panel can
+	// start rendering without anyone deciding it should.
+	assert.match(AGENT_MCP_ACCESS_QUERY, /query ContentusAgentMcpAccess\(/);
+	for (const field of [
+		'mcpURL',
+		'protectedResourceURL',
+		'authorizationServerURL',
+		'registrationURL',
+		'scopes',
+		'guidance',
+	]) {
+		assert.match(AGENT_MCP_ACCESS_QUERY, new RegExp(`\\b${field}\\b`), `${field} is asked for`);
+	}
+
+	for (const field of ['agentOwner', 'delegatedScopes', 'viewerCanSeePrivateFields']) {
+		assert.doesNotMatch(
+			AGENT_MCP_ACCESS_QUERY,
+			new RegExp(`\\b${field}\\b`),
+			`${field} is lesser's redacted half and this read makes no ownership claim`
+		);
+	}
+});
+
+test('the connect endpoint is lesser’s string, carried through untouched', async () => {
+	// The whole point of consuming `Agent.mcpAccess` rather than building the URL:
+	// lesser canonicalises MCP onto `api.<domain>` while the authorization server
+	// stays on the apex, and only the instance knows that. Anything this client
+	// reconstructed would be a second copy of `pkg/auth/mcp_access.go`.
+	const { seen, result } = await readAccess(
+		{ data: { agent: { mcpAccess: BUNDLE } } },
+		{ accessToken: 'token-bob' }
+	);
+
+	assert.equal(result.ok, true);
+	assert.deepEqual(result.access, BUNDLE);
+	assert.deepEqual(seen[0].variables, { username: 'weatherbot' });
+	assert.equal(seen[0].authorization, 'Bearer token-bob', 'the caller’s token is forwarded');
+});
+
+test('an instance that publishes no endpoint for the agent says so, and it is not a failure', async () => {
+	// `{ ok: true, access: <nulls> }` and `{ ok: false }` are different sentences.
+	// Collapsing them would report a served "there is no MCP surface for this
+	// agent" as a read that broke, and the grantee would retry forever.
+	const { result } = await readAccess({ data: { agent: { mcpAccess: EMPTY_BUNDLE } } });
+
+	assert.equal(result.ok, true);
+	assert.equal(result.access.mcpURL, null);
+	assert.equal(result.access.protectedResourceURL, null);
+	assert.deepEqual(result.access.guidance, EMPTY_BUNDLE.guidance, 'lesser’s guidance survives');
+});
+
+test('an agent the instance will not resolve is a failure, not an empty bundle', async () => {
+	const missing = await readAccess({ data: { agent: null } });
+	assert.equal(missing.result.ok, false);
+	assert.equal(missing.result.failure.reason, 'not-found');
+
+	const disabled = await readAccess({
+		data: { agent: null },
+		errors: [{ message: 'agents are disabled by instance policy' }],
+	});
+	assert.equal(disabled.result.ok, false);
+	assert.equal(disabled.result.failure.reason, 'agents-disabled');
 });
 
 test('the owned view asks for the private fields and lesser’s visibility statement', () => {
