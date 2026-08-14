@@ -77,8 +77,18 @@
  * reading the screen.
  */
 
-/** How a human drove the agent, per lesser's two attribution keys. */
-export type DriverMechanism = 'mcp' | 'act-as';
+/**
+ * How a human drove the agent, per lesser's two attribution keys.
+ *
+ * `delegated` RATHER THAN `mcp`, WHICH IS WHAT THE KEY ACTUALLY PROVES.
+ * `recordAgentAuditEvent` fires on every request carrying agent claims
+ * (`agent_audit.go:16`), so a `delegated_by` row says the agent acted under a
+ * token this human authorized — it does NOT say they reached it over MCP. An
+ * act-as request from a CMS client carries an agent-subject token too, and
+ * writes one of these rows alongside its act-as row. Naming the member for the
+ * channel invited the label that claimed one.
+ */
+export type DriverMechanism = 'delegated' | 'act-as';
 
 /** One human lesser named on one action. */
 export interface ActionDriver {
@@ -114,7 +124,15 @@ export interface AgentDriverSummary {
 	label: string;
 	/** Every mechanism this driver was named through, in encounter order. */
 	mechanisms: DriverMechanism[];
-	/** Actions in this read naming them. Never a claim about the whole window. */
+	/**
+	 * ROWS in this read naming them. Never a claim about the whole window, and
+	 * not a count of things the agent did: one act-as status create writes TWO
+	 * rows (`statuses.go:126-127` calls both writers), so a deed can be counted
+	 * twice. Collapsing the pair would need an invented identity for "the same
+	 * action" across rows, which `(action, target_id)` is not — two genuine
+	 * favourites of one status share it — so the count is left honest about what
+	 * it counts rather than made to guess.
+	 */
 	actions: number;
 	/** Their most recent named action in this read, or null if none carried a time. */
 	latest: Date | null;
@@ -229,8 +247,8 @@ export function actionDrivers(metadataJson: unknown): {
 
 	const fields = parsed as Record<string, unknown>;
 	const drivers: ActionDriver[] = [];
-	// `delegated_by` first: it is the MCP driver, which is what this view is
-	// about, and on a row carrying both it is the one that answers the heading.
+	// `delegated_by` first: it is the authorizing human, which is what this view
+	// is about, and on a row carrying both it is the one that answers the heading.
 	const delegated = driverLabel(fields['delegated_by']);
 	const acted = driverLabel(fields['acted_by']);
 
@@ -247,17 +265,17 @@ export function actionDrivers(metadataJson: unknown): {
 		// on a validated `X-Lesser-Act-As` request, so the act-as channel is
 		// certain. `delegated_by` is on this row because the map was shared, and
 		// it carries a claim EVERY agent token holds whatever channel it came
-		// through — so it is not evidence of an MCP sign-in, and labelling this
-		// action as one would invent a connection that did not happen. Nothing is
-		// lost: a real MCP action writes a `delegated_by`-only row, which still
-		// contributes `mcp` to this driver in the fold.
+		// through, so keeping it as a second mechanism would say this one action
+		// arrived two ways. Nothing is lost: a request that carried no act-as
+		// header writes a `delegated_by`-only row, which still contributes
+		// `delegated` to this driver in the fold.
 		//
 		// The label kept is `delegated_by`'s. It is the form the instance stores
 		// for that human, and keeping it folds this row together with their
 		// `delegated_by`-only rows rather than beside them.
 		drivers.push({ label: delegated, mechanism: 'act-as' });
 	} else {
-		if (delegated) drivers.push({ label: delegated, mechanism: 'mcp' });
+		if (delegated) drivers.push({ label: delegated, mechanism: 'delegated' });
 		if (acted) drivers.push({ label: acted, mechanism: 'act-as' });
 	}
 
@@ -458,9 +476,17 @@ export function driverStamp(
  * extends freely, the mechanism comes from this module's own two-key reader —
  * so every value here is one this file produced, and the union type makes a
  * third one a type error rather than a silent blank.
+ *
+ * NEITHER SENTENCE NAMES A CHANNEL THE ROW DOES NOT PROVE. This used to say
+ * "signed in to the agent's MCP" for a `delegated_by` row, which is a claim the
+ * key cannot carry: the same row is written for an act-as request from a CMS
+ * client, so it would have told an owner that someone who never opened MCP had
+ * signed in to it. What the key proves is the authorization, and that is what it
+ * now says. The act-as sentence is unchanged because that one IS certain —
+ * `acted_by` is written only behind a validated `X-Lesser-Act-As`.
  */
 export function mechanismLabel(mechanism: DriverMechanism): string {
-	return mechanism === 'mcp'
-		? "signed in to the agent's MCP"
+	return mechanism === 'delegated'
+		? 'authorized the token the agent acted under'
 		: 'acted as the agent in a CMS client';
 }

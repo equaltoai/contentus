@@ -270,9 +270,20 @@ path cannot reach, but `metadataJson` is an unvalidated column any writer may
 have filled, so two names stay two people. The merged row is labelled `act-as`:
 only `recordActAsAuditEvent` writes `acted_by` and only a validated
 `X-Lesser-Act-As` request reaches it, so that channel is certain, while
-`delegated_by` rides every agent token whatever channel it came over and is not
-evidence of an MCP sign-in. Nothing is lost — a real MCP action writes a
-`delegated_by`-only row, which still contributes `mcp` to that driver.
+`delegated_by` rides every agent token whatever channel it came over. Nothing is
+lost — a request carrying no act-as header writes a `delegated_by`-only row,
+which still contributes `delegated` to that driver.
+
+**Neither mechanism label names a channel its key does not prove.** The
+`delegated_by` mechanism was called `mcp` and rendered "signed in to the agent's
+MCP"; both are retired. `recordAgentAuditEvent` fires on **every** request
+carrying agent claims (`agent_audit.go:16`), and an act-as request from a CMS
+client carries an agent-subject token — so that row is written for callers who
+never opened MCP, and the label told the owner they had signed in to it. The
+member is now `delegated` and the sentence is "authorized the token the agent
+acted under", which is what the key carries. The act-as label is unchanged: that
+one is certain, because `acted_by` is written only behind a validated
+`X-Lesser-Act-As`.
 
 **The identity is compared case-insensitively, because lesser spells it both
 ways.** `resolveAgentClaims` keeps the stored owner form "byte-for-byte"
@@ -294,6 +305,18 @@ render past a boundary it did not know about:
   row's `SessionID` _column_, and `AgentActivityEvent` has no field for it —
   the resolver reads `ID`, `EventType`, `Metadata` and `Timestamp` and nothing
   else. This is the shape of the directive above, not a gap to route upstream.
+- **A row is not a deed.** One act-as status create writes **two** rows:
+  `statuses.go:126-127` calls both writers, and lesser's round test says so in
+  its own words — "agent-subject requests emit both the agent audit event
+  (`delegated_by`) and the act-as attribution event (`acted_by`)"
+  (`agent_act_as_round_test.go:182-183`). The other act-as sites
+  (`interactions.go:349`, `misc.go:1806`) call one writer and emit one row. So a
+  driver's count is **rows naming them**, which the roster's own field comment
+  says and which can exceed the number of things the agent did. This client does
+  **not** collapse the pair: doing so would need an invented identity for "the
+  same action" across rows — `(action, target_id)` is not one, since two genuine
+  favourites of one status share it — and that is the same guess this module
+  refuses when it declines to gloss `action`.
 - **No login or token events.** The resolver keeps only event types prefixed
   `agent.` (`agent_resolvers_stubs.go:449`), so the `auth.oauth.*` records —
   token issued, refreshed, revoked — are filtered out server-side.

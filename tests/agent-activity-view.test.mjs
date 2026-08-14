@@ -78,9 +78,9 @@ test('nothing usable is null rather than a bare sigil', () => {
  * Reading the metadata, and the three answers it can give
  * ---------------------------------------------------------------------- */
 
-test('delegated_by is the MCP driver and acted_by is the act-as one', () => {
+test('delegated_by is the authorizing driver and acted_by is the act-as one', () => {
 	assert.deepEqual(actionDrivers(JSON.stringify({ delegated_by: '@ada' })), {
-		drivers: [{ label: '@ada', mechanism: 'mcp' }],
+		drivers: [{ label: '@ada', mechanism: 'delegated' }],
 		attribution: 'named',
 	});
 	assert.deepEqual(actionDrivers(JSON.stringify({ acted_by: 'bob' })), {
@@ -105,7 +105,7 @@ test('the shipped dual-key row is one human, named once', () => {
 		})
 	);
 	assert.equal(attribution, 'named');
-	// act-as, not mcp: only recordActAsAuditEvent writes acted_by and only a
+	// act-as, not delegated: only recordActAsAuditEvent writes acted_by and only a
 	// validated X-Lesser-Act-As request reaches it, so that channel is certain,
 	// while delegated_by rides every agent token whatever channel it came over.
 	assert.deepEqual(drivers, [{ label: '@alice', mechanism: 'act-as' }]);
@@ -126,7 +126,7 @@ test('one human in lessers two spellings is still one driver, counted once', () 
 	);
 });
 
-test('a row naming two different people keeps both, MCP first', () => {
+test('a row naming two different people keeps both, the authorizer first', () => {
 	// The shipped path cannot reach this — ActedBy is derived from DelegatedBy —
 	// but metadataJson is an unvalidated column and another writer may have
 	// filled it, so two names stay two people. Merging on the mere presence of
@@ -136,7 +136,7 @@ test('a row naming two different people keeps both, MCP first', () => {
 	);
 	assert.equal(attribution, 'named');
 	assert.deepEqual(drivers, [
-		{ label: '@ada', mechanism: 'mcp' },
+		{ label: '@ada', mechanism: 'delegated' },
 		{ label: '@bob', mechanism: 'act-as' },
 	]);
 	assert.equal(drivers.map((driver) => driver.label).join(' and '), '@ada and @bob');
@@ -252,7 +252,7 @@ test('a driver named through both mechanisms records both, once each', () => {
 		node({ eventId: 'e2', metadataJson: JSON.stringify({ acted_by: 'ada' }) }),
 		node({ eventId: 'e3', metadataJson: JSON.stringify({ acted_by: 'ada' }) }),
 	]);
-	assert.deepEqual(ledger.drivers[0].mechanisms, ['mcp', 'act-as']);
+	assert.deepEqual(ledger.drivers[0].mechanisms, ['delegated', 'act-as']);
 	assert.equal(ledger.drivers[0].actions, 3);
 });
 
@@ -270,7 +270,7 @@ test('the same human spelled two ways across rows folds into one roster line', (
 	// spelling rather than an arbitrary one.
 	assert.equal(ledger.drivers[0].label, '@Alice');
 	assert.equal(ledger.drivers[0].actions, 2);
-	assert.deepEqual(ledger.drivers[0].mechanisms, ['mcp', 'act-as']);
+	assert.deepEqual(ledger.drivers[0].mechanisms, ['delegated', 'act-as']);
 });
 
 test('the identity key folds case but is not the display label', () => {
@@ -388,7 +388,7 @@ test('the count is pluralized rather than assembled around a bare number', () =>
 });
 
 test('the mechanism is said in the owner terms, not the metadata key name', () => {
-	assert.equal(mechanismLabel('mcp'), "signed in to the agent's MCP");
+	assert.equal(mechanismLabel('delegated'), 'authorized the token the agent acted under');
 	assert.equal(mechanismLabel('act-as'), 'acted as the agent in a CMS client');
 });
 
