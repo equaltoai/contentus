@@ -268,3 +268,44 @@ Nothing in the open questions at the end of this document is closed or changed
 by M2.1. Upstream ask G in `docs/consumption/review-contract.md` is sharpened
 by it: with no act-as read from this client, a grantee-facing review surface has
 no caller attribution at all, so `DraftReview.actedBy` is the only path to one.
+
+## Completed by M2.2 (2026-08-14)
+
+M2.1 removed the wrong thing. M2.2 (equaltoai/contentus#93) supplies the right
+one, which is the half the operator's "we may refine the UI from here" left
+open: with the act-as button gone, neither share panel actually said what a
+grant _does_ convey, and a grantee had no way to reach the agent they had been
+granted.
+
+- **Item 7 again.** `AgentSharedWithMePanel` is still a grant list, and each row
+  now carries the agent's MCP endpoint — lesser's `mcpAccess.mcpURL`, read per
+  agent through `AGENT_MCP_ACCESS_QUERY` — plus a link to the agent's own page
+  for the OAuth parameters, scopes and guidance.
+- **Both ledes were rewritten.** The owner's said "grant … the ability to act
+  as", which after M2.1 described a capability the CMS no longer offers; it now
+  states MCP access. The grantee's states the same thing from the other side.
+  Prose is not held by a component-tree probe, so
+  `tests/agents-trust.test.mjs` asserts the copy directly, with comments
+  stripped first — both panels explain act-as at length in their headers, and an
+  unstripped reading would match the explanation.
+- **The endpoint is read, never assembled.** lesser canonicalises MCP onto
+  `api.<domain>` while the authorization server stays on the apex
+  (`canonicalMCPResourceBaseURL`), so any client-side reconstruction is a second
+  copy of `pkg/auth/mcp_access.go`. A parsed probe over the panel's string
+  literals holds that, and it is mutation-tested against a planted
+  `https://api.${location.hostname}/mcp/` assembly.
+- **Display only.** No connector-state provisioning, no lease, no token —
+  `BuildPublicMCPAccessBundle` is published for exactly this use.
+
+Still open and unchanged: the access half's root cause in lesser's OAuth layer
+(equaltoai/lesser#1397, M1) and upstream ask G. M2.2 makes the endpoint
+reachable from the client; whether signing into it succeeds is lesser's.
+
+One piece of M2.1 debt is recorded rather than fixed here. `actAsCandidates`
+(`src/lib/agents/act-as.ts`) fed the removed selector and lost its last
+production reader when this panel began filtering whole grant rows; it and
+`selectActAs` are now both exported with no caller under `src/`. They are kept
+deliberately — `tests/agents-trust.test.mjs` reads `selectActAs` BY NAME to
+prove no surface elects a selection, which is a probe that needs the name to go
+on existing — and retiring that pair is a decision about the act-as module, not
+about the sharing panels this milestone owns.
