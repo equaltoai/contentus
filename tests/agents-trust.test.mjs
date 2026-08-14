@@ -7,11 +7,16 @@ import { test } from 'node:test';
 import { parse } from 'svelte/compiler';
 
 import { liveScript, sourceIdentifiers } from '../scripts/lib/module-imports.mjs';
+// THE GATE'S OWN SCANNER, imported rather than reproduced: a second copy of the
+// comment stripper is how the copy keeps passing after the original is fixed.
+import { stripComments } from '../scripts/lib/strip-comments.mjs';
 import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 import {
 	AGENT_DETAIL_QUERY,
+	AGENT_MCP_ACCESS_QUERY,
 	fetchAgent,
+	fetchAgentMcpAccess,
 	fetchMyAgents,
 	MY_AGENTS_QUERY,
 } from '../src/lib/agents/contract.ts';
@@ -277,6 +282,125 @@ test('fetchAgent reads ownership from the served boolean, not from the token', a
 	}
 });
 
+/* -------------------------------------------------------------------------
+ * The MCP access bundle a grant conveys (M2.2, equaltoai/contentus#93)
+ * ---------------------------------------------------------------------- */
+
+/** lesser's bundle for `weatherbot`, shaped as `BuildPublicMCPAccessBundle` fills it. */
+const BUNDLE = {
+	mcpURL: 'https://api.example.invalid/mcp/weatherbot',
+	protectedResourceURL:
+		'https://api.example.invalid/.well-known/oauth-protected-resource/mcp/weatherbot',
+	authorizationServerURL: 'https://example.invalid/.well-known/oauth-authorization-server',
+	registrationURL: 'https://example.invalid/oauth/register',
+	scopes: ['read', 'write', 'follow', 'push'],
+	guidance: ['Start from the actor-scoped MCP URL.'],
+};
+
+/** The empty bundle lesser returns when it cannot name a base URL or an actor. */
+const EMPTY_BUNDLE = {
+	mcpURL: '',
+	protectedResourceURL: '',
+	authorizationServerURL: '',
+	registrationURL: '',
+	scopes: ['read'],
+	guidance: ['Start from the actor-scoped MCP URL.'],
+};
+
+/** Drive one `fetchAgentMcpAccess` against a stubbed transport. */
+async function readAccess(answer, { accessToken } = {}) {
+	const seen = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init = {}) => {
+		const payload = init.body ? JSON.parse(init.body) : {};
+		seen.push({
+			query: payload.query ?? '',
+			variables: payload.variables ?? {},
+			authorization: new Headers(init.headers).get('authorization'),
+		});
+		return new Response(JSON.stringify(answer), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	};
+
+	try {
+		return {
+			seen,
+			result: await fetchAgentMcpAccess(accessToken ? { accessToken } : {}, 'weatherbot'),
+		};
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+}
+
+test('the access read asks for lesser’s bundle and for none of the private fields', () => {
+	// NARROWER THAN THE DETAIL READ, ON PURPOSE. This document is sent by the
+	// grantee's list about somebody else's agent, so it must not carry an
+	// ownership selection: every field asked for is a field a later panel can
+	// start rendering without anyone deciding it should.
+	assert.match(AGENT_MCP_ACCESS_QUERY, /query ContentusAgentMcpAccess\(/);
+	for (const field of [
+		'mcpURL',
+		'protectedResourceURL',
+		'authorizationServerURL',
+		'registrationURL',
+		'scopes',
+		'guidance',
+	]) {
+		assert.match(AGENT_MCP_ACCESS_QUERY, new RegExp(`\\b${field}\\b`), `${field} is asked for`);
+	}
+
+	for (const field of ['agentOwner', 'delegatedScopes', 'viewerCanSeePrivateFields']) {
+		assert.doesNotMatch(
+			AGENT_MCP_ACCESS_QUERY,
+			new RegExp(`\\b${field}\\b`),
+			`${field} is lesser's redacted half and this read makes no ownership claim`
+		);
+	}
+});
+
+test('the connect endpoint is lesser’s string, carried through untouched', async () => {
+	// The whole point of consuming `Agent.mcpAccess` rather than building the URL:
+	// lesser canonicalises MCP onto `api.<domain>` while the authorization server
+	// stays on the apex, and only the instance knows that. Anything this client
+	// reconstructed would be a second copy of `pkg/auth/mcp_access.go`.
+	const { seen, result } = await readAccess(
+		{ data: { agent: { mcpAccess: BUNDLE } } },
+		{ accessToken: 'token-bob' }
+	);
+
+	assert.equal(result.ok, true);
+	assert.deepEqual(result.access, BUNDLE);
+	assert.deepEqual(seen[0].variables, { username: 'weatherbot' });
+	assert.equal(seen[0].authorization, 'Bearer token-bob', 'the caller’s token is forwarded');
+});
+
+test('an instance that publishes no endpoint for the agent says so, and it is not a failure', async () => {
+	// `{ ok: true, access: <nulls> }` and `{ ok: false }` are different sentences.
+	// Collapsing them would report a served "there is no MCP surface for this
+	// agent" as a read that broke, and the grantee would retry forever.
+	const { result } = await readAccess({ data: { agent: { mcpAccess: EMPTY_BUNDLE } } });
+
+	assert.equal(result.ok, true);
+	assert.equal(result.access.mcpURL, null);
+	assert.equal(result.access.protectedResourceURL, null);
+	assert.deepEqual(result.access.guidance, EMPTY_BUNDLE.guidance, 'lesser’s guidance survives');
+});
+
+test('an agent the instance will not resolve is a failure, not an empty bundle', async () => {
+	const missing = await readAccess({ data: { agent: null } });
+	assert.equal(missing.result.ok, false);
+	assert.equal(missing.result.failure.reason, 'not-found');
+
+	const disabled = await readAccess({
+		data: { agent: null },
+		errors: [{ message: 'agents are disabled by instance policy' }],
+	});
+	assert.equal(disabled.result.ok, false);
+	assert.equal(disabled.result.failure.reason, 'agents-disabled');
+});
+
 test('the owned view asks for the private fields and lesser’s visibility statement', () => {
 	// `myAgents` is answered AS the owner, so `agentOwner` and
 	// `delegatedScopes` come back real rather than redacted — and
@@ -476,7 +600,11 @@ const SESSION_SCOPED_PANELS = [
 		// below.
 		file: 'AgentSharedWithMePanel.svelte',
 		subject: 'the shared-with-me grants',
-		emptied: [/session = 'anonymous'/, /grants = \[\]/],
+		// `access` joined the list in M2.2 (equaltoai/contentus#93). The MCP
+		// endpoints in it are public — but WHICH agents were shared with this
+		// reader is not, and a populated map is that private fact keyed by agent
+		// username, one sign-in away from the next reader's screen.
+		emptied: [/session = 'anonymous'/, /grants = \[\]/, /access = \{\}/],
 	},
 ];
 
@@ -658,4 +786,132 @@ test('the shared-with-me panel ends a selection made before the control went', (
 		'clearActAs',
 		'and that call must be clearActAs() — unconditional, and before the grants are read'
 	);
+});
+
+/* -------------------------------------------------------------------------
+ * What a grant conveys, and where the grantee connects
+ * (M2.2, equaltoai/contentus#93)
+ *
+ * Two obligations, and they are not the same obligation. The first is that the
+ * ENDPOINT IS LESSER'S: `BuildPublicMCPAccessBundle` (lesser
+ * `pkg/auth/mcp_access.go`) canonicalises MCP onto `api.<domain>` while the
+ * authorization server stays on the apex, and only the instance knows that, so
+ * a client that assembled the URL would be a second copy of that file — right
+ * until an instance is deployed whose shape it guessed wrong. The second is
+ * that the SCREENS SAY SO: an owner deciding to share, and a grantee reading
+ * what they were given, are the two people who must not come away believing a
+ * grant conveys the act-as control the CMS deliberately no longer offers.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Every string a component's client-side JavaScript carries as DATA.
+ *
+ * Module specifiers are excluded, and that exclusion is a statement rather than
+ * a convenience: `import … from './mcp'` names a file in this directory, and a
+ * reading that counted it would report the panel for importing the very module
+ * whose job is to keep it from building a URL. Nothing else is excluded, so a
+ * specifier-shaped string used as a value is still in the reading — the skip is
+ * keyed on the node's POSITION in the import, not on how it looks.
+ */
+function scriptStrings(file) {
+	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents', file), 'utf8'), {
+		modern: true,
+	});
+
+	// One parse, so node identity is usable here; a set keyed across two parses
+	// would silently never match.
+	const specifiers = new Set();
+	for (const node of walkAst(ast.instance)) {
+		if (
+			node.type === 'ImportDeclaration' ||
+			node.type === 'ImportExpression' ||
+			node.type === 'ExportNamedDeclaration' ||
+			node.type === 'ExportAllDeclaration'
+		) {
+			if (node.source) specifiers.add(node.source);
+		}
+	}
+
+	const strings = [];
+	for (const node of walkAst(ast.instance)) {
+		if (specifiers.has(node)) continue;
+		if (node.type === 'Literal' && typeof node.value === 'string') strings.push(node.value);
+		else if (node.type === 'TemplateElement') strings.push(node.value?.cooked ?? node.value?.raw);
+	}
+	return strings.filter((value) => typeof value === 'string');
+}
+
+test('the grantee’s panel reads the connect endpoint and assembles no part of it', () => {
+	// PARSED, not grepped: the panel's prose discusses `api.<domain>` and
+	// `/mcp/<actor>` at length precisely because it must not build them, so a
+	// text search over this file matches the documentation and proves nothing.
+	// String LITERALS in the instance script are the material a URL would have to
+	// be assembled from.
+	for (const value of scriptStrings('AgentSharedWithMePanel.svelte')) {
+		for (const fragment of ['http', '/mcp', 'api.', '.well-known', 'oauth']) {
+			assert.ok(
+				!value.toLowerCase().includes(fragment),
+				`the panel carries the string ${JSON.stringify(value)}: the MCP endpoint is lesser's to state and this client's to display, never to build from ${JSON.stringify(fragment)} (lesser pkg/auth/mcp_access.go)`
+			);
+		}
+	}
+
+	// And the positive half, because "no URL literals" is also true of a panel
+	// that shows no endpoint at all: the value must arrive through lesser's read
+	// and be classified by the one function that refuses to substitute for it.
+	const named = sourceIdentifiers(
+		liveScript(
+			'AgentSharedWithMePanel.svelte',
+			readFileSync(join(repoRoot, 'src/lib/agents/AgentSharedWithMePanel.svelte'), 'utf8')
+		)
+	);
+	assert.ok(named.includes('fetchAgentMcpAccess'), 'the endpoint comes from lesser’s bundle');
+	assert.ok(named.includes('sharedMcpAccess'), 'and is classified without being added to');
+	assert.ok(
+		!named.includes('location'),
+		'never from the page origin, which is the app host and a different one'
+	);
+});
+
+/**
+ * The rendered copy of a panel: its markup with comments removed.
+ *
+ * STRIPPED FIRST, and that is not cosmetic. Both panels' header comments
+ * explain at length what act-as was and why the control went, so an assertion
+ * that a panel does not PROMISE acting as the agent would match the explanation
+ * and pass on every possible source — including one that had put the promise
+ * back in the lede.
+ */
+function panelCopy(file) {
+	return stripComments(readFileSync(join(repoRoot, 'src/lib/agents', file), 'utf8'));
+}
+
+test('both share panels state that a grant conveys MCP access', () => {
+	// The owner's panel is where the decision to share is made; the grantee's is
+	// where what they hold is read. Each must say it on its own — a reader sees
+	// one of these screens, not both.
+	for (const file of ['AgentSharingPanel.svelte', 'AgentSharedWithMePanel.svelte']) {
+		const copy = panelCopy(file);
+		assert.match(copy, /MCP/, `${file} must name the thing a grant conveys`);
+		assert.match(
+			copy,
+			/sign(s)? in as (yourself|themselves)/i,
+			`${file} must say the grantee signs in as themselves — the property that makes this access rather than impersonation`
+		);
+	}
+});
+
+test('neither share panel offers acting as the agent inside the CMS', () => {
+	// The M2.1 removal was of a CONTROL; this is the copy half of the same line.
+	// An owner who reads "grant the ability to act as @agent" believes they
+	// handed over the thing the CMS no longer offers, and no probe over the
+	// component tree catches a sentence.
+	for (const file of ['AgentSharingPanel.svelte', 'AgentSharedWithMePanel.svelte']) {
+		const copy = panelCopy(file);
+		assert.doesNotMatch(
+			copy,
+			/(ability|able|permission|lets? (you|them)) to act as/i,
+			`${file} must not describe a grant as conveying the ability to act as the agent (equaltoai/contentus#92, #93)`
+		);
+	}
 });

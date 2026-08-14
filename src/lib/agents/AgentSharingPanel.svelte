@@ -6,14 +6,21 @@ WHAT THIS PANEL IS, AND WHAT IT DELIBERATELY IS NOT. It lists, grants and
 revokes lesser's agent share-grants for ONE agent the viewer owns — lesser's
 agent MANAGEMENT plane, which is REST-only by lesser's design, so the calls
 are the `src/lib/agents/share-client.ts` ones and the GraphQL-first rule does
-not bend for it (see the CMS-consumption audit). It does not know anything
-about act-as: the owner grants ACCESS to their agent, and whether the grantee
-then acts as the agent on some surface is the grantee's choice, made elsewhere.
-The panel never derives who may grant what — lesser answers each call with a
-status, and the panel reports the answer.
+not bend for it (see the CMS-consumption audit). The panel never derives who
+may grant what — lesser answers each call with a status, and the panel reports
+the answer.
+
+WHAT THE OWNER IS ACTUALLY HANDING OVER, said in the lede because this is the
+screen where they decide to hand it over (M2.2, equaltoai/contentus#93). A
+grant conveys ACCESS TO THE AGENT'S MCP: the grantee signs into that agent's
+MCP as themselves, with their own account, and lesser records which grantee
+drove each agent action. It is not a licence to act as the agent inside this
+CMS — that surface was the M7 tree's one mistake and went in M2.1. Saying
+"the ability to act as" here, as this lede once did, is how an owner comes to
+believe they granted the thing the CMS no longer offers.
 
 CLIENT-ONLY, FOR THE SAME REASON THE OWNED ROSTER IS. The grants are
-owner-private (who may act as your agent is the sensitive half of the
+owner-private (who holds access to your agent is the sensitive half of the
 capability), the token lives in `sessionStorage`, and the route's props are
 serialized into the PUBLIC hydration endpoint. So nothing renders on the
 server; `MyAgents.svelte` mounts this only for an authenticated reader.
@@ -230,8 +237,11 @@ capability is missing from the instance on this route's word.
 {#if session === 'authenticated'}
 	<Panel title={`Sharing @${agent.username}`} headerLevel={2}>
 		<p class="contentus-sharing__lede">
-			Grant another local account the ability to act as <strong>@{agent.username}</strong>.
-			The instance records who really acted — acting as an agent is never silent.
+			Grant another local account access to <strong>@{agent.username}</strong>'s MCP. A grantee
+			connects to the agent's MCP endpoint and signs in as themselves, with their own account;
+			this instance records which grantee drove each agent action. A grant does not let anyone
+			act as this agent inside the CMS. Grantees see the endpoint under
+			<em>Agents shared with you</em>.
 		</p>
 
 		{#if shareState.status === 'loading'}
@@ -295,7 +305,7 @@ capability is missing from the instance on this route's word.
 					{/each}
 				</ul>
 			{:else}
-				<p class="contentus-agents__notice">No account can act as this agent yet.</p>
+				<p class="contentus-agents__notice">No account has access to this agent yet.</p>
 			{/if}
 		{/if}
 	</Panel>

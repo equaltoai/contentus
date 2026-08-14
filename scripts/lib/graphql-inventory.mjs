@@ -117,7 +117,12 @@ export const DOCUMENT_INVENTORY = [
 	},
 	{
 		module: 'src/lib/agents/contract.ts',
-		documents: ['AGENTS_ROSTER_QUERY', 'AGENT_DETAIL_QUERY', 'MY_AGENTS_QUERY'],
+		documents: [
+			'AGENTS_ROSTER_QUERY',
+			'AGENT_DETAIL_QUERY',
+			'MY_AGENTS_QUERY',
+			'AGENT_MCP_ACCESS_QUERY',
+		],
 	},
 	{
 		module: 'src/lib/drones/contract.ts',

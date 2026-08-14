@@ -203,25 +203,25 @@
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1206,
+        "line": 1216,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which initialises a scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1222,
+        "line": 1232,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which stages the fixture files the probe has just written into that scratch repository. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1256,
+        "line": 1266,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which initialises a second scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1259,
+        "line": 1269,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which stages one of the two fixture files, so the assertion can tell tracked from untracked. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
@@ -272,7 +272,7 @@
       "scripts/deploy-client.test.mjs": "8aa5d6d33d8d7a2ab0475c71951ac0f0c37d1b2a23b8f3a59140d4edd71a060d",
       "scripts/lib/agent-seams.mjs": "bad4396fc83962acfec1c6f14ed6a6b65ba9f01ecd96b0012502bac5532dba81",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
-      "scripts/lib/graphql-inventory.mjs": "83e20f1ed596203f628adc217b6026c8582e7a1f2e7c69a52a0af19f1938598e",
+      "scripts/lib/graphql-inventory.mjs": "cdc1d4c61f779a2721181882edf50890b938f760b572a4c034be904a96c5a5d3",
       "scripts/lib/module-imports.mjs": "03ef1380e131c9ae8625d9d2ac6f7a66cc608cfce5e0c689c0a0f011a2e7cd5c",
       "scripts/lib/schema-pin.mjs": "e173e93932ed0fa671d1082891da514f2b8df6dc6115804af18c9ebd0526e856",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
@@ -282,10 +282,10 @@
       "tests/agent-act-as.test.mjs": "9698b1cb3ac036b534ea5d153fac77dbcf19e6ebdba0290eee6838163b036327",
       "tests/agent-share-client.test.mjs": "80e1a01a1c2fc2d06ee29508e8cf2eb163b1f51a8ae8e2449ae41fa32b4c442e",
       "tests/act-as-banner.test.mjs": "72f6ed24c3ea6e0795528c15d244e6f0b8dd72bb9bc360e687482cfcb1d35274",
-      "tests/agents-mcp.test.mjs": "812cba39345facf1002993af7341b6bd598db3e1a802130eab12080e598e19b9",
-      "tests/agents-mobile.test.mjs": "789f60e99b242d0d7c4ab2729315b39598007b4dcc3a18df1e1c9cf7ddd9e7c1",
+      "tests/agents-mcp.test.mjs": "b27c0b29b5336f08d6a442fe69fc362118edba9442a8a47ed0d8182de0d30a35",
+      "tests/agents-mobile.test.mjs": "3a29b0b13c62c6acc44ba7e8fc49b16a0cd5d4893738f44969beac4730e25e4e",
       "tests/agents-roster.test.mjs": "ccaf23ee8cd43e0475430fb7033499cd364849068871f89114b974fcc317919e",
-      "tests/agents-trust.test.mjs": "b2f2ea55286122ff13040fa241efb3b8a44653db14a73304eb6eb27085967509",
+      "tests/agents-trust.test.mjs": "f904c88af9d342f7731e20f23783ac39307bacefe590518eaad7fa8df0502b5b",
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",

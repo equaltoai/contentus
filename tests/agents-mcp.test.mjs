@@ -8,6 +8,7 @@ import {
 	mcpClientConfigs,
 	mcpConnectOrigin,
 	resolveMcpProbeTargets,
+	sharedMcpAccess,
 	toMcpDiscoveryDocument,
 	toOAuthProtectedResourceDocument,
 } from '../src/lib/agents/mcp.ts';
@@ -112,6 +113,50 @@ test('the CSP origin is the one lesser returned, or nothing at all', () => {
 	assert.equal(mcpConnectOrigin(null), null);
 	assert.equal(mcpConnectOrigin(undefined), null);
 	assert.equal(mcpConnectOrigin({ mcpURL: 'nonsense' }), null);
+});
+
+/* -------------------------------------------------------------------------
+ * What a grantee is shown about a shared agent (M2.2, equaltoai/contentus#93)
+ * ---------------------------------------------------------------------- */
+
+test('a shared agent’s row gets lesser’s endpoint, carried through untouched', () => {
+	assert.deepEqual(sharedMcpAccess({ ok: true, access: ACCESS }), {
+		status: 'published',
+		endpoint: 'https://api.example.invalid/mcp/weatherbot',
+	});
+});
+
+test('“no endpoint published” and “could not ask” stay two different sentences', () => {
+	// THE DISTINCTION IS THE POINT OF THE FUNCTION. A served bundle with no
+	// `mcpURL` is the instance stating it publishes no MCP surface for this
+	// agent — a fact a grantee can act on by stopping. A failed read is the
+	// instance not answering, which a grantee acts on by trying again. Reporting
+	// either as the other tells one of them to do the wrong thing.
+	assert.deepEqual(sharedMcpAccess({ ok: true, access: { ...ACCESS, mcpURL: null } }), {
+		status: 'none',
+	});
+	assert.deepEqual(sharedMcpAccess({ ok: true, access: { ...ACCESS, mcpURL: '' } }), {
+		status: 'none',
+	});
+	// Whitespace is not an endpoint either: `BuildPublicMCPAccessBundle` builds
+	// its URLs by concatenation, so a blank base URL is the shape that reaches a
+	// client, and a row that printed it would show a grantee an empty box it
+	// could not paste anywhere.
+	assert.deepEqual(sharedMcpAccess({ ok: true, access: { ...ACCESS, mcpURL: '   ' } }), {
+		status: 'none',
+	});
+	// An agent lesser will not resolve at all, and its message rather than a
+	// substitute one.
+	assert.deepEqual(
+		sharedMcpAccess({ ok: false, failure: { reason: 'not-found', message: 'No such agent.' } }),
+		{ status: 'unavailable', message: 'No such agent.' }
+	);
+});
+
+test('a bundle with no access object at all is “none”, not a crash', () => {
+	// `{ ok: true, access: null }` is reachable: `fetchAgentMcpAccess` normalizes
+	// a served `mcpAccess: null` to it rather than inventing a bundle.
+	assert.deepEqual(sharedMcpAccess({ ok: true, access: null }), { status: 'none' });
 });
 
 /* -------------------------------------------------------------------------

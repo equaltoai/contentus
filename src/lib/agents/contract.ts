@@ -261,6 +261,35 @@ export const MY_AGENTS_QUERY = `
 	}
 `;
 
+/**
+ * One agent's MCP access bundle, and nothing else.
+ *
+ * WHY THIS IS NOT `AGENT_DETAIL_QUERY`. The surface that sends this is the
+ * grantee's "shared with you" list (M2.2, equaltoai/contentus#93), which asks
+ * one question about somebody ELSE's agent: what does a grant on it convey, and
+ * where does the grantee connect? `AGENT_DETAIL_QUERY` answers that too, but it
+ * also asks for `agentOwner`, `delegatedScopes` and `viewerCanSeePrivateFields`
+ * — the private half lesser redacts for exactly this viewer. Sending an
+ * ownership selection from a surface that makes no ownership claim would be a
+ * read wider than the thing it renders, and every extra field is a field a
+ * later panel can start showing without anyone deciding it should.
+ *
+ * ANONYMOUS-SAFE AND UNREDACTED, which is what makes the narrow document
+ * possible: `mcpAccess` is absent from lesser's `redactGraphAgentPrivateFields`
+ * (`graph/agent_model_helpers.go`), because the bundle is the *public*
+ * actor-scoped discovery surface by construction — `BuildPublicMCPAccessBundle`
+ * is documented as "the client-neutral actor-scoped MCP access surface that can
+ * be shown by agent UIs without provisioning connector state". Reading it is
+ * display, never provisioning: no lease, no token, no connector state.
+ */
+export const AGENT_MCP_ACCESS_QUERY = `
+	query ContentusAgentMcpAccess($username: String!) {
+		agent(username: $username) {
+			mcpAccess { ${MCP_ACCESS_FIELDS} }
+		}
+	}
+`;
+
 /* -------------------------------------------------------------------------
  * Normalizers
  * ---------------------------------------------------------------------- */
@@ -590,6 +619,65 @@ export async function fetchAgent(
 		}
 
 		return { ok: true, agent };
+	} catch (error) {
+		return { ok: false, failure: agentUnavailableFromFailure(error) };
+	}
+}
+
+export type AgentMcpAccessResult =
+	{ ok: true; access: AgentMcpAccess | null } | { ok: false; failure: AgentUnavailable };
+
+/**
+ * The MCP access bundle lesser publishes for one agent.
+ *
+ * `{ ok: true, access: null }` IS AN ANSWER, and a different one from a
+ * failure. `BuildPublicMCPAccessBundle` returns a guidance-only bundle with
+ * empty URL strings when it cannot name a base URL or an actor, and
+ * `toAgentMcpAccess` carries the empties through as nulls rather than as
+ * absent-and-therefore-unknown. So "this instance publishes no MCP endpoint for
+ * this agent" arrives as a served fact, and a surface can say it — which is not
+ * the same sentence as "the read failed", and must never be shown as one.
+ *
+ * ONE READ PER AGENT, deliberately. lesser has no batch-by-username query for
+ * agents, and the roster's `query` filter is applied to a page AFTER it is
+ * fetched (see the module header), so a single roster read cannot be trusted to
+ * contain every agent a caller was granted. A grant list is a handful of rows;
+ * the caller dispatches these in parallel under one abort signal and one
+ * session stamp.
+ *
+ * A token is passed when the caller has one, and is not required: lesser admits
+ * anonymous `agent` reads and does not redact `mcpAccess`. The bundle is the
+ * same either way, and an instance that gates its agent surface answers the
+ * authenticated form rather than refusing it.
+ */
+export async function fetchAgentMcpAccess(
+	ctx: AgentRequestContext,
+	username: string
+): Promise<AgentMcpAccessResult> {
+	const handle = username.trim().replace(/^@/, '');
+	if (!handle) {
+		return { ok: false, failure: { reason: 'not-found', message: 'No agent was requested.' } };
+	}
+
+	try {
+		const result = await graphqlRequest<{ agent: unknown }>(
+			AGENT_MCP_ACCESS_QUERY,
+			{ username: handle },
+			requestOptions(ctx)
+		);
+
+		const failure = agentUnavailableFromErrors(result.errors);
+		if (failure && !result.data?.agent) return { ok: false, failure };
+
+		const node = record(result.data?.agent);
+		if (!node) {
+			return {
+				ok: false,
+				failure: { reason: 'not-found', message: 'No agent matches this address.' },
+			};
+		}
+
+		return { ok: true, access: toAgentMcpAccess(node.mcpAccess) };
 	} catch (error) {
 		return { ok: false, failure: agentUnavailableFromFailure(error) };
 	}

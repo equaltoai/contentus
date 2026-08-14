@@ -16,6 +16,7 @@ this document and lesser disagree, lesser is right and this is a bug.
 | `/agents/{username}` | `agent(username)`                             | anonymous                 |
 | "Agents you own"     | `myAgents`                                    | bearer token, client only |
 | MCP addresses        | `Agent.mcpAccess`                             | anonymous (not redacted)  |
+| A shared agent's MCP | `agent(username) { mcpAccess }`               | bearer token, client only |
 | Capability badges    | `Agent.agentCapabilities`                     | anonymous                 |
 | Trust state          | `Agent.verified`, `Agent.quarantine*`         | anonymous                 |
 
@@ -104,6 +105,48 @@ not name. It hangs off the **origin of `mcpAccess.mcpURL`** — the host lesser
 itself named — never off `window.location`, which is the app host and a
 different origin. Deriving a well-known path beneath a stated host is a much
 smaller claim than deriving the host.
+
+### What a share grant conveys, and where the grantee reads it
+
+A grant on an agent conveys **access to that agent's MCP**: the grantee connects
+to the agent's MCP endpoint and signs in **as themselves**, with their own
+account, and lesser records which grantee drove each agent action (`actedBy`).
+It is not, and since M2.1 (equaltoai/contentus#92) is nowhere offered as, a
+licence to act as the agent inside this CMS.
+
+Both share panels say so in their own lede, because a reader sees one screen and
+not both: the owner's `AgentSharingPanel` at the moment they decide to grant,
+and the grantee's `AgentSharedWithMePanel` when they read what they hold.
+`tests/agents-trust.test.mjs` holds both halves — that each panel names MCP
+access, and that neither describes a grant as the ability to act as the agent.
+
+The grantee's list reads `mcpAccess` through `AGENT_MCP_ACCESS_QUERY`, one read
+per shared agent, dispatched under the grant list's abort signal and session
+stamp. Three things about that document are deliberate:
+
+- **It is narrower than `AGENT_DETAIL_QUERY`.** The surface sending it asks one
+  question about somebody _else's_ agent, so it selects no `agentOwner`,
+  `delegatedScopes` or `viewerCanSeePrivateFields`. Every extra field is one a
+  later panel can start rendering without anyone deciding it should.
+- **It is one read per agent, not a roster read.** lesser has no
+  batch-by-username query for agents, and the roster's filters are applied after
+  paging (above), so no single roster page can be trusted to contain every agent
+  a caller was granted.
+- **It is display, never provisioning.** `BuildPublicMCPAccessBundle` is
+  documented as the client-neutral actor-scoped MCP access surface "that can be
+  shown by agent UIs without provisioning connector state". contentus provisions
+  no lease, no token and no connector state, and has no surface that could.
+
+An `ok` read whose `mcpURL` is empty is the instance **stating** it publishes no
+MCP endpoint for that agent. That is a served fact and renders as one; it is a
+different sentence from a read that failed, and `sharedMcpAccess`
+(`src/lib/agents/mcp.ts`) is where the two are kept apart. A grantee who reads
+"none published" stops looking; one who reads a failure tries again.
+
+The row shows the endpoint and links to the agent's own page for the rest of the
+bundle. It deliberately does not reuse `CopyBlock`: that component sits behind
+the `AgentMcpPanel` seam (`scripts/lib/agent-seams.mjs`), and greater M6a
+replacing that panel must not orphan the grantee's list.
 
 ### The tool catalog is the server's, not the agent's
 
