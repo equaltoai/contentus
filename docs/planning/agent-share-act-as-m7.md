@@ -219,3 +219,42 @@ Open questions — resolved 2026-08-13 and routed to
   delegation path and must be supported in lesser: add a `DraftReview.actedBy`
   (or per-verdict `actedBy` on `DraftReviewVerdictRecord`) so delegated
   reviews carry the real caller.
+
+## Superseded in part by M2.1 (2026-08-14)
+
+This document records what the M7.0 tree planned and built. One of its
+surfaces was wrong, and this note says which, so a later reader does not take
+the plan above as the current shape.
+
+Testing M7 surfaced that sharing an agent granted the wrong thing. The intent
+was that a grantee gets ACCESS to the agent — signing into the agent's MCP as
+themselves — and that act-as means ATTRIBUTION, lesser recording which grantee
+drove an agent action. What shipped also let a person elect to act as the agent
+inside the web CMS. Operator, verbatim (2026-08-13):
+
+> "there is only a single place thats wrong and thats the button to act as, we
+> may refine the UI from here but its functionally ok"
+
+The root cause of the access half is in lesser's OAuth layer and is tracked as
+equaltoai/lesser#1397 (M1). The client half is equaltoai/contentus#91 (M2), and
+the button itself was removed in M2.1, equaltoai/contentus#92.
+
+What that changes in the plan above:
+
+- **Item 7** ("Shared with me" panel + act-as selector). The panel stays; the
+  selector is gone. `AgentSharedWithMePanel` is a grant list, and it clears any
+  selection stored before the removal when it mounts.
+- **The install-verification checklist** in the roadmap section still names
+  "act-as verdict/publish" as a step to walk. That step is no longer reachable
+  from this client and is not part of M2.1's proof. What M2.1 is verified by is
+  the absence: the CMS offers no way to elect to act as an agent, and the
+  attribution surfaces still render.
+- **Items 2, 4, 5, 8 and 9** — the `actAs` transport option, the act-as session
+  module, the review threading, the FORBIDDEN revocation path and the banner —
+  are unchanged and were deliberately kept. They carry attribution, which is
+  what the operator wanted act-as to mean all along.
+
+Nothing in the open questions at the end of this document is closed or changed
+by M2.1. Upstream ask G in `docs/consumption/review-contract.md` is sharpened
+by it: with no act-as read from this client, a grantee-facing review surface has
+no caller attribution at all, so `DraftReview.actedBy` is the only path to one.

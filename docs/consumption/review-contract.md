@@ -289,6 +289,23 @@ the acting identity legible there.
 (delivery-8d8cae4ac3204cdc) as an active lesser need, alongside the agent
 ownership-signal need.
 
+**Sharpened by M2.1 (equaltoai/contentus#92), and the ask is now wider, not
+narrower.** The paragraph above rests on a reader who is acting as the agent:
+`Draft.actedBy` is owner-only, it becomes readable to a grantee only because
+the act-as selection makes their `draft(id)` read agent-scoped, and the banner
+is what named the acting identity. M2.1 removed the control that let a person
+elect that selection — sharing an agent grants ACCESS to it, and a human
+driving the agent from the web CMS was never what act-as meant. So from this
+client there is no agent-scoped read left to make: a grantee now reads as
+themselves, `Draft.actedBy` stays owner-only to them, and the banner has no
+selection to announce. The owner's own view is unchanged and still shows who
+drove their draft, which is the attribution the milestone exists to provide.
+
+What that leaves is precisely this ask. A grantee-facing review surface has no
+caller attribution at all now, and cannot acquire one by acting as anybody —
+the workaround that partially covered the gap is the thing that was wrong.
+`DraftReview.actedBy` (or a per-verdict `actedBy`) is the only path to it.
+
 ## M2d.5 — the completion-gate round trip, and what was actually verified
 
 The operator's completion gate is: articles sharable as drafts for review, and
