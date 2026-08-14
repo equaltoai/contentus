@@ -44,6 +44,7 @@ bandwidth, check the stamp for the correctness.
 	import { createSessionScope } from '$lib/auth/session-scope';
 
 	import AgentCard from './AgentCard.svelte';
+	import AgentDriversPanel from './AgentDriversPanel.svelte';
 	import AgentSharingPanel from './AgentSharingPanel.svelte';
 	import { fetchMyAgents, type AgentSummary, type AgentUnavailable } from './contract';
 
@@ -170,6 +171,14 @@ bandwidth, check the stamp for the correctness.
 	{#each agents as agent (agent.id)}
 		{#if agent.owner}
 			<AgentSharingPanel {agent} />
+			<!--
+				Who has been DRIVING the agent, directly below who HOLDS access to it
+				(M2.4, equaltoai/contentus#95). The two are companion answers and the
+				order is the owner's reading order: the grant ledger says who could,
+				this says who did. Same gate, same client-only rule, same reason —
+				lesser answers the activity log to the agent's owner and admins alone.
+			-->
+			<AgentDriversPanel {agent} />
 		{/if}
 	{/each}
 {/if}

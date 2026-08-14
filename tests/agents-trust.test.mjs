@@ -568,7 +568,7 @@ function callsFn(ast, name) {
 }
 
 /**
- * The three client-only panels on the agents route, each carrying private
+ * The four client-only panels on the agents route, each carrying private
  * session-scoped subject matter and each required to end with the session.
  *
  * The fields listed are what `closeSession` must empty on each panel — the
@@ -605,6 +605,17 @@ const SESSION_SCOPED_PANELS = [
 		// reader is not, and a populated map is that private fact keyed by agent
 		// username, one sign-in away from the next reader's screen.
 		emptied: [/session = 'anonymous'/, /grants = \[\]/, /access = \{\}/],
+	},
+	{
+		// M2.4 (equaltoai/contentus#95). WHO HAS BEEN DRIVING an agent is the
+		// sharper half of the two owner views: the grant ledger names accounts
+		// that could reach the agent, this one names the people who actually did
+		// and when they last did it. lesser answers it to the owner and admins
+		// alone, so a populated `ledger` left behind on sign-out would hand the
+		// next reader of this browser a log of a stranger's collaborators.
+		file: 'AgentDriversPanel.svelte',
+		subject: 'who has been driving the agent',
+		emptied: [/session = 'anonymous'/, /ledger = null/, /activityState = \{ status: 'loading' \}/],
 	},
 ];
 
@@ -681,7 +692,19 @@ function isOwnershipGate(node) {
 	);
 }
 
-test("share management mounts only behind lesser's ownership statement", () => {
+/**
+ * The owner-only panels `MyAgents` mounts per agent, each gated on lesser's own
+ * ownership statement.
+ *
+ * Both read a surface lesser answers to the agent's owner and admins alone —
+ * the share grants, and the activity log behind them (M2.4,
+ * equaltoai/contentus#95, `agentActivity` answers `Forbidden` to anyone else).
+ * The server gate is the real one; this list holds the client to not ASKING on
+ * a screen it should not have drawn.
+ */
+const OWNER_GATED_PANELS = ['AgentSharingPanel', 'AgentDriversPanel'];
+
+test("the owner-only panels mount only behind lesser's ownership statement", () => {
 	// STRUCTURAL, like the session probes above: the mount gate is one line whose
 	// removal is silent — a later rework of the `{#each}` that drops the
 	// `{#if agent.owner}` returns the defect the gate fixed, and every other
@@ -690,17 +713,19 @@ test("share management mounts only behind lesser's ownership statement", () => {
 		modern: true,
 	});
 
-	const mounts = [];
-	for (const { node, ancestors } of walkTemplate(ast.fragment)) {
-		if (node.type !== 'Component' || node.name !== 'AgentSharingPanel') continue;
-		mounts.push(ancestors.some(isOwnershipGate));
-	}
+	for (const panel of OWNER_GATED_PANELS) {
+		const mounts = [];
+		for (const { node, ancestors } of walkTemplate(ast.fragment)) {
+			if (node.type !== 'Component' || node.name !== panel) continue;
+			mounts.push(ancestors.some(isOwnershipGate));
+		}
 
-	assert.ok(mounts.length > 0, 'MyAgents must mount a sharing panel at all');
-	assert.ok(
-		mounts.every(Boolean),
-		"and only behind {#if agent.owner} — lesser's served statement, never list membership"
-	);
+		assert.ok(mounts.length > 0, `MyAgents must mount ${panel} at all`);
+		assert.ok(
+			mounts.every(Boolean),
+			`${panel} may mount only behind {#if agent.owner} — lesser's served statement, never list membership`
+		);
+	}
 });
 
 /* -------------------------------------------------------------------------

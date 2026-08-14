@@ -2,5 +2,5 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786743845445 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786743845447 COMPLETED 879 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1786748919541 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786748919543 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS

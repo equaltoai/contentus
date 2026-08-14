@@ -95,6 +95,10 @@ export const DOCUMENT_INVENTORY = [
 		documents: ['INSTANCE_INFO_QUERY'],
 	},
 	{
+		module: 'src/lib/agents/activity-client.ts',
+		documents: ['AGENT_ACTIVITY_QUERY'],
+	},
+	{
 		module: 'src/lib/messaging/queries.ts',
 		documents: [
 			'CONVERSATIONS_QUERY',
