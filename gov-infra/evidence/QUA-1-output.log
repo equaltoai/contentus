@@ -10,22 +10,22 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786743726561 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786743726564 COMPLETED 879 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1786746361956 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786746361959 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 811 modules transformed.
+[2Ktransforming...✓ 814 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-C5w_ABSr.js                716.25 kB │ gzip: 217.33 kB
+build/client/assets/entry-client-CVZVedc0.js                724.33 kB │ gzip: 219.48 kB
 
-✓ built in 1.08s
+✓ built in 1.09s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -36,18 +36,18 @@ build/client/assets/entry-client-C5w_ABSr.js                716.25 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 787 modules transformed.
+[2Ktransforming...✓ 790 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,151.91 kB │ gzip: 278.11 kB
+build/server/handler.mjs  1,151.99 kB │ gzip: 278.11 kB
 
-✓ built in 1.00s
+✓ built in 1.02s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 347571 bytes, 144 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 349923 bytes, 144 --tc-* definitions, integrity assertions passed
 brand assets: copied 13 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -65,8 +65,8 @@ Schema:     contracts/lesser/graphql-schema.graphql
             blob aa6c9f03d87d86cb05510bc75407af148aaca3b5 (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
-Documents:  48 in 10 inventoried module(s), 48 operation(s)
-Swept:      63 contentus-authored .ts module(s) under src/, out of 1726 tracked file(s) there
+Documents:  49 in 11 inventoried module(s), 49 operation(s)
+Swept:      65 contentus-authored .ts module(s) under src/, out of 1729 tracked file(s) there
 
 graphql-contract: PASS
 
@@ -131,10 +131,10 @@ CSP audit: clean.
 # Seam graph audit — faces 6–7 (src/lib/agents, src/lib/drones)
 
 - Build passes recorded: client, server
-- Modules the client build resolved / loaded: 810 / 810
-- Modules the server build resolved / loaded: 793 / 786
-- Dependency edges recorded: 4578
-- Distinct edges into the face: 44
+- Modules the client build resolved / loaded: 813 / 813
+- Modules the server build resolved / loaded: 796 / 789
+- Dependency edges recorded: 4601
+- Distinct edges into the face: 48
 - Findings: 0
 
 ## Edges into the face
@@ -146,6 +146,8 @@ CSP audit: clean.
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentMcpPanel.svelte [client:import, server:import]
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustDetail.svelte [client:import, server:import]
+- src/lib/agents/AgentDriversPanel.svelte → src/lib/agents/activity-client.ts [client:import, server:import]
+- src/lib/agents/AgentDriversPanel.svelte → src/lib/agents/activity-view.ts [client:import, server:import]
 - src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/Accordion.svelte [client:import, server:import]
 - src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/CopyBlock.svelte [client:import, server:import]
 - src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/mcp.ts [client:import, server:import]
@@ -162,9 +164,11 @@ CSP audit: clean.
 - src/lib/agents/AgentSharingPanel.svelte → src/lib/agents/share-client.ts [client:import, server:import]
 - src/lib/agents/AgentSharingPanel.svelte → src/lib/agents/share-view.ts [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
+- src/lib/agents/MyAgents.svelte → src/lib/agents/AgentDriversPanel.svelte [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/AgentSharingPanel.svelte [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/agents/act-as.ts → src/lib/agents/share-client.ts [client:import, server:import]
+- src/lib/agents/activity-client.ts → src/lib/agents/activity-view.ts [client:import, server:import]
 - src/lib/agents/filters.ts → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/cms/review-transport.ts → src/lib/agents/act-as.ts [client:import, server:import]
 - src/lib/drones/DroneCard.svelte → src/lib/drones/identity.ts [client:import, server:import]
