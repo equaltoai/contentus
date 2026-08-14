@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786746361956 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786746361959 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1786748800430 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786748800432 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -20,12 +20,12 @@ vite v8.2.0 building client environment for production...
 [2Ktransforming...✓ 814 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-CVZVedc0.js                724.33 kB │ gzip: 219.48 kB
+build/client/assets/entry-client-KRNkmDFo.js                724.45 kB │ gzip: 219.52 kB
 
-✓ built in 1.09s
+✓ built in 1.10s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -41,7 +41,7 @@ rendering chunks...
 computing gzip size...
 build/server/handler.mjs  1,151.99 kB │ gzip: 278.11 kB
 
-✓ built in 1.02s
+✓ built in 1.06s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
