@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import { parse } from 'svelte/compiler';
+
+import { liveScript, sourceIdentifiers } from '../scripts/lib/module-imports.mjs';
+import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 
 import {
 	AGENT_DETAIL_QUERY,
@@ -466,9 +469,14 @@ const SESSION_SCOPED_PANELS = [
 		],
 	},
 	{
+		// The act-as selection this panel used to mirror in a `selected` field
+		// went with the control in M2.1 (equaltoai/contentus#92), so there is no
+		// third field to empty here any more. The selection itself is not merely
+		// emptied on sign-out — it is cleared at mount; see the act-as probes
+		// below.
 		file: 'AgentSharedWithMePanel.svelte',
-		subject: 'the shared-with-me grants and the act-as selection',
-		emptied: [/session = 'anonymous'/, /grants = \[\]/, /selected = null/],
+		subject: 'the shared-with-me grants',
+		emptied: [/session = 'anonymous'/, /grants = \[\]/],
 	},
 ];
 
@@ -564,5 +572,90 @@ test("share management mounts only behind lesser's ownership statement", () => {
 	assert.ok(
 		mounts.every(Boolean),
 		"and only behind {#if agent.owner} — lesser's served statement, never list membership"
+	);
+});
+
+/* -------------------------------------------------------------------------
+ * The act-as selection control, held gone (M2.1, equaltoai/contentus#92)
+ *
+ * Sharing an agent grants a person ACCESS to it. Act-as is ATTRIBUTION —
+ * lesser recording which grantee drove an agent action — and the M7 tree
+ * confused the two by shipping a button that let a person elect to drive the
+ * agent from inside the web CMS. The button is gone; everything that carries
+ * the attribution stays. These two probes are what hold that line, and they
+ * hold it from opposite ends: the first says no surface can START acting as an
+ * agent, the second says a selection made before the removal ENDS.
+ *
+ * WHAT THEY DO NOT CLAIM. The first reads a NAME, so it holds against the
+ * control returning through the module's own writer — the only writer that
+ * exists — and not against a future surface that reimplements the storage
+ * write by hand. That is the honest bound of a name reading, and the reason
+ * the write path stays in one module worth naming.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The act-as selection writer. Every surface reaches the selection through
+ * this name, which is what makes its absence checkable.
+ */
+const SELECTION_WRITER = 'selectActAs';
+
+/** The module that defines it — the one file expected to name it. */
+const SELECTION_MODULE = 'src/lib/agents/act-as.ts';
+
+test('no surface in the app elects an act-as selection', () => {
+	// PARSED, not grepped, and compiled for the CLIENT: `liveScript` hands back
+	// the JavaScript a component actually executes, so a call written in a
+	// markup event handler is in the reading and a name written in a comment or
+	// a string is not. Repository-wide over tracked source, because "the panel
+	// that used to have the button" is the file a reviewer checks and any other
+	// file is where the control would come back unnoticed.
+	const named = [];
+
+	for (const path of trackedSource(repoRoot, 'src', MODULE_SOURCE)) {
+		const file = relative(repoRoot, path);
+		if (file === SELECTION_MODULE) continue;
+
+		const live = liveScript(file, readFileSync(path, 'utf8'));
+		if (sourceIdentifiers(live).includes(SELECTION_WRITER)) named.push(file);
+	}
+
+	assert.deepEqual(
+		named,
+		[],
+		`${SELECTION_WRITER} is the act-as selection writer and no surface may call it: a person electing to act as an agent in the web CMS is the one thing sharing was never meant to grant (equaltoai/contentus#92)`
+	);
+});
+
+test('the shared-with-me panel ends a selection made before the control went', () => {
+	// The stop button went with the start button, so whoever held a selection
+	// when this shipped would otherwise keep acting as the agent with nothing
+	// left to end it. This panel is where that ends, and WHERE IN THE MOUNT
+	// matters: after the read it would not run when the share plane 404s or
+	// fails, and behind a condition it would not run at all. So the assertion is
+	// the position, not merely the presence.
+	const ast = parse(
+		readFileSync(join(repoRoot, 'src/lib/agents/AgentSharedWithMePanel.svelte'), 'utf8'),
+		{ modern: true }
+	);
+
+	let mounted = null;
+	for (const node of walkAst(ast.instance)) {
+		if (node.type !== 'CallExpression') continue;
+		if (node.callee?.type !== 'Identifier' || node.callee.name !== 'onMount') continue;
+		mounted = node.arguments?.[0] ?? null;
+	}
+
+	assert.ok(mounted, 'the panel must mount at all');
+
+	const first = mounted.body?.body?.[0];
+	assert.equal(
+		first?.type,
+		'ExpressionStatement',
+		'the first thing the mount does must be a call, not a declaration or a branch'
+	);
+	assert.equal(
+		first.expression?.type === 'CallExpression' && first.expression.callee?.name,
+		'clearActAs',
+		'and that call must be clearActAs() — unconditional, and before the grants are read'
 	);
 });

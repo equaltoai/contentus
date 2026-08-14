@@ -134,9 +134,10 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 
 	<!--
 		The grantee half, below the owned half: the agents lesser has shared with
-		the viewer, and the act-as selection the review surfaces later send as
-		`X-Lesser-Act-As`. Client-only like `MyAgents` — the grants are private
-		and the props above are public.
+		the viewer. A list since M2.1 — the act-as selection control it used to
+		carry was the one surface the M7 tree got wrong and is gone
+		(equaltoai/contentus#92). Client-only like `MyAgents` — the grants are
+		private and the props above are public.
 	-->
 	<AgentSharedWithMePanel />
 

@@ -729,17 +729,13 @@
 	border-radius: var(--tc-radius-md);
 }
 
-/* The accent border names the selected row the same way the "Acting as" pill
-   does — a state a reader can see without decoding either alone. */
-.contentus-act-as__row--selected {
-	border-color: var(--tc-accent);
-}
-
 .contentus-act-as__agent {
 	display: flex;
 	flex-direction: column;
 	gap: var(--tc-space-1);
-	/* Pushes the controls to the far edge. */
+	/* Holds the row's start edge; the row carried trailing controls until M2.1
+	   removed the act-as selection, and a later grantee-facing control belongs
+	   in the same place. */
 	margin-right: auto;
 	min-width: 0;
 }
@@ -757,38 +753,10 @@
 	overflow-wrap: anywhere;
 }
 
-.contentus-act-as__select-btn {
-	/* 44px minimum touch target (product design §4). */
-	min-height: 44px;
-	padding: 0 var(--tc-space-5);
-	color: var(--tc-fg-inverse);
-	background: var(--tc-accent);
-	border: 1px solid transparent;
-	border-radius: var(--tc-radius-md);
-	font: inherit;
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.contentus-act-as__stop-btn {
-	/* 44px minimum touch target (product design §4). */
-	min-height: 44px;
-	padding: 0 var(--tc-space-3);
-	color: var(--tc-fg);
-	background: transparent;
-	border: 1px solid var(--tc-outline);
-	border-radius: var(--tc-radius-md);
-	font: inherit;
-	font-size: 0.8125rem;
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.contentus-act-as__stop-btn:hover,
-.contentus-act-as__stop-btn:focus-visible {
-	border-color: var(--tc-accent);
-	color: var(--tc-accent);
-}
+/* The `--select-btn` and `--stop-btn` rules went with the act-as selection
+   control in M2.1 (equaltoai/contentus#92): a person electing to act as an
+   agent was the one surface the M7 tree got wrong, and a style left behind for
+   a removed control is how it comes back. */
 
 /* --- trust and capabilities ------------------------------------------- */
 
