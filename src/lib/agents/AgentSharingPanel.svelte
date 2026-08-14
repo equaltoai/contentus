@@ -329,17 +329,18 @@ capability is missing from the instance on this route's word.
 			<section class="contentus-sharing__section">
 				<h3 class="contentus-sharing__subheading">Who has access now</h3>
 				{#if ledger.current.length}
-					<ul class="contentus-sharing__grants">
-						<!--
-						UNKEYED, deliberately. The rows hold no state of their own — every
-						span and the button's handler derive from `grant` — so keying buys
-						nothing here, and `grantee_username` is not a key this component
-						may assume is unique: it is unique per lesser's storage, and a
-						malformed 200 is exactly what this panel promises to survive.
-						Svelte throws `each_key_duplicate` on a repeated key, which would
-						be the render-time crash `grantsFrom` exists to keep out of.
+					<!--
+						UNKEYED, deliberately, in both lists. The rows hold no state of their
+						own — every span and the button's handler derive from `grant` — so
+						keying buys nothing here, and `grantee_username` is not a key this
+						component may assume is unique: it is unique per lesser's storage, and
+						a malformed 200 is exactly what this panel promises to survive. Svelte
+						throws `each_key_duplicate` on a repeated key, in the production build
+						as well as in development, which would be the render-time crash
+						`grantsFrom` exists to keep this panel out of.
 					-->
-					{#each ledger.current as grant}
+					<ul class="contentus-sharing__grants">
+						{#each ledger.current as grant}
 							<li class="contentus-sharing__grant">
 								<span class="contentus-sharing__grantee">@{grant.grantee_username}</span>
 								<span class="contentus-sharing__audit">
