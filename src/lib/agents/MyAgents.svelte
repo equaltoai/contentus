@@ -165,7 +165,7 @@ bandwidth, check the stamp for the correctness.
 		schema description that membership means ownership, so the panel does
 		not derive it. Each panel is client-only like everything else in this
 		block, reads its own grants, and ends with the session — because who
-		may act as your agent is the sensitive half of the capability.
+		holds access to your agent is the sensitive half of the capability.
 	-->
 	{#each agents as agent (agent.id)}
 		{#if agent.owner}

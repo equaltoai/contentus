@@ -20,7 +20,7 @@ CMS — that surface was the M7 tree's one mistake and went in M2.1. Saying
 believe they granted the thing the CMS no longer offers.
 
 CLIENT-ONLY, FOR THE SAME REASON THE OWNED ROSTER IS. The grants are
-owner-private (who may act as your agent is the sensitive half of the
+owner-private (who holds access to your agent is the sensitive half of the
 capability), the token lives in `sessionStorage`, and the route's props are
 serialized into the PUBLIC hydration endpoint. So nothing renders on the
 server; `MyAgents.svelte` mounts this only for an authenticated reader.
