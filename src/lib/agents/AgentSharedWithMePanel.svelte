@@ -1,27 +1,31 @@
 <!--
-"Shared with me" panel and act-as selector (M7.0, item 7;
-docs/planning/agent-share-act-as-m7.md).
+"Shared with me" panel (M7.0, item 7; docs/planning/agent-share-act-as-m7.md).
+The act-as selection control this panel used to carry was removed in M2.1
+(equaltoai/contentus#92).
 
 THE GRANTEE HALF OF THE CAPABILITY. Where the owner's sharing panel manages
-who may act as their agent, this panel shows what the VIEWER may act as — the
-agents lesser has shared with them — and carries the selection the review
-surfaces later send as `X-Lesser-Act-As`. The selection itself lives in
-`./act-as` (sessionStorage, bound to the auth session that made it), and this
-panel is one of its two writers: the list of candidates IS lesser's
-`shared-with-me` answer, and a choice is never invented beyond it.
+who holds a grant on their agent, this panel shows what lesser has shared with
+the VIEWER. Since M2.1 it is a list and only a list.
 
-ATTRIBUTION IS THE POINT, SO THE COPY SAYS IT. lesser records the real caller
-as `actedBy` on whatever runs under the selection — attribution, never
-impersonation — and the selected row wears an "Acting as" pill rather than
-silently restyling the page. A surface acting as an agent must be legible.
+WHY THE CONTROL WENT, STATED HERE BECAUSE THE ABSENCE IS THE FEATURE. Sharing
+an agent was always meant to grant the grantee ACCESS to that agent — to sign
+into its MCP as themselves. Act-as was only ever meant as ATTRIBUTION: lesser
+recording WHICH grantee drove an agent action. A button that let a person elect
+to drive the agent from inside the web CMS was never the intent, and it is the
+one surface the M7 tree got wrong. So the button is gone; the attribution it
+was confused with is untouched. lesser still records the real caller as
+`actedBy`, the review workspace still displays it, and `$lib/review/ActAsBanner`
+still names an active selection wherever one exists.
 
-THE SELECTION ENDS WHEN THE GRANT DOES, in both of lesser's spellings. The
-GraphQL one (`FORBIDDEN` extension on HTTP 200) ends it on the review surfaces
-(phase 5); the REST one is a plain 403 here, so a 403 from the share plane
-clears the selection before this panel reports the failure. And the list is
-the derivation: whenever it loads, a selection naming an agent it no longer
-contains is cleared rather than kept — a revoked grant must not keep a
-selection alive by this panel's silence.
+STALE SELECTIONS DIE HERE, AND THAT IS NOT TIDINESS. Nothing in this face
+writes an act-as selection any more, so a stored one can only be the artifact
+of a session that predates the removal — and whoever holds it would otherwise
+keep acting as the agent with no control left to stop, since the stop button
+went with the start button. Mounting this panel clears it, unconditionally and
+before the grants are read, so a failed or unsupported share plane does not
+leave the selection standing. The banner's own "Change or stop" link lands
+exactly here, which makes this the reachable end of that state rather than a
+silent one.
 
 CLIENT-ONLY AND SESSION-SCOPED, like every authenticated surface on this
 route: the token is in `sessionStorage`, the grants are private, and the route
@@ -38,22 +42,15 @@ the screen is emptied.
 	import { onSessionChange, sessionGeneration } from '$lib/auth/session-events';
 	import { createSessionScope } from '$lib/auth/session-scope';
 
-	import {
-		actAsCandidates,
-		actAsSelection,
-		clearActAs,
-		onActAsChange,
-		selectActAs,
-		type ActAsSelection,
-	} from './act-as';
+	import { actAsCandidates, clearActAs } from './act-as';
 	import { listSharedWithMe, ShareClientError, type AgentShareGrant } from './share-client';
 
 	let session = $state<'unknown' | 'anonymous' | 'authenticated'>('unknown');
 
 	/**
 	 * `unsupported` is the pre-v1.6.5 instance, answered as a 404 by lesser's
-	 * router — shown as a state with no selector, never as a control that looks
-	 * live and cannot work.
+	 * router — shown as a state with no list, never as a surface that looks live
+	 * and cannot work.
 	 */
 	type PanelShareState =
 		| { status: 'loading' }
@@ -63,8 +60,6 @@ the screen is emptied.
 
 	let shareState = $state<PanelShareState>({ status: 'loading' });
 	let grants = $state<AgentShareGrant[]>([]);
-	/** The mirror of the module's selection this page renders. */
-	let selected = $state<ActAsSelection | null>(null);
 
 	const scope = createSessionScope(sessionGeneration);
 	let controller: AbortController | null = null;
@@ -82,12 +77,12 @@ the screen is emptied.
 		session = 'anonymous';
 		shareState = { status: 'loading' };
 		grants = [];
-		selected = null;
 	}
 
 	/**
-	 * The candidates a row renders, drawn from lesser's answer only — revoked
-	 * grants are not selectable, however lesser chose to list them.
+	 * The grants this panel lists, drawn from lesser's answer only — a revoked
+	 * grant is not shown as one the viewer holds, however lesser chose to list
+	 * it.
 	 */
 	const candidates = $derived(actAsCandidates(grants));
 
@@ -110,17 +105,9 @@ the screen is emptied.
 				if (!scope.holds(stamp)) return;
 				grants = result;
 				shareState = { status: 'ready' };
-				reconcile();
 			})
 			.catch((error: unknown) => {
 				if (!scope.holds(stamp)) return;
-				if (error instanceof ShareClientError && error.status === 403) {
-					// lesser refused the share plane for this caller. A selection built
-					// on its grants is unsupported: the contract's REST forbidden
-					// spelling ends it here, the GraphQL one ends it on the review
-					// surfaces.
-					clearActAs();
-				}
 				if (error instanceof ShareClientError && error.status === 404) {
 					shareState = { status: 'unsupported' };
 					return;
@@ -135,41 +122,20 @@ the screen is emptied.
 			});
 	}
 
-	/**
-	 * THE DERIVATION, ENFORCED. The selection is only ever a value this list
-	 * served; a selection naming an agent the fresh list no longer contains was
-	 * made under a grant that has gone, so it is cleared rather than kept alive
-	 * by this panel's silence.
-	 */
-	function reconcile() {
-		selected = actAsSelection();
-		if (selected && !candidates.includes(selected.agentUsername)) {
-			clearActAs();
-			selected = null;
-		}
-	}
-
-	function choose(username: string) {
-		const selection = selectActAs(username);
-		if (selection) selected = selection;
-	}
-
-	function stop() {
-		clearActAs();
-		selected = null;
-	}
-
 	onMount(() => {
+		// Before the read, and not conditional on it: see the header. A selection
+		// can only be a leftover now, and a leftover must not outlive the panel
+		// that is the only place left to end it.
+		clearActAs();
+
 		openSession();
 
-		const unsubscribeActAs = onActAsChange((selection) => (selected = selection));
 		const unsubscribeSession = onSessionChange((change) => {
 			if (change === 'signed-out') closeSession();
 			else openSession();
 		});
 
 		return () => {
-			unsubscribeActAs();
 			unsubscribeSession();
 			controller?.abort();
 			scope.end();
@@ -179,10 +145,7 @@ the screen is emptied.
 
 {#if session === 'authenticated'}
 	<Panel title="Agents shared with you" headerLevel={2}>
-		<p class="contentus-act-as__lede">
-			You can act as these agents. The instance records who really acted — acting as an agent is
-			never silent.
-		</p>
+		<p class="contentus-act-as__lede">These agents have been shared with you by their owners.</p>
 
 		{#if shareState.status === 'loading'}
 			<p class="contentus-agents__notice">Reading the agents shared with you…</p>
@@ -195,31 +158,13 @@ the screen is emptied.
 		{:else}
 			<ul class="contentus-act-as__list">
 				{#each grants.filter((grant) => grant.active) as grant}
-					{@const isSelected = selected?.agentUsername === grant.agent_username}
-					<li
-						class="contentus-act-as__row"
-						class:contentus-act-as__row--selected={isSelected}
-					>
+					<li class="contentus-act-as__row">
 						<div class="contentus-act-as__agent">
 							<span class="contentus-act-as__handle">@{grant.agent_username}</span>
 							<span class="contentus-act-as__meta">
 								granted {new Date(grant.granted_at).toLocaleDateString()} by @{grant.granted_by}
 							</span>
 						</div>
-						{#if isSelected}
-							<span class="contentus-agent-pill contentus-agent-pill--success">Acting as</span>
-							<button class="contentus-act-as__stop-btn" type="button" onclick={stop}>
-								Stop acting as
-							</button>
-						{:else}
-							<button
-								class="contentus-act-as__select-btn"
-								type="button"
-								onclick={() => choose(grant.agent_username)}
-							>
-								Act as
-							</button>
-						{/if}
 					</li>
 				{/each}
 			</ul>

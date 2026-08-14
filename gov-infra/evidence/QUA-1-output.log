@@ -10,10 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-Loading svelte-check in workspace: /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
-Getting Svelte diagnostics...
-
-svelte-check found 0 errors and 0 warnings
+1786730377449 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786730377451 COMPLETED 878 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -22,12 +20,12 @@ vite v8.2.0 building client environment for production...
 [2Ktransforming...✓ 810 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-B9LL6ycF.js                712.48 kB │ gzip: 216.17 kB
+build/client/assets/entry-client-Dfx2A492.js                711.35 kB │ gzip: 215.92 kB
 
-✓ built in 1.07s
+✓ built in 1.06s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -41,15 +39,15 @@ vite v8.2.0 building ssr environment for production...
 [2Ktransforming...✓ 786 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,150.33 kB │ gzip: 277.38 kB
+build/server/handler.mjs  1,152.29 kB │ gzip: 278.24 kB
 
-✓ built in 996ms
+✓ built in 997ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 345802 bytes, 144 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 345200 bytes, 144 --tc-* definitions, integrity assertions passed
 brand assets: copied 13 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus

@@ -143,8 +143,11 @@ test('every interactive target in the face clears 44px', () => {
 		'.contentus-sharing__input',
 		'.contentus-sharing__grant-btn',
 		'.contentus-sharing__revoke-btn',
-		'.contentus-act-as__select-btn',
-		'.contentus-act-as__stop-btn',
+		// `.contentus-act-as__select-btn` and `.contentus-act-as__stop-btn` were
+		// here until M2.1 removed the act-as selection control they styled
+		// (equaltoai/contentus#92). They are absent from this list because the
+		// buttons are absent from the face, not because the floor was relaxed —
+		// `tests/agents-trust.test.mjs` is what holds them gone.
 	]) {
 		const block = new RegExp(`\\${selector}[^{]*\\{([^}]*)\\}`).exec(agentsCss)?.[1] ?? '';
 		assert.match(block, /min-height:\s*44px/, `${selector} must clear the 44px floor`);
