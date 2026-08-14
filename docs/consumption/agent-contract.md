@@ -211,6 +211,91 @@ inventing the answer to the one question the screen exists to ask. lesser's
 served order is kept within each half for the same reason — re-sorting by
 `revoked_at` would order the list by a field that is not always there.
 
+### Who has been driving the agent
+
+M2.4 (equaltoai/contentus#95). The companion question to the one above, and a
+different one: the grant ledger names the accounts that **could** reach the
+agent, this names the people who **actually did**. The operator's words were
+"knowing who was logged into MCP as it were".
+
+**There is no session index, upstream or here.** Operator directive,
+2026-08-13: _"I would not index who was logged into an MCP, but its important
+metadata."_ Attribution rides the audit trail lesser#1401 landed
+(`lesser` commit `a1ed548ea`): the agent stays in the audit row's `Username`
+and the human who authorized the token rides in the row's metadata. So this
+view answers who was connected **from what the agent did**, never from a record
+of anyone being connected — and `AgentDriversPanel`'s lede says exactly that,
+because a roster of names under a heading about being logged in reads as a list
+of live sessions, which is the thing that was deliberately not built.
+
+**The contentus-consumable surface is GraphQL**, so GraphQL-first applies with
+nothing to except it. Unlike the share grants — REST because lesser puts them
+on a management plane with no GraphQL spelling — the activity log is served
+both ways: `GET /api/v1/agents/{username}/activity`
+(`lesser/cmd/api/routes.go:180`) and the root field
+`agentActivity(username, first, after)` (`lesser/graph/agents.graphql:993`,
+present in the pinned schema). `activity-client.ts` uses the GraphQL one
+through the same transport as every other contentus read.
+
+**Owner-gated by lesser, and this client does not widen it.** The resolver
+requires a caller, requires `read` scope, and answers `Forbidden` unless the
+caller is the agent's owner, an admin, or the agent itself
+(`lesser/graph/agent_resolvers_stubs.go:376-395`). The panel mounts behind
+lesser's own `agent.owner` statement — the same gate as the sharing panel —
+and sends the owner's own token.
+
+**Two attribution keys, two mechanisms, and one row can carry both.**
+`delegated_by` is written from the token's `DelegatedBy` claim
+(`agent_audit.go:53`) and names the human who authorized the token — on a
+shared agent's MCP, the grantee who signed in. `acted_by` is written on the
+in-CMS act-as path (`agent_act_as.go:114`) and names that request's real
+caller. `statuses.go:126-127` hands the **same** metadata map to both writers
+in sequence, so the act-as row is marshalled with `delegated_by` already in it;
+where the two name different people both are real, so both are shown, labelled
+by mechanism rather than one being chosen. The keys are also spelled
+differently at the source — `acted_by` is a bare username, `delegated_by` has
+been through `normalizeDelegatedBy`, which prepends `@` (and prepends it to an
+actor-URL owner too) — so `driverLabel` decides the sigil, never the identity.
+
+**What this surface does not provide**, recorded so a later consumer does not
+render past a boundary it did not know about:
+
+- **No session identity.** The writer puts the agent's session in the audit
+  row's `SessionID` _column_, and `AgentActivityEvent` has no field for it —
+  the resolver reads `ID`, `EventType`, `Metadata` and `Timestamp` and nothing
+  else. This is the shape of the directive above, not a gap to route upstream.
+- **No login or token events.** The resolver keeps only event types prefixed
+  `agent.` (`agent_resolvers_stubs.go:449`), so the `auth.oauth.*` records —
+  token issued, refreshed, revoked — are filtered out server-side.
+- **No window control.** The range is fixed at 30 days before now
+  (`agent_resolvers_stubs.go:404`) with no argument to move it. The number is
+  deliberately **not** asserted on screen: it is a server constant this client
+  cannot read back, so putting it in the copy would be a claim that goes stale
+  silently the day lesser changes it. The panel says "the activity it keeps".
+- **`totalCount` is not a total.** The resolver assigns it `len(edges)` — the
+  size of the page it just built — so the document does not select it. The
+  honest count of one read is `edges.length`, and the boundary that matters is
+  `pageInfo.hasNextPage`, which is selected and surfaced as older actions this
+  view did not read.
+- **`metadataJson` arrives unvalidated.** lesser hands back the stored column
+  without parsing it (`agentActivityMetadataPtr`), so a value that will not
+  parse is a state the contract permits and is classified `unreadable`.
+
+**An empty roster is not an empty answer**, the M2.3 lesson on this surface.
+"Nobody has driven this agent" is lesser's own statement only when it recorded
+no actions at all. Actions that named no driver, and rows whose metadata could
+not be read, are counted apart and get their own sentences from
+`noDriverStatement` and `partialAttributionNotice` — composed beside the fold
+whose exclusions they describe, and probed there, never a certain sentence with
+a caveat bolted on.
+
+**No upstream ask is opened by this milestone.** Everything M2.4 needed was
+already reachable. Ask G in `docs/consumption/review-contract.md` remains open
+and is unaffected: it concerns `DraftReview.actedBy` on the **CMS review
+projection**, a different surface from the agent audit trail, and this view
+does not substitute for it — the review queue still shows no per-draft caller
+attribution.
+
 ### The tool catalog is the server's, not the agent's
 
 `mcp.json` lists what the MCP server exposes for the souled runtime profile. It
@@ -233,11 +318,18 @@ no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
 greater M6a will land vendored agent-roster and MCP-detail components. Face 6 is
 built so that lands at **three component boundaries** and nothing else moves.
 
-| Seam                                  | Owns (replaced with it)                           | Imported by                      |
-| ------------------------------------- | ------------------------------------------------- | -------------------------------- |
-| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentRosterFilters`, `MyAgents`     | `routes/Agents.svelte`           |
-| `src/lib/agents/AgentDetail.svelte`   | `AgentTrustDetail`, `AgentCapabilities`           | `routes/AgentDetailRoute.svelte` |
-| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering | `AgentDetail.svelte`             |
+| Seam                                  | Owns (replaced with it)                                                                                           | Imported by                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentDriversPanel`, `AgentRosterFilters`, `AgentSharedWithMePanel`, `AgentSharingPanel`, `MyAgents` | `routes/Agents.svelte`           |
+| `src/lib/agents/AgentDetail.svelte`   | `AgentTrustDetail`, `AgentCapabilities`                                                                           | `routes/AgentDetailRoute.svelte` |
+| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering                                                                 | `AgentDetail.svelte`             |
+
+The `Owns` column is `SEAMS` in `scripts/lib/agent-seams.mjs`, and it is
+reproduced here rather than summarized: this table listed three of the roster's
+components while the declaration named five, because the panels landed in M7,
+M2.2 and M2.3 and the prose did not follow them. A seam table that is a partial
+copy of the declaration is worse than none — it reads as the answer while the
+gate is checking something wider.
 
 `AgentTrustBadge` is **shared** on purpose: it is the one pill the roster card
 and the detail header both show, and greater's `AgentStateBadge` replaces it on
