@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { accessLedger, grantStamp } from '../src/lib/agents/share-view.ts';
+import {
+	accessLedger,
+	grantStamp,
+	noCurrentAccessStatement,
+	unclassifiedEntriesNotice,
+} from '../src/lib/agents/share-view.ts';
 
 /**
  * The owner's read of one agent's share list (M2.3, equaltoai/contentus#94).
@@ -95,6 +100,106 @@ test("the ledger keeps lesser's order within each side", () => {
 test('an empty answer is an empty ledger rather than an absent one', () => {
 	const ledger = accessLedger([]);
 	assert.deepEqual(ledger, { current: [], revoked: [], unreadable: [] });
+});
+
+/* -------------------------------------------------------------------------
+ * What the panel SAYS about the classification
+ *
+ * The split above decides which list a row lands in. These decide the two
+ * sentences that speak for the rows that landed in NEITHER — the counting
+ * notice, and the empty state of the current-access list. Both are copy, so no
+ * probe over the component tree catches a rewrite of them; they are composed in
+ * `share-view.ts` precisely so they can be called here.
+ * ---------------------------------------------------------------------- */
+
+/** A ledger with `count` entries lesser did not classify. */
+function ledgerWithUnreadable(count, rest = {}) {
+	return accessLedger([
+		...(rest.current ?? []),
+		...(rest.revoked ?? []),
+		...Array.from({ length: count }, (_, index) =>
+			grant({ active: undefined, grantee_username: `unmarked${index}` })
+		),
+	]);
+}
+
+test('the unclassified notice counts the entries lesser did not classify', () => {
+	assert.equal(
+		unclassifiedEntriesNotice(accessLedger([grant(), grant({ active: false })])),
+		null,
+		'a conforming answer says nothing, rather than saying zero'
+	);
+
+	const one = unclassifiedEntriesNotice(ledgerWithUnreadable(1));
+	assert.match(one, /one share entry/, 'one entry is a sentence, not a numeral');
+	assert.doesNotMatch(one, /\d/, 'and carries no digit at all');
+
+	// The count is of UNREADABLE entries, not of the answer: a notice that
+	// counted the whole list would tell an owner with three good grants and one
+	// unmarked row that the instance failed to classify four.
+	const three = unclassifiedEntriesNotice(
+		ledgerWithUnreadable(3, { current: [grant(), grant()], revoked: [grant({ active: false })] })
+	);
+	assert.match(three, /\b3 share entries\b/, 'and the plural counts only the unclassified rows');
+});
+
+test('the empty state states nobody holds access only when nothing was unclassified', () => {
+	assert.equal(
+		noCurrentAccessStatement('scribe', accessLedger([grant({ active: false })])),
+		'No account holds access to @scribe right now.',
+		'with every entry classified, an empty current list IS the instance’s answer'
+	);
+});
+
+test('the empty state does not claim nobody holds access while entries were unreadable', () => {
+	// THE FAILURE THIS HOLDS SHUT (equaltoai/contentus#100, codex review
+	// 4941340448): a 200 that drops `active` from a live grantee's row hides that
+	// row from both lists, and an empty state that still reads "no account holds
+	// access to @scribe" then tells the owner the OPPOSITE of the only claim that
+	// survives the malformed answer. The unclassified rows are exactly the ones
+	// that might be live grants, so this is the case where certainty is least
+	// available and most damaging.
+	const certain = noCurrentAccessStatement('scribe', accessLedger([]));
+
+	for (const count of [1, 2, 7]) {
+		const statement = noCurrentAccessStatement('scribe', ledgerWithUnreadable(count));
+
+		assert.notEqual(statement, certain, `${count} unclassified entries must change the claim`);
+		// A CAVEAT BOLTED ONTO A FALSE SENTENCE IS STILL THE FALSE SENTENCE, and is
+		// the likeliest shape of a careless fix — so the assertion is that the
+		// certain claim does not appear at all, not merely that something was
+		// appended after it.
+		assert.ok(
+			!statement.includes('No account holds access'),
+			`the certain claim must not survive as a clause: ${statement}`
+		);
+		assert.match(
+			statement,
+			/could not be determined/i,
+			'the empty state must say the access it could not determine'
+		);
+		assert.match(
+			statement,
+			count === 1 ? /\bone further entry\b/ : new RegExp(`\\b${count} further entries\\b`),
+			'and say how many entries it could not determine it for'
+		);
+		assert.match(statement, /@scribe/, 'while still naming the agent it is speaking about');
+	}
+});
+
+test('the empty state is a statement about classification, not about the revoked list', () => {
+	// Revoked entries are classified, so they neither soften nor harden the
+	// claim: an owner whose only grantee was revoked is told plainly that nobody
+	// holds access, and one with an unmarked row is not told that regardless of
+	// how much revoked history sits beside it.
+	const revokedOnly = accessLedger([grant({ active: false }), grant({ active: false })]);
+	assert.equal(
+		noCurrentAccessStatement('scribe', revokedOnly),
+		'No account holds access to @scribe right now.'
+	);
+
+	const withHistory = ledgerWithUnreadable(1, { revoked: [grant({ active: false })] });
+	assert.ok(!noCurrentAccessStatement('scribe', withHistory).includes('No account holds access'));
 });
 
 test('a stamp names when and who when lesser served both', () => {

@@ -74,7 +74,12 @@ capability is missing from the instance on this route's word.
 		ShareClientError,
 		type AgentShareGrant,
 	} from './share-client';
-	import { accessLedger, grantStamp } from './share-view';
+	import {
+		accessLedger,
+		grantStamp,
+		noCurrentAccessStatement,
+		unclassifiedEntriesNotice,
+	} from './share-view';
 
 	interface Props {
 		agent: AgentSummary;
@@ -113,20 +118,15 @@ capability is missing from the instance on this route's word.
 	const ledger = $derived(accessLedger(grants));
 
 	/**
-	 * The notice for entries lesser sent without saying whether they are active.
-	 *
-	 * Written as a whole sentence per count rather than assembled around a
-	 * number, because the two readings are different sentences and a screen that
-	 * says "sent 1 share entries" is a screen the owner stops trusting — on a
-	 * surface whose whole job is to be believed about who can reach their agent.
+	 * The two sentences this panel says ABOUT the classification rather than out
+	 * of it: the notice for entries lesser sent without saying whether they are
+	 * active, and what the current-access list's empty state may claim while any
+	 * such entry exists. Both are composed in `share-view.ts`, beside the
+	 * classifier whose exclusion they describe, so a probe can call them with a
+	 * ledger instead of reading them off the screen.
 	 */
-	const unclassifiedNotice = $derived.by(() => {
-		const count = ledger.unreadable.length;
-		if (!count) return null;
-		return count === 1
-			? 'This instance sent one share entry without marking it active or revoked, so neither list below accounts for it.'
-			: `This instance sent ${count} share entries without marking them active or revoked, so neither list below accounts for them.`;
-	});
+	const unclassifiedNotice = $derived(unclassifiedEntriesNotice(ledger));
+	const noAccessStatement = $derived(noCurrentAccessStatement(agent.username, ledger));
 
 	const scope = createSessionScope(sessionGeneration);
 	let loadController: AbortController | null = null;
@@ -366,9 +366,16 @@ capability is missing from the instance on this route's word.
 						{/each}
 					</ul>
 				{:else}
-					<p class="contentus-agents__notice">
-						No account holds access to @{agent.username} right now.
-					</p>
+					<!--
+						COMPOSED, never written here. An empty `current` list is only the
+						instance's "nobody holds access" when the instance classified
+						everything it sent; with an entry it did not classify, that
+						sentence is this client answering for lesser about the one row
+						that could be a live grant. `noCurrentAccessStatement` holds both
+						readings and a probe calls it, which a sentence sitting in this
+						branch could not be.
+					-->
+					<p class="contentus-agents__notice">{noAccessStatement}</p>
 				{/if}
 			</section>
 

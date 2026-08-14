@@ -72,6 +72,48 @@ export function accessLedger(grants: readonly AgentShareGrant[]): AgentAccessLed
 	return ledger;
 }
 
+/**
+ * What to say about entries lesser sent without classifying them, or null.
+ *
+ * Written as a whole sentence per count rather than assembled around a number,
+ * because the two readings are different sentences and a screen that says
+ * "sent 1 share entries" is a screen the owner stops trusting — on a surface
+ * whose whole job is to be believed about who can reach their agent.
+ */
+export function unclassifiedEntriesNotice(ledger: AgentAccessLedger): string | null {
+	const count = ledger.unreadable.length;
+	if (!count) return null;
+	return count === 1
+		? 'This instance sent one share entry without marking it active or revoked, so neither list below accounts for it.'
+		: `This instance sent ${count} share entries without marking them active or revoked, so neither list below accounts for them.`;
+}
+
+/**
+ * What the owner is told when the current-access list is empty.
+ *
+ * AN EMPTY LIST IS NOT ALWAYS AN EMPTY ANSWER, which is the whole of this
+ * function. With nothing unclassified, `current` being empty IS the instance's
+ * statement: no account holds access. With entries the instance did not
+ * classify, the same sentence would be this client answering a question lesser
+ * declined to answer — and the unclassified entries are precisely the ones that
+ * could be live grants, so a 200 that dropped `active` from a real grantee's
+ * row would both hide that row and tell the owner the opposite of the only
+ * claim that survives it (equaltoai/contentus#100, codex review 4941340448).
+ *
+ * So the empty state states what is known — nothing classified holds access —
+ * and names the entries whose access could not be determined, in the same
+ * exclusion the counting notice above the lists describes. It is never a
+ * softened version of the certain sentence with a caveat bolted on: "no account
+ * holds access" is a false statement here, and a caveat does not repair one.
+ */
+export function noCurrentAccessStatement(username: string, ledger: AgentAccessLedger): string {
+	const count = ledger.unreadable.length;
+	if (!count) return `No account holds access to @${username} right now.`;
+	return count === 1
+		? `No entry this instance classified holds access to @${username} right now. Access could not be determined for one further entry, so this is not a statement that nobody holds it.`
+		: `No entry this instance classified holds access to @${username} right now. Access could not be determined for ${count} further entries, so this is not a statement that nobody holds it.`;
+}
+
 /** A timestamp lesser served, or null when it served nothing usable. */
 function servedMoment(value: unknown): Date | null {
 	if (typeof value !== 'string' || !value.trim()) return null;

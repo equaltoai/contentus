@@ -1013,6 +1013,74 @@ test('neither grant list is keyed on a value lesser could repeat', () => {
 	}
 });
 
+test('the empty current-access state is composed, never written into the template', () => {
+	// THE DEFECT THIS CLOSES (equaltoai/contentus#100, codex review 4941340448):
+	// the branch held the sentence "No account holds access to @{username} right
+	// now", which is the instance's answer only when the instance classified
+	// everything it sent. With an entry it did not classify — the one case where
+	// a live grant can be missing from `ledger.current` — that sentence tells the
+	// owner the opposite of the only surviving claim.
+	//
+	// The wording lives in `noCurrentAccessStatement` and is asserted in
+	// `tests/agent-share-view.test.mjs`, where both readings can be CALLED. What
+	// this probe holds is the other half: that the screen keeps asking it. A
+	// sentence written back into this branch is the whole defect returning, and
+	// it would return with every unit test still green.
+	const ast = sharingPanelAst();
+	const branches = [];
+	for (const { node } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'IfBlock') continue;
+		const condition = node.test;
+		if (condition?.type !== 'MemberExpression' || condition.property?.name !== 'length') continue;
+		const list = condition.object;
+		if (list?.type !== 'MemberExpression') continue;
+		if (list.object?.name !== 'ledger' || list.property?.name !== 'current') continue;
+		branches.push(node);
+	}
+
+	assert.equal(branches.length, 1, 'the panel tests ledger.current.length exactly once');
+	const empty = branches[0].alternate;
+	assert.ok(empty, 'and answers the empty case rather than rendering nothing at all');
+
+	// Attribute values are `Text` too — a class name is not something the panel
+	// says to the owner, so what is collected is the text a reader would read.
+	const inAttribute = (ancestors) => ancestors.some((node) => node.type === 'Attribute');
+	const spoken = [];
+	const rendered = [];
+	for (const { node, ancestors } of walkTemplate(empty)) {
+		if (node.type === 'Text' && node.data?.trim() && !inAttribute(ancestors))
+			spoken.push(node.data.trim());
+		if (node.type === 'ExpressionTag' && !inAttribute(ancestors)) rendered.push(node.expression);
+	}
+
+	assert.deepEqual(
+		spoken,
+		[],
+		`the empty state must carry no literal copy — a claim about who holds access cannot be written where the unclassified count is not in hand: ${spoken.join(' / ')}`
+	);
+
+	// FOLLOWED BY NAME into the instance script, because the panel renders
+	// `$derived` values rather than calling into the template: what is asserted
+	// is that whatever this branch prints is bound to the classifier's statement,
+	// not merely that the module is imported somewhere in the file.
+	const sources = rendered.map((expression) => {
+		if (expression?.type === 'CallExpression') return expression.callee?.name ?? null;
+		if (expression?.type !== 'Identifier') return null;
+		for (const node of walkAst(ast.instance)) {
+			if (node.type !== 'VariableDeclarator') continue;
+			if (node.id?.name !== expression.name) continue;
+			if (callsFn(node.init, 'noCurrentAccessStatement')) return 'noCurrentAccessStatement';
+		}
+		return null;
+	});
+
+	assert.ok(rendered.length > 0, 'the empty state must render something');
+	assert.ok(
+		sources.every((source) => source === 'noCurrentAccessStatement'),
+		`every part of the empty state must come from the classifier’s own statement (src/lib/agents/share-view.ts), not from a value assembled here: ${JSON.stringify(sources)}`
+	);
+});
+
 test('only current grants are offered a revoke control', () => {
 	// A revoke button on an already-revoked row sends a call lesser answers by
 	// returning the grant unchanged — harmless on the wire, and a claim on the
