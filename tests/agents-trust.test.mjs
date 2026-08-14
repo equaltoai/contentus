@@ -995,6 +995,24 @@ test('current access and revoked access are rendered from separate lists', () =>
 	);
 });
 
+test('neither grant list is keyed on a value lesser could repeat', () => {
+	// Svelte throws `each_key_duplicate` on a repeated key, in production as
+	// well as in development. `grantee_username` is unique per lesser's storage
+	// — one row per (agent, grantee) — but this panel's stated promise is that a
+	// malformed 200 lands in `unavailable` rather than in a render-time throw,
+	// and a key is a place that promise can be broken by an edit that looks like
+	// a tidy-up. The rows hold no state, so keying buys nothing to weigh
+	// against it.
+	for (const { node } of walkTemplate(sharingPanelAst().fragment)) {
+		if (node.type !== 'EachBlock') continue;
+		assert.equal(
+			node.key ?? null,
+			null,
+			'the grant lists must stay unkeyed: a repeated key is a render-time throw on exactly the malformed answer this panel promises to survive'
+		);
+	}
+});
+
 test('only current grants are offered a revoke control', () => {
 	// A revoke button on an already-revoked row sends a call lesser answers by
 	// returning the grant unchanged — harmless on the wire, and a claim on the

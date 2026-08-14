@@ -286,7 +286,7 @@
       "tests/agents-mcp.test.mjs": "b27c0b29b5336f08d6a442fe69fc362118edba9442a8a47ed0d8182de0d30a35",
       "tests/agents-mobile.test.mjs": "3a29b0b13c62c6acc44ba7e8fc49b16a0cd5d4893738f44969beac4730e25e4e",
       "tests/agents-roster.test.mjs": "ccaf23ee8cd43e0475430fb7033499cd364849068871f89114b974fcc317919e",
-      "tests/agents-trust.test.mjs": "043ef3b37f2b2bff2b56949280047c39bdddd69db1455b70c5c8344a670a8d6a",
+      "tests/agents-trust.test.mjs": "366c5afacb2206145b27e34ed0b54bee6aa155b83b2c7abdb66a32dd9de21f32",
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
