@@ -177,6 +177,22 @@ revoked it would tell an owner someone's access is gone when it may not be.
 `accessLedger` (`src/lib/agents/share-view.ts`) is where that classification
 lives, and `tests/agent-share-view.test.mjs` exercises it directly.
 
+**The exclusion reaches the empty state, which is a claim like any other.** An
+empty current-access list is the instance's "nobody holds access" only when the
+instance classified everything it sent; while an unclassified entry exists, that
+same sentence answers for lesser about the one row that could be a live grant —
+a 200 that dropped `active` from a real grantee's row would hide the row _and_
+tell the owner the opposite of the only surviving claim
+(equaltoai/contentus#100, codex review 4941340448). So the empty state states
+what is known — nothing classified holds access — and names the entries whose
+access could not be determined, in the same exclusion the counting notice
+describes. A caveat appended to the certain sentence is not the fix and is
+probed against: `noCurrentAccessStatement` composes both readings beside the
+classifier, `tests/agent-share-view.test.mjs` calls them, and
+`tests/agents-trust.test.mjs` holds the panel to rendering that statement rather
+than a sentence written into the branch, where the unclassified count is not in
+hand.
+
 **The revoked list is not an event log, and says so on screen.** lesser keeps
 one row per grantee, and `RegrantAgentShareGrant` `Remove`s that row's
 `RevokedAt` and `RevokedBy`
