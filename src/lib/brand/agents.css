@@ -660,12 +660,46 @@
 	overflow-wrap: anywhere;
 }
 
-.contentus-sharing__granted {
+/* The `--granted` single stamp became `--audit` in M2.3
+   (equaltoai/contentus#94): a revoked row carries TWO stamps — who granted it
+   and who took it away — so the slot is a column rather than one line, and a
+   class named for the grant alone would name half of what sits in it. */
+
+.contentus-sharing__audit {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-1);
 	/* Sits beside the grantee and before the revoke control, which is pushed to
 	   the far edge by the auto margin. */
 	margin-right: auto;
+	min-width: 0;
+}
+
+.contentus-sharing__stamp {
 	color: var(--tc-fg-muted);
 	font-size: 0.8125rem;
+	overflow-wrap: anywhere;
+}
+
+.contentus-sharing__section + .contentus-sharing__section {
+	margin-top: var(--tc-space-5);
+}
+
+.contentus-sharing__subheading {
+	margin: 0 0 var(--tc-space-2);
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-sharing__note {
+	margin: 0 0 var(--tc-space-3);
+	color: var(--tc-fg-muted);
+	font-size: 0.8125rem;
+	line-height: 1.6;
+	max-width: 70ch;
 }
 
 .contentus-sharing__revoke-btn {
