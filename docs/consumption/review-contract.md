@@ -301,6 +301,20 @@ themselves, `Draft.actedBy` stays owner-only to them, and the banner has no
 selection to announce. The owner's own view is unchanged and still shows who
 drove their draft, which is the attribution the milestone exists to provide.
 
+**Why that is true of an upgraded session too, and not only a new one.** The
+selection lives in `sessionStorage`, so removing the control does not reach the
+grantee who already used it — and the review surfaces, not the agents route, are
+where a selection is spent. Two mechanisms close it, each mutation-tested:
+nothing can START a selection (`selectActAs` is the only writer, and no tracked
+module under `src/` calls it — held repository-wide by
+`tests/agents-trust.test.mjs`), and a selection an earlier build stored is ENDED
+before it can be read — `cms/review-transport.ts` clears it when the module
+loads, which on `/review` is before any operation runs and before any surface
+mounts, and `ActAsBanner` and the shared-with-me panel each clear it at mount as
+the consumer boundaries they are. A grantee who loads `/review` directly after
+upgrading therefore reads as themselves on the first request, not after a visit
+to `/agents`.
+
 What that leaves is precisely this ask. A grantee-facing review surface has no
 caller attribution at all now, and cannot acquire one by acting as anybody —
 the workaround that partially covered the gap is the thing that was wrong.

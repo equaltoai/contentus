@@ -244,6 +244,16 @@ What that changes in the plan above:
 - **Item 7** ("Shared with me" panel + act-as selector). The panel stays; the
   selector is gone. `AgentSharedWithMePanel` is a grant list, and it clears any
   selection stored before the removal when it mounts.
+- **A selection stored before the removal is ended wherever it would be spent,
+  not only where it was made** (codex review 4939834145 on PR #98, finding 1).
+  The selection is in `sessionStorage` and the review surfaces are where it is
+  spent, so clearing it on the agents route left a grantee who loads `/review`
+  directly still acting as the agent after upgrading. `cms/review-transport.ts`
+  now clears it on module load — before either of its act-as read sites can run,
+  and before any surface mounts — and `ActAsBanner` clears it at mount as the
+  other consumer. With `selectActAs` having no caller in any tracked module
+  under `src/`, nothing starts a selection and nothing an earlier build started
+  survives to be read.
 - **The install-verification checklist** in the roadmap section still names
   "act-as verdict/publish" as a step to walk. That step is no longer reachable
   from this client and is not part of M2.1's proof. What M2.1 is verified by is
