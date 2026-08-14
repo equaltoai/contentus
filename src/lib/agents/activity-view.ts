@@ -40,6 +40,35 @@
  * people they are both real and neither is a correction of the other, so this
  * module keeps both rather than choosing.
  *
+ * ON THE SHIPPED ACT-AS PATH THE TWO KEYS ARE ONE PERSON, and reading them as
+ * two was this module's defect (codex review 4941720248 on
+ * equaltoai/contentus#101). `ResolveActAs` does not receive a caller identity
+ * from anywhere — it DERIVES one from the same claim the other writer used:
+ *
+ *     human  := strings.TrimSpace(claims.DelegatedBy)      // → delegated_by
+ *     caller := strings.ToLower(strings.TrimPrefix(human, "@"))
+ *     return &ActAsResolution{AgentUsername: agent, ActedBy: caller}
+ *     (`lesser/pkg/auth/agent_act_as.go:79-111`)
+ *
+ * so on every dual-key row lesser actually writes, `acted_by` is `delegated_by`
+ * with the sigil stripped and the case folded — ONE human in two spellings, not
+ * two humans. lesser's own round test pins the pair: an agent-subject token with
+ * `DelegatedBy: "@alice"` plus `X-Lesser-Act-As` writes
+ * `{"delegated_by":"@alice","acted_by":"alice",…}`
+ * (`lesser/cmd/api/handlers/agent_act_as_round_test.go:157-193`). Rendering that
+ * row's drivers unmerged printed "@alice and @alice" and counted one action
+ * twice. So a dual-key row naming ONE identity yields ONE driver, and the two
+ * are kept apart only when they genuinely name two people — a state the shipped
+ * path cannot reach but the contract permits, since `metadataJson` is an
+ * unvalidated column any writer may have filled.
+ *
+ * IDENTITY IS COMPARED CASE-INSENSITIVELY BECAUSE LESSER SPELLS IT BOTH WAYS.
+ * `resolveAgentClaims` keeps the stored owner form "byte-for-byte"
+ * (`lesser/pkg/auth/oauth.go:595-599`) while `ActedBy` is `ToLower`ed, so the
+ * same human reaches this client as `@Alice` and `alice` on one row. Folding
+ * case is lesser's own rule for these values, not a liberty taken here: every
+ * identity comparison in `pkg/auth/agent_owner.go` is `strings.EqualFold`.
+ *
  * NOTHING HERE FILLS A BLANK. An action lesser recorded without naming a driver
  * is `unnamed`, never "the owner" — the owner is the likeliest driver and that
  * is exactly why guessing it would be believed. Metadata that will not parse is
@@ -134,6 +163,24 @@ export function driverLabel(value: unknown): string | null {
 	return core.includes('://') ? core : `@${core}`;
 }
 
+/**
+ * The identity two labels share, or do not — the key one human folds under.
+ *
+ * SEPARATE FROM THE LABEL BECAUSE THE SPELLING IS NOT THE IDENTITY. `driverLabel`
+ * settles the sigil; this settles the case, which lesser varies on the same
+ * person within a single row (`@Alice` from the byte-for-byte owner form,
+ * `alice` from the `ToLower`ed `ActedBy`). Comparing labels directly split one
+ * driver into two roster lines and counted their actions apart.
+ *
+ * `toLowerCase` rather than `toLocaleLowerCase`: this must fold the way lesser's
+ * `strings.ToLower` folded when it wrote the value, which is locale-independent.
+ * A key that changed with the reader's locale would fold two identities together
+ * on one machine and not on another.
+ */
+export function driverKey(label: string): string {
+	return label.toLowerCase();
+}
+
 /** A timestamp lesser served, or null when it served nothing usable. */
 function servedMoment(value: unknown): Date | null {
 	if (typeof value !== 'string' || !value.trim()) return null;
@@ -185,9 +232,34 @@ export function actionDrivers(metadataJson: unknown): {
 	// `delegated_by` first: it is the MCP driver, which is what this view is
 	// about, and on a row carrying both it is the one that answers the heading.
 	const delegated = driverLabel(fields['delegated_by']);
-	if (delegated) drivers.push({ label: delegated, mechanism: 'mcp' });
 	const acted = driverLabel(fields['acted_by']);
-	if (acted) drivers.push({ label: acted, mechanism: 'act-as' });
+
+	if (delegated && acted && driverKey(delegated) === driverKey(acted)) {
+		// ONE HUMAN, TWO SPELLINGS — the shipped act-as row. It is merged HERE, in
+		// the reader, because this is the only place that knows the two keys came
+		// off ONE row: by the time `driverLedger` sees them they are two entries
+		// among many and merging would have to guess which pair shared a row.
+		// Merging here also settles both symptoms at once, since the per-action
+		// "by …" line and the roster count both read this array.
+		//
+		// THE MECHANISM IS `act-as`, WHICH IS THE ONE THE ROW ACTUALLY RECORDS.
+		// `acted_by` is written only by `recordActAsAuditEvent`, which fires only
+		// on a validated `X-Lesser-Act-As` request, so the act-as channel is
+		// certain. `delegated_by` is on this row because the map was shared, and
+		// it carries a claim EVERY agent token holds whatever channel it came
+		// through — so it is not evidence of an MCP sign-in, and labelling this
+		// action as one would invent a connection that did not happen. Nothing is
+		// lost: a real MCP action writes a `delegated_by`-only row, which still
+		// contributes `mcp` to this driver in the fold.
+		//
+		// The label kept is `delegated_by`'s. It is the form the instance stores
+		// for that human, and keeping it folds this row together with their
+		// `delegated_by`-only rows rather than beside them.
+		drivers.push({ label: delegated, mechanism: 'act-as' });
+	} else {
+		if (delegated) drivers.push({ label: delegated, mechanism: 'mcp' });
+		if (acted) drivers.push({ label: acted, mechanism: 'act-as' });
+	}
 
 	return { drivers, attribution: drivers.length ? 'named' : 'unnamed' };
 }
@@ -229,16 +301,24 @@ export function toAgentAction(node: unknown): AgentAction | null {
  * established may be absent — the same trap `share-view.ts` refused when it
  * declined to sort the grant list by `revoked_at`.
  *
- * A DRIVER'S COUNT IS ACTIONS THAT NAME THEM, not actions they performed, and
- * the two differ on exactly the rows that carry both keys. The panel's wording
- * follows this function rather than the other way round.
+ * A DRIVER'S COUNT IS ACTIONS THAT NAME THEM, not actions they performed. Those
+ * differed on every dual-key row until the reader stopped counting one human
+ * twice; they still differ wherever a row genuinely names two people.
+ *
+ * THE FOLD KEYS ON IDENTITY, NOT ON SPELLING, which is the cross-row half of the
+ * defect `actionDrivers` fixes within one row. lesser writes the same human as
+ * `@Alice` on a delegated-token row and as `alice` on an act-as-only row
+ * (`interactions.go:349`, `misc.go:1806` pass no shared map, so those rows carry
+ * `acted_by` alone), and keying on the label put one person on two roster lines
+ * with their actions split between them. The label DISPLAYED is the first one
+ * encountered: newest-first order makes that their most recent spelling.
  */
 export function driverLedger(
 	nodes: readonly unknown[],
 	options: { more?: boolean } = {}
 ): AgentDriverLedger {
 	const actions: AgentAction[] = [];
-	const byLabel = new Map<string, AgentDriverSummary>();
+	const byIdentity = new Map<string, AgentDriverSummary>();
 	let unnamed = 0;
 	let unreadable = 0;
 
@@ -251,9 +331,9 @@ export function driverLedger(
 		else if (parsed.attribution === 'unreadable') unreadable += 1;
 
 		for (const driver of parsed.drivers) {
-			const existing = byLabel.get(driver.label);
+			const existing = byIdentity.get(driverKey(driver.label));
 			if (!existing) {
-				byLabel.set(driver.label, {
+				byIdentity.set(driverKey(driver.label), {
 					label: driver.label,
 					mechanisms: [driver.mechanism],
 					actions: 1,
@@ -273,7 +353,7 @@ export function driverLedger(
 	}
 
 	return {
-		drivers: [...byLabel.values()],
+		drivers: [...byIdentity.values()],
 		actions,
 		unnamed,
 		unreadable,

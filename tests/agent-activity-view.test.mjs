@@ -16,6 +16,7 @@ import { test } from 'node:test';
 
 import {
 	actionDrivers,
+	driverKey,
 	driverLabel,
 	driverLedger,
 	driverStamp,
@@ -88,10 +89,48 @@ test('delegated_by is the MCP driver and acted_by is the act-as one', () => {
 	});
 });
 
-test('a row carrying both keys keeps both, MCP first', () => {
-	// lesser's statuses.go passes ONE metadata map to both writers in sequence,
-	// so the act-as row is marshalled with delegated_by already in it. Choosing
-	// one would drop a real person from an owner's view of who drove the agent.
+test('the shipped dual-key row is one human, named once', () => {
+	// THE ROW LESSER ACTUALLY WRITES, copied from its own round test
+	// (agent_act_as_round_test.go:157-193): an agent-subject token with
+	// DelegatedBy "@alice" plus X-Lesser-Act-As. `statuses.go:126-127` hands ONE
+	// map to both writers, and `ResolveActAs` derives ActedBy FROM DelegatedBy
+	// (agent_act_as.go:79-111) — so both keys are alice, and reading them as two
+	// printed "@alice and @alice" and counted one action twice.
+	const { drivers, attribution } = actionDrivers(
+		JSON.stringify({
+			delegated_by: '@alice',
+			acted_by: 'alice',
+			agent_username: 'agent-one',
+			target_id: 's-act-as-1',
+		})
+	);
+	assert.equal(attribution, 'named');
+	// act-as, not mcp: only recordActAsAuditEvent writes acted_by and only a
+	// validated X-Lesser-Act-As request reaches it, so that channel is certain,
+	// while delegated_by rides every agent token whatever channel it came over.
+	assert.deepEqual(drivers, [{ label: '@alice', mechanism: 'act-as' }]);
+	// The rendered "by" line the panel builds off this array.
+	assert.equal(drivers.map((driver) => driver.label).join(' and '), '@alice');
+});
+
+test('one human in lessers two spellings is still one driver, counted once', () => {
+	// resolveAgentClaims keeps the stored owner form byte-for-byte
+	// (oauth.go:595-599) while ActedBy is ToLower'ed, so one row carries @Alice
+	// and alice. Comparing labels rather than identities split the roster in two.
+	const ledger = driverLedger([
+		node({ metadataJson: JSON.stringify({ delegated_by: '@Alice', acted_by: 'alice' }) }),
+	]);
+	assert.deepEqual(
+		ledger.drivers.map((driver) => [driver.label, driver.actions, driver.mechanisms]),
+		[['@Alice', 1, ['act-as']]]
+	);
+});
+
+test('a row naming two different people keeps both, MCP first', () => {
+	// The shipped path cannot reach this — ActedBy is derived from DelegatedBy —
+	// but metadataJson is an unvalidated column and another writer may have
+	// filled it, so two names stay two people. Merging on the mere presence of
+	// both keys would drop a real driver from the owner's view.
 	const { drivers, attribution } = actionDrivers(
 		JSON.stringify({ delegated_by: '@ada', acted_by: 'bob' })
 	);
@@ -100,6 +139,7 @@ test('a row carrying both keys keeps both, MCP first', () => {
 		{ label: '@ada', mechanism: 'mcp' },
 		{ label: '@bob', mechanism: 'act-as' },
 	]);
+	assert.equal(drivers.map((driver) => driver.label).join(' and '), '@ada and @bob');
 });
 
 test('metadata that will not parse is unreadable, not driverless', () => {
@@ -214,6 +254,33 @@ test('a driver named through both mechanisms records both, once each', () => {
 	]);
 	assert.deepEqual(ledger.drivers[0].mechanisms, ['mcp', 'act-as']);
 	assert.equal(ledger.drivers[0].actions, 3);
+});
+
+test('the same human spelled two ways across rows folds into one roster line', () => {
+	// The cross-row half of the same defect. An act-as-only row (interactions.go
+	// and misc.go pass no shared map, so those carry acted_by alone) is ToLower'ed
+	// while the delegated-token row keeps the owner form, and keying the fold on
+	// the label put one person on two lines with their actions split.
+	const ledger = driverLedger([
+		node({ eventId: 'e1', metadataJson: JSON.stringify({ delegated_by: '@Alice' }) }),
+		node({ eventId: 'e2', metadataJson: JSON.stringify({ acted_by: 'alice' }) }),
+	]);
+	assert.equal(ledger.drivers.length, 1);
+	// First encountered wins, and newest-first order makes that the most recent
+	// spelling rather than an arbitrary one.
+	assert.equal(ledger.drivers[0].label, '@Alice');
+	assert.equal(ledger.drivers[0].actions, 2);
+	assert.deepEqual(ledger.drivers[0].mechanisms, ['mcp', 'act-as']);
+});
+
+test('the identity key folds case but is not the display label', () => {
+	assert.equal(driverKey('@Alice'), driverKey('@alice'));
+	assert.notEqual(driverKey('@ada'), driverKey('@bob'));
+	// It keys the URL form too, which normalizeDelegatedBy also produces.
+	assert.equal(
+		driverKey('https://Instance.example/users/Ada'),
+		driverKey('https://instance.example/users/ada')
+	);
 });
 
 test('unnamed and unreadable rows are counted apart and neither becomes a driver', () => {

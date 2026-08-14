@@ -250,12 +250,42 @@ and sends the owner's own token.
 shared agent's MCP, the grantee who signed in. `acted_by` is written on the
 in-CMS act-as path (`agent_act_as.go:114`) and names that request's real
 caller. `statuses.go:126-127` hands the **same** metadata map to both writers
-in sequence, so the act-as row is marshalled with `delegated_by` already in it;
-where the two name different people both are real, so both are shown, labelled
-by mechanism rather than one being chosen. The keys are also spelled
+in sequence, so the act-as row is marshalled with `delegated_by` already in it.
+
+**On the shipped path a dual-key row names one human, not two**, and reading it
+as two was this client's defect (codex review 4941720248 on PR #101).
+`ResolveActAs` is handed no caller identity; it **derives** one from the same
+claim the other writer used — `caller := ToLower(TrimPrefix(claims.DelegatedBy,
+"@"))`, returned as `ActedBy` (`pkg/auth/agent_act_as.go:79-111`). So on every
+dual-key row lesser writes, `acted_by` _is_ `delegated_by` with the sigil
+stripped and the case folded. lesser's own round test pins the pair: an
+agent-subject token with `DelegatedBy: "@alice"` plus `X-Lesser-Act-As` writes
+`{"delegated_by":"@alice","acted_by":"alice",…}`
+(`agent_act_as_round_test.go:157-193`). Rendering that unmerged printed
+"@alice and @alice" and counted one action twice.
+
+`actionDrivers` therefore merges the two keys when they name one identity, and
+keeps them apart only when they genuinely name two people — a state the shipped
+path cannot reach, but `metadataJson` is an unvalidated column any writer may
+have filled, so two names stay two people. The merged row is labelled `act-as`:
+only `recordActAsAuditEvent` writes `acted_by` and only a validated
+`X-Lesser-Act-As` request reaches it, so that channel is certain, while
+`delegated_by` rides every agent token whatever channel it came over and is not
+evidence of an MCP sign-in. Nothing is lost — a real MCP action writes a
+`delegated_by`-only row, which still contributes `mcp` to that driver.
+
+**The identity is compared case-insensitively, because lesser spells it both
+ways.** `resolveAgentClaims` keeps the stored owner form "byte-for-byte"
+(`pkg/auth/oauth.go:595-599`) while `ActedBy` is `ToLower`ed, so the same human
+reaches this client as `@Alice` and `alice` — within one row, and across rows
+(`interactions.go:349` and `misc.go:1806` pass no shared map, so those carry
+`acted_by` alone). Folding case is lesser's own rule for these values, not a
+liberty taken here: every identity comparison in `pkg/auth/agent_owner.go` is
+`strings.EqualFold`. `driverLabel` decides the **sigil**, `driverKey` decides
+the **identity**, and neither decides who the person is: the keys are spelled
 differently at the source — `acted_by` is a bare username, `delegated_by` has
 been through `normalizeDelegatedBy`, which prepends `@` (and prepends it to an
-actor-URL owner too) — so `driverLabel` decides the sigil, never the identity.
+actor-URL owner too) — and an unrecognizable value is still shown as it arrived.
 
 **What this surface does not provide**, recorded so a later consumer does not
 render past a boundary it did not know about:

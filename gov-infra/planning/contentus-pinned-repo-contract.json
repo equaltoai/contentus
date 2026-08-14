@@ -282,7 +282,7 @@
       "tests/act-as-banner.test.mjs": "72f6ed24c3ea6e0795528c15d244e6f0b8dd72bb9bc360e687482cfcb1d35274",
       "tests/agent-act-as.test.mjs": "9698b1cb3ac036b534ea5d153fac77dbcf19e6ebdba0290eee6838163b036327",
       "tests/agent-activity-client.test.mjs": "8b1a7d867906eafd064ea44f4c35dcee551b4582651501b445a1c58b9369e558",
-      "tests/agent-activity-view.test.mjs": "33fd65137a1444b404319784aa26cf77795a00f7d1b9fbe180d04b942c754093",
+      "tests/agent-activity-view.test.mjs": "167da212dd3e4cb7a769f1f39d66eebb9dc2aedd69711066a4984691cae95200",
       "tests/agent-share-client.test.mjs": "80e1a01a1c2fc2d06ee29508e8cf2eb163b1f51a8ae8e2449ae41fa32b4c442e",
       "tests/agent-share-view.test.mjs": "72e4c70897f0d9dc18b9f6b975c2d94f9d5d7925338464d96eac732b17b45d32",
       "tests/agents-mcp.test.mjs": "b27c0b29b5336f08d6a442fe69fc362118edba9442a8a47ed0d8182de0d30a35",
