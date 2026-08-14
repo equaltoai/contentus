@@ -10,6 +10,23 @@ not bend for it (see the CMS-consumption audit). The panel never derives who
 may grant what — lesser answers each call with a status, and the panel reports
 the answer.
 
+WHO HOLDS ACCESS, AND WHO HELD IT (M2.3, equaltoai/contentus#94). The list
+`GET /api/v1/agents/{username}/share` returns is the OWNER/ADMIN view, and it
+is the only read on this contract that carries revoked entries at all — lesser
+authorizes the owner first and answers everyone else `ErrNotAuthorized`, while
+the grantee's `shared-with-me` list filters revoked rows out at the index. So
+the audit half below is owner-only by lesser's construction. This panel shows
+both halves apart and shows each entry's audit stamps — who granted it and
+when, who revoked it and when — because "@ada was granted access" and "@ada's
+access was taken away, by @bob, in March" are different facts, and one list
+with a pill on some rows left the owner to do that reading themselves.
+
+WHAT THE REVOKED LIST IS NOT: every revocation there has ever been. lesser
+keeps ONE ROW PER GRANTEE and a re-grant clears that row's revocation, so this
+is where each account's access STANDS. The event sequence is the agent
+activity log, a different record; `share-view.ts` carries the full statement
+and the section says so on screen.
+
 WHAT THE OWNER IS ACTUALLY HANDING OVER, said in the lede because this is the
 screen where they decide to hand it over (M2.2, equaltoai/contentus#93). A
 grant conveys ACCESS TO THE AGENT'S MCP: the grantee signs into that agent's
@@ -57,6 +74,12 @@ capability is missing from the instance on this route's word.
 		ShareClientError,
 		type AgentShareGrant,
 	} from './share-client';
+	import {
+		accessLedger,
+		grantStamp,
+		noCurrentAccessStatement,
+		unclassifiedEntriesNotice,
+	} from './share-view';
 
 	interface Props {
 		agent: AgentSummary;
@@ -86,6 +109,24 @@ capability is missing from the instance on this route's word.
 	let grantee = $state('');
 	let actionInFlight = $state(false);
 	let actionError = $state<string | null>(null);
+
+	/**
+	 * lesser's answer, split by lesser's own `active` boolean — who holds access
+	 * now, whose access stands revoked, and (against a conforming instance,
+	 * never) entries it did not classify either way.
+	 */
+	const ledger = $derived(accessLedger(grants));
+
+	/**
+	 * The two sentences this panel says ABOUT the classification rather than out
+	 * of it: the notice for entries lesser sent without saying whether they are
+	 * active, and what the current-access list's empty state may claim while any
+	 * such entry exists. Both are composed in `share-view.ts`, beside the
+	 * classifier whose exclusion they describe, so a probe can call them with a
+	 * ledger instead of reading them off the screen.
+	 */
+	const unclassifiedNotice = $derived(unclassifiedEntriesNotice(ledger));
+	const noAccessStatement = $derived(noCurrentAccessStatement(agent.username, ledger));
 
 	const scope = createSessionScope(sessionGeneration);
 	let loadController: AbortController | null = null;
@@ -281,15 +322,38 @@ capability is missing from the instance on this route's word.
 				<p class="contentus-sharing__error" role="status">{actionError}</p>
 			{/if}
 
-			{#if grants.length}
-				<ul class="contentus-sharing__grants">
-					{#each grants as grant}
-						<li class="contentus-sharing__grant">
-							<span class="contentus-sharing__grantee">@{grant.grantee_username}</span>
-							<span class="contentus-sharing__granted">
-								granted {new Date(grant.granted_at).toLocaleDateString()}
-							</span>
-							{#if grant.active}
+			{#if unclassifiedNotice}
+				<p class="contentus-agents__notice">{unclassifiedNotice}</p>
+			{/if}
+
+			<section class="contentus-sharing__section">
+				<h3 class="contentus-sharing__subheading">Who has access now</h3>
+				{#if ledger.current.length}
+					<!--
+						UNKEYED, deliberately, in both lists. The rows hold no state of their
+						own — every span and the button's handler derive from `grant` — so
+						keying buys nothing here, and `grantee_username` is not a key this
+						component may assume is unique: it is unique per lesser's storage, and
+						a malformed 200 is exactly what this panel promises to survive. Svelte
+						throws `each_key_duplicate` on a repeated key, in the production build
+						as well as in development, which would be the render-time crash
+						`grantsFrom` exists to keep this panel out of.
+					-->
+					<ul class="contentus-sharing__grants">
+						{#each ledger.current as grant}
+							<li class="contentus-sharing__grant">
+								<span class="contentus-sharing__grantee">@{grant.grantee_username}</span>
+								<span class="contentus-sharing__audit">
+									<!--
+										The stamp is composed by `grantStamp`, which drops a clause
+										lesser did not serve rather than filling it. Who granted this
+										account access is the question the screen exists to answer,
+										so it is the last place to answer it with a placeholder.
+									-->
+									<span class="contentus-sharing__stamp">
+										{grantStamp('granted', grant.granted_at, grant.granted_by)}
+									</span>
+								</span>
 								<button
 									class="contentus-sharing__revoke-btn"
 									type="button"
@@ -298,14 +362,49 @@ capability is missing from the instance on this route's word.
 								>
 									Revoke
 								</button>
-							{:else}
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<!--
+						COMPOSED, never written here. An empty `current` list is only the
+						instance's "nobody holds access" when the instance classified
+						everything it sent; with an entry it did not classify, that
+						sentence is this client answering for lesser about the one row
+						that could be a live grant. `noCurrentAccessStatement` holds both
+						readings and a probe calls it, which a sentence sitting in this
+						branch could not be.
+					-->
+					<p class="contentus-agents__notice">{noAccessStatement}</p>
+				{/if}
+			</section>
+
+			{#if ledger.revoked.length}
+				<section class="contentus-sharing__section">
+					<h3 class="contentus-sharing__subheading">Access that was revoked</h3>
+					<p class="contentus-sharing__note">
+						One entry per account, showing where its access stands now. Granting a revoked
+						account again moves it back to the list above rather than adding a line here, so
+						this is not the full sequence of grants and revocations — that sequence is this
+						instance's agent activity log, which is a separate record.
+					</p>
+					<ul class="contentus-sharing__grants">
+						{#each ledger.revoked as grant}
+							<li class="contentus-sharing__grant">
+								<span class="contentus-sharing__grantee">@{grant.grantee_username}</span>
+								<span class="contentus-sharing__audit">
+									<span class="contentus-sharing__stamp">
+										{grantStamp('granted', grant.granted_at, grant.granted_by)}
+									</span>
+									<span class="contentus-sharing__stamp">
+										{grantStamp('revoked', grant.revoked_at, grant.revoked_by)}
+									</span>
+								</span>
 								<span class="contentus-agent-pill contentus-agent-pill--neutral">Revoked</span>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{:else}
-				<p class="contentus-agents__notice">No account has access to this agent yet.</p>
+							</li>
+						{/each}
+					</ul>
+				</section>
 			{/if}
 		{/if}
 	</Panel>

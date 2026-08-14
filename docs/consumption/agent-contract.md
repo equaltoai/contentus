@@ -148,6 +148,69 @@ bundle. It deliberately does not reuse `CopyBlock`: that component sits behind
 the `AgentMcpPanel` seam (`scripts/lib/agent-seams.mjs`), and greater M6a
 replacing that panel must not orphan the grantee's list.
 
+### Who holds access, and who held it
+
+`GET /api/v1/agents/{username}/share` is lesser's **owner/admin view**, and it is
+the only read on this contract that carries revoked entries at all.
+`ListByAgent` runs `authorizeAgentOwner` before it reads anything and answers
+everyone else `ErrNotAuthorized`
+(`lesser/pkg/services/agentshare/service.go:142-149, 201-225`); the route sits
+behind `requireManageAgents` and `authenticateAgentOwner` on top of that
+(`lesser/cmd/api/routes.go:173`). The grantee-facing `shared-with-me` list is a
+different index with `RevokedAt attribute_not_exists` filtered in at the query.
+So the audit half is owner-only by lesser's construction, and no arrangement of
+this client widens or narrows it.
+
+What contentus owes is not to widen the READER. The one call site is
+`AgentSharingPanel`, which `MyAgents` mounts only behind lesser's `agent.owner`
+statement, and `tests/agents-trust.test.mjs` sweeps tracked source to assert
+`listShareGrants` has no second caller.
+
+The panel shows the two halves apart — **who has access now**, and **access that
+was revoked** — with each entry's audit stamps: `granted_at`/`granted_by` on
+both sides, `revoked_at`/`revoked_by` on the revoked one. The split is lesser's
+own `active` boolean (`RevokedAt == nil`, computed server-side), never a
+re-derivation from the timestamps, and an entry that arrives without that
+boolean is placed on **neither** side and counted in a notice: filed under
+current it would claim access the instance never confirmed, and filed under
+revoked it would tell an owner someone's access is gone when it may not be.
+`accessLedger` (`src/lib/agents/share-view.ts`) is where that classification
+lives, and `tests/agent-share-view.test.mjs` exercises it directly.
+
+**The exclusion reaches the empty state, which is a claim like any other.** An
+empty current-access list is the instance's "nobody holds access" only when the
+instance classified everything it sent; while an unclassified entry exists, that
+same sentence answers for lesser about the one row that could be a live grant —
+a 200 that dropped `active` from a real grantee's row would hide the row _and_
+tell the owner the opposite of the only surviving claim
+(equaltoai/contentus#100, codex review 4941340448). So the empty state states
+what is known — nothing classified holds access — and names the entries whose
+access could not be determined, in the same exclusion the counting notice
+describes. A caveat appended to the certain sentence is not the fix and is
+probed against: `noCurrentAccessStatement` composes both readings beside the
+classifier, `tests/agent-share-view.test.mjs` calls them, and
+`tests/agents-trust.test.mjs` holds the panel to rendering that statement rather
+than a sentence written into the branch, where the unclassified count is not in
+hand.
+
+**The revoked list is not an event log, and says so on screen.** lesser keeps
+one row per grantee, and `RegrantAgentShareGrant` `Remove`s that row's
+`RevokedAt` and `RevokedBy`
+(`lesser/pkg/storage/repositories/agent_share_repository.go:45-75`) — so
+granting a revoked account again erases the revocation it followed. What the
+list shows is where each account's access **stands**. The event-by-event
+sequence is the agent activity log lesser writes beside each mutation
+(`agent.share.grant`, `agent.share.revoke`, `service.go:227-259`), a different
+read on a different surface, and M2.4's rather than this one's.
+
+An audit stamp **drops a clause lesser did not serve rather than filling it**.
+`revoked_by` is optional in the vendored contract and `revoked_at` is nullable,
+so `grantStamp` composes from what arrived and degrades to the verb alone;
+"by unknown", or the owner's own name standing in, would be this client
+inventing the answer to the one question the screen exists to ask. lesser's
+served order is kept within each half for the same reason — re-sorting by
+`revoked_at` would order the list by a field that is not always there.
+
 ### The tool catalog is the server's, not the agent's
 
 `mcp.json` lists what the MCP server exposes for the souled runtime profile. It

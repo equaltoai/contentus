@@ -915,3 +915,239 @@ test('neither share panel offers acting as the agent inside the CMS', () => {
 		);
 	}
 });
+
+/* -------------------------------------------------------------------------
+ * The owner's view of who holds access (M2.3, equaltoai/contentus#94)
+ *
+ * The DATA has been arriving since M7: `GET /api/v1/agents/{username}/share`
+ * is lesser's owner/admin view and it has always carried `granted_by`,
+ * `revoked_at` and `revoked_by`. What the owner could SEE was a grantee, a
+ * grant date, and a pill on some rows — so the two questions this milestone
+ * exists to answer, who gave this account access and who took it away, were
+ * answered in the payload and nowhere on the screen. These probes hold the
+ * display, the split, and the sentence that keeps the revoked list from
+ * claiming to be an event log.
+ *
+ * The unit behaviour underneath them — the split itself, and a stamp that
+ * drops rather than fills a clause lesser did not serve — is
+ * `tests/agent-share-view.test.mjs`, where it can be called instead of read.
+ * ---------------------------------------------------------------------- */
+
+/** The owner panel's parsed tree, the one subject of the probes below. */
+function sharingPanelAst() {
+	return parse(readFileSync(join(repoRoot, 'src/lib/agents/AgentSharingPanel.svelte'), 'utf8'), {
+		modern: true,
+	});
+}
+
+/** Every `a.b` the template reads off `object`, as `b` names. */
+function templateReads(fragment, object) {
+	const read = new Set();
+	for (const { node } of walkTemplate(fragment)) {
+		if (node.type !== 'MemberExpression') continue;
+		if (node.object?.type !== 'Identifier' || node.object.name !== object) continue;
+		if (node.property?.type === 'Identifier') read.add(node.property.name);
+	}
+	return read;
+}
+
+test('the owner view shows who granted access and who took it away', () => {
+	// STRUCTURAL, and pointed at the fields rather than at words on the screen:
+	// the copy around them can be rewritten freely, but a rework that drops a
+	// stamp puts the payload's answer back out of the owner's reach silently —
+	// every other probe here, and every unit test of the classifier, stays
+	// green while the screen stops naming the actor.
+	const read = templateReads(sharingPanelAst().fragment, 'grant');
+
+	for (const field of ['granted_at', 'granted_by', 'revoked_at', 'revoked_by']) {
+		assert.ok(
+			read.has(field),
+			`the panel must render grant.${field} — the owner view exists to answer who granted access and who revoked it (equaltoai/contentus#94)`
+		);
+	}
+});
+
+test('current access and revoked access are rendered from separate lists', () => {
+	// The M7 panel rendered one `{#each grants}` and distinguished the halves
+	// with a pill, which put an account that HAS access and an account that had
+	// it taken away on adjacent identical rows. The assertion is the split at
+	// its source: the template iterates the classifier's sides, never the raw
+	// answer, so a row's side is lesser's `active` boolean and not a reader's
+	// scan of a badge.
+	const each = [];
+	for (const { node } of walkTemplate(sharingPanelAst().fragment)) {
+		if (node.type !== 'EachBlock') continue;
+		const expression = node.expression;
+		if (expression?.type === 'Identifier') each.push(expression.name);
+		else if (
+			expression?.type === 'MemberExpression' &&
+			expression.object?.type === 'Identifier' &&
+			expression.property?.type === 'Identifier'
+		)
+			each.push(`${expression.object.name}.${expression.property.name}`);
+	}
+
+	assert.ok(each.includes('ledger.current'), 'the panel must list who holds access now');
+	assert.ok(each.includes('ledger.revoked'), 'and list revoked access separately');
+	assert.ok(
+		!each.includes('grants'),
+		'and never iterate the unsplit answer, which is how the two became one list of rows'
+	);
+});
+
+test('neither grant list is keyed on a value lesser could repeat', () => {
+	// Svelte throws `each_key_duplicate` on a repeated key, in production as
+	// well as in development. `grantee_username` is unique per lesser's storage
+	// — one row per (agent, grantee) — but this panel's stated promise is that a
+	// malformed 200 lands in `unavailable` rather than in a render-time throw,
+	// and a key is a place that promise can be broken by an edit that looks like
+	// a tidy-up. The rows hold no state, so keying buys nothing to weigh
+	// against it.
+	for (const { node } of walkTemplate(sharingPanelAst().fragment)) {
+		if (node.type !== 'EachBlock') continue;
+		assert.equal(
+			node.key ?? null,
+			null,
+			'the grant lists must stay unkeyed: a repeated key is a render-time throw on exactly the malformed answer this panel promises to survive'
+		);
+	}
+});
+
+test('the empty current-access state is composed, never written into the template', () => {
+	// THE DEFECT THIS CLOSES (equaltoai/contentus#100, codex review 4941340448):
+	// the branch held the sentence "No account holds access to @{username} right
+	// now", which is the instance's answer only when the instance classified
+	// everything it sent. With an entry it did not classify — the one case where
+	// a live grant can be missing from `ledger.current` — that sentence tells the
+	// owner the opposite of the only surviving claim.
+	//
+	// The wording lives in `noCurrentAccessStatement` and is asserted in
+	// `tests/agent-share-view.test.mjs`, where both readings can be CALLED. What
+	// this probe holds is the other half: that the screen keeps asking it. A
+	// sentence written back into this branch is the whole defect returning, and
+	// it would return with every unit test still green.
+	const ast = sharingPanelAst();
+	const branches = [];
+	for (const { node } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'IfBlock') continue;
+		const condition = node.test;
+		if (condition?.type !== 'MemberExpression' || condition.property?.name !== 'length') continue;
+		const list = condition.object;
+		if (list?.type !== 'MemberExpression') continue;
+		if (list.object?.name !== 'ledger' || list.property?.name !== 'current') continue;
+		branches.push(node);
+	}
+
+	assert.equal(branches.length, 1, 'the panel tests ledger.current.length exactly once');
+	const empty = branches[0].alternate;
+	assert.ok(empty, 'and answers the empty case rather than rendering nothing at all');
+
+	// Attribute values are `Text` too — a class name is not something the panel
+	// says to the owner, so what is collected is the text a reader would read.
+	const inAttribute = (ancestors) => ancestors.some((node) => node.type === 'Attribute');
+	const spoken = [];
+	const rendered = [];
+	for (const { node, ancestors } of walkTemplate(empty)) {
+		if (node.type === 'Text' && node.data?.trim() && !inAttribute(ancestors))
+			spoken.push(node.data.trim());
+		if (node.type === 'ExpressionTag' && !inAttribute(ancestors)) rendered.push(node.expression);
+	}
+
+	assert.deepEqual(
+		spoken,
+		[],
+		`the empty state must carry no literal copy — a claim about who holds access cannot be written where the unclassified count is not in hand: ${spoken.join(' / ')}`
+	);
+
+	// FOLLOWED BY NAME into the instance script, because the panel renders
+	// `$derived` values rather than calling into the template: what is asserted
+	// is that whatever this branch prints is bound to the classifier's statement,
+	// not merely that the module is imported somewhere in the file.
+	const sources = rendered.map((expression) => {
+		if (expression?.type === 'CallExpression') return expression.callee?.name ?? null;
+		if (expression?.type !== 'Identifier') return null;
+		for (const node of walkAst(ast.instance)) {
+			if (node.type !== 'VariableDeclarator') continue;
+			if (node.id?.name !== expression.name) continue;
+			if (callsFn(node.init, 'noCurrentAccessStatement')) return 'noCurrentAccessStatement';
+		}
+		return null;
+	});
+
+	assert.ok(rendered.length > 0, 'the empty state must render something');
+	assert.ok(
+		sources.every((source) => source === 'noCurrentAccessStatement'),
+		`every part of the empty state must come from the classifier’s own statement (src/lib/agents/share-view.ts), not from a value assembled here: ${JSON.stringify(sources)}`
+	);
+});
+
+test('only current grants are offered a revoke control', () => {
+	// A revoke button on an already-revoked row sends a call lesser answers by
+	// returning the grant unchanged — harmless on the wire, and a claim on the
+	// screen that the access is still there to take away. So the control's
+	// position is the assertion: every call site sits inside the current list.
+	const offered = [];
+	for (const { node, ancestors } of walkTemplate(sharingPanelAst().fragment)) {
+		if (node.type !== 'CallExpression') continue;
+		if (node.callee?.type !== 'Identifier' || node.callee.name !== 'performRevoke') continue;
+		offered.push(
+			ancestors.some(
+				(ancestor) =>
+					ancestor.type === 'EachBlock' &&
+					ancestor.expression?.type === 'MemberExpression' &&
+					ancestor.expression.object?.name === 'ledger' &&
+					ancestor.expression.property?.name === 'current'
+			)
+		);
+	}
+
+	assert.ok(offered.length > 0, 'the panel must offer revoke at all');
+	assert.ok(offered.every(Boolean), 'and only from inside the list of accounts that hold access');
+});
+
+test('the revoked list does not present itself as every revocation', () => {
+	// lesser keeps ONE ROW PER GRANTEE and `RegrantAgentShareGrant` removes that
+	// row's `RevokedAt`/`RevokedBy`, so granting a revoked account again erases
+	// the revocation it followed. A heading over that list is a claim, and the
+	// claim "here is the history" is false in exactly the case an owner would
+	// most want it to be true. The caveat is copy, so no probe over the
+	// component tree catches its removal — this one reads the rendered words
+	// with the comments stripped, for the same reason the M2.2 lede probes do.
+	const copy = panelCopy('AgentSharingPanel.svelte');
+
+	assert.match(
+		copy,
+		/again moves it back to the list above/i,
+		'the panel must say a re-grant moves an account back rather than adding a line'
+	);
+	assert.match(
+		copy,
+		/activity log/i,
+		'and name the record that does hold the full sequence (M2.4, a different read)'
+	);
+});
+
+test('the owner grant list is read on the owner path and nowhere else', () => {
+	// The revoked half of this contract is owner/admin-only by lesser's
+	// construction — `ListByAgent` authorizes first, and the grantee's
+	// `shared-with-me` list has revoked rows filtered out at the index. What
+	// contentus owes is not to widen that: the read stays in the panel
+	// `MyAgents` mounts behind lesser's `agent.owner` statement (probed above),
+	// and any second caller would be a surface reaching for the audit view
+	// without that gate over it.
+	const callers = [];
+
+	for (const path of trackedSource(repoRoot, 'src', MODULE_SOURCE)) {
+		const file = relative(repoRoot, path);
+		if (file === 'src/lib/agents/share-client.ts') continue;
+
+		const live = liveScript(file, readFileSync(path, 'utf8'));
+		if (sourceIdentifiers(live).includes('listShareGrants')) callers.push(file);
+	}
+
+	assert.deepEqual(
+		callers,
+		['src/lib/agents/AgentSharingPanel.svelte'],
+		'the owner grant list — the one read that carries revoked audit history — must be read only from the panel gated on lesser’s ownership statement (equaltoai/contentus#94)'
+	);
+});
