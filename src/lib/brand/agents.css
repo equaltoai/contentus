@@ -952,3 +952,92 @@
 .contentus-accordion + .contentus-accordion {
 	margin-top: var(--tc-space-2);
 }
+
+/* --- who has been driving (M2.4, equaltoai/contentus#95) ---------------
+
+   The companion block to `contentus-sharing__`, and deliberately its own: the
+   sharing panel answers who HOLDS access and this one answers who has actually
+   DRIVEN the agent, so sharing one block would tie the two screens' layouts
+   together at exactly the point where they are expected to diverge. The visual
+   language is kept identical on purpose — an owner reads the two panels as one
+   answer, and a driver line should sit like a grant line. */
+
+.contentus-drivers__lede {
+	margin: 0 0 var(--tc-space-4);
+	color: var(--tc-fg-muted);
+	line-height: 1.6;
+	max-width: 70ch;
+}
+
+.contentus-drivers__section + .contentus-drivers__section {
+	margin-top: var(--tc-space-5);
+}
+
+.contentus-drivers__subheading {
+	margin: 0 0 var(--tc-space-2);
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--tc-fg-muted);
+}
+
+.contentus-drivers__note {
+	margin: var(--tc-space-3) 0 0;
+	color: var(--tc-fg-muted);
+	font-size: 0.8125rem;
+	line-height: 1.6;
+	max-width: 70ch;
+}
+
+.contentus-drivers__list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--tc-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.contentus-drivers__driver,
+.contentus-drivers__action {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--tc-space-1) var(--tc-space-3);
+	padding: var(--tc-space-3);
+	background: var(--tc-bg);
+	border: 1px solid var(--tc-outline-variant);
+	border-radius: var(--tc-radius-md);
+}
+
+.contentus-drivers__name {
+	font-family: var(--tc-font-mono);
+	font-weight: 600;
+	color: var(--tc-fg);
+	overflow-wrap: anywhere;
+}
+
+/* The event token is lesser's own vocabulary, shown verbatim, so it is set in
+   the mono face that says "this is the instance's word, not ours". */
+.contentus-drivers__event {
+	font-family: var(--tc-font-mono);
+	color: var(--tc-fg);
+	overflow-wrap: anywhere;
+}
+
+.contentus-drivers__stamp {
+	color: var(--tc-fg-muted);
+	font-size: 0.8125rem;
+	overflow-wrap: anywhere;
+}
+
+/* Pushed to the far edge so the attribution — the answer this panel exists for
+   — lands in a consistent column rather than trailing the event name's width. */
+.contentus-drivers__by,
+.contentus-drivers__how {
+	margin-left: auto;
+	color: var(--tc-fg-muted);
+	font-size: 0.8125rem;
+	overflow-wrap: anywhere;
+}

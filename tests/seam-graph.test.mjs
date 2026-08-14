@@ -292,7 +292,7 @@ test('import.meta.glob cannot carry a dependency past the gate', async () => {
 	);
 });
 
-test('a wildcard glob naming no component is still ten cross-seam edges', async () => {
+test('a wildcard glob naming no component is a cross-seam edge per component', async () => {
 	// THE INVENTED FORM, and the one that makes the architectural point rather than
 	// adding a seventh entry to a list. `'./[A-Z]*.svelte'` names nothing: there is
 	// no component in the source for a reader to match, however many forms it
@@ -300,10 +300,14 @@ test('a wildcard glob naming no component is still ten cross-seam edges', async 
 	// only the bundler goes and looks. One line of a face module quietly takes a
 	// dependency on every component behind every seam.
 	//
-	// The gate reports the twelve it resolved to, each on its own line, which is
+	// The gate reports every one it resolved to, each on its own line, which is
 	// also the answer the next steward needs: the shared badge is the one
 	// component this is allowed to reach, and every other name here is a swap
-	// this line would break.
+	// this line would break. THE COUNT IS DELIBERATELY NOT IN THE TITLE any more.
+	// It was "ten" while the list held twelve, because the face grew and the
+	// prose did not — a number in a name that nothing checks is a number that
+	// goes stale silently. The list below is the assertion and it is exhaustive;
+	// adding a component to the face is expected to add a line to it.
 	const helper = './seam-probe.ts';
 	const pattern = './[A-Z]*.svelte';
 	assert.deepEqual(
@@ -316,6 +320,7 @@ test('a wildcard glob naming no component is still ten cross-seam edges', async 
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentCapabilities.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentCard.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentDetail.svelte (a seam imported from behind no seam)',
+			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentDriversPanel.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentMcpPanel.svelte (a seam imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentRoster.svelte (a seam imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentRosterFilters.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
