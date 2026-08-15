@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786762099359 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786762099361 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1786804783851 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786804783853 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -23,9 +23,9 @@ computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-GBM5oU-0.js                725.30 kB │ gzip: 219.63 kB
+build/client/assets/entry-client-B6yOGUdP.js                725.36 kB │ gzip: 219.64 kB
 
-✓ built in 1.07s
+✓ built in 1.11s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -39,9 +39,9 @@ vite v8.2.0 building ssr environment for production...
 [2Ktransforming...✓ 790 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,155.84 kB │ gzip: 279.46 kB
+build/server/handler.mjs  1,158.26 kB │ gzip: 280.13 kB
 
-✓ built in 1.01s
+✓ built in 992ms
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -60,9 +60,9 @@ brand assets: copied 13 files to build/client/brand/
 # GraphQL contract audit
 
 Schema:     contracts/lesser/graphql-schema.graphql
-            112060 chars, sha256 3b57d1d3ed1646f6a44d83f705274ae96ad763b838c63c8013ac06ac504ee60e
-            equaltoai/lesser@a1eb3c6740bd5aca99273130e2b52d3c4c5775ea:docs/contracts/graphql-schema.graphql
-            blob aa6c9f03d87d86cb05510bc75407af148aaca3b5 (contracts/lesser/provenance.json)
+            112322 chars, sha256 21fc0d07e7a5af3065a6fb4c2b9d0f3770a4df1b607975209b310e293ff0a736
+            equaltoai/lesser@1ce2dc975bd212c11ffc6b4fca0035bae039bd60:docs/contracts/graphql-schema.graphql
+            blob 558c4cf1fbc2d369cc2909786ad50fbe8f68bb58 (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
 Documents:  49 in 11 inventoried module(s), 49 operation(s)

@@ -19,6 +19,7 @@ import {
 	fetchAgentMcpAccess,
 	fetchMyAgents,
 	MY_AGENTS_QUERY,
+	toAgentSummary,
 } from '../src/lib/agents/contract.ts';
 import { notifySessionChange, sessionGeneration } from '../src/lib/auth/session-events.ts';
 import { createSessionScope } from '../src/lib/auth/session-scope.ts';
@@ -50,8 +51,11 @@ function agentNode(overrides = {}) {
 		activityCount: 12,
 		// The detail route's server pass is anonymous, and lesser v1.6.4 states
 		// the redaction in the answer (commit 7aad73d5a) — so the shape lesser
-		// serves this surface carries the boolean set to false.
+		// serves this surface carries the boolean set to false. From lesser#1418
+		// it carries the ownership boolean too, false for the same viewer:
+		// anonymous is neither an owner nor an admin.
 		viewerCanSeePrivateFields: false,
+		viewerIsOwner: false,
 		agentCapabilities: {
 			canPost: true,
 			canReply: true,
@@ -231,6 +235,11 @@ test('the detail read is one document, with lesser deciding what each viewer see
 	assert.match(AGENT_DETAIL_QUERY, /agentOwner/);
 	assert.match(AGENT_DETAIL_QUERY, /delegatedScopes/);
 	assert.match(AGENT_DETAIL_QUERY, /viewerCanSeePrivateFields/);
+
+	// And the ownership statement beside it (lesser#1418). Two booleans because
+	// they answer two questions; selecting only the first is what made every
+	// admin look like an owner.
+	assert.match(AGENT_DETAIL_QUERY, /viewerIsOwner/);
 });
 
 test('fetchAgent reads ownership from the served boolean, not from the token', async () => {
@@ -255,6 +264,7 @@ test('fetchAgent reads ownership from the served boolean, not from the token', a
 						agentOwner: null,
 						delegatedScopes: [],
 						viewerCanSeePrivateFields: false,
+						viewerIsOwner: false,
 					}),
 				},
 			}),
@@ -266,7 +276,8 @@ test('fetchAgent reads ownership from the served boolean, not from the token', a
 		const asNonOwner = await fetchAgent({ accessToken: 'token-bob' }, 'weatherbot');
 		assert.equal(asNonOwner.ok, true);
 		assert.equal(asNonOwner.agent.owner, null);
-		assert.equal(asNonOwner.agent.redaction.viewerIsOwner, false);
+		assert.equal(asNonOwner.agent.viewer.canSeePrivateFields, false);
+		assert.equal(asNonOwner.agent.viewer.isOwner, false);
 
 		// Anonymous gets the same document: one read, lesser decides visibility.
 		const anonymous = await fetchAgent({}, 'weatherbot');
@@ -351,11 +362,16 @@ test('the access read asks for lesser’s bundle and for none of the private fie
 		assert.match(AGENT_MCP_ACCESS_QUERY, new RegExp(`\\b${field}\\b`), `${field} is asked for`);
 	}
 
-	for (const field of ['agentOwner', 'delegatedScopes', 'viewerCanSeePrivateFields']) {
+	for (const field of [
+		'agentOwner',
+		'delegatedScopes',
+		'viewerCanSeePrivateFields',
+		'viewerIsOwner',
+	]) {
 		assert.doesNotMatch(
 			AGENT_MCP_ACCESS_QUERY,
 			new RegExp(`\\b${field}\\b`),
-			`${field} is lesser's redacted half and this read makes no ownership claim`
+			`${field} belongs to the ownership/visibility half, and this read makes no claim about either — it asks one question about somebody else's agent`
 		);
 	}
 });
@@ -401,7 +417,7 @@ test('an agent the instance will not resolve is a failure, not an empty bundle',
 	assert.equal(disabled.result.failure.reason, 'agents-disabled');
 });
 
-test('the owned view asks for the private fields and lesser’s visibility statement', () => {
+test('the owned view asks for the private fields and BOTH of lesser’s viewer statements', () => {
 	// `myAgents` is answered AS the owner, so `agentOwner` and
 	// `delegatedScopes` come back real rather than redacted — and
 	// `viewerCanSeePrivateFields` comes back true, which is the statement the
@@ -409,6 +425,14 @@ test('the owned view asks for the private fields and lesser’s visibility state
 	assert.match(MY_AGENTS_QUERY, /agentOwner/);
 	assert.match(MY_AGENTS_QUERY, /delegatedScopes/);
 	assert.match(MY_AGENTS_QUERY, /viewerCanSeePrivateFields/);
+
+	// AND THE OWNERSHIP STATEMENT, which is what the owner-only panels mount on
+	// (lesser#1418). Not selecting it would leave the mount with only the
+	// visibility boolean to read, which is the state this sync migrated away
+	// from — and `myAgents` carrying a schema description that its membership
+	// means ownership is a promise about a conforming instance, not a
+	// substitute for asking.
+	assert.match(MY_AGENTS_QUERY, /viewerIsOwner/);
 });
 
 test('the owned view is gated on a session, not on the roster failing', () => {
@@ -476,6 +500,7 @@ const OWNED = {
 	agentOwner: 'https://example.invalid/users/ada',
 	delegatedScopes: ['read', 'write'],
 	viewerCanSeePrivateFields: true,
+	viewerIsOwner: true,
 };
 
 test('an owned-agent read that lands after sign-out publishes nothing', async () => {
@@ -682,14 +707,84 @@ function* walkTemplate(node, ancestors = []) {
 	}
 }
 
-/** Whether an `{#if}` block tests exactly `agent.owner` — lesser's served statement. */
-function isOwnershipGate(node) {
-	return (
-		node.type === 'IfBlock' &&
-		node.test?.type === 'MemberExpression' &&
-		node.test.object?.name === 'agent' &&
-		node.test.property?.name === 'owner'
+/**
+ * Evaluate an `{#if}` gate expression against one view model.
+ *
+ * READING THE GATE'S NAME IS NOT READING THE GATE, which is the whole reason
+ * this exists. The probe this replaced asserted that the mount sat behind an
+ * `{#if}` testing the member `agent.owner` — true of the migrated code's
+ * predecessor and equally true of any other property spelled `owner`, and it
+ * could say nothing at all about WHICH VIEWERS the gate admits. That is the
+ * question the migration is about: `agent.owner` and `agent.viewer.isOwner`
+ * differ on exactly one viewer, the admin, and a name check cannot see the
+ * difference. So the gate is executed against real view models instead, built
+ * by `toAgentSummary` from the shapes lesser actually serves.
+ *
+ * FAIL-CLOSED ON ANY NODE IT DOES NOT MODEL. A gate rewritten as `a && b`, a
+ * call, a negation or an optional chain THROWS rather than returning a verdict.
+ * A probe that quietly skipped the expressions it could not read would report a
+ * pass it never established — the silent-cap shape — so the cost of a more
+ * complex gate is that this function must be taught it deliberately.
+ */
+function evaluateGate(node, agent) {
+	if (node?.type === 'Identifier') {
+		if (node.name !== 'agent') {
+			throw new Error(`gate reads an identifier this probe does not model: ${node.name}`);
+		}
+		return agent;
+	}
+	if (node?.type === 'MemberExpression') {
+		if (node.computed || node.optional) {
+			throw new Error('gate uses a computed or optional member access; teach this probe first');
+		}
+		const object = evaluateGate(node.object, agent);
+		if (node.property?.type !== 'Identifier') {
+			throw new Error('gate uses a non-identifier property; teach this probe first');
+		}
+		return object == null ? undefined : object[node.property.name];
+	}
+	throw new Error(`gate uses a ${node?.type ?? 'missing'} expression; teach this probe first`);
+}
+
+/**
+ * Whether an expression reads the `agent` binding anywhere inside it.
+ *
+ * A GENERIC WALK, not a shape match, because a miss here would be a fail-open:
+ * this decides which gates get executed, and a gate that reads `agent` in a
+ * form the walker did not recognise would be silently excluded from the
+ * verdict. Recursing over every own property cannot miss an `Identifier`.
+ */
+function expressionReadsAgent(node) {
+	if (!node || typeof node !== 'object') return false;
+	if (Array.isArray(node)) return node.some(expressionReadsAgent);
+	if (node.type === 'Identifier' && node.name === 'agent') return true;
+	return Object.entries(node).some(
+		([key, value]) => key !== 'parent' && key !== 'loc' && expressionReadsAgent(value)
 	);
+}
+
+/**
+ * The per-agent `{#if}` tests guarding every mount of `panel`.
+ *
+ * GATES THAT DO NOT READ `agent` ARE EXCLUDED, and that is not a hole. The one
+ * such gate here is `{#if session === 'authenticated'}`, which decides whether
+ * the whole block renders at all and is asserted separately; it cannot vary by
+ * viewer, so including it would only mean modelling a second scope to reach the
+ * same verdict. The direction that matters is covered: an extra non-agent gate
+ * can only ever narrow the conjunction, while REPLACING the ownership gate with
+ * one leaves no per-agent gate at all — and the caller requires at least one.
+ */
+function mountGates(ast, panel) {
+	const mounts = [];
+	for (const { node, ancestors } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'Component' || node.name !== panel) continue;
+		mounts.push(
+			ancestors
+				.filter((entry) => entry.type === 'IfBlock' && expressionReadsAgent(entry.test))
+				.map((entry) => entry.test)
+		);
+	}
+	return mounts;
 }
 
 /**
@@ -704,27 +799,83 @@ function isOwnershipGate(node) {
  */
 const OWNER_GATED_PANELS = ['AgentSharingPanel', 'AgentDriversPanel'];
 
-test("the owner-only panels mount only behind lesser's ownership statement", () => {
+/**
+ * The three viewers lesser distinguishes, as this client receives them.
+ *
+ * `admit` is what the owner-only panels must do for each. The ADMIN row is the
+ * one the migration exists for and the one lesser pins in its own contract test
+ * (`TestActorAgentInfoAppliesPrivateFieldPolicy`): private fields visible,
+ * ownership false. Under the old gate that viewer was admitted, because the
+ * only boolean available to read said "you may see this agent's private
+ * fields" and the panel beneath it is the owner's management surface.
+ */
+const VIEWERS = [
+	{
+		name: 'the owner',
+		admit: true,
+		served: {
+			agentOwner: 'https://example.invalid/users/ada',
+			delegatedScopes: ['read', 'write'],
+			viewerCanSeePrivateFields: true,
+			viewerIsOwner: true,
+		},
+	},
+	{
+		name: 'an admin who does not own the agent',
+		admit: false,
+		served: {
+			agentOwner: 'https://example.invalid/users/ada',
+			delegatedScopes: ['read', 'write'],
+			viewerCanSeePrivateFields: true,
+			viewerIsOwner: false,
+		},
+	},
+	{
+		name: 'a grantee holding a share on the agent',
+		admit: false,
+		served: {
+			agentOwner: null,
+			delegatedScopes: [],
+			viewerCanSeePrivateFields: false,
+			viewerIsOwner: false,
+		},
+	},
+];
+
+test('the owner-only panels admit the owner and refuse every other viewer', () => {
 	// STRUCTURAL, like the session probes above: the mount gate is one line whose
-	// removal is silent — a later rework of the `{#each}` that drops the
-	// `{#if agent.owner}` returns the defect the gate fixed, and every other
-	// check stays green. So the gate itself is the assertion.
+	// removal is silent — a later rework of the `{#each}` that drops the gate
+	// returns the defect it fixed, and every other check stays green. So the gate
+	// itself is the assertion, and it is EXECUTED rather than named.
 	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8'), {
 		modern: true,
 	});
 
 	for (const panel of OWNER_GATED_PANELS) {
-		const mounts = [];
-		for (const { node, ancestors } of walkTemplate(ast.fragment)) {
-			if (node.type !== 'Component' || node.name !== panel) continue;
-			mounts.push(ancestors.some(isOwnershipGate));
-		}
-
+		const mounts = mountGates(ast, panel);
 		assert.ok(mounts.length > 0, `MyAgents must mount ${panel} at all`);
-		assert.ok(
-			mounts.every(Boolean),
-			`${panel} may mount only behind {#if agent.owner} — lesser's served statement, never list membership`
-		);
+
+		for (const viewer of VIEWERS) {
+			const agent = toAgentSummary(agentNode(viewer.served));
+
+			for (const gates of mounts) {
+				assert.ok(
+					gates.length > 0,
+					`${panel} must mount behind a per-agent gate at all — a session gate alone admits every agent in the list`
+				);
+				// EVERY enclosing `{#if}` must admit, which is how the mount is
+				// actually reached — asserting on one of them would let a second,
+				// wider gate be added beside it without notice.
+				const admitted = gates.every((gate) => Boolean(evaluateGate(gate, agent)));
+				assert.equal(
+					admitted,
+					viewer.admit,
+					`${panel} must ${viewer.admit ? 'mount for' : 'stay unmounted for'} ${viewer.name}` +
+						' — the gate is lesser’s served viewerIsOwner, not the visibility boolean it' +
+						' stood in for before lesser#1418'
+				);
+			}
+		}
 	}
 });
 

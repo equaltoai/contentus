@@ -84,6 +84,15 @@ together. That nesting is the one seam-to-seam import face 6 allows, and
 			and admins. For everyone else lesser redacts the fields to null and
 			`[]`, and those blanks are indistinguishable from real values — so the
 			section is absent rather than showing "no owner".
+
+			STILL THE VISIBILITY GATE, DELIBERATELY, now that `viewer.isOwner`
+			exists beside it (lesser#1418). This section renders the redacted
+			values themselves, so the question it asks is "did lesser serve these
+			to me", and an admin who may read them should. The owner-only
+			MANAGEMENT surfaces moved to the ownership boolean in the same change
+			(MyAgents.svelte); a display of served fields is not one of them, and
+			migrating it too would have hidden data from admins lesser chose to
+			show it to.
 		-->
 		{#if agent.owner}
 			<dl class="contentus-mcp__facts">

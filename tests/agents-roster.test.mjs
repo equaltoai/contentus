@@ -98,14 +98,18 @@ test('the roster asks for the preferred field names, not the deprecated aliases'
 		'the anonymous roster must not send an argument lesser refuses anonymously'
 	);
 
-	// Nor the ownership question. The roster is anonymous-only on the server
+	// Nor either viewer question. The roster is anonymous-only on the server
 	// pass and its cards render no owner fields, so it selects neither the
-	// redacted fields nor the boolean that states their visibility — those
-	// belong to the detail and owned-view documents, whose surfaces can be an
-	// owner's.
+	// redacted fields, nor the boolean that states their visibility, nor the
+	// one that states ownership — those belong to the detail and owned-view
+	// documents, whose surfaces can be an owner's.
 	assert.ok(!AGENTS_ROSTER_QUERY.includes('agentOwner'));
 	assert.ok(!AGENTS_ROSTER_QUERY.includes('delegatedScopes'));
 	assert.ok(!AGENTS_ROSTER_QUERY.includes('viewerCanSeePrivateFields'));
+	assert.ok(
+		!AGENTS_ROSTER_QUERY.includes('viewerIsOwner'),
+		'the anonymous roster must not ask an ownership question it renders nothing from — and asking it would make the public roster fail validation against an instance predating lesser#1418'
+	);
 });
 
 test('totalCount is carried as a per-page count, because that is what it is', () => {
@@ -134,36 +138,110 @@ test('redacted owner fields are absent rather than empty', () => {
 	// false` (v1.6.4, commit 7aad73d5a). Rendering the blanks as facts would
 	// tell every anonymous visitor that every agent has no owner and no scopes.
 	const anonymous = toAgentSummary(
-		agentNode({ agentOwner: null, delegatedScopes: [], viewerCanSeePrivateFields: false })
+		agentNode({
+			agentOwner: null,
+			delegatedScopes: [],
+			viewerCanSeePrivateFields: false,
+			viewerIsOwner: false,
+		})
 	);
 	assert.equal(anonymous.owner, null);
-	assert.equal(anonymous.redaction.viewerIsOwner, false);
+	assert.equal(anonymous.viewer.canSeePrivateFields, false);
 
 	const asOwner = toAgentSummary(
 		agentNode({
 			agentOwner: 'https://example.invalid/users/ada',
 			delegatedScopes: ['read'],
 			viewerCanSeePrivateFields: true,
+			viewerIsOwner: true,
 		})
 	);
-	assert.equal(asOwner.redaction.viewerIsOwner, true);
+	assert.equal(asOwner.viewer.canSeePrivateFields, true);
 	assert.equal(asOwner.owner.agentOwner, 'https://example.invalid/users/ada');
 	assert.deepEqual(asOwner.owner.delegatedScopes, ['read']);
 });
 
-test('viewerIsOwner is lesser’s served boolean, never a sniff of the values', () => {
+test('the owner block is keyed on visibility, and ownership is a separate answer', () => {
+	// THE CONFLATION CASE, which is why lesser#1418 exists. An ADMIN is served
+	// `viewerCanSeePrivateFields: true` and `viewerIsOwner: false` — lesser pins
+	// this pair in `TestActorAgentInfoAppliesPrivateFieldPolicy` — so a client
+	// that reads one boolean for both questions treats every admin as an owner
+	// of every agent they can see. Before the sync this module had no second
+	// boolean to read and did exactly that.
+	//
+	// Both halves are asserted together because each is wrong without the other:
+	// the values must still render (lesser chose to serve them to an admin), and
+	// ownership must still be false (the admin does not own the agent).
+	const asAdmin = toAgentSummary(
+		agentNode({
+			agentOwner: 'https://example.invalid/users/ada',
+			delegatedScopes: ['read'],
+			viewerCanSeePrivateFields: true,
+			viewerIsOwner: false,
+		})
+	);
+
+	assert.equal(asAdmin.viewer.canSeePrivateFields, true);
+	assert.equal(asAdmin.viewer.isOwner, false);
+	assert.equal(
+		asAdmin.owner.agentOwner,
+		'https://example.invalid/users/ada',
+		'an admin was served the private fields, so they render — the ownership answer does not suppress them'
+	);
+});
+
+test('a grantee is told neither that they may see the private fields nor that they own the agent', () => {
+	// The other side of the same contract: someone holding a share grant on an
+	// agent is not its owner and is not an admin, so lesser redacts and says so
+	// twice over. Nothing owner-shaped may be derived from the grant.
+	const asGrantee = toAgentSummary(
+		agentNode({
+			agentOwner: null,
+			delegatedScopes: [],
+			viewerCanSeePrivateFields: false,
+			viewerIsOwner: false,
+		})
+	);
+
+	assert.equal(asGrantee.viewer.canSeePrivateFields, false);
+	assert.equal(asGrantee.viewer.isOwner, false);
+	assert.equal(asGrantee.owner, null);
+});
+
+test('both viewer booleans are lesser’s served answers, never a sniff of the values', () => {
 	// The inference this replaces: before lesser v1.6.4 the client guessed
 	// ownership from "we sent a token and a non-null agentOwner came back" —
-	// values redaction exists to make ambiguous. lesser now states the
-	// authorization directly, and a read that did not ask for the boolean (the
+	// values redaction exists to make ambiguous. lesser now states both
+	// authorizations directly, and a read that did not ask for a boolean (the
 	// anonymous roster, by design) normalizes its absence to false: the owner
-	// block hides rather than fabricates, even when the payload carries a
-	// real-looking value no served answer would produce.
-	const withoutBoolean = toAgentSummary(
+	// block hides rather than fabricates, and an owner-only panel stays
+	// unmounted, even when the payload carries a real-looking value no served
+	// answer would produce.
+	const withoutBooleans = toAgentSummary(
 		agentNode({ agentOwner: 'https://example.invalid/users/ada', delegatedScopes: ['read'] })
 	);
-	assert.equal(withoutBoolean.redaction.viewerIsOwner, false);
-	assert.equal(withoutBoolean.owner, null);
+	assert.equal(withoutBooleans.viewer.canSeePrivateFields, false);
+	assert.equal(withoutBooleans.viewer.isOwner, false);
+	assert.equal(withoutBooleans.owner, null);
+
+	// STRICT, not truthy, in both directions. A non-conforming instance sending
+	// a string, a number or null must not be read as an ownership claim — the
+	// one response shape that could mount a management panel for a stranger.
+	for (const served of ['true', 1, {}, [], null, undefined]) {
+		const coerced = toAgentSummary(
+			agentNode({ viewerCanSeePrivateFields: served, viewerIsOwner: served })
+		);
+		assert.equal(
+			coerced.viewer.isOwner,
+			false,
+			`viewerIsOwner: ${JSON.stringify(served)} is not a served true`
+		);
+		assert.equal(
+			coerced.viewer.canSeePrivateFields,
+			false,
+			`viewerCanSeePrivateFields: ${JSON.stringify(served)} is not a served true`
+		);
+	}
 });
 
 test('an unknown agent type becomes CUSTOM, matching lesser’s own normaliser', () => {

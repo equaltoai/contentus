@@ -53,13 +53,64 @@ what came back. Two consequences, both load-bearing:
 to `[]`, and the soul fields to `UNBOUND` for anyone who is not the agent's
 owner or an admin (v1.6.4, commit `7aad73d5a`). Rendering those would tell
 every anonymous visitor that every agent has no owner and no scopes. The view
-model omits them unless lesser says the viewer may see them: `viewerIsOwner` is
-lesser's served `viewerCanSeePrivateFields` carried through, never inferred
-from whether a token was sent or from the values themselves. One detail
-document serves every viewer — anonymous `agent` reads are admitted (commit
-`1df0358b8`) and answered with the redacted shape plus
-`viewerCanSeePrivateFields: false`, so there is no anonymous/owner document
-split and lesser decides visibility per viewer.
+model omits them unless lesser says the viewer may see them:
+`viewer.canSeePrivateFields` is lesser's served `viewerCanSeePrivateFields`
+carried through, never inferred from whether a token was sent or from the
+values themselves. One detail document serves every viewer — anonymous `agent`
+reads are admitted (commit `1df0358b8`) and answered with the redacted shape
+plus `viewerCanSeePrivateFields: false`, so there is no anonymous/owner
+document split and lesser decides visibility per viewer.
+
+**2a. Visibility is not ownership, and there are now two booleans because there
+are two questions.** `viewerCanSeePrivateFields` is true for the agent's owner
+**and for admins**, which makes it a visibility statement and never an
+ownership one. `Agent.viewerIsOwner` (lesser#1418, pinned at `1ce2dc97`) is the
+ownership statement: computed from `auth.AgentOwnerMatchesLocalPrincipal`, the
+same canonical rule the server authorizes with, and preserved across redaction
+the way `mcpAccess` is — so a non-owner receives a served `false` rather than a
+redacted blank, and an anonymous viewer receives `false`. lesser pins the
+distinguishing case in its own contract test
+(`TestActorAgentInfoAppliesPrivateFieldPolicy`): an admin gets
+`viewerCanSeePrivateFields: true` with `viewerIsOwner: false`.
+
+`AgentSummary` carries both, unmerged, as `viewer.canSeePrivateFields` and
+`viewer.isOwner`. Which one a surface reads is a decision each surface makes
+explicitly:
+
+| Surface                                                      | Gate                                             | Why                                                                                                                          |
+| ------------------------------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Owner/scopes rows on the detail page                         | `viewer.canSeePrivateFields` (via `agent.owner`) | It renders the redacted values themselves, so the question is whether lesser served them. An admin who may read them should. |
+| `AgentSharingPanel`, `AgentDriversPanel` in "Agents you own" | `viewer.isOwner`                                 | They are the owner's management surfaces.                                                                                    |
+| Public roster                                                | neither — not selected                           | It renders no owner fields, so it asks no viewer question.                                                                   |
+
+**Neither boolean is derived from the other, and neither is derived from a
+username.** The obvious client-side ownership test — compare the viewer's
+handle against `agentOwner` — is a defect class rather than a shortcut. lesser
+stores the owner form byte-for-byte while other surfaces lower-case it, so one
+human reaches a client as `@Alice` and as `alice`; contentus was bitten by
+exactly that in its activity log at M2.4, which is the evidence lesser#1417
+cites. lesser folds case internally (`strings.EqualFold`,
+`pkg/auth/agent_owner.go`), and `viewerIsOwner` is that rule's answer served
+directly, so no client re-implements it and gets it wrong independently.
+
+**History, because the workaround shipped.** From M7 until this sync the
+owner-only panels mounted on the presence of the `owner` block — that is, on
+`viewerCanSeePrivateFields` — because no ownership field existed to read. The
+gloss recorded at the time ("may manage", never a re-derived ownership claim)
+was honest about the gap but could not close it: an admin passed that gate. The
+ask was escalated as the `myAgents` ownership item in
+`docs/planning/agent-share-act-as-m7.md`, answered by lesser#1418, and consumed
+here. The proxy is still read where it answers a visibility question; only its
+use as an ownership answer ended.
+
+**One deploy-ordering consequence.** `viewerIsOwner` exists in the pinned
+contract from `1ce2dc97`, which is a lesser **staging** commit rather than a
+released tag — the first forward pin this repository has taken. GraphQL
+validates a selection before it resolves anything, so an instance predating the
+field rejects the whole document rather than returning a null: the detail read
+and `myAgents` both fail (classified `transport`) rather than degrading.
+**lesser staging deploys before contentus deploys this generation.** See
+`contracts/lesser/provenance.json`, `inspected.forward_pin`.
 
 **3. `quarantineActive` is lesser's projection, not a date comparison.** It
 comes from `QuarantineSummaryAt` against lesser's own clock. contentus never
@@ -126,8 +177,10 @@ stamp. Three things about that document are deliberate:
 
 - **It is narrower than `AGENT_DETAIL_QUERY`.** The surface sending it asks one
   question about somebody _else's_ agent, so it selects no `agentOwner`,
-  `delegatedScopes` or `viewerCanSeePrivateFields`. Every extra field is one a
-  later panel can start rendering without anyone deciding it should.
+  `delegatedScopes`, `viewerCanSeePrivateFields` or `viewerIsOwner` — neither
+  the redacted values nor either statement about the viewer's relationship to
+  the agent. Every extra field is one a later panel can start rendering without
+  anyone deciding it should.
 - **It is one read per agent, not a roster read.** lesser has no
   batch-by-username query for agents, and the roster's filters are applied after
   paging (above), so no single roster page can be trusted to contain every agent
@@ -162,9 +215,11 @@ So the audit half is owner-only by lesser's construction, and no arrangement of
 this client widens or narrows it.
 
 What contentus owes is not to widen the READER. The one call site is
-`AgentSharingPanel`, which `MyAgents` mounts only behind lesser's `agent.owner`
-statement, and `tests/agents-trust.test.mjs` sweeps tracked source to assert
-`listShareGrants` has no second caller.
+`AgentSharingPanel`, which `MyAgents` mounts only behind lesser's served
+`viewerIsOwner` (§2a), and `tests/agents-trust.test.mjs` sweeps tracked source
+to assert `listShareGrants` has no second caller. The client gate is now
+**narrower** than the server's — lesser would answer an admin — and narrower is
+the right direction for a panel that lives under the heading "Agents you own".
 
 The panel shows the two halves apart — **who has access now**, and **access that
 was revoked** — with each entry's audit stamps: `granted_at`/`granted_by` on
@@ -241,8 +296,8 @@ through the same transport as every other contentus read.
 requires a caller, requires `read` scope, and answers `Forbidden` unless the
 caller is the agent's owner, an admin, or the agent itself
 (`lesser/graph/agent_resolvers_stubs.go:376-395`). The panel mounts behind
-lesser's own `agent.owner` statement — the same gate as the sharing panel —
-and sends the owner's own token.
+lesser's own served `viewerIsOwner` (§2a) — the same gate as the sharing panel
+— and sends the owner's own token.
 
 **Two attribution keys, two mechanisms, and one row can carry both.**
 `delegated_by` is written from the token's `DelegatedBy` claim

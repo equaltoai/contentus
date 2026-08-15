@@ -156,20 +156,33 @@ bandwidth, check the stamp for the correctness.
 
 	<!--
 		One sharing panel per owned agent, below the cards. Mounted only where
-		lesser says this viewer may see the agent's private fields —
-		`agent.owner` is present exactly when `viewerCanSeePrivateFields` was
-		served true, and absent otherwise, because lesser redacts rather than
-		reports (contract.ts). lesser serves that boolean true for owners AND
-		admins, so the accurate gloss of the gate is "may manage", never a
-		re-derived ownership claim. The mount is lesser's answer, never an
-		inference from which list the agent arrived in: `myAgents` carries no
-		schema description that membership means ownership, so the panel does
-		not derive it. Each panel is client-only like everything else in this
-		block, reads its own grants, and ends with the session — because who
-		holds access to your agent is the sensitive half of the capability.
+		lesser says THIS VIEWER OWNS THIS AGENT — `agent.viewer.isOwner`, the
+		served `viewerIsOwner` (lesser#1418, pinned at 1ce2dc97), computed from
+		the same `AgentOwnerMatchesLocalPrincipal` rule the server authorizes
+		with.
+
+		IT USED TO BE `agent.owner`, AND THAT WAS THE WRONG QUESTION. That block
+		is present exactly when `viewerCanSeePrivateFields` was served true,
+		which lesser serves true for owners AND ADMINS — so the gate said "may
+		see this agent's private fields" while the panels beneath it are the
+		owner's management surface. The gloss "may manage" papered over the
+		difference honestly but could not remove it; there was simply no
+		ownership field to read until lesser#1417 was filed and #1418 answered
+		it. An admin now gets `canSeePrivateFields: true` with `isOwner: false`
+		and no panel, which is lesser's own contract test made visible.
+
+		The mount is still lesser's answer and still never an inference from
+		which list the agent arrived in. `myAgents` now carries a description
+		saying membership means ownership, and this gate deliberately does not
+		lean on it: a description is a promise about a conforming instance, the
+		boolean is what this one said.
+
+		Each panel is client-only like everything else in this block, reads its
+		own grants, and ends with the session — because who holds access to your
+		agent is the sensitive half of the capability.
 	-->
 	{#each agents as agent (agent.id)}
-		{#if agent.owner}
+		{#if agent.viewer.isOwner}
 			<AgentSharingPanel {agent} />
 			<!--
 				Who has been DRIVING the agent, directly below who HOLDS access to it
