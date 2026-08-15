@@ -67,6 +67,17 @@
  * it. If that is not the account this run authenticated as, the row predates this
  * run and this run will not remove it.
  *
+ * WHAT IS LEFT, SAID PLAINLY. This NARROWS the window; it does not abolish it.
+ * lesser's share routes expose no compare-and-delete — no If-Match, no revocation
+ * conditional on the stamp the caller last read — so between this file's final
+ * read and its `DELETE` there remains a gap no client-side check can close, and a
+ * grant created inside THAT gap would still be removed. What changed is the size:
+ * from the whole run, which is a dozen requests and however long a human spends
+ * in Part B, down to one round trip. Closing it entirely is lesser's to give and
+ * an upstream ask against `equaltoai/lesser`, not something this probe may claim
+ * by asserting harder — a guarantee stated past its evidence is the defect, not
+ * the remedy for one.
+ *
  * ── WHAT IT PROVES, AND WHAT IT ONLY WATCHES ────────────────────────────────
  *
  * Marks are `PASS`/`FAIL` for what this process checked and `ATTEST` for what it

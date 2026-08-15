@@ -277,7 +277,7 @@
       "scripts/lib/schema-pin.mjs": "e173e93932ed0fa671d1082891da514f2b8df6dc6115804af18c9ebd0526e856",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/probe-live-contract.mjs": "9b2f71f2d9dce3d4a829c2317586e8792265099a44f2e9b77afb25f20f625a5d",
-      "scripts/probe-share-flow.mjs": "da0aea44431618e35e8d0b1bc2378ef7c637e06a6c4f67167391fd23eb6411e9",
+      "scripts/probe-share-flow.mjs": "0dcc58259f912232776aa4c2790255f9264388b3f56a4bfc63deb877fba6847f",
       "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
       "scripts/verify-schema-provenance.mjs": "1cd2a9194bd63948296dede9f4c710af976a9d4a2266d00a56a858a15612f8d3",
       "tests/act-as-banner.test.mjs": "72f6ed24c3ea6e0795528c15d244e6f0b8dd72bb9bc360e687482cfcb1d35274",

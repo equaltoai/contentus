@@ -216,6 +216,16 @@ refuses, and prints, loudly, that the access may still be standing and must be
 revoked by hand. **A refusal here means you have a grant to remove from the
 `Sharing @<agent>` panel before you leave the instance.**
 
+What that does **not** do is abolish the window, and the procedure should not be
+read as if it did. lesser's share routes expose no compare-and-delete — no
+`If-Match`, no revocation conditional on the stamp the caller last read — so a gap
+remains between the harness's final read and its delete, and a grant created
+inside _that_ gap would still be removed. The change is one of size: from the
+whole run, which is a dozen requests plus however long Part B takes, down to a
+single round trip. Closing it completely is lesser's to give and belongs upstream
+against `equaltoai/lesser`. In practice: **do not grant that account access to
+that agent from another window while the harness is running.**
+
 **It will not send the grantee's MCP credential to a host nobody vouched for.**
 `mcpAccess.mcpURL` is a value the _server publishes_, and
 `CONTENTUS_GRANTEE_MCP_TOKEN` is a working bearer for the grantee's account.
@@ -305,12 +315,24 @@ This is the procedure's real job. After the instance takes a new lesser:
    `AGENT_ACTIVITY_QUERY`, `accessLedger`, `driverLedger` are imported from the
    shipped modules, never retyped — so a contract that moved under contentus
    shows up here as a named failing step rather than as a screen that renders
-   emptily. **Re-read `--mcp-host` from the upgraded instance before reusing the
-   command line**: an upgrade is exactly when a published endpoint legitimately
-   moves, and a stale expectation is a failing step rather than a silent one —
-   which is the behaviour you want, but only if you know why it fired.
-3. **Part B** for anything Part C marked ATTEST, plus a look at the two panels.
-4. If a step fails because lesser changed, that is an upstream report against
+   emptily.
+
+   **Run it without `CONTENTUS_GRANTEE_MCP_TOKEN` at this point in the order.**
+   An upgrade is exactly when a published endpoint legitimately moves, so the
+   `--mcp-host` you used last time is precisely the value you cannot trust yet —
+   and reusing it stale is the one shape of this step that could offer a bearer to
+   an endpoint no human has looked at since the upgrade. The harness enforces the
+   floor (no host decision, no start; a mismatched host, no request), but the
+   ordering is what keeps you from _making_ the wrong decision: read the endpoint
+   off the screen in **B2** first, and only then re-run Part C with the MCP
+   credential and the host you just read. Everything else in Part C needs no such
+   ordering, which is why it comes first.
+
+3. **Part B** for anything Part C marked ATTEST, plus a look at the two panels —
+   and, per the note above, for the endpoint the credentialed re-run will pin.
+4. **Part C again with the MCP credential**, if you want the drive and the
+   post-revoke fail-closed check machine-checked rather than attested.
+5. If a step fails because lesser changed, that is an upstream report against
    `equaltoai/lesser`, not a local patch. See `docs/consumption/agent-contract.md`
    for what this client already records about each of these surfaces.
 
