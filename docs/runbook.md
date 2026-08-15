@@ -168,7 +168,9 @@ rather than a curl, so it has its own procedure:
 `docs/exercise/end-to-end-share-connect-observe.md`. Run it after any install
 that carries a lesser upgrade — it starts with a dry run that sends nothing, and
 its harness reads lesser through the app's own documents, so a contract that
-moved shows up as a named failing step instead of an empty screen.
+moved shows up as a named failing step instead of an empty screen. Its run with
+an MCP credential needs the expected MCP host named up front (`--mcp-host`);
+that credential is not sent to a host only the instance vouched for.
 
 ## Milestone-zero discipline
 

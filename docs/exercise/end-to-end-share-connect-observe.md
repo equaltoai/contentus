@@ -164,11 +164,20 @@ Supply `CONTENTUS_GRANTEE_MCP_TOKEN` as well — the token minted in B3 — and 
 more steps become machine-checked: that the grantee's session is live, and that
 the same credential is refused after revocation.
 
+**A run carrying that token must first say which MCP host it may reach.** Take
+the endpoint from the `Connect a client` panel in B2 — the host of the URL the
+grantee is shown — and name it:
+
 ```bash
 CONTENTUS_OWNER_TOKEN=… CONTENTUS_GRANTEE_TOKEN=… CONTENTUS_GRANTEE_MCP_TOKEN=… \
 node --experimental-strip-types scripts/probe-share-flow.mjs \
-  --base https://<instance> --agent <agent> --grantee <account> --execute
+  --base https://<instance> --agent <agent> --grantee <account> \
+  --mcp-host <mcp-host> --execute
 ```
+
+Without `--mcp-host` (or `--i-trust-the-published-host`, below) a run holding
+that token **refuses to start** and sends nothing at all. The reason is in the
+next section.
 
 Run it **after** B3 so there is a recorded action for the attribution step to
 find. The probe's own drive is `initialize` + `tools/list` and nothing else — it
@@ -177,7 +186,7 @@ audit row and cannot satisfy that step itself. Pass `--no-attribution` to run
 before a recorded action exists; the summary then says, in as many words, that
 the run did not check attribution.
 
-### Two things it refuses to do
+### Three things it refuses to do
 
 **It will not revoke access it did not create.** Before writing anything it
 reads the owner's share list, and if the grantee already holds active access it
@@ -186,19 +195,60 @@ standing grant nobody asked it to remove is not a cost a milestone check may
 impose. It aborts for the same reason when the instance sends a share entry it
 did not mark active or revoked — that entry could be the grantee's.
 
+That preflight is a **gate on starting, never the authority for the deletion**.
+It is a read, and a dozen requests happen after it; you or another admin can
+grant that same account access inside that window, in another browser tab, at
+which point "the grantee held nothing when we looked" describes the past and a
+revocation would land on a grant somebody meant to keep. So the deletion has its
+own authority: the `granted_at`/`granted_by` stamp lesser returns for the row
+**this run's own write produced**, captured at that moment and re-checked against
+a fresh read of the share list taken immediately before the delete. A row that
+moved underneath the run — re-granted, removed, re-stamped, or left unclassified
+— stops the revocation with the grant intact and says so by name. The same
+identity covers the other edge: if lesser answers the write with a row it says
+somebody else granted, that is a standing grant this run merely adopted, and the
+run aborts rather than adopting the right to remove it.
+
+This applies to the **cleanup** too — the revocation that runs after a failure,
+which is the one most likely to be written as an unconditional delete and the one
+where that would do the most damage. If the cleanup cannot identify its own row it
+refuses, and prints, loudly, that the access may still be standing and must be
+revoked by hand. **A refusal here means you have a grant to remove from the
+`Sharing @<agent>` panel before you leave the instance.**
+
+**It will not send the grantee's MCP credential to a host nobody vouched for.**
+`mcpAccess.mcpURL` is a value the _server publishes_, and
+`CONTENTUS_GRANTEE_MCP_TOKEN` is a working bearer for the grantee's account.
+Handing the second to the first because the first arrived in a response trusts a
+host on the word of the party that named it — an instance that is compromised,
+misconfigured, or simply pointed at the wrong origin publishes a URL and receives
+a credential. So the decision is yours and it is made up front:
+
+- `--mcp-host <host>` — the host you expect. Checked against what the instance
+  actually publishes **before the first request reaches that origin**; a mismatch
+  is a failing step with nothing sent to it at all, credential or otherwise.
+- `--i-trust-the-published-host` — accept whatever is published. It works, warns
+  on its own line, and the endpoint check is counted among the claims the run did
+  **not** establish.
+
+The two are contradictory and passing both is refused: an escape hatch that
+silently overrode a stated expectation would be the fail-open the pair exists to
+prevent. Without the MCP token there is nothing of the grantee's to lose to that
+host and the run proceeds either way — still saying which of the two it did.
+
 **It will not accept two credentials for one account.** Sharing an agent with
 yourself walks every route and demonstrates none of the flow.
-
-If a run fails after the grant, the probe still revokes before exiting. If that
-cleanup itself fails it says so loudly — revoke by hand before leaving.
 
 ### Reading the result
 
 Exit 0 means every step the probe checked passed. It is not a statement about
 the ATTEST steps, and the summary lists those by name. A run that exercised the
-full flow with an MCP credential supplied reports **16/16 checked** and **2 steps
-this run did not prove** — the credential mint and the recorded action, both of
-which happen in B3 under the operator's own hand.
+full flow with an MCP credential and `--mcp-host` supplied reports **19/19
+checked** and **2 steps this run did not prove** — the credential mint and the
+recorded action, both of which happen in B3 under the operator's own hand. Swap
+`--mcp-host` for `--i-trust-the-published-host` and it is **18/18 checked** with
+three unproven, the third being the published endpoint nobody vouched for.
+Without the MCP credential at all: **16/16 checked**, five unproven.
 
 ## What is proven where
 
@@ -208,13 +258,14 @@ which happen in B3 under the operator's own hand.
 | Owner's current-access list names grantee  | ✔      | ✔                    |
 | Grantee's shared-with-me list names agent  | ✔      | ✔                    |
 | Grantee reads the published MCP endpoint   | ✔      | ✔                    |
+| Published endpoint is on the expected host | ✔      | ✔ with `--mcp-host`  |
 | Endpoint's discovery documents answer      | —      | ✔                    |
 | Endpoint refuses an unauthenticated caller | —      | ✔ (negative control) |
 | Grantee mints an MCP credential            | ✔      | ATTEST — always      |
 | Grantee's session is live                  | ✔      | ✔ with the MCP token |
 | Grantee performs a recorded action         | ✔      | ATTEST — always      |
 | Owner sees the grantee attributed          | ✔      | ✔                    |
-| Owner revokes                              | ✔      | ✔                    |
+| Owner revokes                              | ✔      | ✔ (own grant only)   |
 | Both lists reflect the revocation          | ✔      | ✔                    |
 | Revoked credential is refused              | ✔      | ✔ with the MCP token |
 
@@ -254,7 +305,10 @@ This is the procedure's real job. After the instance takes a new lesser:
    `AGENT_ACTIVITY_QUERY`, `accessLedger`, `driverLedger` are imported from the
    shipped modules, never retyped — so a contract that moved under contentus
    shows up here as a named failing step rather than as a screen that renders
-   emptily.
+   emptily. **Re-read `--mcp-host` from the upgraded instance before reusing the
+   command line**: an upgrade is exactly when a published endpoint legitimately
+   moves, and a stale expectation is a failing step rather than a silent one —
+   which is the behaviour you want, but only if you know why it fired.
 3. **Part B** for anything Part C marked ATTEST, plus a look at the two panels.
 4. If a step fails because lesser changed, that is an upstream report against
    `equaltoai/lesser`, not a local patch. See `docs/consumption/agent-contract.md`
