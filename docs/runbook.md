@@ -161,6 +161,15 @@ than prose. That is correct, deliberate behaviour, not an install failure — se
 `docs/consumption/renderer-authority.md`. Verifying the rendered-prose path
 requires either an HTML-format article or the upstream lesser fix.
 
+### Agent sharing and MCP access (M2)
+
+The share → connect → observe → revoke path is a sequence across two accounts
+rather than a curl, so it has its own procedure:
+`docs/exercise/end-to-end-share-connect-observe.md`. Run it after any install
+that carries a lesser upgrade — it starts with a dry run that sends nothing, and
+its harness reads lesser through the app's own documents, so a contract that
+moved shows up as a named failing step instead of an empty screen.
+
 ## Milestone-zero discipline
 
 The manifest and this install path are milestone-zero artifacts: they exist
