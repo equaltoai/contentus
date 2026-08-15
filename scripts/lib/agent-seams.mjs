@@ -32,7 +32,22 @@ export const FACE_DIR = 'src/lib/agents';
 
 export const SEAMS = {
 	'AgentRoster.svelte': {
-		owns: ['AgentCard.svelte', 'AgentRosterFilters.svelte', 'MyAgents.svelte'],
+		owns: [
+			'AgentCard.svelte',
+			// The owner's "who has been driving" view (M2.4,
+			// equaltoai/contentus#95) sits behind this seam for the same reason
+			// `AgentSharingPanel` does: `MyAgents` mounts it per owned agent, so a
+			// swap that replaces the roster orphans it. It is not SHARED — the
+			// detail route has no owner-only surface to mount it on — and it is not
+			// a seam of its own, because there is no greater component in prospect
+			// that would replace an activity-log view independently of the roster
+			// that carries it.
+			'AgentDriversPanel.svelte',
+			'AgentRosterFilters.svelte',
+			'AgentSharedWithMePanel.svelte',
+			'AgentSharingPanel.svelte',
+			'MyAgents.svelte',
+		],
 		nests: [],
 	},
 	'AgentDetail.svelte': {

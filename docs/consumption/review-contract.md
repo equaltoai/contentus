@@ -13,6 +13,12 @@ are **answered at lesser v1.6.4** and are marked closed in place; the consuming
 code moved with them. Ask D (verdict control sizing) closed at greater-v0.13.4.
 A and E remain open and still name the release they reproduce at.
 
+Ask G (`DraftReview.actedBy`) is **retired at the M2 realignment**
+(2026-08-14) — not answered and not deferred: M2.1 removed the act-as read that
+was its entire premise, so the ask names a flow this client no longer offers.
+It is the one entry below closed by a change here rather than upstream, which is
+why it records its reasoning at length instead of a release tag.
+
 A thin consumption note, not a redefinition of anyone's contract. It records
 what contentus observed while wiring Face 2, what it decided, and what it did
 not build because the contract does not currently support it.
@@ -252,6 +258,79 @@ per-draft `draftReview(id)` fan-out, the `listing-only` fallback, and the
 `myDrafts` listing read are deleted from the queue path.
 
 **Where:** `equaltoai/lesser`, GraphQL contract.
+
+### G. `DraftReview` carries no `actedBy` carrier for the review surface — RETIRED
+
+**RETIRED 2026-08-14, by operator disposition at the close of the M2
+realignment (equaltoai/contentus#91; M2.1–M2.4 merged and live-verified).** Not
+answered upstream, not deferred, and not withdrawn for being hard: the scenario
+that motivated it stopped existing in this client. The ask and its reasoning are
+kept below rather than deleted, because an ask that vanishes silently is one the
+next reader re-opens from the same premises.
+
+**What was asked.** Expose the real-caller attribution on the review projection
+— a `DraftReview.actedBy`, or a per-verdict `actedBy` on
+`DraftReviewVerdictRecord`, resolving the actor under whose grant the write was
+performed — so a grantee-facing review surface could show who actually acted
+rather than only which agent they acted as. lesser v1.6.5's act-as contract
+(`docs/contracts/agent-share-act-as.md`) named `Draft.actedBy` and
+`Article.actedBy` as the CMS caller-attribution carriers, and the v1.6.4→v1.6.5
+schema delta was exactly those two fields; `DraftReview` — the projection the
+review queue and workspace consume, and the shape every act-as-enabled review
+operation returned (`sharedDraftReviews`, `draftReview`, `submitDraftReview`) —
+had none.
+
+**Why it is retired: the premise, stated plainly, is false now.** Every word of
+the ask rests on a reader who is ACTING AS THE AGENT on the CMS review surface.
+That is the only way "the agent in the verdict's `reviewer` position and the
+real caller nowhere" arises — the verdict has to have been written under the
+agent's identity for there to be a real caller hidden behind it. M2.1
+(equaltoai/contentus#92) removed the control that let a person elect that
+selection, because sharing an agent grants ACCESS to it and a human driving the
+agent from inside the web CMS was never what a share meant. So on this client:
+
+- **A grantee reviews as themselves.** Their own account is the `reviewer` in
+  the verdict lesser records. There is no second identity for an `actedBy` to
+  disambiguate — the field would resolve to the same account already named.
+- **A grantee who drives the agent does it through MCP** (M2.2,
+  equaltoai/contentus#93), where lesser records the real caller on the write
+  itself. The attribution question did not go unanswered; it moved to the
+  surface that was always its home, and the client's job there is to hand the
+  grantee the endpoint, which it does.
+- **The owner's "who drove my agent" is answered twice over.**
+  `Draft.actedBy` is rendered on the review workspace (M7.0 phase 5) through a
+  contentus-owned `draft(id)` read, owner-only by `GetDraft`; and the M2.4
+  driver view (equaltoai/contentus#95, `AgentDriversPanel`) folds lesser's agent
+  activity log into who has been driving the agent and when. That is the
+  attribution the milestone existed to provide, and it is live.
+
+What is left once those three are true is a field with no consumer. Asking
+lesser to add one would be this client requesting a contract surface to serve a
+flow it deliberately does not offer — the shape of upstream request most worth
+not making.
+
+**The escalation stands withdrawn.** This ask was routed to
+`factory.equaltoai@theorymcp.ai` on 2026-08-13
+(delivery-8d8cae4ac3204cdc) as an active lesser need, alongside the agent
+ownership-signal need. That escalation is withdrawn as to ask G only; the
+ownership-signal need it travelled with is untouched and unrelated. Recorded
+here because an escalation nobody retracts is how a backend comes to build a
+field its only named consumer no longer wants.
+
+**What would bring it back, and it is a product decision rather than a contract
+gap.** If contentus is ever asked to support MULTI-HUMAN CMS REVIEW
+COLLABORATION — several people reviewing through the web client under one
+identity, or a delegated review path inside the CMS rather than through MCP —
+then a verdict's `reviewer` stops identifying the person who wrote it, and the
+real-caller carrier becomes necessary again on exactly the reasoning above. That
+is a decision about what the product offers, to be taken deliberately and by the
+operator. It is not a gap in lesser's contract today, and nothing in the current
+tree is waiting on it.
+
+**Consequence for the review queue, stated so it is not read as a regression.**
+The queue shows no per-draft caller attribution, and after this retirement it is
+not expected to. Every review the CMS can produce is written by the account that
+signed in, and that account is what the projection names.
 
 ## M2d.5 — the completion-gate round trip, and what was actually verified
 

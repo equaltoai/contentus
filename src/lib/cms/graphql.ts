@@ -35,6 +35,13 @@ export interface GraphQLRequestOptions {
 	endpoint?: string | null;
 	/** Bearer token. Omitted entirely for anonymous reads. */
 	accessToken?: string | null;
+	/**
+	 * Agent username for act-as (agent share-grants, lesser v1.6.5). Sent as
+	 * `X-Lesser-Act-As`. lesser honors it only on its act-as-enabled operations
+	 * and silently runs owner semantics elsewhere — the header is a request,
+	 * never a guarantee, so callers must not treat its presence as agent scope.
+	 */
+	actAs?: string | null;
 	signal?: AbortSignal;
 }
 
@@ -62,6 +69,9 @@ export async function graphqlRequest<T>(
 	};
 	if (options.accessToken) {
 		headers.authorization = `Bearer ${options.accessToken}`;
+	}
+	if (options.actAs) {
+		headers['x-lesser-act-as'] = options.actAs;
 	}
 
 	let response: Response;

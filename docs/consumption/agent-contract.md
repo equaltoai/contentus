@@ -16,6 +16,7 @@ this document and lesser disagree, lesser is right and this is a bug.
 | `/agents/{username}` | `agent(username)`                             | anonymous                 |
 | "Agents you own"     | `myAgents`                                    | bearer token, client only |
 | MCP addresses        | `Agent.mcpAccess`                             | anonymous (not redacted)  |
+| A shared agent's MCP | `agent(username) { mcpAccess }`               | bearer token, client only |
 | Capability badges    | `Agent.agentCapabilities`                     | anonymous                 |
 | Trust state          | `Agent.verified`, `Agent.quarantine*`         | anonymous                 |
 
@@ -105,6 +106,259 @@ itself named — never off `window.location`, which is the app host and a
 different origin. Deriving a well-known path beneath a stated host is a much
 smaller claim than deriving the host.
 
+### What a share grant conveys, and where the grantee reads it
+
+A grant on an agent conveys **access to that agent's MCP**: the grantee connects
+to the agent's MCP endpoint and signs in **as themselves**, with their own
+account, and lesser records which grantee drove each agent action (`actedBy`).
+It is not, and since M2.1 (equaltoai/contentus#92) is nowhere offered as, a
+licence to act as the agent inside this CMS.
+
+Both share panels say so in their own lede, because a reader sees one screen and
+not both: the owner's `AgentSharingPanel` at the moment they decide to grant,
+and the grantee's `AgentSharedWithMePanel` when they read what they hold.
+`tests/agents-trust.test.mjs` holds both halves — that each panel names MCP
+access, and that neither describes a grant as the ability to act as the agent.
+
+The grantee's list reads `mcpAccess` through `AGENT_MCP_ACCESS_QUERY`, one read
+per shared agent, dispatched under the grant list's abort signal and session
+stamp. Three things about that document are deliberate:
+
+- **It is narrower than `AGENT_DETAIL_QUERY`.** The surface sending it asks one
+  question about somebody _else's_ agent, so it selects no `agentOwner`,
+  `delegatedScopes` or `viewerCanSeePrivateFields`. Every extra field is one a
+  later panel can start rendering without anyone deciding it should.
+- **It is one read per agent, not a roster read.** lesser has no
+  batch-by-username query for agents, and the roster's filters are applied after
+  paging (above), so no single roster page can be trusted to contain every agent
+  a caller was granted.
+- **It is display, never provisioning.** `BuildPublicMCPAccessBundle` is
+  documented as the client-neutral actor-scoped MCP access surface "that can be
+  shown by agent UIs without provisioning connector state". contentus provisions
+  no lease, no token and no connector state, and has no surface that could.
+
+An `ok` read whose `mcpURL` is empty is the instance **stating** it publishes no
+MCP endpoint for that agent. That is a served fact and renders as one; it is a
+different sentence from a read that failed, and `sharedMcpAccess`
+(`src/lib/agents/mcp.ts`) is where the two are kept apart. A grantee who reads
+"none published" stops looking; one who reads a failure tries again.
+
+The row shows the endpoint and links to the agent's own page for the rest of the
+bundle. It deliberately does not reuse `CopyBlock`: that component sits behind
+the `AgentMcpPanel` seam (`scripts/lib/agent-seams.mjs`), and greater M6a
+replacing that panel must not orphan the grantee's list.
+
+### Who holds access, and who held it
+
+`GET /api/v1/agents/{username}/share` is lesser's **owner/admin view**, and it is
+the only read on this contract that carries revoked entries at all.
+`ListByAgent` runs `authorizeAgentOwner` before it reads anything and answers
+everyone else `ErrNotAuthorized`
+(`lesser/pkg/services/agentshare/service.go:142-149, 201-225`); the route sits
+behind `requireManageAgents` and `authenticateAgentOwner` on top of that
+(`lesser/cmd/api/routes.go:173`). The grantee-facing `shared-with-me` list is a
+different index with `RevokedAt attribute_not_exists` filtered in at the query.
+So the audit half is owner-only by lesser's construction, and no arrangement of
+this client widens or narrows it.
+
+What contentus owes is not to widen the READER. The one call site is
+`AgentSharingPanel`, which `MyAgents` mounts only behind lesser's `agent.owner`
+statement, and `tests/agents-trust.test.mjs` sweeps tracked source to assert
+`listShareGrants` has no second caller.
+
+The panel shows the two halves apart — **who has access now**, and **access that
+was revoked** — with each entry's audit stamps: `granted_at`/`granted_by` on
+both sides, `revoked_at`/`revoked_by` on the revoked one. The split is lesser's
+own `active` boolean (`RevokedAt == nil`, computed server-side), never a
+re-derivation from the timestamps, and an entry that arrives without that
+boolean is placed on **neither** side and counted in a notice: filed under
+current it would claim access the instance never confirmed, and filed under
+revoked it would tell an owner someone's access is gone when it may not be.
+`accessLedger` (`src/lib/agents/share-view.ts`) is where that classification
+lives, and `tests/agent-share-view.test.mjs` exercises it directly.
+
+**The exclusion reaches the empty state, which is a claim like any other.** An
+empty current-access list is the instance's "nobody holds access" only when the
+instance classified everything it sent; while an unclassified entry exists, that
+same sentence answers for lesser about the one row that could be a live grant —
+a 200 that dropped `active` from a real grantee's row would hide the row _and_
+tell the owner the opposite of the only surviving claim
+(equaltoai/contentus#100, codex review 4941340448). So the empty state states
+what is known — nothing classified holds access — and names the entries whose
+access could not be determined, in the same exclusion the counting notice
+describes. A caveat appended to the certain sentence is not the fix and is
+probed against: `noCurrentAccessStatement` composes both readings beside the
+classifier, `tests/agent-share-view.test.mjs` calls them, and
+`tests/agents-trust.test.mjs` holds the panel to rendering that statement rather
+than a sentence written into the branch, where the unclassified count is not in
+hand.
+
+**The revoked list is not an event log, and says so on screen.** lesser keeps
+one row per grantee, and `RegrantAgentShareGrant` `Remove`s that row's
+`RevokedAt` and `RevokedBy`
+(`lesser/pkg/storage/repositories/agent_share_repository.go:45-75`) — so
+granting a revoked account again erases the revocation it followed. What the
+list shows is where each account's access **stands**. The event-by-event
+sequence is the agent activity log lesser writes beside each mutation
+(`agent.share.grant`, `agent.share.revoke`, `service.go:227-259`), a different
+read on a different surface, and M2.4's rather than this one's.
+
+An audit stamp **drops a clause lesser did not serve rather than filling it**.
+`revoked_by` is optional in the vendored contract and `revoked_at` is nullable,
+so `grantStamp` composes from what arrived and degrades to the verb alone;
+"by unknown", or the owner's own name standing in, would be this client
+inventing the answer to the one question the screen exists to ask. lesser's
+served order is kept within each half for the same reason — re-sorting by
+`revoked_at` would order the list by a field that is not always there.
+
+### Who has been driving the agent
+
+M2.4 (equaltoai/contentus#95). The companion question to the one above, and a
+different one: the grant ledger names the accounts that **could** reach the
+agent, this names the people who **actually did**. The operator's words were
+"knowing who was logged into MCP as it were".
+
+**There is no session index, upstream or here.** Operator directive,
+2026-08-13: _"I would not index who was logged into an MCP, but its important
+metadata."_ Attribution rides the audit trail lesser#1401 landed
+(`lesser` commit `a1ed548ea`): the agent stays in the audit row's `Username`
+and the human who authorized the token rides in the row's metadata. So this
+view answers who was connected **from what the agent did**, never from a record
+of anyone being connected — and `AgentDriversPanel`'s lede says exactly that,
+because a roster of names under a heading about being logged in reads as a list
+of live sessions, which is the thing that was deliberately not built.
+
+**The contentus-consumable surface is GraphQL**, so GraphQL-first applies with
+nothing to except it. Unlike the share grants — REST because lesser puts them
+on a management plane with no GraphQL spelling — the activity log is served
+both ways: `GET /api/v1/agents/{username}/activity`
+(`lesser/cmd/api/routes.go:180`) and the root field
+`agentActivity(username, first, after)` (`lesser/graph/agents.graphql:993`,
+present in the pinned schema). `activity-client.ts` uses the GraphQL one
+through the same transport as every other contentus read.
+
+**Owner-gated by lesser, and this client does not widen it.** The resolver
+requires a caller, requires `read` scope, and answers `Forbidden` unless the
+caller is the agent's owner, an admin, or the agent itself
+(`lesser/graph/agent_resolvers_stubs.go:376-395`). The panel mounts behind
+lesser's own `agent.owner` statement — the same gate as the sharing panel —
+and sends the owner's own token.
+
+**Two attribution keys, two mechanisms, and one row can carry both.**
+`delegated_by` is written from the token's `DelegatedBy` claim
+(`agent_audit.go:53`) and names the human who authorized the token — on a
+shared agent's MCP, the grantee who signed in. `acted_by` is written on the
+in-CMS act-as path (`agent_act_as.go:114`) and names that request's real
+caller. `statuses.go:126-127` hands the **same** metadata map to both writers
+in sequence, so the act-as row is marshalled with `delegated_by` already in it.
+
+**On the shipped path a dual-key row names one human, not two**, and reading it
+as two was this client's defect (codex review 4941720248 on PR #101).
+`ResolveActAs` is handed no caller identity; it **derives** one from the same
+claim the other writer used — `caller := ToLower(TrimPrefix(claims.DelegatedBy,
+"@"))`, returned as `ActedBy` (`pkg/auth/agent_act_as.go:79-111`). So on every
+dual-key row lesser writes, `acted_by` _is_ `delegated_by` with the sigil
+stripped and the case folded. lesser's own round test pins the pair: an
+agent-subject token with `DelegatedBy: "@alice"` plus `X-Lesser-Act-As` writes
+`{"delegated_by":"@alice","acted_by":"alice",…}`
+(`agent_act_as_round_test.go:157-193`). Rendering that unmerged printed
+"@alice and @alice" and counted one action twice.
+
+`actionDrivers` therefore merges the two keys when they name one identity, and
+keeps them apart only when they genuinely name two people — a state the shipped
+path cannot reach, but `metadataJson` is an unvalidated column any writer may
+have filled, so two names stay two people. The merged row is labelled `act-as`:
+only `recordActAsAuditEvent` writes `acted_by` and only a validated
+`X-Lesser-Act-As` request reaches it, so that channel is certain, while
+`delegated_by` rides every agent token whatever channel it came over. Nothing is
+lost — a request carrying no act-as header writes a `delegated_by`-only row,
+which still contributes `delegated` to that driver.
+
+**Neither mechanism label names a channel its key does not prove.** The
+`delegated_by` mechanism was called `mcp` and rendered "signed in to the agent's
+MCP"; both are retired. `recordAgentAuditEvent` fires on **every** request
+carrying agent claims (`agent_audit.go:16`), and an act-as request from a CMS
+client carries an agent-subject token — so that row is written for callers who
+never opened MCP, and the label told the owner they had signed in to it. The
+member is now `delegated` and the sentence is "authorized the token the agent
+acted under", which is what the key carries. The act-as label is unchanged: that
+one is certain, because `acted_by` is written only behind a validated
+`X-Lesser-Act-As`.
+
+**The identity is compared case-insensitively, because lesser spells it both
+ways.** `resolveAgentClaims` keeps the stored owner form "byte-for-byte"
+(`pkg/auth/oauth.go:595-599`) while `ActedBy` is `ToLower`ed, so the same human
+reaches this client as `@Alice` and `alice` — within one row, and across rows
+(`interactions.go:349` and `misc.go:1806` pass no shared map, so those carry
+`acted_by` alone). Folding case is lesser's own rule for these values, not a
+liberty taken here: every identity comparison in `pkg/auth/agent_owner.go` is
+`strings.EqualFold`. `driverLabel` decides the **sigil**, `driverKey` decides
+the **identity**, and neither decides who the person is: the keys are spelled
+differently at the source — `acted_by` is a bare username, `delegated_by` has
+been through `normalizeDelegatedBy`, which prepends `@` (and prepends it to an
+actor-URL owner too) — and an unrecognizable value is still shown as it arrived.
+
+**What this surface does not provide**, recorded so a later consumer does not
+render past a boundary it did not know about:
+
+- **No session identity.** The writer puts the agent's session in the audit
+  row's `SessionID` _column_, and `AgentActivityEvent` has no field for it —
+  the resolver reads `ID`, `EventType`, `Metadata` and `Timestamp` and nothing
+  else. This is the shape of the directive above, not a gap to route upstream.
+- **A row is not a deed.** One act-as status create writes **two** rows:
+  `statuses.go:126-127` calls both writers, and lesser's round test says so in
+  its own words — "agent-subject requests emit both the agent audit event
+  (`delegated_by`) and the act-as attribution event (`acted_by`)"
+  (`agent_act_as_round_test.go:182-183`). The other act-as sites
+  (`interactions.go:349`, `misc.go:1806`) call one writer and emit one row. So a
+  driver's count is **rows naming them**, which the roster's own field comment
+  says and which can exceed the number of things the agent did. This client does
+  **not** collapse the pair: doing so would need an invented identity for "the
+  same action" across rows — `(action, target_id)` is not one, since two genuine
+  favourites of one status share it — and that is the same guess this module
+  refuses when it declines to gloss `action`.
+- **No login or token events.** The resolver keeps only event types prefixed
+  `agent.` (`agent_resolvers_stubs.go:449`), so the `auth.oauth.*` records —
+  token issued, refreshed, revoked — are filtered out server-side.
+- **No window control.** The range is fixed at 30 days before now
+  (`agent_resolvers_stubs.go:404`) with no argument to move it. The number is
+  deliberately **not** asserted on screen: it is a server constant this client
+  cannot read back, so putting it in the copy would be a claim that goes stale
+  silently the day lesser changes it. The panel says "the activity it keeps".
+- **`totalCount` is not a total.** The resolver assigns it `len(edges)` — the
+  size of the page it just built — so the document does not select it. The
+  honest count of one read is `edges.length`, and the boundary that matters is
+  `pageInfo.hasNextPage`, which is selected and surfaced as older actions this
+  view did not read.
+- **`metadataJson` arrives unvalidated.** lesser hands back the stored column
+  without parsing it (`agentActivityMetadataPtr`), so a value that will not
+  parse is a state the contract permits and is classified `unreadable`.
+
+**An empty roster is not an empty answer**, the M2.3 lesson on this surface.
+"Nobody has driven this agent" is lesser's own statement only when it recorded
+no actions at all. Actions that named no driver, and rows whose metadata could
+not be read, are counted apart and get their own sentences from
+`noDriverStatement` and `partialAttributionNotice` — composed beside the fold
+whose exclusions they describe, and probed there, never a certain sentence with
+a caveat bolted on.
+
+**No upstream ask is opened by this milestone.** Everything M2.4 needed was
+already reachable.
+
+**And one was closed by it.** This section previously recorded ask G in
+`docs/consumption/review-contract.md` as open and unaffected, on the reasoning
+that `DraftReview.actedBy` concerns the **CMS review projection** — a different
+surface from the agent audit trail — so this view could not substitute for it.
+The first half is still true and the conclusion no longer follows. Ask G is
+**retired** (2026-08-14, operator disposition at the close of the M2
+realignment): its premise was a grantee reading the CMS review surface AS the
+agent, which M2.1 removed. What remains of the underlying question — who
+actually drove this agent — is answered by owner-only `Draft.actedBy` on the
+workspace and by this view, and for a grantee by lesser's own record of the MCP
+call they made as themselves. The review queue shows no per-draft caller
+attribution and, after the retirement, is not expected to. The full reasoning is
+in the review contract, under G.
+
 ### The tool catalog is the server's, not the agent's
 
 `mcp.json` lists what the MCP server exposes for the souled runtime profile. It
@@ -127,11 +381,18 @@ no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
 greater M6a will land vendored agent-roster and MCP-detail components. Face 6 is
 built so that lands at **three component boundaries** and nothing else moves.
 
-| Seam                                  | Owns (replaced with it)                           | Imported by                      |
-| ------------------------------------- | ------------------------------------------------- | -------------------------------- |
-| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentRosterFilters`, `MyAgents`     | `routes/Agents.svelte`           |
-| `src/lib/agents/AgentDetail.svelte`   | `AgentTrustDetail`, `AgentCapabilities`           | `routes/AgentDetailRoute.svelte` |
-| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering | `AgentDetail.svelte`             |
+| Seam                                  | Owns (replaced with it)                                                                                           | Imported by                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentDriversPanel`, `AgentRosterFilters`, `AgentSharedWithMePanel`, `AgentSharingPanel`, `MyAgents` | `routes/Agents.svelte`           |
+| `src/lib/agents/AgentDetail.svelte`   | `AgentTrustDetail`, `AgentCapabilities`                                                                           | `routes/AgentDetailRoute.svelte` |
+| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering                                                                 | `AgentDetail.svelte`             |
+
+The `Owns` column is `SEAMS` in `scripts/lib/agent-seams.mjs`, and it is
+reproduced here rather than summarized: this table listed three of the roster's
+components while the declaration named five, because the panels landed in M7,
+M2.2 and M2.3 and the prose did not follow them. A seam table that is a partial
+copy of the declaration is worse than none — it reads as the answer while the
+gate is checking something wider.
 
 `AgentTrustBadge` is **shared** on purpose: it is the one pill the roster card
 and the detail header both show, and greater's `AgentStateBadge` replaces it on

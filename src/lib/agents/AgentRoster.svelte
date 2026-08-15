@@ -51,6 +51,7 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 
 	import AgentCard from './AgentCard.svelte';
 	import AgentRosterFilters from './AgentRosterFilters.svelte';
+	import AgentSharedWithMePanel from './AgentSharedWithMePanel.svelte';
 	import MyAgents from './MyAgents.svelte';
 	import { agentsHref } from '../../facetheory/routing';
 	import { hasActiveFilters, type AgentRosterFilterState } from './filters';
@@ -130,6 +131,15 @@ v1 composes the roster from `shell` (Panel, StatCard, PageFrame) + primitives".
 		nothing at all for an anonymous reader.
 	-->
 	<MyAgents />
+
+	<!--
+		The grantee half, below the owned half: the agents lesser has shared with
+		the viewer. A list since M2.1 — the act-as selection control it used to
+		carry was the one surface the M7 tree got wrong and is gone
+		(equaltoai/contentus#92). Client-only like `MyAgents` — the grants are
+		private and the props above are public.
+	-->
+	<AgentSharedWithMePanel />
 
 	<!--
 		Forward-only paging, because lesser's connection is forward-only: it

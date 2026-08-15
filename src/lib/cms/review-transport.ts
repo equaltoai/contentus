@@ -26,7 +26,12 @@
  * lesser's, and every operation is authenticated and therefore client-side.
  */
 
-import type { DraftReviewData, DraftReviewVerdict } from '../blog-types';
+import type { DraftReviewData, DraftReviewVerdict, ReviewActorData } from '../blog-types';
+
+// The act-as context: what this transport sends as `X-Lesser-Act-As`, and what
+// ends a selection when lesser says a grant is gone. Explicit `.ts` extension
+// like everything else here — probe-loaded under `node --test`.
+import { actAsSelection, clearActAs, hasForbiddenExtension } from '../agents/act-as.ts';
 
 // Explicit `.ts` extensions: this module and everything it pulls in at runtime
 // are loaded straight off disk by `node --test --experimental-strip-types`,
@@ -34,6 +39,7 @@ import type { DraftReviewData, DraftReviewVerdict } from '../blog-types';
 // (`allowImportingTsExtensions`) both accept the explicit form.
 import { graphqlRequest, GraphQLTransportError } from './graphql.ts';
 import {
+	DRAFT_ACTED_BY_QUERY,
 	DRAFT_OWNERSHIP_QUERY,
 	DRAFT_PREVIEW_QUERY,
 	DRAFT_REVIEW_QUERY,
@@ -45,6 +51,7 @@ import {
 	failureFromErrors,
 	isAgentGenerated,
 	orderQueueEntries,
+	toDraftActedBy,
 	toDraftPreview,
 	toDraftReview,
 	type DraftPreview,
@@ -56,6 +63,39 @@ import {
 
 /** A caller's bearer token, or null when there is no session. */
 export type AccessToken = string | null;
+
+/**
+ * A selection stored before the act-as control was removed dies here, once,
+ * when this module loads.
+ *
+ * M2.1 (equaltoai/contentus#92) removed the control that let a person elect to
+ * act as a shared agent — sharing an agent grants ACCESS to it, and a human
+ * driving it from the web CMS was never what act-as meant. Removing a control
+ * does not reach into a browser that already used it: the selection lives in
+ * `sessionStorage`, so a grantee who selected an agent before the upgrade still
+ * holds one, and THIS module is what would otherwise put it on the wire.
+ *
+ * IT DIES BEFORE THE FIRST READ, AND NOT AT A SURFACE. Both act-as read sites
+ * are in this file — `authenticated` below and `loadDraftActedBy` further down
+ * — and module evaluation completes before either can be called: before a route
+ * asks for a queue, before the banner mounts. Clearing at a surface's mount
+ * instead would hold only for the surfaces that mount and only in the order
+ * they mount in; this holds for every load of every operation here.
+ *
+ * ONCE PER MODULE LOAD IS ONCE PER DOCUMENT, WHICH IS THE WHOLE WINDOW. Every
+ * navigation here is a fresh document (see `agents/act-as.ts` on why the
+ * selection is stored at all), so the next load runs this again — and nothing
+ * can put a selection back in between, because `selectActAs` is the only writer
+ * and no tracked module under `src/` calls it, which `tests/agents-trust.test.mjs`
+ * holds repository-wide. The two are one statement: nothing starts a selection,
+ * and nothing an earlier build started survives to be read.
+ *
+ * The act-as path itself is untouched. A selection made after this point — which
+ * is to say, in a probe — still rides `X-Lesser-Act-As` on exactly the operations
+ * lesser enables, and a FORBIDDEN answer still ends it. What no longer exists is
+ * a way for a person using this client to be the one who made it.
+ */
+clearActAs();
 
 function failureFromThrown(error: unknown): ReviewFailure {
 	if (error instanceof GraphQLTransportError) {
@@ -76,12 +116,28 @@ function failureFromThrown(error: unknown): ReviewFailure {
  * The token is checked before the request rather than after a rejection: a
  * signed-out reviewer should be told to sign in, not spend a round trip
  * discovering it.
+ *
+ * ACT-AS IS THE DEFAULT, AND THE OPT-OUT IS DELIBERATE. lesser's act-as
+ * contract enables the header on this face's operations — `draft`,
+ * `draftPreview`, `sharedDraftReviews`, `draftReview`, `submitDraftReview`,
+ * `publishDraft` — and a selection from the agents route is attached
+ * automatically. The two calls that are NOT on the enabled list opt out with
+ * `{ actAsEnabled: false }` and state why at the call site: the header on an
+ * unlisted operation is silently ignored and the request runs owner semantics,
+ * so sending it there would dress a stated limitation as agent behavior.
+ *
+ * A FORBIDDEN extension on a request that carried the header is lesser saying
+ * the grant is gone — revocation mid-session is the designed case, re-checked
+ * per request. The selection is cleared here (announced to every subscribed
+ * surface) and the failure is named `act-as-revoked` so the surface can say
+ * what happened rather than showing a generic refusal.
  */
 async function authenticated<T>(
 	accessToken: AccessToken,
 	document: string,
 	variables: Record<string, unknown>,
-	extract: (data: unknown) => T | null
+	extract: (data: unknown) => T | null,
+	options: { actAsEnabled?: boolean } = {}
 ): Promise<ReviewResult<T>> {
 	if (!accessToken) {
 		return {
@@ -90,8 +146,16 @@ async function authenticated<T>(
 		};
 	}
 
+	const actAs = options.actAsEnabled === false ? null : (actAsSelection()?.agentUsername ?? null);
+
 	try {
-		const result = await graphqlRequest<unknown>(document, variables, { accessToken });
+		const result = await graphqlRequest<unknown>(document, variables, {
+			accessToken,
+			...(actAs ? { actAs } : {}),
+		});
+
+		const revocation = revocationFailure(actAs, result.errors);
+		if (revocation) return { ok: false, failure: revocation };
 
 		if (result.errors.length > 0) {
 			return { ok: false, failure: failureFromErrors(result.errors) };
@@ -112,6 +176,32 @@ async function authenticated<T>(
 	} catch (error) {
 		return { ok: false, failure: failureFromThrown(error) };
 	}
+}
+
+/**
+ * Whether a response ends an active act-as selection.
+ *
+ * lesser answers a revoked grant with the `FORBIDDEN` error extension on an
+ * HTTP 200 — never a 403, which is the REST spelling. When the request carried
+ * a selection and the answer carries the extension, the selection is cleared
+ * (announced to subscribed surfaces) and the failure is named `act-as-revoked`.
+ * Without a selection attached, a FORBIDDEN is an ordinary refusal and nothing
+ * here touches the act-as state.
+ */
+function revocationFailure(
+	actAs: string | null,
+	errors: readonly {
+		message: string;
+		path?: (string | number)[];
+		extensions?: Record<string, unknown>;
+	}[]
+): ReviewFailure | null {
+	if (!actAs || !hasForbiddenExtension(errors)) return null;
+	clearActAs();
+	return {
+		reason: 'act-as-revoked',
+		message: `The share grant for @${actAs} was revoked, so acting as that agent has ended.`,
+	};
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -196,7 +286,12 @@ async function loadOwnReviewsPage(
 				hasNextPage: connection.hasNextPage,
 				endCursor: connection.endCursor,
 			};
-		}
+		},
+		// `myDraftReviews` is NOT on lesser's act-as enabled list: the header
+		// would be silently ignored and the request would run owner semantics.
+		// That is the recorded limitation (docs/planning/agent-share-act-as-m7.md),
+		// and the opt-out keeps the design from dressing it as agent behavior.
+		{ actAsEnabled: false }
 	);
 }
 
@@ -311,6 +406,58 @@ export async function isDraftAuthor(accessToken: AccessToken, id: string): Promi
 		str(record((data as { draft?: unknown } | null)?.draft)?.['id'])
 	);
 	return result.ok;
+}
+
+/**
+ * Who last wrote this draft on its author's behalf, from lesser's
+ * `Draft.actedBy`.
+ *
+ * A success with a null value is the normal answer — no act-as write has
+ * happened — and must not be confused with a failed read. A failed read
+ * (an owner-only `draft(id)` refused for a non-owner, for instance) is
+ * returned as a failure; the caller treats both the same way on screen:
+ * nothing to show, presence-driven.
+ */
+export async function loadDraftActedBy(
+	accessToken: AccessToken,
+	id: string
+): Promise<ReviewResult<ReviewActorData | null>> {
+	if (!id) {
+		return { ok: false, failure: { reason: 'not-found', message: 'No draft was requested.' } };
+	}
+	if (!accessToken) {
+		return {
+			ok: false,
+			failure: { reason: 'unauthenticated', message: 'Sign in to review drafts on this instance.' },
+		};
+	}
+
+	// `draft` IS on lesser's act-as enabled list: under a selection the read is
+	// agent-scoped, which is exactly when an owner-only field like `actedBy`
+	// becomes visible to the grantee acting as the agent.
+	const actAs = actAsSelection()?.agentUsername ?? null;
+
+	try {
+		const result = await graphqlRequest<unknown>(
+			DRAFT_ACTED_BY_QUERY,
+			{ id },
+			{ accessToken, ...(actAs ? { actAs } : {}) }
+		);
+
+		const revocation = revocationFailure(actAs, result.errors);
+		if (revocation) return { ok: false, failure: revocation };
+
+		if (result.errors.length > 0) {
+			return { ok: false, failure: failureFromErrors(result.errors) };
+		}
+
+		return {
+			ok: true,
+			value: toDraftActedBy((result.data as { draft?: unknown } | null)?.draft),
+		};
+	} catch (error) {
+		return { ok: false, failure: failureFromThrown(error) };
+	}
 }
 
 export async function loadDraftReview(
@@ -450,15 +597,24 @@ export async function scheduleDraft(
 	id: string,
 	scheduledAt: string
 ): Promise<ReviewResult<ScheduledDraft>> {
-	return authenticated(accessToken, SCHEDULE_DRAFT_MUTATION, { id, scheduledAt }, (data) => {
-		const draft = record((data as { scheduleDraft?: unknown } | null)?.scheduleDraft);
-		const draftId = draft ? str(draft['id']) : null;
-		if (!draft || !draftId) return null;
+	return authenticated(
+		accessToken,
+		SCHEDULE_DRAFT_MUTATION,
+		{ id, scheduledAt },
+		(data) => {
+			const draft = record((data as { scheduleDraft?: unknown } | null)?.scheduleDraft);
+			const draftId = draft ? str(draft['id']) : null;
+			if (!draft || !draftId) return null;
 
-		return {
-			id: draftId,
-			status: str(draft['status']),
-			scheduledAt: str(draft['scheduledAt']),
-		};
-	});
+			return {
+				id: draftId,
+				status: str(draft['status']),
+				scheduledAt: str(draft['scheduledAt']),
+			};
+		},
+		// `scheduleDraft` is deliberately NOT act-as-enabled upstream: a
+		// scheduler-driven publish cannot carry honest caller attribution. No
+		// act-as threading reaches it, per the planning doc.
+		{ actAsEnabled: false }
+	);
 }

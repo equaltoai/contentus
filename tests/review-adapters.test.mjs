@@ -1,16 +1,113 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { existsSync, readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { after, beforeEach, test } from 'node:test';
 
-import {
+import { initialSchedulingOffer } from '../src/lib/review/scheduling-offer.ts';
+
+/**
+ * The act-as threading this file probes pulls `auth/session.ts` into the
+ * transport's module graph, which imports SvelteKit's `$app/*` aliases and
+ * uses extensionless relative imports — neither of which `node --test` can
+ * resolve on its own. The loader below is the same one
+ * `tests/agent-act-as.test.mjs` and `tests/auth-session.test.mjs` register,
+ * and it must run BEFORE the transport is imported, which is why the imports
+ * below are dynamic rather than static.
+ */
+const aliases = new Map([
+	['$app/environment', pathToFileURL(resolve('src/facetheory/shims/app-environment.ts')).href],
+	['$app/paths', pathToFileURL(resolve('src/facetheory/shims/app-paths.ts')).href],
+]);
+
+registerHooks({
+	resolve(specifier, context, nextResolve) {
+		const url = aliases.get(specifier);
+		if (url) return { url, shortCircuit: true };
+
+		if (
+			context.parentURL?.startsWith(pathToFileURL(resolve('src')).href) &&
+			specifier.startsWith('.')
+		) {
+			const resolved = new URL(specifier, context.parentURL);
+			const candidates = resolved.pathname.endsWith('.js')
+				? [resolved.pathname.slice(0, -3) + '.ts']
+				: [`${resolved.pathname}.ts`];
+			const candidate = candidates.find(existsSync);
+			if (candidate) return { url: pathToFileURL(candidate).href, shortCircuit: true };
+		}
+
+		return nextResolve(specifier, context);
+	},
+});
+
+class MemoryStorage {
+	#values = new Map();
+
+	getItem(key) {
+		return this.#values.get(String(key)) ?? null;
+	}
+
+	setItem(key, value) {
+		this.#values.set(String(key), String(value));
+	}
+
+	removeItem(key) {
+		this.#values.delete(String(key));
+	}
+
+	clear() {
+		this.#values.clear();
+	}
+}
+
+const originalGlobals = {
+	window: globalThis.window,
+	sessionStorage: globalThis.sessionStorage,
+	fetch: globalThis.fetch,
+};
+
+globalThis.window = { location: { origin: 'https://contentus.example' } };
+globalThis.sessionStorage = new MemoryStorage();
+
+const {
 	isDraftAuthor,
+	loadDraftActedBy,
 	loadDraftPreview,
+	loadDraftReview,
 	loadReviewQueue,
 	publishDraft,
 	scheduleDraft,
 	submitDraftReview,
-} from '../src/lib/cms/review-transport.ts';
-import { initialSchedulingOffer } from '../src/lib/review/scheduling-offer.ts';
+} = await import('../src/lib/cms/review-transport.ts');
+const { actAsSelection, clearActAs, onActAsChange, selectActAs } =
+	await import('../src/lib/agents/act-as.ts');
+
+after(() => {
+	globalThis.window = originalGlobals.window;
+	globalThis.sessionStorage = originalGlobals.sessionStorage;
+	globalThis.fetch = originalGlobals.fetch;
+});
+
+beforeEach(() => {
+	sessionStorage.clear();
+});
+
+/** A signed-in auth session in the shape `readSession` accepts. */
+function signIn() {
+	sessionStorage.setItem(
+		'contentus:auth_session',
+		JSON.stringify({
+			accessToken: 'tok',
+			tokenType: 'Bearer',
+			scope: 'read write',
+			createdAt: Date.now(),
+			expiresIn: 3600,
+			expiresAt: Date.now() + 3600_000,
+		})
+	);
+}
 
 /**
  * The review ADAPTERS, driven for real.
@@ -403,6 +500,266 @@ test('the ownership probe answers from whether lesser resolved it', async () => 
 		() => isDraftAuthor(TOKEN, DRAFT_ID)
 	);
 	assert.equal(notOwner.value, false);
+});
+
+/* ---------------------------------------------------------------------------
+ * loadDraftActedBy — lesser's Draft.actedBy attribution carrier
+ * ------------------------------------------------------------------------ */
+
+test('loadDraftActedBy sends the actedBy document with the draft id, and maps the actor', async () => {
+	const { value, calls } = await withGraphql(
+		() => ({ data: { draft: { actedBy: reviewer } } }),
+		() => loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+
+	assert.ok(value.ok);
+	assert.deepEqual(value.value, {
+		id: 'actor-human-1',
+		username: 'editor',
+		domain: null,
+		displayName: 'Editor',
+		avatar: null,
+		isAgent: false,
+	});
+	assert.equal(calls[0].operation, 'ContentusDraftActedBy');
+	assert.deepEqual(calls[0].variables, { id: DRAFT_ID });
+});
+
+test('an absent actedBy is a success with nothing to show, never a failure', async () => {
+	// The normal answer for a draft nobody has written under a grant. Reading
+	// it as a failure would put an error on screen for the common case; the
+	// display is presence-driven, and `ok: true, value: null` is what keeps it
+	// that way.
+	const { value } = await withGraphql(
+		() => ({ data: { draft: { actedBy: null } } }),
+		() => loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+
+	assert.ok(value.ok);
+	assert.equal(value.value, null);
+});
+
+test('an owner-only refusal is a failure the workspace hides, not a fabricated nobody', async () => {
+	const { value } = await withGraphql(
+		() => ({ errors: [{ message: 'draft is not yours', extensions: { code: 'FORBIDDEN' } }] }),
+		() => loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+
+	assert.equal(value.ok, false);
+	assert.equal(value.failure.reason, 'forbidden');
+});
+
+/* ---------------------------------------------------------------------------
+ * act-as threading — the header, and what ends a selection
+ * ------------------------------------------------------------------------ */
+
+const EMPTY_SHARED = () => ({
+	data: {
+		sharedDraftReviews: {
+			totalCount: 0,
+			pageInfo: { hasNextPage: false, endCursor: null },
+			edges: [],
+		},
+	},
+});
+
+const EMPTY_OWN = () => ({
+	data: {
+		myDraftReviews: {
+			totalCount: 0,
+			pageInfo: { hasNextPage: false, endCursor: null },
+			edges: [],
+		},
+	},
+});
+
+test('an act-as selection rides the header on enabled operations, and not on the own half', async () => {
+	signIn();
+	selectActAs('scribe');
+	try {
+		const { calls } = await withGraphql(
+			(call) => (call.operation === 'ContentusSharedDraftReviews' ? EMPTY_SHARED() : EMPTY_OWN()),
+			() => loadReviewQueue(TOKEN)
+		);
+
+		const shared = calls.find((call) => call.operation === 'ContentusSharedDraftReviews');
+		const own = calls.find((call) => call.operation === 'ContentusMyDraftReviews');
+		assert.equal(shared.headers['x-lesser-act-as'], 'scribe');
+		// `myDraftReviews` is NOT on lesser's enabled list: owner semantics by
+		// design, and the opt-out keeps the header off it rather than dressing
+		// the limitation as agent behavior.
+		assert.equal(own.headers['x-lesser-act-as'], undefined);
+	} finally {
+		clearActAs();
+	}
+});
+
+test('enabled workspace reads and writes carry the header', async () => {
+	signIn();
+	selectActAs('scribe');
+	try {
+		const review = await withGraphql(
+			() => ({ data: { draftReview: { draftId: DRAFT_ID } } }),
+			() => loadDraftReview(TOKEN, DRAFT_ID)
+		);
+		assert.equal(review.calls[0].headers['x-lesser-act-as'], 'scribe');
+
+		const publish = await withGraphql(
+			() => ({
+				data: {
+					publishDraft: {
+						id: 'article-1',
+						slug: 's',
+						title: 't',
+						publishedAt: null,
+						canonicalUrl: null,
+					},
+				},
+			}),
+			() => publishDraft(TOKEN, DRAFT_ID)
+		);
+		assert.equal(publish.calls[0].headers['x-lesser-act-as'], 'scribe');
+
+		const author = await withGraphql(
+			() => ({ data: { draft: { id: DRAFT_ID } } }),
+			() => isDraftAuthor(TOKEN, DRAFT_ID)
+		);
+		assert.equal(author.calls[0].headers['x-lesser-act-as'], 'scribe');
+	} finally {
+		clearActAs();
+	}
+});
+
+test('without a selection no header is sent on any review operation', async () => {
+	signIn();
+	const { calls } = await withGraphql(
+		() => ({ data: { draft: { id: DRAFT_ID } } }),
+		() => isDraftAuthor(TOKEN, DRAFT_ID)
+	);
+	assert.equal(calls[0].headers['x-lesser-act-as'], undefined);
+});
+
+test('scheduleDraft never carries the header — act-as is deliberately excluded there', async () => {
+	signIn();
+	selectActAs('scribe');
+	try {
+		const { calls } = await withGraphql(
+			() => ({
+				data: { scheduleDraft: { id: DRAFT_ID, status: 'SCHEDULED', scheduledAt: null } },
+			}),
+			() => scheduleDraft(TOKEN, DRAFT_ID, '2026-09-01T00:00:00Z')
+		);
+		assert.equal(calls[0].headers['x-lesser-act-as'], undefined);
+	} finally {
+		clearActAs();
+	}
+});
+
+test('a FORBIDDEN extension on an act-as request ends the selection and names the reason', async () => {
+	signIn();
+	selectActAs('scribe');
+
+	const cleared = [];
+	const unsubscribe = onActAsChange((selection) => cleared.push(selection));
+	try {
+		const { value } = await withGraphql(
+			() => ({ errors: [{ message: 'grant revoked', extensions: { code: 'FORBIDDEN' } }] }),
+			() => loadDraftReview(TOKEN, DRAFT_ID)
+		);
+
+		assert.equal(value.ok, false);
+		assert.equal(value.failure.reason, 'act-as-revoked');
+		assert.match(value.failure.message, /scribe/);
+		// Revocation mid-session is the designed case: the selection is cleared
+		// and every subscribed surface is told.
+		assert.equal(actAsSelection(), null);
+		assert.deepEqual(cleared, [null]);
+	} finally {
+		unsubscribe();
+		clearActAs();
+	}
+});
+
+test('a FORBIDDEN without a selection is an ordinary refusal and touches nothing', async () => {
+	signIn();
+	const { value } = await withGraphql(
+		() => ({ errors: [{ message: 'not yours', extensions: { code: 'FORBIDDEN' } }] }),
+		() => loadDraftReview(TOKEN, DRAFT_ID)
+	);
+
+	assert.equal(value.ok, false);
+	assert.equal(value.failure.reason, 'forbidden');
+	assert.equal(actAsSelection(), null);
+});
+
+/** Where the act-as selection is stored — the key an earlier build wrote. */
+const ACT_AS_KEY = 'contentus:act_as';
+
+test('a selection stored before the control went never reaches lesser on a fresh load', async () => {
+	// M2.1 (equaltoai/contentus#92) removed the control that elects a selection,
+	// but a removal does not reach into a browser that already used one: the
+	// selection is in `sessionStorage`, so a grantee who selected an agent
+	// before the upgrade still holds it, and this transport is what would put it
+	// on the wire. Clearing it when `/agents` mounts is not enough — a grantee
+	// can load `/review` directly and never go there. This is that path.
+	signIn();
+
+	const session = JSON.parse(sessionStorage.getItem('contentus:auth_session'));
+	// Planted through the storage key rather than `selectActAs`, because
+	// "written by a build that still had the control" is the entire scenario —
+	// and bound to the live session, so the read path would otherwise honour it.
+	sessionStorage.setItem(
+		ACT_AS_KEY,
+		JSON.stringify({
+			agentUsername: 'scribe',
+			sessionCreatedAt: session.createdAt,
+			sessionExpiresAt: session.expiresAt,
+		})
+	);
+	assert.deepEqual(
+		actAsSelection(),
+		{ agentUsername: 'scribe' },
+		'the plant must be a selection this build would otherwise honour, or the assertions below prove nothing'
+	);
+
+	// A fresh `/review` document. Both review routes import `$lib/cms/review`,
+	// so the transport's module graph evaluates before any surface mounts and
+	// before any operation can run; the query suffix is how a probe gets that
+	// second evaluation of a module this process already holds. It loads the
+	// same repository source, and shares the one act-as module every instance of
+	// it imports — which is why the assertions read through the selection this
+	// file already imported.
+	const fresh = await import('../src/lib/cms/review-transport.ts?fresh-document');
+
+	assert.equal(actAsSelection(), null, 'loading the transport must end the stored selection');
+	assert.equal(
+		sessionStorage.getItem(ACT_AS_KEY),
+		null,
+		'and remove it, rather than leaving it stored for the next reader'
+	);
+
+	// Both act-as read sites, driven for real: the shared entry every enabled
+	// operation runs through, and `loadDraftActedBy`, which reads the selection
+	// on its own.
+	const review = await withGraphql(
+		() => ({ data: { draftReview: { draftId: DRAFT_ID } } }),
+		() => fresh.loadDraftReview(TOKEN, DRAFT_ID)
+	);
+	assert.equal(
+		review.calls[0].headers['x-lesser-act-as'],
+		undefined,
+		'an enabled review operation must not act as the agent an earlier build selected'
+	);
+
+	const actedBy = await withGraphql(
+		() => ({ data: { draft: { id: DRAFT_ID, actedBy: null } } }),
+		() => fresh.loadDraftActedBy(TOKEN, DRAFT_ID)
+	);
+	assert.equal(
+		actedBy.calls[0].headers['x-lesser-act-as'],
+		undefined,
+		'and neither must the owner-only actedBy read, which reaches the selection by itself'
+	);
 });
 
 /* ---------------------------------------------------------------------------

@@ -84,6 +84,7 @@ export const DOCUMENT_INVENTORY = [
 			'DRAFT_REVIEW_QUERY',
 			'DRAFT_PREVIEW_QUERY',
 			'DRAFT_OWNERSHIP_QUERY',
+			'DRAFT_ACTED_BY_QUERY',
 			'SUBMIT_DRAFT_REVIEW_MUTATION',
 			'PUBLISH_DRAFT_MUTATION',
 			'SCHEDULE_DRAFT_MUTATION',
@@ -92,6 +93,10 @@ export const DOCUMENT_INVENTORY = [
 	{
 		module: 'src/lib/instance/info.ts',
 		documents: ['INSTANCE_INFO_QUERY'],
+	},
+	{
+		module: 'src/lib/agents/activity-client.ts',
+		documents: ['AGENT_ACTIVITY_QUERY'],
 	},
 	{
 		module: 'src/lib/messaging/queries.ts',
@@ -116,7 +121,12 @@ export const DOCUMENT_INVENTORY = [
 	},
 	{
 		module: 'src/lib/agents/contract.ts',
-		documents: ['AGENTS_ROSTER_QUERY', 'AGENT_DETAIL_QUERY', 'MY_AGENTS_QUERY'],
+		documents: [
+			'AGENTS_ROSTER_QUERY',
+			'AGENT_DETAIL_QUERY',
+			'MY_AGENTS_QUERY',
+			'AGENT_MCP_ACCESS_QUERY',
+		],
 	},
 	{
 		module: 'src/lib/drones/contract.ts',
