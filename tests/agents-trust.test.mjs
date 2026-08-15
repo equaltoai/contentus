@@ -1152,6 +1152,438 @@ test('the revoked list does not present itself as every revocation', () => {
 	);
 });
 
+/* -------------------------------------------------------------------------
+ * The grantee's view of what was shared with them
+ *
+ * THE SAME DEFECT AS #100, ON THE OTHER SIDE OF THE CONTRACT. The panel
+ * filtered `grants.filter((grant) => grant.active)` — truthiness, not
+ * `=== true` — and rendered a certain empty state under it. A row lesser sent
+ * without the boolean was therefore dropped from the list and then denied by
+ * the sentence beneath it, which is this client answering for the instance in
+ * the one case where the hidden row could be a live grant.
+ *
+ * WHY IT WAS NOT A LIVE BUG, AND WHY THE PROBES STAY ANYWAY. lesser answers
+ * `/api/v1/agents/shared-with-me` from a different index with
+ * `Filter("RevokedAt", "attribute_not_exists", nil)`, and `active` is
+ * server-computed on a field carrying no `omitempty`, so a conforming instance
+ * sends `true` on every row. These hold the client honest about a NON-conforming
+ * one — the case where a claim is least available and most damaging.
+ * ---------------------------------------------------------------------- */
+
+/** The grantee panel's parsed tree. */
+function sharedPanelAst() {
+	return parse(
+		readFileSync(join(repoRoot, 'src/lib/agents/AgentSharedWithMePanel.svelte'), 'utf8'),
+		{ modern: true }
+	);
+}
+
+/**
+ * Whether a node is the `{#if ledger.current.length}` block — the one branch
+ * that decides between the list and its empty state.
+ *
+ * SPELLED OUT TO THE `.length`, and that is the whole reason this is a function
+ * rather than two lines inlined at each call site. The first version of the
+ * position probe below matched `test.object.name === 'ledger'`, which is the
+ * shape of `{#if ledger.current}` and NOT of what the panel writes: in
+ * `ledger.current.length` the test's object is itself a MemberExpression, so
+ * the matcher never fired and the assertion it guarded passed on every input,
+ * including the mutant it existed to catch. One reading, used by both probes,
+ * is what keeps that from being true of only one of them.
+ */
+function isCurrentListBranch(node) {
+	if (node?.type !== 'IfBlock') return false;
+	const test = node.test;
+	if (test?.type !== 'MemberExpression' || test.property?.name !== 'length') return false;
+	const list = test.object;
+	return (
+		list?.type === 'MemberExpression' &&
+		list.object?.name === 'ledger' &&
+		list.property?.name === 'current'
+	);
+}
+
+/**
+ * The node types that decide, at the fan-out's own level, whether a row is
+ * reached — every spelling of "this one, not that one" that does not need a
+ * `.filter` to be written.
+ *
+ * CLOSED OVER JAVASCRIPT'S CONDITIONALS, not over the three shapes that occurred
+ * to the author. The first version of this set held `IfStatement`,
+ * `ConditionalExpression` and `ContinueStatement`, and a mutant sweep walked
+ * `grant.active && void fetchAgentMcpAccess(…)` straight through it: a
+ * `LogicalExpression` guards a dispatch with no `if` anywhere, and a `switch`
+ * whose losing case `break`s does the same in a third spelling. A probe a
+ * one-character bypass survives is not the proof the comment above claims, so
+ * the set is now enumerated from the language — `if`, `?:`, `&&`/`||`/`??`,
+ * `switch`, and the two jumps that skip a row inside a loop — rather than from
+ * the defect that prompted it.
+ *
+ * WHAT IS STILL OUTSIDE IT, and why that is not a silent gap: a narrowing
+ * written inside a nested callback, which `walkOwnScope` deliberately does not
+ * reach, for the reason stated there. Everything the fan-out's own scope can use
+ * to skip a row is in this set; if a spelling is found that is not, the sweep
+ * that finds it is the one that adds it.
+ */
+const ROW_NARROWING = new Set([
+	'IfStatement',
+	'ConditionalExpression',
+	'LogicalExpression',
+	'SwitchStatement',
+	'ContinueStatement',
+	'BreakStatement',
+]);
+
+/**
+ * The reads the fan-out may make on the classified list it was handed: `map`
+ * seeds one loading state per row and touches no membership.
+ *
+ * ONE ENTRY, AND SHORT ON PURPOSE. `filter` is the defect by name, but `slice`,
+ * `reduce`, `findIndex` and an index are selections too, and the honest closure
+ * over "reads that cannot drop a row" is not a list this probe can be sure it
+ * finished. So the allowlist names what the panel does rather than what it may
+ * not do, and a new read fails until it is added deliberately.
+ */
+const FAN_OUT_ROW_READS = ['map'];
+
+/** The expressions a walk must stop at, because they open a scope of their own. */
+const NESTED_SCOPES = new Set([
+	'ArrowFunctionExpression',
+	'FunctionExpression',
+	'FunctionDeclaration',
+]);
+
+/**
+ * Every node in `root`'s OWN scope: the walk stops AT a nested function rather
+ * than descending into it.
+ *
+ * THE BOUNDARY IS THE CLAIM, not an optimisation. What the fan-out probe asks is
+ * which rows enter the dispatch loop, and that is settled by `loadAccess`'s own
+ * statements. The guards inside its `.then` callbacks answer a different
+ * question — whether a row's ANSWER may paint, which is the session stamp and
+ * the abort, both probed above — so a walk that descended into them would read a
+ * publish guard as a row selection and the assertion below would be
+ * unsatisfiable by correct code. That is not hypothetical and it is checkable:
+ * the callback's own guard is `if (signal.aborted || !scope.holds(stamp))`,
+ * which is two members of `ROW_NARROWING` in one line, so the correct panel
+ * passing the narrowing assertion is itself the evidence this walk stops where
+ * it says it does.
+ *
+ * WHAT IT THEREFORE DOES NOT REACH, said rather than left as silence: a
+ * selection written inside one of those callbacks. That would not change which
+ * agents lesser is asked about; it would suppress a row's answer after the fact,
+ * and it is the stamp/abort probes that own that surface.
+ */
+function* walkOwnScope(root) {
+	function* visit(node, isRoot) {
+		if (!node || typeof node !== 'object') return;
+		if (Array.isArray(node)) {
+			for (const item of node) yield* visit(item, false);
+			return;
+		}
+		if (!isRoot && NESTED_SCOPES.has(node.type)) return;
+		yield node;
+		for (const [key, value] of Object.entries(node)) {
+			if (key === 'parent' || key === 'loc') continue;
+			yield* visit(value, false);
+		}
+	}
+
+	yield* visit(root, true);
+}
+
+/** The initializer of `<name> = …` in a parsed script, or null when nothing declares it. */
+function declaratorInit(script, name) {
+	for (const node of walkAst(script))
+		if (node.type === 'VariableDeclarator' && node.id?.name === name) return node.init ?? null;
+	return null;
+}
+
+/**
+ * Whether an expression IS a call to `accessLedger`, followed one name at a time
+ * through the script's own declarations.
+ *
+ * `$derived(accessLedger(grants))` is how this panel holds the classification for
+ * the template, so both that and the bare call are the classifier — what is
+ * refused is a set that merely resembles one. `seen` is not tidiness: `let a = b`
+ * beside `let b = a` would otherwise spin, and a probe that hangs is a probe that
+ * never says no.
+ */
+function isClassifierCall(script, expression, seen) {
+	if (expression?.type === 'Identifier') {
+		if (seen.has(expression.name)) return false;
+		seen.add(expression.name);
+		return isClassifierCall(script, declaratorInit(script, expression.name), seen);
+	}
+	if (expression?.type !== 'CallExpression') return false;
+	if (expression.callee?.name === '$derived')
+		return isClassifierCall(script, expression.arguments?.[0], seen);
+	return expression.callee?.name === 'accessLedger';
+}
+
+/**
+ * Whether an expression is the classifier's ACTIVE side — `accessLedger(…).current`.
+ *
+ * The side is named as strictly as the call is. `.revoked` and `.unreadable` are
+ * the other two answers `accessLedger` gives, and a fan-out reading either would
+ * be asking lesser about agents this reader is not being shown.
+ */
+function isActiveSide(script, expression, seen = new Set()) {
+	if (expression?.type === 'Identifier') {
+		if (seen.has(expression.name)) return false;
+		seen.add(expression.name);
+		return isActiveSide(script, declaratorInit(script, expression.name), seen);
+	}
+	return (
+		expression?.type === 'MemberExpression' &&
+		expression.computed !== true &&
+		expression.property?.name === 'current' &&
+		isClassifierCall(script, expression.object, seen)
+	);
+}
+
+test('the grantee list is the classifier’s output, never a truthiness filter', () => {
+	// THE ASSERTION IS AT THE SOURCE OF THE LIST, not on its contents: what the
+	// grantee sees must be the rows lesser said `active: true` about, and
+	// `accessLedger` is the one place in this repo that reads that boolean
+	// strictly. A template that iterated `grants` again — or a `.filter` written
+	// back into the instance script — is the whole defect returning, with every
+	// unit test of the classifier still green.
+	const ast = sharedPanelAst();
+
+	const each = [];
+	for (const { node } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'EachBlock') continue;
+		const expression = node.expression;
+		if (expression?.type === 'Identifier') each.push(expression.name);
+		else if (
+			expression?.type === 'MemberExpression' &&
+			expression.object?.type === 'Identifier' &&
+			expression.property?.type === 'Identifier'
+		)
+			each.push(`${expression.object.name}.${expression.property.name}`);
+	}
+
+	assert.ok(each.includes('ledger.current'), 'the panel must list the classifier’s active side');
+	assert.ok(
+		!each.includes('grants'),
+		'and never iterate lesser’s unsplit answer, which is where a revoked or unclassified row reaches the screen'
+	);
+
+	// The MCP fan-out is the second reader of the same set, and it carried its
+	// own copy of the truthiness filter. Two filters that must agree are one
+	// correction away from disagreeing, so the assertion is that only one
+	// classifier exists in the file.
+	//
+	// THIS IS THE FILTER'S ABSENCE AND NOTHING MORE. It says no `.filter` was
+	// written back; it does not say the fan-out reads the classification, which
+	// is a claim about provenance and is asserted in the probe below. Neither
+	// stands in for the other: a fan-out handed lesser's unsplit answer passes
+	// this assertion exactly, and a fan-out that filters passes the next one.
+	assert.ok(
+		!callsFn(ast.instance, 'filter'),
+		'the panel must not filter the grant list itself: `accessLedger` is the classification, and a second filter beside it is the half a fix forgets'
+	);
+	assert.ok(
+		callsFn(ast.instance, 'accessLedger'),
+		'and it must actually classify — a list rendered straight from lesser’s answer is the defect with the filter merely deleted'
+	);
+});
+
+test('the MCP fan-out is handed the classifier’s active side, and narrows nothing of its own', () => {
+	// WHAT THE MISSING `.filter` DOES NOT PROVE, and this probe exists because it
+	// does not: three bypasses satisfy the assertion above untouched. Handing the
+	// fan-out lesser's unsplit answer — `loadAccess(result, …)` — writes no filter
+	// at all. A loop over the module's own `grants` state ignores what it was
+	// given. A `continue` drops rows one at a time. Each is the second classifier
+	// returning in a spelling the first probe cannot see, and the panel's
+	// correctness rests on the claim it cannot make: that the rows the fan-out
+	// asks lesser about ARE the rows the list renders — one classification of one
+	// answer, not two sets that happen to agree today.
+	const ast = sharedPanelAst();
+
+	// HALF ONE — WHAT IT IS HANDED, followed by name through the instance script
+	// because the panel may pass either `accessLedger(result).current` or the
+	// `$derived` it already holds, and both are the classification.
+	const dispatches = [];
+	for (const node of walkAst(ast.instance))
+		if (node.type === 'CallExpression' && node.callee?.name === 'loadAccess') dispatches.push(node);
+
+	assert.equal(dispatches.length, 1, 'the fan-out is dispatched from exactly one place');
+	assert.ok(
+		isActiveSide(ast.instance, dispatches[0].arguments?.[0]),
+		'and is handed the classifier’s active side — `accessLedger(…).current`, not lesser’s unsplit answer and not another side of the ledger, either of which asks about agents the reader is not being shown'
+	);
+
+	// HALF TWO — WHAT IT DOES WITH IT. Provenance at the call site is undone by a
+	// narrowing inside the callee, so the parameter has to reach the dispatch loop
+	// as it arrived.
+	const fanOut = [...walkAst(ast.instance)].find(
+		(node) => node.type === 'FunctionDeclaration' && node.id?.name === 'loadAccess'
+	);
+	assert.ok(fanOut, 'the fan-out is a declaration this probe can read, not a value it cannot');
+
+	const rows = fanOut.params?.[0]?.name;
+	assert.ok(rows, 'and binds its classified list to a plain name');
+
+	const iterated = [];
+	const narrowing = [];
+	const reads = [];
+	for (const node of walkOwnScope(fanOut.body)) {
+		if (node.type === 'ForOfStatement') iterated.push(node.right);
+		if (ROW_NARROWING.has(node.type)) narrowing.push(node.type);
+		if (node.type === 'MemberExpression' && node.object?.name === rows)
+			reads.push(node.computed ? '[computed]' : (node.property?.name ?? '[unnamed]'));
+	}
+
+	assert.equal(iterated.length, 1, 'the fan-out dispatches from exactly one loop');
+	assert.equal(
+		iterated[0]?.type === 'Identifier' ? iterated[0].name : `<${iterated[0]?.type}>`,
+		rows,
+		'which iterates the list it was handed, bare — a loop over the module’s own `grants`, or over a re-selection of the parameter, is the classification being redone by the half that must not redo it'
+	);
+	assert.deepEqual(
+		narrowing,
+		[],
+		`and drops no row of it on the way: ${narrowing.join(', ')} decides per row whether lesser is asked, which is a second classifier however few lines it takes`
+	);
+	assert.deepEqual(
+		[...new Set(reads)].sort(),
+		FAN_OUT_ROW_READS,
+		`and reads the list only to seed one loading state per row: ${JSON.stringify([...new Set(reads)].sort())}. The allowlist is deliberately one entry long — a new read is not assumed to be a selection, it is asked to be shown not to be`
+	);
+});
+
+test('the grantee empty state is composed, never written into the template', () => {
+	// The wording lives in `noSharedAgentsStatement` and both readings are
+	// asserted in `tests/agent-share-view.test.mjs`, where they can be CALLED.
+	// What this holds is the other half: that the screen keeps asking. A sentence
+	// written back into this branch — "No agents have been shared with you." is
+	// the one that was there — is the defect returning with every unit test green.
+	const ast = sharedPanelAst();
+
+	const branches = [];
+	for (const { node } of walkTemplate(ast.fragment))
+		if (isCurrentListBranch(node)) branches.push(node);
+
+	assert.equal(branches.length, 1, 'the panel tests ledger.current.length exactly once');
+	const empty = branches[0].alternate;
+	assert.ok(empty, 'and answers the empty case rather than rendering nothing at all');
+
+	// Attribute values are `Text` too — a class name is not something the panel
+	// says to the reader, so what is collected is the text a reader would read.
+	const inAttribute = (ancestors) => ancestors.some((node) => node.type === 'Attribute');
+	const spoken = [];
+	const rendered = [];
+	for (const { node, ancestors } of walkTemplate(empty)) {
+		if (node.type === 'Text' && node.data?.trim() && !inAttribute(ancestors))
+			spoken.push(node.data.trim());
+		if (node.type === 'ExpressionTag' && !inAttribute(ancestors)) rendered.push(node.expression);
+	}
+
+	assert.deepEqual(
+		spoken,
+		[],
+		`the empty state must carry no literal copy — a claim that nothing was shared cannot be written where the unclassified count is not in hand: ${spoken.join(' / ')}`
+	);
+
+	// FOLLOWED BY NAME into the instance script, because the panel renders
+	// `$derived` values rather than calling into the template: what is asserted is
+	// that whatever this branch prints is bound to the classifier's own statement.
+	const sources = rendered.map((expression) => {
+		if (expression?.type === 'CallExpression') return expression.callee?.name ?? null;
+		if (expression?.type !== 'Identifier') return null;
+		for (const node of walkAst(ast.instance)) {
+			if (node.type !== 'VariableDeclarator') continue;
+			if (node.id?.name !== expression.name) continue;
+			if (callsFn(node.init, 'noSharedAgentsStatement')) return 'noSharedAgentsStatement';
+			// Named explicitly so the owner panel's sentence — one import away in
+			// the same module, and about a different subject entirely — cannot be
+			// wired in here and pass as "composed".
+			if (callsFn(node.init, 'noCurrentAccessStatement')) return 'noCurrentAccessStatement';
+		}
+		return null;
+	});
+
+	assert.ok(rendered.length > 0, 'the empty state must render something');
+	assert.ok(
+		sources.every((source) => source === 'noSharedAgentsStatement'),
+		`every part of the empty state must come from the grantee’s own statement in src/lib/agents/share-view.ts: ${JSON.stringify(sources)}`
+	);
+});
+
+/**
+ * Where two template nodes sit, as child indices, in the one fragment holding
+ * them both — or null when no fragment does.
+ *
+ * THE READER'S OWN ORDER, which is what "above" means and what source offsets
+ * only approximate. Two nodes in different branches of the same `{#if}` are
+ * written one after the other and are never met one after the other; sibling
+ * indices in a shared fragment are a sequence a reader actually reads down.
+ * Returning null rather than a guess when no fragment holds both is the whole
+ * reason this is separate from the caller: "I cannot place these" must fail the
+ * assertion, not satisfy it.
+ */
+function siblingOrder(first, second) {
+	const path = (entry) => [...entry.ancestors, entry.node];
+	const left = path(first);
+	const right = path(second);
+
+	let depth = 0;
+	while (depth < left.length && depth < right.length && left[depth] === right[depth]) depth += 1;
+
+	const shared = left[depth - 1];
+	if (!Array.isArray(shared?.nodes)) return null;
+
+	const a = shared.nodes.indexOf(left[depth]);
+	const b = shared.nodes.indexOf(right[depth]);
+	return a < 0 || b < 0 ? null : [a, b];
+}
+
+test('the grantee is told about unclassified rows above the list, not merely outside it', () => {
+	// A reader with three agents listed and a fourth row the instance failed to
+	// classify sees a list that is short by one and looks complete. That is the
+	// same misreading as the empty state's, and it is the one the empty-state fix
+	// does not reach — so the notice sits ABOVE the list rather than inside its
+	// empty branch.
+	//
+	// OUTSIDE THE BRANCH IS HALF OF "ABOVE", AND THE WEAKER HALF. A notice moved
+	// BELOW the list is outside the branch just as completely, and a reader meets
+	// it only after the short list has already been taken for the whole answer —
+	// which is the defect with the notice merely relocated. So both halves are
+	// asserted, and the second is a position rather than a separation: the two
+	// nodes' places in the one fragment a reader reads down.
+	const ast = sharedPanelAst();
+
+	const notices = [];
+	const branches = [];
+	for (const entry of walkTemplate(ast.fragment)) {
+		if (isCurrentListBranch(entry.node)) branches.push(entry);
+		if (entry.node.type !== 'ExpressionTag') continue;
+		if (entry.node.expression?.type !== 'Identifier') continue;
+		const init = declaratorInit(ast.instance, entry.node.expression.name);
+		if (callsFn(init, 'unlistedSharesNotice')) notices.push(entry);
+	}
+
+	assert.equal(notices.length, 1, 'the panel must render the unclassified notice exactly once');
+	assert.equal(branches.length, 1, 'and test ledger.current.length exactly once');
+
+	assert.ok(
+		!notices[0].ancestors.some(isCurrentListBranch),
+		'the notice must sit outside the ledger.current branch — one only the empty screen shows leaves a short list looking complete, and one only the FULL list shows leaves the empty state claiming the instance answered everything'
+	);
+
+	const order = siblingOrder(notices[0], branches[0]);
+	assert.ok(
+		order,
+		'and in the same fragment as the list, because "above the list" is a claim about one sequence the reader reads down and is unmakeable across two'
+	);
+	assert.ok(
+		order[0] < order[1],
+		`and before it in that sequence — a notice rendered after the list is read after the short list has already been taken for complete (notice at ${order[0]}, list at ${order[1]})`
+	);
+});
+
 test('the owner grant list is read on the owner path and nowhere else', () => {
 	// The revoked half of this contract is owner/admin-only by lesser's
 	// construction — `ListByAgent` authorizes first, and the grantee's

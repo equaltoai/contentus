@@ -214,11 +214,17 @@ Open questions — resolved 2026-08-13 and routed to
   serve ownership, that is important to address. Panels remain mounted on
   lesser's served `viewerCanSeePrivateFields` (adversarial review of PR #89,
   finding 4).
-- **`DraftReview` attribution: escalated** (upstream ask G in
-  `docs/consumption/review-contract.md`). `DraftReview` is an important
-  delegation path and must be supported in lesser: add a `DraftReview.actedBy`
-  (or per-verdict `actedBy` on `DraftReviewVerdictRecord`) so delegated
-  reviews carry the real caller.
+- ~~**`DraftReview` attribution: escalated**~~ — **RETIRED 2026-08-14**
+  (upstream ask G in `docs/consumption/review-contract.md`). The entry read:
+  "`DraftReview` is an important delegation path and must be supported in
+  lesser: add a `DraftReview.actedBy` (or per-verdict `actedBy` on
+  `DraftReviewVerdictRecord`) so delegated reviews carry the real caller." The
+  delegation path it names is a grantee reviewing in the CMS **as the agent**,
+  which M2.1 removed — a grantee reviews as themselves and drives the agent
+  through MCP, where lesser already records the caller. The escalation to
+  factory (2026-08-13, delivery-8d8cae4ac3204cdc) stands withdrawn as to this
+  ask only. Full reasoning, and what would bring it back as a product decision,
+  is under G in the review contract.
 
 ## Superseded in part by M2.1 (2026-08-14)
 
@@ -269,6 +275,14 @@ by M2.1. Upstream ask G in `docs/consumption/review-contract.md` is sharpened
 by it: with no act-as read from this client, a grantee-facing review surface has
 no caller attribution at all, so `DraftReview.actedBy` is the only path to one.
 
+> **Followed one step further, this retired the ask (2026-08-14).** The
+> paragraph above is right that the grantee-facing review surface has no caller
+> attribution, and wrong that `DraftReview.actedBy` is therefore needed. A
+> grantee now reviews as THEMSELVES — their own account is the `reviewer` the
+> verdict records, so there is no second identity for the field to reveal. The
+> attribution question belongs to the MCP surface a share actually grants, where
+> lesser answers it already. Ask G is retired; see the review contract, under G.
+
 ## Completed by M2.2 (2026-08-14)
 
 M2.1 removed the wrong thing. M2.2 (equaltoai/contentus#93) supplies the right
@@ -300,6 +314,11 @@ granted.
 Still open and unchanged: the access half's root cause in lesser's OAuth layer
 (equaltoai/lesser#1397, M1) and upstream ask G. M2.2 makes the endpoint
 reachable from the client; whether signing into it succeeds is lesser's.
+
+> **Ask G was retired on 2026-08-14** and is no longer open; the OAuth root
+> cause above is. The endpoint this milestone made reachable is part of why:
+> a grantee's calls arrive over their own MCP session, where the caller is
+> already recorded, so the review projection never needed to carry one.
 
 One piece of M2.1 debt is recorded rather than fixed here. `actAsCandidates`
 (`src/lib/agents/act-as.ts`) fed the removed selector and lost its last

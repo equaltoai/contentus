@@ -343,11 +343,21 @@ whose exclusions they describe, and probed there, never a certain sentence with
 a caveat bolted on.
 
 **No upstream ask is opened by this milestone.** Everything M2.4 needed was
-already reachable. Ask G in `docs/consumption/review-contract.md` remains open
-and is unaffected: it concerns `DraftReview.actedBy` on the **CMS review
-projection**, a different surface from the agent audit trail, and this view
-does not substitute for it — the review queue still shows no per-draft caller
-attribution.
+already reachable.
+
+**And one was closed by it.** This section previously recorded ask G in
+`docs/consumption/review-contract.md` as open and unaffected, on the reasoning
+that `DraftReview.actedBy` concerns the **CMS review projection** — a different
+surface from the agent audit trail — so this view could not substitute for it.
+The first half is still true and the conclusion no longer follows. Ask G is
+**retired** (2026-08-14, operator disposition at the close of the M2
+realignment): its premise was a grantee reading the CMS review surface AS the
+agent, which M2.1 removed. What remains of the underlying question — who
+actually drove this agent — is answered by owner-only `Draft.actedBy` on the
+workspace and by this view, and for a grantee by lesser's own record of the MCP
+call they made as themselves. The review queue shows no per-draft caller
+attribution and, after the retirement, is not expected to. The full reasoning is
+in the review contract, under G.
 
 ### The tool catalog is the server's, not the agent's
 
