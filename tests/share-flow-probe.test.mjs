@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { buildSchema, parse, validate } from 'graphql';
 
 import {
+	createdGrant,
+	expectedHost,
+	grantToRevoke,
 	main,
 	plan,
 	readOptions,
@@ -44,9 +47,22 @@ const MCP_MARKER = 'contentus-mcp-marker-not-a-credential-2222';
 const BASE = 'https://instance.invalid';
 const AGENT = 'scribe';
 const GRANTEE = 'ada';
-const MCP_URL = 'https://api.instance.invalid/mcp/scribe';
+const MCP_HOST = 'api.instance.invalid';
+const MCP_URL = `https://${MCP_HOST}/mcp/scribe`;
+
+const GRANTED_AT = '2026-08-14T12:00:00Z';
 
 const ARGS = ['--base', BASE, '--agent', AGENT, '--grantee', GRANTEE, '--execute'];
+
+/**
+ * The same run, with the MCP host the operator expects named.
+ *
+ * A run carrying `CONTENTUS_GRANTEE_MCP_TOKEN` REFUSES TO START without a host
+ * decision, so every case below that supplies the MCP credential supplies one
+ * too. That is the point rather than an inconvenience: the flag is what stops a
+ * grantee's bearer travelling to whatever host a response happened to name.
+ */
+const ARGS_MCP = [...ARGS, '--mcp-host', MCP_HOST];
 
 const ENV = {
 	CONTENTUS_OWNER_TOKEN: OWNER_MARKER,
@@ -54,6 +70,25 @@ const ENV = {
 };
 
 const ENV_WITH_MCP = { ...ENV, CONTENTUS_GRANTEE_MCP_TOKEN: MCP_MARKER };
+
+/** The share row a healthy instance holds after this run's own PUT. */
+const OWN_GRANT = {
+	agent_username: AGENT,
+	grantee_username: GRANTEE,
+	active: true,
+	granted_at: GRANTED_AT,
+	granted_by: 'owner',
+};
+
+/** The identity the probe captures from that row, as `createdGrant` returns it. */
+const OWN_IDENTITY = {
+	agent: AGENT,
+	grantee: GRANTEE,
+	grantedAt: GRANTED_AT,
+	grantedBy: 'owner',
+};
+
+const ledgerOf = (...current) => ({ current, revoked: [], unreadable: [] });
 
 /** Collects everything the probe writes, so assertions read what a human would. */
 function collector() {
@@ -91,13 +126,7 @@ function instance(overrides = {}) {
 			json({ grants: state.grants.filter((grant) => grant.grantee_username === GRANTEE) }),
 		grant: () => {
 			const existing = state.grants.find((entry) => entry.grantee_username === GRANTEE);
-			const created = {
-				agent_username: AGENT,
-				grantee_username: GRANTEE,
-				active: true,
-				granted_at: '2026-08-14T12:00:00Z',
-				granted_by: 'owner',
-			};
+			const created = { ...OWN_GRANT };
 			if (existing) Object.assign(existing, created);
 			else state.grants.push(created);
 			return json(created);
@@ -247,8 +276,9 @@ test('the dry run names every step and says which it would not prove', async () 
 	}
 	// Without an MCP credential the drive and the fail-closed check are the
 	// operator's; the dry run must say so before the operator plans the session.
-	assert.match(out.text(), /4 would be left to the operator's own record/);
+	assert.match(out.text(), /5 would be left to the operator's own record/);
 	assert.match(out.text(), /Set CONTENTUS_GRANTEE_MCP_TOKEN/);
+	assert.match(out.text(), /--mcp-host <host> would move the published-endpoint check/);
 });
 
 test('supplying an MCP credential moves two steps from ATTEST to CHECK', () => {
@@ -263,11 +293,33 @@ test('supplying an MCP credential moves two steps from ATTEST to CHECK', () => {
 		grantee: GRANTEE,
 		granteeMcpToken: MCP_MARKER,
 		attribution: true,
+		mcpHost: MCP_HOST,
 	});
 
 	const attested = (steps) => steps.filter((step) => step.kind === 'attest').map((step) => step.id);
-	assert.deepEqual(attested(without), ['mint', 'drive', 'recorded-action', 'fail-closed']);
+	assert.deepEqual(attested(without), [
+		'mcp-host-verified',
+		'mint',
+		'drive',
+		'recorded-action',
+		'fail-closed',
+	]);
 	assert.deepEqual(attested(with_), ['mint', 'recorded-action']);
+});
+
+test('naming the expected MCP host moves the published-endpoint check from ATTEST to CHECK', () => {
+	// An unnamed host is not a verified host, and the plan has to say which of the
+	// two this run is doing before the operator decides to hand it a credential.
+	const shared = { agent: AGENT, grantee: GRANTEE, granteeMcpToken: null, attribution: true };
+	const unnamed = plan(shared).find((step) => step.id === 'mcp-host-verified');
+	const named = plan({ ...shared, mcpHost: MCP_HOST }).find(
+		(step) => step.id === 'mcp-host-verified'
+	);
+
+	assert.equal(unnamed.kind, 'attest');
+	assert.match(unnamed.what, /NO EXPECTED MCP HOST NAMED/);
+	assert.equal(named.kind, 'checked');
+	assert.ok(named.what.includes(MCP_HOST));
 });
 
 /* =========================================================================
@@ -348,6 +400,262 @@ test('a grantee credential belonging to someone else aborts before writing', asy
 });
 
 /* =========================================================================
+ * ...and the preflight is not what makes that true
+ *
+ * The preflight is a READ, and between it and the DELETE at the end of the run
+ * sit a dozen requests. An owner or admin in another window can grant that same
+ * account access inside that window, at which point the preflight is a statement
+ * about the past and the revocation lands on a grant somebody meant to stand
+ * (codex review 4942154730 on equaltoai/contentus#102). What actually protects
+ * that grant is the IDENTITY of the row this run wrote, re-checked against a
+ * fresh read immediately before the delete — so these cases move the instance
+ * UNDER the probe, which is the only way a check-to-write window is visible at
+ * all.
+ * ====================================================================== */
+
+/**
+ * A fake whose share list changes at the read the probe takes before revoking.
+ *
+ * The reads of `GET /{agent}/share` are, in order: the preflight, the owner's
+ * view of the new grant, the re-read before the revocation, and the owner's view
+ * of the revocation. Taking over from the THIRD puts a concurrent write exactly
+ * inside the window.
+ *
+ * IT TAKES OVER RATHER THAN FLICKERING. A one-read injection is not a concurrent
+ * grant, it is a glitch — and a probe that refused the revocation and then let a
+ * CLEANUP revoke on the next, healthy read would pass a test written that way
+ * while doing the exact thing the check exists to prevent. Injected reads bypass
+ * the fake's log on purpose, so an assertion about what was SENT reads only the
+ * probe's own traffic.
+ */
+function racing(fake, grantsFromNowOn, at = 3) {
+	let reads = 0;
+	return async (url, init = {}) => {
+		const target = new URL(url);
+		if ((init.method ?? 'GET') === 'GET' && target.pathname === `/api/v1/agents/${AGENT}/share`) {
+			reads += 1;
+			if (reads >= at) return json({ grants: grantsFromNowOn });
+		}
+		return fake.fetchImpl(url, init);
+	};
+}
+
+const deletes = (fake) => fake.state.log.filter((entry) => entry.method === 'DELETE');
+
+test('a grant re-granted by somebody else inside the window is NOT revoked', async () => {
+	// THE MUTATION THIS SECTION EXISTS FOR. lesser stores one row per grantee and
+	// re-grants it in place, so a concurrent grant does not appear as a second row
+	// — it appears as the same row carrying somebody else's stamp. A probe that
+	// revoked "the grant for this grantee" would take that access away.
+	const out = collector();
+	const fake = instance();
+	const status = await main(ARGS, {
+		fetchImpl: racing(fake, [
+			{ ...OWN_GRANT, granted_at: '2026-08-14T12:20:00Z', granted_by: 'someone-else' },
+		]),
+		env: ENV,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /\[FAIL\] revoke-target/);
+	assert.match(out.text(), /re-granted since/);
+	assert.match(out.text(), /will NOT revoke it/);
+	assert.deepEqual(deletes(fake), [], 'the concurrent grant must survive the run');
+
+	// And the operator is told, in the cleanup that runs after the failure, that
+	// the access this run created may still be standing — because it is.
+	assert.match(out.text(), /\[CLEANUP REFUSED\]/);
+	assert.match(out.text(), /revoke by hand/i);
+});
+
+test('a grant that vanished inside the window is not replaced by a blind DELETE', async () => {
+	// Somebody else revoked it while this run was in flight. There is nothing of
+	// this run's left to remove, and a DELETE now would be aimed at whatever has
+	// taken its place.
+	const out = collector();
+	const fake = instance();
+	const status = await main(ARGS, { fetchImpl: racing(fake, []), env: ENV, write: out.write });
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /\[FAIL\] revoke-target/);
+	assert.match(out.text(), /no longer in @scribe's current-access list/);
+	assert.deepEqual(deletes(fake), []);
+});
+
+test('an entry the instance did not classify stops the revocation, not just the preflight', async () => {
+	// The same reasoning the preflight already applies, applied at the moment it
+	// actually decides a delete: an entry lesser did not mark could be this run's
+	// row, and "which one is mine" cannot be established by guessing.
+	const out = collector();
+	const fake = instance();
+	const status = await main(ARGS, {
+		fetchImpl: racing(fake, [{ agent_username: AGENT, grantee_username: GRANTEE }]),
+		env: ENV,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /\[FAIL\] revoke-target/);
+	assert.match(out.text(), /without marking them active or revoked/);
+	assert.deepEqual(deletes(fake), []);
+});
+
+test('two active rows for one grantee are not guessed between', async () => {
+	const out = collector();
+	const fake = instance();
+	const status = await main(ARGS, {
+		fetchImpl: racing(fake, [OWN_GRANT, { ...OWN_GRANT, granted_by: 'someone-else' }]),
+		env: ENV,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /2 active grants for @ada/);
+	assert.deepEqual(deletes(fake), []);
+});
+
+test('a share list that cannot be re-read stops the revocation', async () => {
+	// "I could not check" is not "it is fine". Without the re-read there is no
+	// basis for the delete at all.
+	const out = collector();
+	const fake = instance();
+	let reads = 0;
+	const status = await main(ARGS, {
+		fetchImpl: async (url, init = {}) => {
+			const target = new URL(url);
+			if ((init.method ?? 'GET') === 'GET' && target.pathname === `/api/v1/agents/${AGENT}/share`) {
+				reads += 1;
+				if (reads >= 3) return json({ error: 'gateway' }, 502);
+			}
+			return fake.fetchImpl(url, init);
+		},
+		env: ENV,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /could not be re-read before revoking/);
+	assert.deepEqual(deletes(fake), []);
+});
+
+test('the cleanup after a failure goes through the same check, not around it', async () => {
+	// The cleanup is the path that runs when everything else has already gone
+	// wrong, which makes it the one most likely to be written as an unconditional
+	// DELETE — and the one where that would do the most damage.
+	const out = collector();
+	// The flow dies at the MCP read, so the CLEANUP's re-read is the third one —
+	// there is no `revoke-target` step on this path, only the cleanup's own check.
+	const fake = instance({ mcpAccess: () => json({ errors: [{ message: 'nope' }] }, 422) });
+	const status = await main(ARGS, {
+		fetchImpl: racing(fake, [{ ...OWN_GRANT, granted_by: 'someone-else' }]),
+		env: ENV,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /\[CLEANUP REFUSED\]/);
+	assert.match(out.text(), /re-granted since/);
+	assert.match(out.text(), /MAY\s+STILL HOLD ACCESS/);
+	assert.deepEqual(deletes(fake), [], 'the cleanup must not delete a grant it cannot identify');
+});
+
+test("a PUT answering with somebody else's grant aborts before the flow continues", async () => {
+	// The window's other half: a grant landing between the preflight and this run's
+	// own PUT is answered by lesser as an existing row, carrying the granter who
+	// really made it. That row is a standing grant this run adopted, not one it
+	// created, and it has to survive.
+	const out = collector();
+	const fake = instance({
+		grant: () => json({ ...OWN_GRANT, granted_by: 'someone-else' }),
+	});
+	const status = await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV, write: out.write });
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /\[FAIL\] grant-identity/);
+	assert.match(out.text(), /records @someone-else as the granter/);
+	assert.match(out.text(), /NOT remove somebody else/);
+	assert.deepEqual(deletes(fake), []);
+	assert.match(out.text(), /\[CLEANUP REFUSED\]/);
+});
+
+test('a grant returned without its identifying stamp is not one this run can revoke', async () => {
+	for (const partial of [
+		{ ...OWN_GRANT, granted_at: undefined },
+		{ ...OWN_GRANT, granted_by: '' },
+	]) {
+		const out = collector();
+		const fake = instance({ grant: () => json(partial) });
+		const status = await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV, write: out.write });
+
+		assert.equal(status, 1, out.text());
+		assert.match(out.text(), /without the granted_at\/granted_by stamp that identifies it/);
+		assert.deepEqual(deletes(fake), [], 'nothing may be deleted on an unidentifiable row');
+	}
+});
+
+test('a PUT answering about a different account or a different agent aborts', async () => {
+	for (const wrong of [
+		{ ...OWN_GRANT, grantee_username: 'mallory' },
+		{ ...OWN_GRANT, agent_username: 'other-agent' },
+	]) {
+		const out = collector();
+		const fake = instance({ grant: () => json(wrong) });
+		const status = await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV, write: out.write });
+
+		assert.equal(status, 1, out.text());
+		assert.match(out.text(), /\[FAIL\] grant-identity/);
+		assert.deepEqual(deletes(fake), []);
+	}
+});
+
+test('the identity readers say yes to the row this run wrote — and only to it', () => {
+	// The paired green. A rule that refused everything would pass every red above
+	// while making the probe useless, so each refusal is checked against the case
+	// it must still admit.
+	assert.deepEqual(createdGrant(OWN_GRANT, { agent: AGENT, grantee: GRANTEE, owner: ['owner'] }), {
+		ok: true,
+		identity: OWN_IDENTITY,
+	});
+	// lesser may write `granted_by` as the id rather than the username, so both
+	// spellings the viewer read supplied are accepted — and nothing else is.
+	assert.equal(
+		createdGrant(
+			{ ...OWN_GRANT, granted_by: 'actor-owner' },
+			{ agent: AGENT, grantee: GRANTEE, owner: ['owner', 'actor-owner'] }
+		).ok,
+		true
+	);
+	assert.equal(
+		createdGrant(
+			{ ...OWN_GRANT, granted_by: 'actor-owner' },
+			{ agent: AGENT, grantee: GRANTEE, owner: ['owner', 'actor-grantee'] }
+		).ok,
+		false
+	);
+	// Case is the instance's business, not a difference in identity.
+	assert.equal(
+		createdGrant(
+			{ ...OWN_GRANT, grantee_username: 'Ada', granted_by: 'Owner' },
+			{ agent: AGENT, grantee: GRANTEE, owner: ['owner'] }
+		).ok,
+		true
+	);
+
+	assert.deepEqual(grantToRevoke(ledgerOf(OWN_GRANT), OWN_IDENTITY), { ok: true });
+	// A different timestamp on the same row is a different grant.
+	assert.equal(
+		grantToRevoke(ledgerOf({ ...OWN_GRANT, granted_at: '2026-08-14T12:20:00Z' }), OWN_IDENTITY).ok,
+		false
+	);
+	// And a row for a DIFFERENT grantee is not this run's, however active it is.
+	assert.equal(
+		grantToRevoke(ledgerOf({ ...OWN_GRANT, grantee_username: 'mallory' }), OWN_IDENTITY).ok,
+		false
+	);
+});
+
+/* =========================================================================
  * The happy path — so every red above is not vacuous
  * ====================================================================== */
 
@@ -363,12 +671,14 @@ test('the whole flow passes against a healthy instance, and says what it did not
 		'preflight',
 		'share',
 		'owner-sees-grant',
+		'grant-identity',
 		'grantee-sees-agent',
 		'grantee-reads-endpoint',
 		'discovery',
 		'protected-resource',
 		'mcp-refuses-anonymous',
 		'attribution',
+		'revoke-target',
 		'revoke',
 		'owner-sees-revocation',
 		'grantee-loses-agent',
@@ -382,8 +692,8 @@ test('the whole flow passes against a healthy instance, and says what it did not
 
 	// The steps this process did NOT check are counted apart and named, because
 	// an omitted gate reads as a passed gate to anyone skimming a report.
-	assert.match(out.text(), /14\/14 checked steps passed/);
-	assert.match(out.text(), /4 steps THIS RUN DID NOT PROVE/);
+	assert.match(out.text(), /16\/16 checked steps passed/);
+	assert.match(out.text(), /5 steps THIS RUN DID NOT PROVE/);
 	assert.match(out.text(), /mints an MCP credential/);
 
 	// And the grant it created is gone.
@@ -393,7 +703,7 @@ test('the whole flow passes against a healthy instance, and says what it did not
 test('with an MCP credential the drive and the fail-closed check are really checked', async () => {
 	const out = collector();
 	const fake = instance();
-	const status = await main(ARGS, {
+	const status = await main(ARGS_MCP, {
 		fetchImpl: fake.fetchImpl,
 		env: ENV_WITH_MCP,
 		write: out.write,
@@ -402,7 +712,8 @@ test('with an MCP credential the drive and the fail-closed check are really chec
 	assert.equal(status, 0, out.text());
 	assert.match(out.text(), /\[PASS\] drive/);
 	assert.match(out.text(), /\[PASS\] fail-closed/);
-	assert.match(out.text(), /16\/16 checked steps passed/);
+	assert.match(out.text(), /\[PASS\] mcp-host-verified/);
+	assert.match(out.text(), /19\/19 checked steps passed/);
 	assert.match(out.text(), /2 steps THIS RUN DID NOT PROVE/);
 });
 
@@ -410,7 +721,7 @@ test('the drive is read-only: initialize and tools/list, nothing else', async ()
 	// A probe that called a mutating tool would change an instance to prove a
 	// session, which is a cost nobody asked it to impose.
 	const fake = instance();
-	await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
+	await main(ARGS_MCP, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
 
 	const methods = fake.state.log
 		.filter((entry) => entry.url === MCP_URL)
@@ -420,7 +731,7 @@ test('the drive is read-only: initialize and tools/list, nothing else', async ()
 
 test('the only writes the probe ever sends are the two share routes', async () => {
 	const fake = instance();
-	await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
+	await main(ARGS_MCP, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
 
 	const writes = fake.state.log
 		.filter((entry) => entry.method !== 'GET' && new URL(entry.url).pathname.startsWith('/api/v1/'))
@@ -437,7 +748,7 @@ test('every GraphQL document the probe sends is a query, never a mutation', asyn
 	// for, and the property is checked over the DOCUMENTS actually sent rather
 	// than over the file's prose.
 	const fake = instance();
-	await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
+	await main(ARGS_MCP, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
 
 	const documents = fake.state.log
 		.filter((entry) => new URL(entry.url).pathname === '/api/graphql')
@@ -590,7 +901,7 @@ test('a grantee still holding the agent after revocation fails', async () => {
 test('an MCP credential that still works after revocation fails the run', async () => {
 	const out = collector();
 	const status = await run(
-		ARGS,
+		ARGS_MCP,
 		ENV_WITH_MCP,
 		{ mcpAuthorized: () => json({ jsonrpc: '2.0', id: 1, result: { tools: [] } }) },
 		out
@@ -773,7 +1084,7 @@ test('a probe that throws mid-flow is a failure, not a clean tally', async () =>
 test('a hostile instance echoing any of the three tokens cannot get it into the output', async () => {
 	for (const marker of [OWNER_MARKER, GRANTEE_MARKER, MCP_MARKER]) {
 		const out = collector();
-		await main(ARGS, {
+		await main(ARGS_MCP, {
 			fetchImpl: instance({
 				viewerOwner: () => json({ errors: [{ message: `bearer ${marker} was rejected` }] }, 401),
 			}).fetchImpl,
@@ -802,7 +1113,7 @@ test('a token reflected in data, an exception or a non-JSON body is redacted too
 		}),
 	]) {
 		const out = collector();
-		await main(ARGS, { fetchImpl: hostile(), env: ENV_WITH_MCP, write: out.write });
+		await main(ARGS_MCP, { fetchImpl: hostile(), env: ENV_WITH_MCP, write: out.write });
 		for (const marker of [OWNER_MARKER, GRANTEE_MARKER, MCP_MARKER]) {
 			assert.ok(!out.text().includes(marker), `${marker} reached the output:\n${out.text()}`);
 		}
@@ -811,7 +1122,7 @@ test('a token reflected in data, an exception or a non-JSON body is redacted too
 
 test('tokens go in bearer headers and appear in no URL and no request body', async () => {
 	const fake = instance();
-	await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
+	await main(ARGS_MCP, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
 
 	for (const entry of fake.state.log) {
 		for (const marker of [OWNER_MARKER, GRANTEE_MARKER, MCP_MARKER]) {
@@ -832,7 +1143,7 @@ test('the anonymous negative control really is anonymous', async () => {
 	// If it carried a bearer it would prove nothing about an unauthenticated
 	// caller, and the control would be certifying the gate it was meant to test.
 	const fake = instance();
-	await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
+	await main(ARGS_MCP, { fetchImpl: fake.fetchImpl, env: ENV_WITH_MCP, write: () => {} });
 
 	const first = fake.state.log.find((entry) => entry.url === MCP_URL);
 	assert.equal(first.auth, null, 'the control must send no credential');
@@ -860,6 +1171,145 @@ test('the redactor knows every token and refuses to be a formality', () => {
 	const plainly = redactingAll((text) => plain.push(text), [null, undefined, '']);
 	plainly('untouched output');
 	assert.deepEqual(plain, ['untouched output']);
+});
+
+/* =========================================================================
+ * The MCP credential goes to a host the operator named
+ *
+ * `mcpAccess.mcpURL` is a value THE SERVER PUBLISHES and
+ * `CONTENTUS_GRANTEE_MCP_TOKEN` is a bearer for the grantee's account. Sending
+ * the second to the first because the first arrived in a response is trusting a
+ * host on the word of the party that named it (codex review 4942154730 on
+ * equaltoai/contentus#102) — so the decision is the operator's, made before the
+ * run starts, and checked before the first byte reaches that origin.
+ * ====================================================================== */
+
+test('an MCP credential with no host decision refuses to START, having sent nothing', async () => {
+	// The strongest form of "the token does not leave": the run does not begin.
+	const out = collector();
+	const status = await main(ARGS, {
+		fetchImpl: () => {
+			throw new Error('nothing may be sent before the host decision is made');
+		},
+		env: ENV_WITH_MCP,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /would send the grantee bearer to the MCP host THIS INSTANCE PUBLISHES/);
+	assert.match(out.text(), /--mcp-host <host>/);
+	assert.match(out.text(), /--i-trust-the-published-host/);
+	assert.ok(!out.text().includes(MCP_MARKER));
+});
+
+test('a published host that is not the one named gets NOTHING — credential least of all', async () => {
+	// THE EXFILTRATION MUTATION. A compromised or misconfigured instance publishes
+	// an mcpURL of its choosing; the probe must refuse it before a request, not
+	// after a handshake.
+	const out = collector();
+	const fake = instance();
+	const status = await main([...ARGS, '--mcp-host', 'mcp.somewhere-else.invalid'], {
+		fetchImpl: fake.fetchImpl,
+		env: ENV_WITH_MCP,
+		write: out.write,
+	});
+
+	assert.equal(status, 1, out.text());
+	assert.match(out.text(), /\[FAIL\] mcp-host-verified/);
+	assert.match(out.text(), /publishes its MCP endpoint on api\.instance\.invalid/);
+	assert.match(out.text(), /NOTHING was sent to it/);
+
+	// Not one request reached the published host — not the discovery documents,
+	// not the negative control, and above all not the drive.
+	const reached = fake.state.log.filter((entry) => new URL(entry.url).host === MCP_HOST);
+	assert.deepEqual(reached, [], 'the unexpected host received a request');
+	for (const entry of fake.state.log) {
+		assert.notEqual(entry.auth, `Bearer ${MCP_MARKER}`, 'the grantee bearer left the process');
+	}
+
+	// And the grant this run created is still cleaned up.
+	assert.equal(fake.state.grants[0].active, false);
+});
+
+test('--i-trust-the-published-host sends it, says so loudly, and counts it unproven', async () => {
+	// The escape hatch has to work — an operator on an instance whose host they
+	// cannot know in advance still needs the drive checked — and has to be
+	// impossible to take without noticing.
+	const out = collector();
+	const fake = instance();
+	const status = await main([...ARGS, '--i-trust-the-published-host'], {
+		fetchImpl: fake.fetchImpl,
+		env: ENV_WITH_MCP,
+		write: out.write,
+	});
+
+	assert.equal(status, 0, out.text());
+	assert.match(out.text(), /!! --i-trust-the-published-host/);
+	assert.match(out.text(), /a host THIS INSTANCE PUBLISHED and nobody verified/);
+	assert.match(out.text(), /Re-run\s+with --mcp-host api\.instance\.invalid to pin it/);
+	assert.match(out.text(), /\[ATTEST\] mcp-host-verified/);
+	assert.match(out.text(), /\[PASS\] drive/);
+	// One more ATTEST than the named-host run: the host itself.
+	assert.match(out.text(), /18\/18 checked steps passed/);
+	assert.match(out.text(), /3 steps THIS RUN DID NOT PROVE/);
+
+	const drive = fake.state.log.find((entry) => entry.url === MCP_URL && entry.auth);
+	assert.equal(drive.auth, `Bearer ${MCP_MARKER}`, 'the hatch must actually open');
+});
+
+test('naming the host and trusting whatever is published are contradictory', () => {
+	// Letting the hatch win would be an escape hatch silently overriding a stated
+	// expectation, which is the fail-open the pair exists to prevent.
+	const options = readOptions([...ARGS_MCP, '--i-trust-the-published-host'], ENV_WITH_MCP);
+	assert.ok(options.problems.some((problem) => /contradictory/.test(problem)));
+});
+
+test('--mcp-host takes a host, and says so rather than trimming a URL into one', () => {
+	// Accepting `https://api.example/mcp/scribe` and comparing only its host would
+	// discard the path the operator typed while reporting a match.
+	assert.equal(expectedHost('api.example.com'), 'api.example.com');
+	assert.equal(expectedHost('https://API.Example.com'), 'api.example.com');
+	assert.equal(expectedHost('api.example.com:8443'), 'api.example.com:8443');
+	assert.equal(expectedHost('https://api.example.com/mcp/scribe'), null);
+	assert.equal(expectedHost('https://api.example.com/?a=b'), null);
+	assert.equal(expectedHost('  '), null);
+	assert.equal(expectedHost(null), null);
+
+	const options = readOptions([...ARGS, '--mcp-host', MCP_URL], ENV_WITH_MCP);
+	assert.ok(options.problems.some((problem) => /is not a host/.test(problem)));
+});
+
+test('without an MCP credential no host decision is needed, and the run still says so', async () => {
+	// Nothing of the grantee's can be lost to the published host on this path, so
+	// the run proceeds — but "nobody verified it" is still a claim it did not
+	// establish, and it is counted with the rest of them.
+	const out = collector();
+	const fake = instance();
+	const status = await main(ARGS, { fetchImpl: fake.fetchImpl, env: ENV, write: out.write });
+
+	assert.equal(status, 0, out.text());
+	assert.match(out.text(), /\[ATTEST\] mcp-host-verified/);
+	assert.match(out.text(), /no expected host was named/);
+	assert.ok(!out.text().includes('!! --i-trust-the-published-host'), 'no credential, no warning');
+});
+
+test('naming the right host checks it, before anything is sent to it', async () => {
+	// The paired green: every red above would also be produced by a probe that
+	// simply never talked to the endpoint.
+	const out = collector();
+	const fake = instance();
+	const status = await main(ARGS_MCP, {
+		fetchImpl: fake.fetchImpl,
+		env: ENV_WITH_MCP,
+		write: out.write,
+	});
+
+	assert.equal(status, 0, out.text());
+	assert.match(out.text(), /\[PASS\] mcp-host-verified — api\.instance\.invalid/);
+	assert.ok(
+		fake.state.log.some((entry) => entry.url === MCP_URL && entry.auth === `Bearer ${MCP_MARKER}`),
+		'a verified host must still be reached'
+	);
 });
 
 /* =========================================================================

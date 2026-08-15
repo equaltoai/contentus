@@ -18,6 +18,13 @@
  *     node --experimental-strip-types scripts/probe-share-flow.mjs \
  *     --base https://<instance> --agent <agent-username> --grantee <account> --execute
  *
+ *   # with the grantee's MCP credential, which requires naming the host it may
+ *   # reach — see THE MCP CREDENTIAL GOES TO A HOST THE OPERATOR NAMED below
+ *   CONTENTUS_OWNER_TOKEN=… CONTENTUS_GRANTEE_TOKEN=… CONTENTUS_GRANTEE_MCP_TOKEN=… \
+ *     node --experimental-strip-types scripts/probe-share-flow.mjs \
+ *     --base https://<instance> --agent <agent-username> --grantee <account> \
+ *     --mcp-host <mcp-host> --execute
+ *
  * ── IT SENDS NOTHING UNLESS IT IS TOLD TO ───────────────────────────────────
  *
  * Two of this flow's steps are WRITES — `PUT` and `DELETE` on lesser's share
@@ -38,6 +45,28 @@
  * It also refuses when the two credentials resolve to the SAME identity. Sharing
  * an agent with yourself walks every route and demonstrates none of the flow.
  *
+ * THE PREFLIGHT IS A READ, AND A READ IS A MOMENT. Between it and the revocation
+ * at the end of the run sit a dozen requests, and an owner or an admin in another
+ * window can grant that same account access inside that window — at which point
+ * "the grantee held nothing when we looked" is a statement about the past and the
+ * DELETE at the end lands on a grant somebody meant to stand (codex review
+ * 4942154730 on equaltoai/contentus#102). So the preflight is a gate on starting,
+ * never the authority for the revocation. The revocation's own authority is an
+ * IDENTITY: the `granted_at`/`granted_by` stamp lesser returned for the row this
+ * run's `PUT` produced, captured at the moment it was produced, checked against a
+ * FRESH read of the share list immediately before the DELETE. A row that moved
+ * under this run is a row this run did not create, and the probe aborts loudly
+ * with the grant left standing rather than revoking blind — including in the
+ * cleanup path, which is the one that runs when everything else has already
+ * failed. Every DELETE this file can send goes through `revokeOwnGrant`; there is
+ * no second spelling of the revocation for that guarantee to miss.
+ *
+ * The same identity closes the window on the other side. lesser stores ONE ROW
+ * PER GRANTEE, so a grant landing between the preflight and this run's own `PUT`
+ * is re-granted rather than duplicated — and the `PUT` response names who granted
+ * it. If that is not the account this run authenticated as, the row predates this
+ * run and this run will not remove it.
+ *
  * ── WHAT IT PROVES, AND WHAT IT ONLY WATCHES ────────────────────────────────
  *
  * Marks are `PASS`/`FAIL` for what this process checked and `ATTEST` for what it
@@ -57,6 +86,25 @@
  * log keeps only `agent.`-prefixed events, so a read-only session writes no row.
  * Attribution is checked against a recorded action the operator performs — see
  * `docs/exercise/end-to-end-share-connect-observe.md`.
+ *
+ * ── THE MCP CREDENTIAL GOES TO A HOST THE OPERATOR NAMED ────────────────────
+ *
+ * `mcpAccess.mcpURL` is a value THE SERVER PUBLISHES, and `CONTENTUS_GRANTEE_MCP_
+ * TOKEN` is a bearer for the grantee's account. Sending the second to the first
+ * because the first arrived in a response is trusting a host on the word of the
+ * party that named it: an instance that is compromised, misconfigured, or simply
+ * pointed at the wrong origin publishes a URL, and the probe hands it a working
+ * credential (codex review 4942154730 on equaltoai/contentus#102).
+ *
+ * So the token cannot leave for a host nobody vouched for. With the token set the
+ * run REFUSES TO START unless the operator has either named the host they expect
+ * (`--mcp-host <host>`) or accepted whatever is published, in as many words
+ * (`--i-trust-the-published-host`). Naming it is checked against what the instance
+ * actually publishes BEFORE the first request reaches that origin — a mismatch is
+ * a failed step with nothing sent to it, credential or otherwise. Accepting it is
+ * an ATTEST, warned about on its own line, and counted among the claims the run
+ * did not establish. Without the token there is no credential to lose and the run
+ * proceeds either way, still saying which of the two it did.
  *
  * ── THE DOCUMENTS AND THE READERS ARE THE APP'S ─────────────────────────────
  *
@@ -161,6 +209,28 @@ function flagValue(argv, name) {
 /** A nonempty string, which is what "a value" means throughout this file. */
 const value = (raw) => (typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null);
 
+/**
+ * The operator's `--mcp-host` as a `URL.host` looks, or null when it is not one.
+ *
+ * A HOST, NEVER A URL. `https://api.example/mcp/scribe` parses perfectly well and
+ * would compare equal on its host while quietly discarding the path the operator
+ * typed — and the whole point of the flag is that the operator said exactly what
+ * they meant. Anything carrying a path, a query or a fragment is refused by name
+ * rather than trimmed into something that passes.
+ */
+export function expectedHost(raw) {
+	const supplied = value(raw);
+	if (!supplied) return null;
+	let url;
+	try {
+		url = new URL(supplied.includes('://') ? supplied : `https://${supplied}`);
+	} catch {
+		return null;
+	}
+	if (url.pathname !== '/' || url.search || url.hash || !url.host) return null;
+	return url.host.toLowerCase();
+}
+
 export function readOptions(argv, env) {
 	const problems = [];
 
@@ -199,12 +269,42 @@ export function readOptions(argv, env) {
 	if (execute && !ownerToken) problems.push('CONTENTUS_OWNER_TOKEN must be set for --execute');
 	if (execute && !granteeToken) problems.push('CONTENTUS_GRANTEE_TOKEN must be set for --execute');
 
+	const rawMcpHost = flagValue(argv, '--mcp-host');
+	const mcpHost = expectedHost(rawMcpHost);
+	const trustPublishedHost = argv.includes('--i-trust-the-published-host');
+	if (value(rawMcpHost) && !mcpHost) {
+		problems.push(
+			`--mcp-host ${rawMcpHost} is not a host — pass api.example.com or api.example.com:8443, ` +
+				'not a URL with a path'
+		);
+	}
+	if (mcpHost && trustPublishedHost) {
+		// One says "it must be this host", the other says "whatever it is". Picking
+		// a winner would mean an escape hatch silently overriding a stated
+		// expectation, which is the fail-open this pair exists to prevent.
+		problems.push(
+			'--mcp-host and --i-trust-the-published-host are contradictory — the first names the host ' +
+				'the MCP credential may reach, the second accepts whatever this instance publishes. Pass one.'
+		);
+	}
+	if (granteeMcpToken && !mcpHost && !trustPublishedHost) {
+		// The bearer would otherwise travel to whatever `mcpAccess.mcpURL` named,
+		// on the word of the server that named it.
+		problems.push(
+			'CONTENTUS_GRANTEE_MCP_TOKEN is set, so this run would send the grantee bearer to the MCP ' +
+				'host THIS INSTANCE PUBLISHES. Name the host you expect with --mcp-host <host>, or accept ' +
+				'whatever is published with --i-trust-the-published-host.'
+		);
+	}
+
 	return {
 		base,
 		agent,
 		grantee,
 		execute,
 		attribution,
+		mcpHost,
+		trustPublishedHost,
 		ownerToken,
 		granteeToken,
 		granteeMcpToken,
@@ -344,7 +444,7 @@ async function jsonRpc(fetchImpl, endpoint, token, method, params = {}) {
  * name the steps a run left unproven. Two lists would drift, and the one that
  * drifted would be the one describing what was NOT done.
  */
-export function plan({ agent, grantee, granteeMcpToken, attribution }) {
+export function plan({ agent, grantee, granteeMcpToken, attribution, mcpHost }) {
 	const driven = granteeMcpToken ? 'checked' : 'attest';
 	return [
 		{
@@ -372,6 +472,14 @@ export function plan({ agent, grantee, granteeMcpToken, attribution }) {
 			what: `PUT ${AGENTS_PATH}/${agent}/share/${grantee} — WRITE: the grant this run creates`,
 		},
 		{
+			id: 'grant-identity',
+			kind: 'checked',
+			credential: 'owner',
+			what:
+				'the grant just written carries a granted_at/granted_by stamp naming this run as its ' +
+				'granter — the identity the revocation is aimed at',
+		},
+		{
 			id: 'owner-sees-grant',
 			kind: 'checked',
 			credential: 'owner',
@@ -388,6 +496,15 @@ export function plan({ agent, grantee, granteeMcpToken, attribution }) {
 			kind: 'checked',
 			credential: 'grantee',
 			what: 'AGENT_MCP_ACCESS_QUERY — lesser publishes an mcpURL to the grantee',
+		},
+		{
+			id: 'mcp-host-verified',
+			kind: mcpHost ? 'checked' : 'attest',
+			credential: 'none',
+			what: mcpHost
+				? `the published mcpURL is on ${mcpHost} — the host this run was told to expect, checked ` +
+					'before anything is sent to it'
+				: 'NO EXPECTED MCP HOST NAMED — whatever host this instance publishes is accepted as served',
 		},
 		{
 			id: 'discovery',
@@ -436,6 +553,14 @@ export function plan({ agent, grantee, granteeMcpToken, attribution }) {
 				]
 			: []),
 		{
+			id: 'revoke-target',
+			kind: 'checked',
+			credential: 'owner',
+			what:
+				`GET ${AGENTS_PATH}/${agent}/share re-read — the active grant is STILL the one this run ` +
+				'created, or nothing is deleted',
+		},
+		{
 			id: 'revoke',
 			kind: 'checked',
 			credential: 'owner',
@@ -475,6 +600,182 @@ const granteeNames = (grants) =>
 
 const agentNames = (grants) =>
 	grants.map((grant) => value(grant?.agent_username)?.toLowerCase()).filter(Boolean);
+
+/** Case-insensitive equality over two things lesser may have spelled either way. */
+const sameName = (left, right) =>
+	value(left) !== null && value(left).toLowerCase() === value(right)?.toLowerCase();
+
+/**
+ * The identity of the grant this run's `PUT` produced, or a refusal naming why
+ * this run cannot claim to have produced one.
+ *
+ * WHAT THIS IS FOR. The revocation at the end of the flow is aimed at a row, and
+ * this is the only description of that row this run will ever hold. Everything it
+ * refuses is a case where the DELETE would be aimed at something else: a response
+ * about a different agent or account, a row lesser stamped without the fields that
+ * distinguish it, and — the case the preflight cannot cover — a row lesser says
+ * SOMEBODY ELSE granted. lesser stores one row per grantee and re-grants it in
+ * place, so a grant that landed between the preflight and this `PUT` is answered
+ * by this `PUT` as an existing row carrying its original granter; that is a
+ * standing grant this run adopted, not one it created, and it must survive.
+ *
+ * `owner` is the identity this run authenticated as, passed as the spellings the
+ * viewer read supplied (username and id) because `granted_by` is a string and
+ * which of the two an instance writes into it is the instance's business.
+ */
+export function createdGrant(body, { agent, grantee, owner }) {
+	if (!body || typeof body !== 'object') {
+		return { ok: false, reason: 'lesser answered the grant with no readable body' };
+	}
+	if (body.active !== true) {
+		return { ok: false, reason: 'lesser accepted the grant but did not return it as active' };
+	}
+	if (!sameName(body.grantee_username, grantee)) {
+		return {
+			ok: false,
+			reason:
+				`lesser answered the grant with grantee ${value(body.grantee_username) ? `@${value(body.grantee_username)}` : 'unnamed'}, ` +
+				`not the @${grantee} this run asked for`,
+		};
+	}
+	if (!sameName(body.agent_username, agent)) {
+		return {
+			ok: false,
+			reason:
+				`lesser answered the grant with agent ${value(body.agent_username) ? `@${value(body.agent_username)}` : 'unnamed'}, ` +
+				`not the @${agent} this run asked for`,
+		};
+	}
+	const grantedAt = value(body.granted_at);
+	const grantedBy = value(body.granted_by);
+	if (!grantedAt || !grantedBy) {
+		// Both are required by the contract. Without them there is nothing to tell
+		// this row apart from one somebody else creates later in the run, and a
+		// revocation aimed at "the row for this grantee" is the blind DELETE this
+		// function exists to prevent.
+		return {
+			ok: false,
+			reason:
+				'lesser returned the grant without the granted_at/granted_by stamp that identifies it, ' +
+				'so the revocation at the end of this run could not be aimed at the row this run wrote',
+		};
+	}
+	if (!owner.some((spelling) => sameName(grantedBy, spelling))) {
+		return {
+			ok: false,
+			reason:
+				`lesser records @${grantedBy} as the granter of this row, not the ${owner
+					.filter(Boolean)
+					.map((spelling) => `@${spelling}`)
+					.join(' / ')} ` +
+				'this run authenticated as. The row predates this run — an account granted access to ' +
+				'@' +
+				grantee +
+				' after the preflight read it as clear — and this run will NOT remove somebody else’s grant',
+		};
+	}
+	return { ok: true, identity: { agent, grantee, grantedAt, grantedBy } };
+}
+
+/**
+ * Whether a freshly-read share list still shows the grant this run created.
+ *
+ * Called immediately before every DELETE this file sends. Its answers are a
+ * refusal or nothing — it never names a row to delete, because the row is already
+ * named by `identity` and the only question is whether the instance still agrees.
+ * A refusal leaves the grant standing, which is the safe side of this decision:
+ * an access grant left in place is a line in an operator's runbook, and one
+ * deleted is somebody's access gone with no record of what it was.
+ */
+export function grantToRevoke(ledger, identity) {
+	if (ledger.unreadable.length) {
+		return {
+			ok: false,
+			reason:
+				`this instance sent ${ledger.unreadable.length} share entr` +
+				`${ledger.unreadable.length === 1 ? 'y' : 'ies'} without marking them active or revoked, ` +
+				'so which row is the one this run created cannot be established',
+		};
+	}
+	const matches = ledger.current.filter(
+		(grant) =>
+			sameName(grant?.grantee_username, identity.grantee) &&
+			sameName(grant?.agent_username, identity.agent)
+	);
+	if (!matches.length) {
+		return {
+			ok: false,
+			reason:
+				`the grant this run created is no longer in @${identity.agent}'s current-access list. ` +
+				'Something else revoked or removed it while this run was in flight, and a DELETE now ' +
+				'would be aimed at whatever has taken its place',
+		};
+	}
+	if (matches.length > 1) {
+		return {
+			ok: false,
+			reason:
+				`this instance names ${matches.length} active grants for @${identity.grantee} on ` +
+				`@${identity.agent}. lesser stores one row per grantee, so this run's model of the ` +
+				'share list is wrong and it will not guess which row is its own',
+		};
+	}
+	const [grant] = matches;
+	const grantedAt = value(grant?.granted_at);
+	const grantedBy = value(grant?.granted_by);
+	if (grantedAt !== identity.grantedAt || !sameName(grantedBy, identity.grantedBy)) {
+		return {
+			ok: false,
+			reason:
+				`@${identity.grantee}'s active grant on @${identity.agent} now reads ` +
+				`${grantedAt ? `granted ${grantedAt}` : 'granted at no stated time'}` +
+				`${grantedBy ? ` by @${grantedBy}` : ' by nobody stated'}, not the granted ` +
+				`${identity.grantedAt} by @${identity.grantedBy} this run created. It has been re-granted ` +
+				'since, so it is somebody else’s standing grant and this run will NOT revoke it',
+		};
+	}
+	return { ok: true };
+}
+
+/**
+ * The ONLY place this file sends a DELETE.
+ *
+ * Re-reads the share list and hands it to `grantToRevoke` first, so the check and
+ * the write cannot drift apart and no caller can reach the write without it. Both
+ * callers — the flow's own revocation and the cleanup that runs after a failure —
+ * go through here, because the cleanup path is the one that runs when everything
+ * else has already gone wrong and is therefore the one that must not guess.
+ */
+async function revokeOwnGrant(fetchImpl, options, identity) {
+	const list = await rest(
+		fetchImpl,
+		options.base,
+		'GET',
+		`/${encodeURIComponent(options.agent)}/share`,
+		options.ownerToken
+	);
+	if (!list.ok || !Array.isArray(list.body?.grants)) {
+		return {
+			matched: false,
+			reason:
+				`the owner's share list could not be re-read before revoking (HTTP ` +
+				`${list.status ?? 'no response'}${list.error ? `: ${list.error}` : ''}), so the grant ` +
+				'this run created could not be told apart from any other',
+			revoke: null,
+		};
+	}
+	const verdict = grantToRevoke(accessLedger(list.body.grants), identity);
+	if (!verdict.ok) return { matched: false, reason: verdict.reason, revoke: null };
+
+	const revoke = await rest(
+		fetchImpl,
+		options.base,
+		'DELETE',
+		`/${encodeURIComponent(options.agent)}/share/${encodeURIComponent(options.grantee)}`,
+		options.ownerToken
+	);
+	return { matched: true, reason: null, revoke };
+}
 
 export async function main(
 	argv,
@@ -522,7 +823,14 @@ export async function main(
 		if (!options.granteeMcpToken) {
 			say(
 				'  Set CONTENTUS_GRANTEE_MCP_TOKEN to move the drive and the post-revoke fail-closed\n' +
-					'  check from ATTEST to CHECK.\n'
+					'  check from ATTEST to CHECK. A run carrying it must also say which MCP host that\n' +
+					'  credential may reach: --mcp-host <host>, or --i-trust-the-published-host.\n'
+			);
+		}
+		if (!options.mcpHost) {
+			say(
+				'  --mcp-host <host> would move the published-endpoint check from ATTEST to CHECK, and\n' +
+					'  is what stops a credential travelling to a host this instance simply asserted.\n'
 			);
 		}
 		if (!options.attribution) {
@@ -535,7 +843,10 @@ export async function main(
 
 	const endpoint = `${options.base}${GRAPHQL_PATH}`;
 	const results = [];
-	const state = { shareCreated: false, revoked: false };
+	// `identity` is what the cleanup is allowed to delete. It stays null until
+	// lesser has named the row this run wrote, and a null one means the cleanup
+	// refuses rather than falling back to "the row for this grantee".
+	const state = { shareCreated: false, revoked: false, identity: null };
 
 	const pass = (id, detail) => {
 		results.push({ id, ok: true });
@@ -650,10 +961,21 @@ export async function main(
 			);
 		}
 		state.shareCreated = true;
-		if (granted.body?.active !== true) {
-			return fail('share', 'lesser accepted the grant but did not return it as active');
-		}
 		pass('share', `@${options.grantee} granted access to @${options.agent}`);
+
+		// The identity the revocation will be aimed at, captured at the moment the
+		// row was written. Everything after this point can take as long as it takes.
+		const created = createdGrant(granted.body, {
+			agent: options.agent,
+			grantee: options.grantee,
+			owner: [ownerName, ownerId],
+		});
+		if (!created.ok) return fail('grant-identity', created.reason);
+		state.identity = created.identity;
+		pass(
+			'grant-identity',
+			`granted ${created.identity.grantedAt} by @${created.identity.grantedBy}`
+		);
 
 		// 5. The owner's view of it.
 		const after = await rest(
@@ -723,15 +1045,46 @@ export async function main(
 					'grantee to connect to. That is a served answer, not a transport failure.'
 			);
 		}
-		let origin;
+		let published;
 		try {
-			origin = new URL(mcpUrl).origin;
+			published = new URL(mcpUrl);
 		} catch {
 			return fail('grantee-reads-endpoint', 'lesser published an mcpURL this probe cannot parse');
 		}
+		const origin = published.origin;
 		pass('grantee-reads-endpoint', mcpUrl);
 
-		// 8-9. The documents a client needs to authorize against it.
+		// 8. Whose host is this? Answered BEFORE the first request reaches it, so a
+		//    host the operator did not expect gets nothing at all from this run —
+		//    the grantee's bearer least of all.
+		const publishedHost = published.host.toLowerCase();
+		if (options.mcpHost) {
+			if (publishedHost !== options.mcpHost) {
+				return fail(
+					'mcp-host-verified',
+					`this instance publishes its MCP endpoint on ${publishedHost}, not the ` +
+						`${options.mcpHost} this run was told to expect. NOTHING was sent to it — the ` +
+						"grantee's credential was not offered to a host nobody vouched for. Either the " +
+						'instance is misconfigured or --mcp-host is out of date; both are worth knowing ' +
+						'before a bearer travels.'
+				);
+			}
+			pass('mcp-host-verified', publishedHost);
+		} else {
+			attest(
+				'mcp-host-verified',
+				`the published host ${publishedHost} was accepted as served; no expected host was named`
+			);
+			if (options.granteeMcpToken) {
+				say(
+					`\n  !! --i-trust-the-published-host: the grantee's MCP credential will be sent to\n` +
+						`     ${publishedHost}, a host THIS INSTANCE PUBLISHED and nobody verified. Re-run\n` +
+						`     with --mcp-host ${publishedHost} to pin it.\n\n`
+				);
+			}
+		}
+
+		// 9-10. The documents a client needs to authorize against it.
 		const discovery = await publicJson(
 			fetchImpl,
 			new URL('/.well-known/mcp.json', origin).toString()
@@ -865,14 +1218,15 @@ export async function main(
 			);
 		}
 
-		// 15. The revocation.
-		const revoked = await rest(
-			fetchImpl,
-			options.base,
-			'DELETE',
-			`/${encodeURIComponent(options.agent)}/share/${encodeURIComponent(options.grantee)}`,
-			options.ownerToken
-		);
+		// 15. The revocation — aimed at the row this run wrote, re-checked against a
+		//     fresh read taken right here rather than at the preflight.
+		const attempt = await revokeOwnGrant(fetchImpl, options, state.identity);
+		if (!attempt.matched) {
+			return fail('revoke-target', `${attempt.reason}. NOTHING was deleted.`);
+		}
+		pass('revoke-target', 'the active grant is still the one this run created');
+
+		const revoked = attempt.revoke;
 		if (!revoked.ok) {
 			return fail(
 				'revoke',
@@ -962,21 +1316,37 @@ export async function main(
 
 	if (state.shareCreated && !state.revoked) {
 		say('\nprobe-share-flow: CLEANUP — revoking the grant this run created\n');
-		const undo = await rest(
-			fetchImpl,
-			options.base,
-			'DELETE',
-			`/${encodeURIComponent(options.agent)}/share/${encodeURIComponent(options.grantee)}`,
-			options.ownerToken
-		);
-		if (undo.ok) {
-			say(`  [CLEANUP] @${options.grantee}'s access to @${options.agent} was revoked\n`);
-		} else {
+		if (!state.identity) {
+			// The `PUT` went out and lesser never named the row it produced, so there
+			// is nothing to aim at. Deleting "the grant for this grantee" here is
+			// exactly the blind revocation the identity exists to prevent, and a
+			// cleanup that does it while a run is already failing is the worst place
+			// for it. Say so at the top of the operator's voice instead.
 			say(
-				`  [CLEANUP FAILED] HTTP ${undo.status ?? 'no response'} — @${options.grantee} MAY STILL ` +
-					`HOLD ACCESS to @${options.agent}. Revoke it by hand before leaving this instance.\n`
+				`  [CLEANUP REFUSED] this run wrote a grant it could not identify, so it will NOT ` +
+					`delete one. @${options.grantee} MAY STILL HOLD ACCESS to @${options.agent} — check ` +
+					`the Sharing @${options.agent} panel and revoke by hand before leaving this instance.\n`
 			);
 			results.push({ id: 'cleanup', ok: false });
+		} else {
+			const undo = await revokeOwnGrant(fetchImpl, options, state.identity);
+			if (!undo.matched) {
+				say(
+					`  [CLEANUP REFUSED] ${undo.reason}. NOTHING was deleted, and @${options.grantee} MAY ` +
+						`STILL HOLD ACCESS to @${options.agent}. Check the Sharing @${options.agent} panel ` +
+						'and revoke by hand before leaving this instance.\n'
+				);
+				results.push({ id: 'cleanup', ok: false });
+			} else if (undo.revoke.ok) {
+				say(`  [CLEANUP] @${options.grantee}'s access to @${options.agent} was revoked\n`);
+			} else {
+				say(
+					`  [CLEANUP FAILED] HTTP ${undo.revoke.status ?? 'no response'} — @${options.grantee} ` +
+						`MAY STILL HOLD ACCESS to @${options.agent}. Revoke it by hand before leaving this ` +
+						'instance.\n'
+				);
+				results.push({ id: 'cleanup', ok: false });
+			}
 		}
 	}
 
