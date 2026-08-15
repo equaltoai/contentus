@@ -26,9 +26,12 @@ its upstream citation.
 
 OWNER-GATED BY LESSER, NOT BY THIS PANEL. `agentActivity` requires a caller with
 `read` scope and answers `Forbidden` to anyone who is not the agent's owner, an
-admin, or the agent itself. This panel mounts only behind lesser's `agent.owner`
-statement — the same gate as the sharing panel — and sends the owner's own
-token, so it consumes that authorization rather than widening it.
+admin, or the agent itself. This panel mounts only behind lesser's served
+`viewerIsOwner` — the same gate as the sharing panel — and sends the owner's own
+token, so it consumes that authorization rather than widening it. The gate read
+`agent.owner` until the lesser#1418 sync; that was the visibility boolean, which
+is true for admins as well, so the client gate is now narrower than the server's
+rather than accidentally as wide.
 
 CLIENT-ONLY, FOR THE SAME REASON ITS NEIGHBOURS ARE. The log is owner-private,
 the token lives in `sessionStorage`, and the route's props are serialized into
