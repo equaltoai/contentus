@@ -10,8 +10,8 @@
 > @equaltoai/contentus@0.1.0 svelte-check /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > svelte-check --tsconfig tsconfig.json --threshold error
 
-1786756912896 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
-1786756912898 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
+1786759296032 START "/home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus"
+1786759296034 COMPLETED 882 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS
 
 > @equaltoai/contentus@0.1.0 build:client /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build
@@ -23,9 +23,9 @@ computing gzip size...
 build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-KRNkmDFo.js                724.45 kB │ gzip: 219.52 kB
+build/client/assets/entry-client-GBM5oU-0.js                725.30 kB │ gzip: 219.63 kB
 
-✓ built in 1.07s
+✓ built in 1.08s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -39,9 +39,9 @@ vite v8.2.0 building ssr environment for production...
 [2Ktransforming...✓ 790 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,151.99 kB │ gzip: 278.11 kB
+build/server/handler.mjs  1,155.84 kB │ gzip: 279.46 kB
 
-✓ built in 1.03s
+✓ built in 1.01s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -133,8 +133,8 @@ CSP audit: clean.
 - Build passes recorded: client, server
 - Modules the client build resolved / loaded: 813 / 813
 - Modules the server build resolved / loaded: 796 / 789
-- Dependency edges recorded: 4601
-- Distinct edges into the face: 48
+- Dependency edges recorded: 4603
+- Distinct edges into the face: 49
 - Findings: 0
 
 ## Edges into the face
@@ -161,6 +161,7 @@ CSP audit: clean.
 - src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/mcp.ts [client:import, server:import]
 - src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/share-client.ts [client:import, server:import]
+- src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/share-view.ts [client:import, server:import]
 - src/lib/agents/AgentSharingPanel.svelte → src/lib/agents/share-client.ts [client:import, server:import]
 - src/lib/agents/AgentSharingPanel.svelte → src/lib/agents/share-view.ts [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
