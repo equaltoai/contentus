@@ -1,5 +1,16 @@
 /**
- * The owner's read of one agent's share list (M2.3, equaltoai/contentus#94).
+ * What a reader may be told about lesser's agent share-grant lists — the
+ * owner's read of one agent (M2.3, equaltoai/contentus#94) and the grantee's
+ * read of their own (the M2.5 follow-up).
+ *
+ * TWO READS, ONE CLASSIFIER, TWO SETS OF SENTENCES. The reads are different in
+ * every way that matters — different routes, different authorization, different
+ * content — but the question a client must answer before it says anything about
+ * either is the same: did the instance classify this row? So `accessLedger`
+ * serves both. What is NOT shared is the copy: "nobody holds access to your
+ * agent" and "nothing has been shared with you" are different claims about
+ * different subjects, and each panel's empty state is composed separately below
+ * so that neither can be spoken for the other.
  *
  * `GET /api/v1/agents/{username}/share` is lesser's OWNER/ADMIN view, and it is
  * the only one that carries revoked entries: `ListByAgent` runs
@@ -112,6 +123,72 @@ export function noCurrentAccessStatement(username: string, ledger: AgentAccessLe
 	return count === 1
 		? `No entry this instance classified holds access to @${username} right now. Access could not be determined for one further entry, so this is not a statement that nobody holds it.`
 		: `No entry this instance classified holds access to @${username} right now. Access could not be determined for ${count} further entries, so this is not a statement that nobody holds it.`;
+}
+
+/* -------------------------------------------------------------------------
+ * The grantee's half — `GET /api/v1/agents/shared-with-me`
+ *
+ * WHY THIS IS DEFENSIVE HONESTY AND NOT A KNOWN-LIVE BUG, recorded here so the
+ * next reader neither hunts for the outage nor deletes the guard as dead code.
+ * lesser answers this route from a different index than the owner's list, and
+ * the revoked rows are excluded AT THE QUERY rather than by anything the client
+ * does: `ListSharedWith` calls `ListActiveAgentShareGrantsByGrantee`
+ * (`pkg/services/agentshare/service.go:157`), which queries the grantee GSI
+ * under `Filter("RevokedAt", "attribute_not_exists", nil)`
+ * (`pkg/storage/repositories/agent_share_repository.go:169`). `active` is then
+ * computed server-side as `RevokedAt == nil`
+ * (`cmd/api/handlers/agent_shares.go:176`) on a field carrying no `omitempty`
+ * (`cmd/api/models/agent_shares.go:13`), so a conforming instance sends `true`
+ * on every row of this list and nothing else.
+ *
+ * So an unclassified row here can only come from a NON-CONFORMING answer. That
+ * is precisely why the classification must be strict rather than truthy: the
+ * one response shape that can hide a real grant is the one a truthiness filter
+ * reads as an absence and then reports as certainty. `grant.active` being
+ * falsy-but-not-`false` — dropped, null, a string — silently removed the row
+ * from the list while the empty state went on asserting that nothing had been
+ * shared. The instance's malformed answer became this client's confident claim,
+ * which is the failure the owner panel already closed (equaltoai/contentus#100,
+ * codex review 4941340448) reappearing on the other side of the same contract.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * What the grantee is told about entries lesser sent unclassified, or null.
+ *
+ * NOT THE OWNER'S NOTICE WITH A WORD CHANGED. That one says the row is in
+ * "neither list below", which is true of a screen with two lists and sends the
+ * reader of a one-list screen looking for a second one. This says where the row
+ * actually went: nowhere they can see it.
+ */
+export function unlistedSharesNotice(ledger: AgentAccessLedger): string | null {
+	const count = ledger.unreadable.length;
+	if (!count) return null;
+	return count === 1
+		? 'This instance sent one share entry without marking it active or revoked, so it is not listed below.'
+		: `This instance sent ${count} share entries without marking them active or revoked, so they are not listed below.`;
+}
+
+/**
+ * What the grantee is told when no agent is listed as shared with them.
+ *
+ * THE SAME RULE AS THE OWNER'S EMPTY STATE, about a different subject. With
+ * nothing unclassified, an empty list IS the instance's answer and the flat
+ * sentence is true — and that includes the case where every row came back
+ * `active: false`, because a classified row is an answered row.
+ *
+ * With an unclassified entry it is not an answer at all: those rows are exactly
+ * the ones that could be live grants, so the certain sentence would tell a
+ * grantee that nothing was shared with them on the strength of a response that
+ * failed to say. The claim is therefore narrowed to what was actually
+ * classified and the remainder is named — never the certain sentence with a
+ * caveat appended, which leaves the false statement standing and adds to it.
+ */
+export function noSharedAgentsStatement(ledger: AgentAccessLedger): string {
+	const count = ledger.unreadable.length;
+	if (!count) return 'No agents have been shared with you.';
+	return count === 1
+		? 'No entry this instance classified is an agent shared with you. One further entry could not be read, so this is not a statement that no agent has been shared with you.'
+		: `No entry this instance classified is an agent shared with you. ${count} further entries could not be read, so this is not a statement that no agent has been shared with you.`;
 }
 
 /** A timestamp lesser served, or null when it served nothing usable. */

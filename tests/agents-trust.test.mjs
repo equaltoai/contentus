@@ -1152,6 +1152,184 @@ test('the revoked list does not present itself as every revocation', () => {
 	);
 });
 
+/* -------------------------------------------------------------------------
+ * The grantee's view of what was shared with them
+ *
+ * THE SAME DEFECT AS #100, ON THE OTHER SIDE OF THE CONTRACT. The panel
+ * filtered `grants.filter((grant) => grant.active)` — truthiness, not
+ * `=== true` — and rendered a certain empty state under it. A row lesser sent
+ * without the boolean was therefore dropped from the list and then denied by
+ * the sentence beneath it, which is this client answering for the instance in
+ * the one case where the hidden row could be a live grant.
+ *
+ * WHY IT WAS NOT A LIVE BUG, AND WHY THE PROBES STAY ANYWAY. lesser answers
+ * `/api/v1/agents/shared-with-me` from a different index with
+ * `Filter("RevokedAt", "attribute_not_exists", nil)`, and `active` is
+ * server-computed on a field carrying no `omitempty`, so a conforming instance
+ * sends `true` on every row. These hold the client honest about a NON-conforming
+ * one — the case where a claim is least available and most damaging.
+ * ---------------------------------------------------------------------- */
+
+/** The grantee panel's parsed tree. */
+function sharedPanelAst() {
+	return parse(
+		readFileSync(join(repoRoot, 'src/lib/agents/AgentSharedWithMePanel.svelte'), 'utf8'),
+		{ modern: true }
+	);
+}
+
+/**
+ * Whether a node is the `{#if ledger.current.length}` block — the one branch
+ * that decides between the list and its empty state.
+ *
+ * SPELLED OUT TO THE `.length`, and that is the whole reason this is a function
+ * rather than two lines inlined at each call site. The first version of the
+ * position probe below matched `test.object.name === 'ledger'`, which is the
+ * shape of `{#if ledger.current}` and NOT of what the panel writes: in
+ * `ledger.current.length` the test's object is itself a MemberExpression, so
+ * the matcher never fired and the assertion it guarded passed on every input,
+ * including the mutant it existed to catch. One reading, used by both probes,
+ * is what keeps that from being true of only one of them.
+ */
+function isCurrentListBranch(node) {
+	if (node?.type !== 'IfBlock') return false;
+	const test = node.test;
+	if (test?.type !== 'MemberExpression' || test.property?.name !== 'length') return false;
+	const list = test.object;
+	return (
+		list?.type === 'MemberExpression' &&
+		list.object?.name === 'ledger' &&
+		list.property?.name === 'current'
+	);
+}
+
+test('the grantee list is the classifier’s output, never a truthiness filter', () => {
+	// THE ASSERTION IS AT THE SOURCE OF THE LIST, not on its contents: what the
+	// grantee sees must be the rows lesser said `active: true` about, and
+	// `accessLedger` is the one place in this repo that reads that boolean
+	// strictly. A template that iterated `grants` again — or a `.filter` written
+	// back into the instance script — is the whole defect returning, with every
+	// unit test of the classifier still green.
+	const ast = sharedPanelAst();
+
+	const each = [];
+	for (const { node } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'EachBlock') continue;
+		const expression = node.expression;
+		if (expression?.type === 'Identifier') each.push(expression.name);
+		else if (
+			expression?.type === 'MemberExpression' &&
+			expression.object?.type === 'Identifier' &&
+			expression.property?.type === 'Identifier'
+		)
+			each.push(`${expression.object.name}.${expression.property.name}`);
+	}
+
+	assert.ok(each.includes('ledger.current'), 'the panel must list the classifier’s active side');
+	assert.ok(
+		!each.includes('grants'),
+		'and never iterate lesser’s unsplit answer, which is where a revoked or unclassified row reaches the screen'
+	);
+
+	// The MCP fan-out is the second reader of the same set, and it carried its
+	// own copy of the truthiness filter. Two filters that must agree are one
+	// correction away from disagreeing, so the assertion is that only one
+	// classifier exists in the file.
+	assert.ok(
+		!callsFn(ast.instance, 'filter'),
+		'the panel must not filter the grant list itself: `accessLedger` is the classification, and a second filter beside it is the half a fix forgets'
+	);
+	assert.ok(
+		callsFn(ast.instance, 'accessLedger'),
+		'and it must actually classify — a list rendered straight from lesser’s answer is the defect with the filter merely deleted'
+	);
+});
+
+test('the grantee empty state is composed, never written into the template', () => {
+	// The wording lives in `noSharedAgentsStatement` and both readings are
+	// asserted in `tests/agent-share-view.test.mjs`, where they can be CALLED.
+	// What this holds is the other half: that the screen keeps asking. A sentence
+	// written back into this branch — "No agents have been shared with you." is
+	// the one that was there — is the defect returning with every unit test green.
+	const ast = sharedPanelAst();
+
+	const branches = [];
+	for (const { node } of walkTemplate(ast.fragment))
+		if (isCurrentListBranch(node)) branches.push(node);
+
+	assert.equal(branches.length, 1, 'the panel tests ledger.current.length exactly once');
+	const empty = branches[0].alternate;
+	assert.ok(empty, 'and answers the empty case rather than rendering nothing at all');
+
+	// Attribute values are `Text` too — a class name is not something the panel
+	// says to the reader, so what is collected is the text a reader would read.
+	const inAttribute = (ancestors) => ancestors.some((node) => node.type === 'Attribute');
+	const spoken = [];
+	const rendered = [];
+	for (const { node, ancestors } of walkTemplate(empty)) {
+		if (node.type === 'Text' && node.data?.trim() && !inAttribute(ancestors))
+			spoken.push(node.data.trim());
+		if (node.type === 'ExpressionTag' && !inAttribute(ancestors)) rendered.push(node.expression);
+	}
+
+	assert.deepEqual(
+		spoken,
+		[],
+		`the empty state must carry no literal copy — a claim that nothing was shared cannot be written where the unclassified count is not in hand: ${spoken.join(' / ')}`
+	);
+
+	// FOLLOWED BY NAME into the instance script, because the panel renders
+	// `$derived` values rather than calling into the template: what is asserted is
+	// that whatever this branch prints is bound to the classifier's own statement.
+	const sources = rendered.map((expression) => {
+		if (expression?.type === 'CallExpression') return expression.callee?.name ?? null;
+		if (expression?.type !== 'Identifier') return null;
+		for (const node of walkAst(ast.instance)) {
+			if (node.type !== 'VariableDeclarator') continue;
+			if (node.id?.name !== expression.name) continue;
+			if (callsFn(node.init, 'noSharedAgentsStatement')) return 'noSharedAgentsStatement';
+			// Named explicitly so the owner panel's sentence — one import away in
+			// the same module, and about a different subject entirely — cannot be
+			// wired in here and pass as "composed".
+			if (callsFn(node.init, 'noCurrentAccessStatement')) return 'noCurrentAccessStatement';
+		}
+		return null;
+	});
+
+	assert.ok(rendered.length > 0, 'the empty state must render something');
+	assert.ok(
+		sources.every((source) => source === 'noSharedAgentsStatement'),
+		`every part of the empty state must come from the grantee’s own statement in src/lib/agents/share-view.ts: ${JSON.stringify(sources)}`
+	);
+});
+
+test('the grantee is told about unclassified rows even when the list is not empty', () => {
+	// A reader with three agents listed and a fourth row the instance failed to
+	// classify sees a list that is short by one and looks complete. That is the
+	// same misreading as the empty state's, and it is the one the empty-state fix
+	// does not reach — so the notice sits ABOVE the list rather than inside its
+	// empty branch, and this asserts the position.
+	const ast = sharedPanelAst();
+
+	const rendered = [];
+	for (const { node, ancestors } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'ExpressionTag') continue;
+		if (node.expression?.type !== 'Identifier') continue;
+		for (const declarator of walkAst(ast.instance)) {
+			if (declarator.type !== 'VariableDeclarator') continue;
+			if (declarator.id?.name !== node.expression.name) continue;
+			if (!callsFn(declarator.init, 'unlistedSharesNotice')) continue;
+			rendered.push(ancestors.some(isCurrentListBranch));
+		}
+	}
+
+	assert.equal(rendered.length, 1, 'the panel must render the unclassified notice exactly once');
+	assert.ok(
+		rendered.every((insideTheList) => !insideTheList),
+		'and outside the ledger.current branch — a notice only the empty screen shows leaves a short list looking complete'
+	);
+});
+
 test('the owner grant list is read on the owner path and nowhere else', () => {
 	// The revoked half of this contract is owner/admin-only by lesser's
 	// construction — `ListByAgent` authorizes first, and the grantee's

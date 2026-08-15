@@ -60,6 +60,7 @@ with this reader is not, so they are emptied with everything else.
 	import { fetchAgentMcpAccess } from './contract';
 	import { sharedMcpAccess, type SharedMcpAccess } from './mcp';
 	import { listSharedWithMe, ShareClientError, type AgentShareGrant } from './share-client';
+	import { accessLedger, noSharedAgentsStatement, unlistedSharesNotice } from './share-view';
 
 	let session = $state<'unknown' | 'anonymous' | 'authenticated'>('unknown');
 
@@ -109,8 +110,28 @@ with this reader is not, so they are emptied with everything else.
 	 * The grants this panel lists, drawn from lesser's answer only — a revoked
 	 * grant is not shown as one the viewer holds, however lesser chose to list
 	 * it. `active` is lesser's served statement, not a client inference.
+	 *
+	 * CLASSIFIED STRICTLY, THROUGH THE OWNER PANEL'S OWN CLASSIFIER, and the
+	 * strictness is the point rather than the sharing. `grants.filter((g) =>
+	 * g.active)` read a row lesser sent WITHOUT the boolean as an absent grant
+	 * and dropped it — and the empty state below then told the reader that
+	 * nothing had been shared with them, which is this client answering a
+	 * question the instance declined to answer, in the one case where the
+	 * hidden row could be a live grant. `accessLedger` puts that row on neither
+	 * side and counts it, which is what the two sentences below are then able to
+	 * say. See `share-view.ts` for why only a non-conforming answer produces one.
 	 */
-	const shared = $derived(grants.filter((grant) => grant.active));
+	const ledger = $derived(accessLedger(grants));
+
+	/**
+	 * The two sentences this panel says ABOUT the classification rather than out
+	 * of it — the same pair the owner panel composes, worded for a reader of one
+	 * list rather than two. Both live in `share-view.ts` beside the classifier
+	 * whose exclusion they describe, so a probe can call them with a ledger
+	 * instead of reading them off the screen.
+	 */
+	const unlistedNotice = $derived(unlistedSharesNotice(ledger));
+	const noSharedStatement = $derived(noSharedAgentsStatement(ledger));
 
 	function loadShared() {
 		const token = accessTokenOrNull();
@@ -133,12 +154,12 @@ with this reader is not, so they are emptied with everything else.
 				if (!scope.holds(stamp)) return;
 				grants = result;
 				shareState = { status: 'ready' };
-				loadAccess(
-					result.filter((grant) => grant.active),
-					token,
-					stamp,
-					signal
-				);
+				// THE SAME CLASSIFIER THE LIST RENDERS THROUGH, called on the same
+				// answer: the rows this fans out over and the rows the reader sees are
+				// one set by construction rather than two filters that happen to agree
+				// today. The previous shape wrote the truthiness filter out twice, so a
+				// correction to either was a correction to half the panel.
+				loadAccess(accessLedger(result).current, token, stamp, signal);
 			})
 			.catch((error: unknown) => {
 				if (!scope.holds(stamp)) return;
@@ -234,52 +255,73 @@ with this reader is not, so they are emptied with everything else.
 			<p class="contentus-agents__notice">This instance does not support agent sharing.</p>
 		{:else if shareState.status === 'unavailable'}
 			<p class="contentus-agents__notice">{shareState.message}</p>
-		{:else if !shared.length}
-			<p class="contentus-agents__notice">No agents have been shared with you.</p>
 		{:else}
-			<ul class="contentus-shared__list">
-				{#each shared as grant}
-					{@const mcp = access[grant.agent_username] ?? { status: 'loading' }}
-					<li class="contentus-shared__row">
-						<div class="contentus-shared__agent">
-							<span class="contentus-shared__handle">@{grant.agent_username}</span>
-							<span class="contentus-shared__meta">
-								granted {new Date(grant.granted_at).toLocaleDateString()} by @{grant.granted_by}
-							</span>
+			<!--
+				ABOVE THE LIST, AND NOT ONLY IN THE EMPTY BRANCH. A reader with three
+				agents listed and one row the instance failed to classify is looking at
+				a list that is short by one and looks complete, which is the same
+				misreading as the empty state's — just harder to notice.
+			-->
+			{#if unlistedNotice}
+				<p class="contentus-agents__notice">{unlistedNotice}</p>
+			{/if}
 
-							{#if mcp.status === 'published'}
-								<!--
-									lesser's `mcpAccess.mcpURL`, verbatim. It is also the OAuth
-									`resource` value, which the agent's own page states in full.
-
-									SELECTABLE TEXT, NOT A `CopyBlock`, and the seam graph is what
-									decides that: `CopyBlock` is owned by the `AgentMcpPanel` seam
-									(`scripts/lib/agent-seams.mjs`), so importing it here would be
-									a cross-seam import — the copy-config affordance goes with the
-									MCP panel when greater M6a replaces it, and this row must not
-									be orphaned by that swap. The division it enforces is the right
-									one anyway: this list answers "which agent, and where", and the
-									agent's own page is the config surface, one link away.
-								-->
-								<span class="contentus-shared__endpoint-label">MCP endpoint</span>
-								<code class="contentus-shared__endpoint">{mcp.endpoint}</code>
-							{:else if mcp.status === 'none'}
+			{#if ledger.current.length}
+				<ul class="contentus-shared__list">
+					{#each ledger.current as grant}
+						{@const mcp = access[grant.agent_username] ?? { status: 'loading' }}
+						<li class="contentus-shared__row">
+							<div class="contentus-shared__agent">
+								<span class="contentus-shared__handle">@{grant.agent_username}</span>
 								<span class="contentus-shared__meta">
-									This instance publishes no MCP endpoint for this agent.
+									granted {new Date(grant.granted_at).toLocaleDateString()} by @{grant.granted_by}
 								</span>
-							{:else if mcp.status === 'unavailable'}
-								<span class="contentus-shared__meta">{mcp.message}</span>
-							{:else}
-								<span class="contentus-shared__meta">Reading this agent's MCP endpoint…</span>
-							{/if}
-						</div>
 
-						<a class="contentus-shared__connect" href={agentHref(grant.agent_username)}>
-							How to connect
-						</a>
-					</li>
-				{/each}
-			</ul>
+								{#if mcp.status === 'published'}
+									<!--
+										lesser's `mcpAccess.mcpURL`, verbatim. It is also the OAuth
+										`resource` value, which the agent's own page states in full.
+
+										SELECTABLE TEXT, NOT A `CopyBlock`, and the seam graph is what
+										decides that: `CopyBlock` is owned by the `AgentMcpPanel` seam
+										(`scripts/lib/agent-seams.mjs`), so importing it here would be
+										a cross-seam import — the copy-config affordance goes with the
+										MCP panel when greater M6a replaces it, and this row must not
+										be orphaned by that swap. The division it enforces is the right
+										one anyway: this list answers "which agent, and where", and the
+										agent's own page is the config surface, one link away.
+									-->
+									<span class="contentus-shared__endpoint-label">MCP endpoint</span>
+									<code class="contentus-shared__endpoint">{mcp.endpoint}</code>
+								{:else if mcp.status === 'none'}
+									<span class="contentus-shared__meta">
+										This instance publishes no MCP endpoint for this agent.
+									</span>
+								{:else if mcp.status === 'unavailable'}
+									<span class="contentus-shared__meta">{mcp.message}</span>
+								{:else}
+									<span class="contentus-shared__meta">Reading this agent's MCP endpoint…</span>
+								{/if}
+							</div>
+
+							<a class="contentus-shared__connect" href={agentHref(grant.agent_username)}>
+								How to connect
+							</a>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<!--
+					COMPOSED, never written here. "No agents have been shared with you"
+					is the instance's answer only when the instance classified
+					everything it sent; with a row it did not classify — the one case
+					where a live grant can be missing from this list — that sentence is
+					this client answering for lesser. `noSharedAgentsStatement` holds
+					both readings and a probe calls it, which a sentence sitting in this
+					branch could not be.
+				-->
+				<p class="contentus-agents__notice">{noSharedStatement}</p>
+			{/if}
 		{/if}
 	</Panel>
 {/if}

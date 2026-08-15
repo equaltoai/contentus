@@ -5,7 +5,9 @@ import {
 	accessLedger,
 	grantStamp,
 	noCurrentAccessStatement,
+	noSharedAgentsStatement,
 	unclassifiedEntriesNotice,
+	unlistedSharesNotice,
 } from '../src/lib/agents/share-view.ts';
 
 /**
@@ -200,6 +202,123 @@ test('the empty state is a statement about classification, not about the revoked
 
 	const withHistory = ledgerWithUnreadable(1, { revoked: [grant({ active: false })] });
 	assert.ok(!noCurrentAccessStatement('scribe', withHistory).includes('No account holds access'));
+});
+
+/* -------------------------------------------------------------------------
+ * The grantee's half — what the shared-with-me panel may say
+ *
+ * THE SAME CLASSIFIER, A DIFFERENT SUBJECT, AND THEREFORE DIFFERENT SENTENCES.
+ * The panel had `grants.filter((g) => g.active)` — truthiness, not `=== true` —
+ * over a list it renders with a certain empty state, so a row lesser sent
+ * without the boolean was dropped from the list and then denied by the sentence
+ * underneath it. Both halves of that are asserted below.
+ *
+ * WHAT THIS IS NOT EVIDENCE OF: a live outage. lesser answers
+ * `/api/v1/agents/shared-with-me` from the grantee index with
+ * `Filter("RevokedAt", "attribute_not_exists", nil)`
+ * (`pkg/storage/repositories/agent_share_repository.go:169`), and serializes
+ * `active` as `RevokedAt == nil` on a field with no `omitempty`
+ * (`cmd/api/handlers/agent_shares.go:176`,
+ * `cmd/api/models/agent_shares.go:13`), so a conforming instance sends `true`
+ * on every row of this list. The unclassified case is reachable only from a
+ * non-conforming answer — which is exactly the answer a client must not turn
+ * into a confident claim, and the reason the probes are worth their lines.
+ * ---------------------------------------------------------------------- */
+
+test('the grantee notice counts the entries lesser did not classify', () => {
+	assert.equal(
+		unlistedSharesNotice(accessLedger([grant(), grant({ active: false })])),
+		null,
+		'a conforming answer says nothing, rather than saying zero'
+	);
+
+	const one = unlistedSharesNotice(ledgerWithUnreadable(1));
+	assert.match(one, /one share entry/, 'one entry is a sentence, not a numeral');
+	assert.doesNotMatch(one, /\d/, 'and carries no digit at all');
+
+	const three = unlistedSharesNotice(
+		ledgerWithUnreadable(3, { current: [grant(), grant()], revoked: [grant({ active: false })] })
+	);
+	assert.match(three, /\b3 share entries\b/, 'and the plural counts only the unclassified rows');
+
+	// NOT THE OWNER'S NOTICE. That one sends the reader to "neither list below",
+	// which is a true description of a screen with two lists and a wild goose
+	// chase on this one, where the grantee sees a single list of agents.
+	for (const notice of [one, three]) {
+		assert.doesNotMatch(
+			notice,
+			/neither list/i,
+			'the grantee panel has one list; the owner panel’s wording must not be reused verbatim here'
+		);
+		assert.match(notice, /not listed below/i, 'it says where the row went: nowhere they can see');
+	}
+});
+
+test('a grantee with agents shared with them is told plainly when nothing was hidden', () => {
+	// The certain sentence is the shipped one, and it stays the answer for every
+	// classified response — including one where every row came back revoked,
+	// because a classified row is an answered row and the grantee index would not
+	// have carried it in the first place.
+	assert.equal(
+		noSharedAgentsStatement(accessLedger([])),
+		'No agents have been shared with you.',
+		'an empty classified answer IS the instance’s statement'
+	);
+	assert.equal(
+		noSharedAgentsStatement(accessLedger([grant({ active: false })])),
+		'No agents have been shared with you.',
+		'and a fully classified list with nothing active is the same statement'
+	);
+});
+
+test('the grantee empty state does not deny a share while entries were unreadable', () => {
+	// THE DEFECT THIS CLOSES: the panel filtered on truthiness and then rendered
+	// "No agents have been shared with you." A 200 that dropped `active` from a
+	// real grantee's row therefore hid the row AND told the reader the opposite
+	// of the only claim that survives the malformed answer — the same failure the
+	// owner panel closed at equaltoai/contentus#100, on the other side of the
+	// same contract.
+	const certain = noSharedAgentsStatement(accessLedger([]));
+
+	for (const count of [1, 2, 7]) {
+		const statement = noSharedAgentsStatement(ledgerWithUnreadable(count));
+
+		assert.notEqual(statement, certain, `${count} unclassified entries must change the claim`);
+		// A CAVEAT BOLTED ONTO A FALSE SENTENCE IS STILL THE FALSE SENTENCE, and is
+		// the likeliest shape of a careless fix — so the assertion is that the
+		// certain claim does not appear at all, not merely that something follows it.
+		assert.ok(
+			!statement.includes('No agents have been shared with you'),
+			`the certain claim must not survive as a clause: ${statement}`
+		);
+		assert.match(
+			statement,
+			/could not be read/i,
+			'the empty state must say there were entries it could not read'
+		);
+		assert.match(
+			statement,
+			count === 1 ? /\bOne further entry\b/ : new RegExp(`\\b${count} further entries\\b`),
+			'and say how many'
+		);
+	}
+});
+
+test('the grantee empty state speaks about shares, never about who holds access', () => {
+	// The two panels read different routes with different authorization, and the
+	// owner's sentence names an agent (`@scribe`) whose access is being reported
+	// on. Spoken on the grantee's screen it would be a claim about a stranger's
+	// agent — and it is the sentence closest to hand, one import away in the same
+	// module.
+	for (const ledger of [accessLedger([]), ledgerWithUnreadable(1), ledgerWithUnreadable(4)]) {
+		const statement = noSharedAgentsStatement(ledger);
+		assert.doesNotMatch(
+			statement,
+			/holds access/i,
+			'the grantee is told what was shared with them, not who holds access to an agent'
+		);
+		assert.doesNotMatch(statement, /@/, 'and no agent is named: this list is about all of them');
+	}
 });
 
 test('a stamp names when and who when lesser served both', () => {
