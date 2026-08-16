@@ -42,7 +42,7 @@
     "repository": "equaltoai/lesser",
     "path": "docs/contracts/graphql-schema.graphql",
     "ref": "1ce2dc975bd212c11ffc6b4fca0035bae039bd60",
-    "ref_description": "equaltoai/lesser staging @ 1ce2dc97, the merge of PR #1418 (closes #1417), 2026-08-15. NOT A RELEASE TAG — a staging merge commit, which is what it remains. It was also NOT YET DEPLOYED when this pin was taken; it was deployed on 2026-08-15. See `inspected.forward_pin` for the state that created, and `inspected.forward_pin_resolved` for the record that closed it.",
+    "ref_description": "equaltoai/lesser staging @ 1ce2dc97, the merge of PR #1418 (closes #1417), 2026-08-15. NOT A RELEASE TAG — a staging merge commit, which is what it remains. It was also NOT YET DEPLOYED when this pin was taken; it was deployed on 2026-08-15. See `inspected.forward_pin` for what that state was, and `inspected.forward_pin_resolved` for the record that closed it.",
     "schema_last_modified_at": "1d3042ba96eb95e8a3074ea9d1e3e770e9f7c3ee"
   },
   "artifact": {
