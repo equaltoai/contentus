@@ -113,8 +113,9 @@ degrading. That made the deploy order load-bearing — lesser first, contentus
 after — and **the operator deployed it that way on 2026-08-15**: lesser
 `1ce2dc97`, then contentus `4d6bb99`, browser-verified live afterwards. This
 paragraph is therefore history rather than a live constraint, and nothing here
-is waiting on a deploy. The one case that reopens it is a new instance
-provisioned from a lesser older than `1ce2dc97` — which no gate here can see,
+is waiting on a deploy. It reopens wherever an instance comes to serve a lesser
+older than `1ce2dc97` — a new one provisioned from an older generation, or an
+existing one rolled back or redeployed to one — which no gate here can see,
 because both pin checks compare bytes to a repository and a repository is not a
 running instance. See `contracts/lesser/provenance.json`,
 `inspected.forward_pin` and `inspected.forward_pin_resolved`.
