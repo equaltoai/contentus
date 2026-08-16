@@ -103,14 +103,21 @@ ask was escalated as the `myAgents` ownership item in
 here. The proxy is still read where it answers a visibility question; only its
 use as an ownership answer ended.
 
-**One deploy-ordering consequence.** `viewerIsOwner` exists in the pinned
-contract from `1ce2dc97`, which is a lesser **staging** commit rather than a
-released tag — the first forward pin this repository has taken. GraphQL
-validates a selection before it resolves anything, so an instance predating the
-field rejects the whole document rather than returning a null: the detail read
-and `myAgents` both fail (classified `transport`) rather than degrading.
-**lesser staging deploys before contentus deploys this generation.** See
-`contracts/lesser/provenance.json`, `inspected.forward_pin`.
+**One deploy-ordering consequence, satisfied 2026-08-15.** `viewerIsOwner`
+exists in the pinned contract from `1ce2dc97`, which is a lesser **staging**
+commit rather than a released tag — the first forward pin this repository has
+taken. GraphQL validates a selection before it resolves anything, so an instance
+predating the field rejects the whole document rather than returning a null: the
+detail read and `myAgents` both fail (classified `transport`) rather than
+degrading. That made the deploy order load-bearing — lesser first, contentus
+after — and **the operator deployed it that way on 2026-08-15**: lesser
+`1ce2dc97`, then contentus `4d6bb99`, browser-verified live afterwards. This
+paragraph is therefore history rather than a live constraint, and nothing here
+is waiting on a deploy. The one case that reopens it is a new instance
+provisioned from a lesser older than `1ce2dc97` — which no gate here can see,
+because both pin checks compare bytes to a repository and a repository is not a
+running instance. See `contracts/lesser/provenance.json`,
+`inspected.forward_pin` and `inspected.forward_pin_resolved`.
 
 **3. `quarantineActive` is lesser's projection, not a date comparison.** It
 comes from `QuarantineSummaryAt` against lesser's own clock. contentus never
