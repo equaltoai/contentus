@@ -40,8 +40,8 @@ importers:
         specifier: ^3.13.13
         version: 3.13.35(svelte@5.56.8)
       '@theory-cloud/facetheory':
-        specifier: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.6/theory-cloud-facetheory-4.0.6.tgz
-        version: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.6/theory-cloud-facetheory-4.0.6.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)
+        specifier: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.7/theory-cloud-facetheory-4.0.7.tgz
+        version: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.7/theory-cloud-facetheory-4.0.7.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)
       hast-util-sanitize:
         specifier: ^5.0.2
         version: 5.0.2
@@ -327,9 +327,9 @@ packages:
   '@tanstack/virtual-core@3.17.7':
     resolution: {integrity: sha512-bp+v10y65sp2H7WpWfIMyxTNfl8ZVfxFTLRjPIFRryi6FV/J33z4IS53WO4pTk36KlvJ4iLiQz+oaydDC1xbcA==}
 
-  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.6/theory-cloud-facetheory-4.0.6.tgz':
-    resolution: {tarball: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.6/theory-cloud-facetheory-4.0.6.tgz}
-    version: 4.0.6
+  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.7/theory-cloud-facetheory-4.0.7.tgz':
+    resolution: {tarball: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.7/theory-cloud-facetheory-4.0.7.tgz}
+    version: 4.0.7
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -1283,7 +1283,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.17.7': {}
 
-  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.6/theory-cloud-facetheory-4.0.6.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)':
+  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.7/theory-cloud-facetheory-4.0.7.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)':
     dependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
