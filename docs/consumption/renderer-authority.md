@@ -85,8 +85,20 @@ Nothing local that would paper over it. Specifically:
   one `$props()` destructure, no markup `{@const}`) and probed by
   `tests/renderer-authority-audit.test.mjs`; every other owned template still
   fails the build on an HTML sink, and every owned executable file fails on an
-  alternate raw-HTML sink (`.innerHTML`, `outerHTML`, `insertAdjacentHTML`,
-  `document.write`, `srcdoc`).
+  alternate raw-HTML sink — `.innerHTML`/`.outerHTML`/`.srcdoc` writes in every
+  spelling (property access, element access, constant-folded keys, compound and
+  update forms), `.insertAdjacentHTML` and `.createContextualFragment` calls,
+  `document.write`/`document.writeln` including locally aliased documents,
+  `Reflect.set` and `Object.assign` reaching a raw-HTML property, `srcdoc`
+  attributes and iframe attribute spreads in templates and JSX, and any
+  computed key the parsers cannot fold (the round-2 evasion shapes) — the gate
+  fails closed wherever it cannot establish safety, and a computed write on a
+  receiver provably bound from a non-DOM container (an object literal,
+  `Object.create(null)`, `new Map()`/`Headers()`/…) is the one cleared shape.
+  The same audit also binds the preview VALUE PATH (round-2): every
+  `PreviewBody` invocation must pass the preview value itself, verbatim, bound
+  only from the `loadDraftPreview` result — a parent `$derived` that spreads
+  `preview` and rewrites `preview.html` before the sink fails the build.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as

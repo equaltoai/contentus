@@ -19,7 +19,9 @@
  *   2. No contentus-owned source imports a Markdown/HTML rendering package —
  *      read with the same TypeScript parser the toolchain runs, so a dynamic
  *      `import('marked')` is as visible as a static one and a package name in
- *      a comment or string is not a finding.
+ *      a comment or string is not a finding. A dynamic import whose specifier
+ *      no static read can name (`import(pkg)`) is also a finding: it could
+ *      load any package, so the position fails closed (round-2 evasion).
  *   3. No contentus-owned Svelte template contains an `{@html}` sink — with
  *      ONE pinned exception: the lesser-preview display sink below, which
  *      check 6 content-binds rather than trusts. Read with the Svelte
@@ -34,9 +36,18 @@
  *      imports, no transform. The exception check 3 admits is narrower than
  *      the rule it suspends, and this check is what makes it so.
  *   7. No contentus-owned executable source reaches the DOM through an
- *      alternate raw-HTML sink — `.innerHTML` / `.outerHTML` writes,
- *      `.insertAdjacentHTML` calls, `document.write`, `srcdoc` attributes —
- *      the sink shapes `{@html}` scanning cannot see (round-1 bypass C).
+ *      alternate raw-HTML sink — `.innerHTML` / `.outerHTML` / `.srcdoc`
+ *      writes in every spelling, `.insertAdjacentHTML` and
+ *      `.createContextualFragment` calls, `document.write`, `srcdoc`
+ *      attributes, and computed keys the analysis cannot resolve — the sink
+ *      shapes `{@html}` scanning cannot see (round-1 bypass C), read for the
+ *      round-2 evasion spellings (Reflect.set, Object.assign, aliased
+ *      document, iframe attribute spreads) and failing closed on any key the
+ *      parsers cannot fold (round-2).
+ *   8. Every `PreviewBody` invocation receives the authorized preview result
+ *      verbatim — the sink's caller is bound, not only the sink file, so a
+ *      parent `$derived` that spreads `preview` and rewrites `preview.html`
+ *      between `toDraftPreview` and the sink is a finding (round-2).
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -75,11 +86,12 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-import { liveScript, moduleSpecifiers } from './lib/module-imports.mjs';
+import { liveScript, moduleSpecifiers, computedImports } from './lib/module-imports.mjs';
 import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,
 	previewDisplayScriptFindings,
+	previewInvocationFindings,
 	svelteConstTags,
 	svelteHtmlTags,
 	svelteScriptContents,
@@ -332,7 +344,23 @@ function checkDependencies() {
  * as visible as a static `from`, and an unparseable file is a finding, never
  * an empty scan. For a Svelte file, `liveScript` hands it the compiler's own
  * script blocks plus the markup's `import(…)` calls.
+ *
+ * `computedImports` is the same reading's fail-closed half: an `import(pkg)`
+ * whose specifier no static read can name could load ANY package, including a
+ * Markdown renderer, so it is a finding unless it is the one pinned exception
+ * below. The exception is a permission without a shape being a hole, so it
+ * names the file AND the exact expression.
  */
+const COMPUTED_IMPORT_EXCEPTIONS = new Map([
+	// `scripts/render-routes.mjs` loads SSR handlers the same repository built,
+	// from `build/server/`, by converting a local path to a file URL — a
+	// computed import of this repository's own build output, never a package
+	// specifier, so it cannot be a second canonical renderer. The exception is
+	// exact-text: a second computed import anywhere, or a changed one here,
+	// is a finding again.
+	['scripts/render-routes.mjs', 'import(pathToFileURL(handlerPath).href)'],
+]);
+
 function checkImports() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
@@ -340,12 +368,27 @@ function checkImports() {
 			const path = relative(repoRoot, file);
 			const source = readFileSync(file, 'utf8');
 			let specifiers;
+			let computed;
 			try {
-				if (path.endsWith('.svelte')) specifiers = moduleSpecifiers(liveScript(path, source));
-				else specifiers = moduleSpecifiers(source, { jsx: /\.(tsx|jsx)$/.test(path) });
+				if (path.endsWith('.svelte')) {
+					const script = liveScript(path, source);
+					specifiers = moduleSpecifiers(script);
+					computed = computedImports(script);
+				} else {
+					const jsx = /\.(tsx|jsx)$/.test(path);
+					specifiers = moduleSpecifiers(source, { jsx });
+					computed = computedImports(source, { jsx });
+				}
 			} catch (error) {
 				problems.push(`${path} could not be read as module source: ${error.message}`);
 				continue;
+			}
+			for (const expression of computed) {
+				if (COMPUTED_IMPORT_EXCEPTIONS.get(path) === expression) continue;
+				problems.push(
+					`${path} loads a module no static read can name (${expression}) — a dynamic import with ` +
+						'a computed specifier could load any package, including a Markdown renderer'
+				);
 			}
 			for (const specifier of specifiers) {
 				const forbidden = FORBIDDEN_RENDERER_PACKAGES.find(
@@ -610,6 +653,35 @@ function checkOwnedSourceCoverage() {
 	return problems;
 }
 
+/**
+ * Check 8 — the preview VALUE PATH, bound at the caller (round-2).
+ *
+ * Check 6 binds the sink file; this check binds every `PreviewBody`
+ * invocation in owned source. The round-2 attack planted a parent transform
+ * — `const shown = $derived(preview.success ? { ...preview, html:
+ * preview.html.replace(...) } : preview)` with `<PreviewBody
+ * preview={shown} />` — and every check that only read PreviewBody.svelte
+ * stayed green, because the value arriving at the sink was no longer lesser's
+ * bytes. The scan lives in `./lib/source-scan.mjs` (the one copy of the
+ * reading): every invocation must pass the preview value itself, verbatim,
+ * and that value must be bound only from the `loadDraftPreview` result.
+ */
+function checkPreviewValuePath() {
+	const problems = [];
+	for (const dir of OWNED_SOURCE_DIRS) {
+		for (const file of walkFiles(dir)) {
+			if (!file.endsWith('.svelte')) continue;
+			const path = relative(repoRoot, file);
+			try {
+				problems.push(...previewInvocationFindings(path, readFileSync(file, 'utf8')));
+			} catch (error) {
+				problems.push(`${path} could not be scanned for PreviewBody invocations: ${error.message}`);
+			}
+		}
+	}
+	return problems;
+}
+
 function main() {
 	const checks = [
 		['dependencies', checkDependencies()],
@@ -619,6 +691,7 @@ function main() {
 		['owned-source coverage', checkOwnedSourceCoverage()],
 		['preview display sink binding', checkPreviewDisplaySink()],
 		['alternate raw-HTML sinks', checkAlternateHtmlSinks()],
+		['preview value path', checkPreviewValuePath()],
 	];
 
 	console.log('# Renderer-authority audit\n');

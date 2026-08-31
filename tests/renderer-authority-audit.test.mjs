@@ -527,3 +527,338 @@ test('the probes leave the tree exactly as they found it', () => {
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });
+
+/* ============================================================
+   R2-1 — the preview value path, bound at the caller
+   ============================================================ */
+
+/**
+ * The round-2 attack closed F1/F3 but proved the sink binding was not the whole
+ * path: a parent transform planted in ReviewWorkspace.svelte — a `$derived`
+ * that spreads `preview` and rewrites `preview.html` before
+ * `<PreviewBody preview={shown} />` — passed every check that only read
+ * PreviewBody.svelte. These probes plant the same shapes OVER the real files
+ * (restoring them in `finally`) and read the real audit's exit code, so what is
+ * asserted is the gate's behaviour over the shipped tree, not a copy of it.
+ */
+const REVIEW_WORKSPACE = 'src/lib/routes/ReviewWorkspace.svelte';
+const PREVIEW_STATE_ANCHOR = 'let preview = $state<DraftPreview | null>(null);\n';
+const PREVIEW_INVOCATION = '<PreviewBody {preview} />';
+
+/** Plant a broken review workspace, run the audit, restore the original. */
+function withPlantedWorkspace(mutate, body) {
+	const original = readFileSync(join(repoRoot, REVIEW_WORKSPACE), 'utf8');
+	const mutated = mutate(original);
+	writeFileSync(join(repoRoot, REVIEW_WORKSPACE), mutated);
+	try {
+		body();
+	} finally {
+		writeFileSync(join(repoRoot, REVIEW_WORKSPACE), original);
+	}
+}
+
+test('a parent $derived transform between loadDraftPreview and the sink fails the audit (round-2 R2-1)', () => {
+	// THE ROUND-2 SHAPE, verbatim in spirit: a derived value that spreads the
+	// preview and rewrites its html, then binds the sink to the derived value.
+	withPlantedWorkspace(
+		(source) =>
+			source
+				.replace(
+					PREVIEW_STATE_ANCHOR,
+					PREVIEW_STATE_ANCHOR +
+						'\tconst shown = $derived(\n' +
+						'\t\tpreview && preview.success\n' +
+						"\t\t\t? { ...preview, html: preview.html.replace('<p>', '<p data-planted=\"1\">') }\n" +
+						'\t\t\t: preview\n' +
+						'\t)\n'
+				)
+				.replace(PREVIEW_INVOCATION, '<PreviewBody preview={shown} />'),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a parent transform must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('[preview value path]') &&
+					output.includes('preview value must be the loadDraftPreview result verbatim'),
+				`check 8 must name the transformed binding:\n${output}`
+			);
+		}
+	);
+});
+
+test('a direct assignment of a reconstructed DraftPreview fails the audit (round-2 R2-1)', () => {
+	// The same reconstruction without the $derived wrapper: `preview` itself is
+	// reassigned from an object spread that rewrites html. The verbatim sink in
+	// PreviewBody still reads `preview.html`, so a sink-only binding would pass.
+	withPlantedWorkspace(
+		(source) =>
+			source
+				.replace(
+					PREVIEW_STATE_ANCHOR,
+					PREVIEW_STATE_ANCHOR +
+						'\t$effect(() => {\n' +
+						"\t\tpreview = { ...preview, html: preview.html.replace(/x/g, 'y') };\n" +
+						'\t});\n'
+				),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a reconstructed DraftPreview must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('preview value must be the loadDraftPreview result verbatim'),
+				`check 8 must reject the object-literal binding:\n${output}`
+			);
+		}
+	);
+});
+
+test('a write to preview.html in the calling file fails the audit (round-2 R2-1)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR + '\t$effect(() => { preview.html = preview.html.slice(0, 100); });\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a mutation of preview.html must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('writes to preview.html'),
+				`check 8 must name the mutated field:\n${output}`
+			);
+		}
+	);
+});
+
+test('an object spread of the preview in the calling file fails the audit (round-2 R2-1)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR + '\tconst copy = { ...preview };\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a spread reconstruction must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('spreads preview into a new object'),
+				`check 8 must name the reconstruction:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   R2-2 — the round-2 alternate sink / parser evasions
+   ============================================================ */
+
+/**
+ * Each round-2 evasion shape, planted as an owned fixture and run against the
+ * real audit. The shapes are the ones the standing attack planted and the old
+ * gate stayed green for: computed element/member access, `Reflect.set`,
+ * `Object.assign` to a DOM receiver, `createContextualFragment`, script-side
+ * `frame.srcdoc`, iframe attribute spreads, an aliased document, and a
+ * non-literal dynamic `import(pkg)`.
+ */
+
+test('a folded computed key targeting innerHTML fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_computed_key__.ts`;
+	plant(relativePath, "export const p = (el: HTMLElement, html: string) => {\n\tel['inner' + 'HTML'] = html;\n};\n");
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `a folded computed key must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} writes to .innerHTML`),
+			`check 7 must fold the concatenated key:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('a computed key no static read can fold fails the audit, even on an unproven receiver (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_computed_dynamic__.ts`;
+	plant(
+		relativePath,
+		'export const p = (el: HTMLElement, html: string, key: string) => {\n\tel[key] = html;\n};\n'
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `a dynamic computed key must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} writes through a computed key`),
+			`check 7 must fail closed on the unresolvable key:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('Reflect.set with a raw-HTML property fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_reflect_set__.ts`;
+	plant(
+		relativePath,
+		"export const p = (el: HTMLElement, html: string) => {\n\tReflect.set(el, 'innerHTML', html);\n};\n"
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `Reflect.set must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} calls Reflect.set with 'innerHTML'`),
+			`check 7 must name the Reflect.set target:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('Object.assign with a raw-HTML key fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_object_assign__.ts`;
+	plant(
+		relativePath,
+		"export const p = (el: HTMLElement, html: string) => {\n\tObject.assign(el, { innerHTML: html });\n};\n"
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `Object.assign must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} calls Object.assign with 'innerHTML'`),
+			`check 7 must name the dangerous key:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('createContextualFragment fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_range__.ts`;
+	plant(
+		relativePath,
+		'export const p = (html: string) => {\n\tdocument.createRange().createContextualFragment(html);\n};\n'
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `createContextualFragment must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} calls .createContextualFragment`),
+			`check 7 must name the method:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('a script-side frame.srcdoc write fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_srcdoc_write__.ts`;
+	plant(
+		relativePath,
+		'export const p = (html: string) => {\n\tconst frame = document.createElement(\'iframe\');\n\tframe.srcdoc = html;\n};\n'
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `a srcdoc write must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} writes to .srcdoc`),
+			`check 7 must catch the script-side srcdoc write:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('an iframe attribute spread fails the audit, in Svelte markup and JSX (R2-2)', () => {
+	const sveltePath = `${OWNED_DIR}/__r2_iframe_spread__.svelte`;
+	plant(
+		sveltePath,
+		'<script lang="ts">\n\tconst frameProps: Record<string, string> = { srcdoc: \'<p>planted</p>\' };\n</script>\n\n<iframe {...frameProps}></iframe>\n'
+	);
+	const tsxPath = `${OWNED_DIR}/__r2_iframe_spread__.tsx`;
+	plant(
+		tsxPath,
+		'export const p = (props: Record<string, string>) => <iframe {...props} />;\n'
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `an iframe spread must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`${sveltePath} <iframe {...spread}> spreads its attributes`),
+			`check 7 must catch the Svelte spread:\n${output}`
+		);
+		assert.ok(
+			output.includes(`${tsxPath} spreads attributes onto an <iframe>`),
+			`check 7 must catch the JSX spread:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, sveltePath), { force: true });
+		rmSync(join(repoRoot, tsxPath), { force: true });
+	}
+});
+
+test('an aliased document write fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_doc_alias__.ts`;
+	plant(
+		relativePath,
+		'export const p = (html: string) => {\n\tconst d = globalThis.document;\n\td.write(html);\n};\n'
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `an aliased document write must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} calls document.write`),
+			`check 7 must follow the alias to the document:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('a non-literal dynamic import fails the audit (R2-2)', () => {
+	const relativePath = `${OWNED_DIR}/__r2_dynamic_pkg__.ts`;
+	plant(
+		relativePath,
+		'export const load = (pkg: string) => import(pkg);\n'
+	);
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `a computed dynamic import must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[owned-source imports] ${relativePath} loads a module no static read can name`),
+			`check 2 must fail closed on the computed specifier:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('legitimate non-sink shapes stay clean (R2-2 negative controls)', () => {
+	// The strengthened scan must not become a text token search: process-stream
+	// writes, store-state Object.assign merges, and container computed writes
+	// are all legitimate owned-code shapes, and each must stay clean.
+	const tsPath = `${OWNED_DIR}/__r2_legit__.ts`;
+	const sveltePath = `${OWNED_DIR}/__r2_legit__.svelte`;
+	plant(
+		tsPath,
+		"export const a = () => process.stdout.write('x');\n" +
+			"export const b = (state: any, partial: any) => { Object.assign(state, partial); };\n" +
+			'export const c = (lower: string, value: string) => {\n' +
+			'\tconst headers: Record<string, string> = {};\n' +
+			'\theaders[lower] = value;\n' +
+			'};\n'
+	);
+	plant(sveltePath, '<p>no sinks here</p>\n');
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 0, `legitimate shapes must not fail the audit:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, tsPath), { force: true });
+		rmSync(join(repoRoot, sveltePath), { force: true });
+	}
+});
