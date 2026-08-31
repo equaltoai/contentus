@@ -24,6 +24,7 @@
  * different ref is exactly the skew this control claims to catch.
  */
 import { readStrictJson } from './strict-json.mjs';
+import { verifyReleaseBinding } from './release-binding.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 const findings = [];
@@ -107,18 +108,65 @@ if (components) {
 		findings.push(`vendored module "${entry.name}" is recorded as hand-modified`);
 }
 
-if (findings.length) {
-	console.error(findings.join('\n'));
-	console.error('');
-	console.error('Vendored source is CLI-managed and never hand-edited; pins move together');
-	console.error('through a `greater` CLI bump, never one channel at a time.');
-	process.exit(1);
+/**
+ * CON-4's second half: the vendored BYTES bound to the pinned release.
+ *
+ * The checks above bind the manifest's own fields to the pin; the release
+ * binding (round-1 F4) binds the bytes themselves. Every on-disk vendored file
+ * must equal the release's canonical bytes for its source path — or the
+ * digest-verified greater CLI's documented import-transform of them — and the
+ * recorded checksum must match the same canonical value. A coordinated
+ * file+checksum edit, which moves every manifest-field check at once, fails
+ * here against the release's own registry manifest (digest-pinned in the
+ * contract). See `release-binding.mjs` for the walk.
+ */
+async function verifyReleaseBindingOrFail(contract) {
+	try {
+		return await verifyReleaseBinding({ repoRoot: process.cwd(), pin: contract });
+	} catch (error) {
+		return [
+			`release-binding could not run: ${error instanceof Error ? error.message : String(error)}`,
+		];
+	}
 }
 
-const [tag] = [...tags.keys()];
-console.log(`greater channels in lockstep at ${tag}, bound to the pin in ${CONTRACT}.`);
-console.log(`  TARBALL-PIN: ${tags.get(tag).length} package.json pins at ${expected.release_tag}`);
-console.log(`  CLI-COPY:    components.json installMode=vendored ref=${components.ref}`);
-console.log(
-	`               ${(components.installed ?? []).length} vendored modules, all at the pinned ref, none modified`
-);
+const main = async () => {
+	if (findings.length) {
+		console.error(findings.join('\n'));
+		console.error('');
+		console.error('Vendored source is CLI-managed and never hand-edited; pins move together');
+		console.error('through a `greater` CLI bump, never one channel at a time.');
+		process.exit(1);
+	}
+
+	const releaseFindings = await verifyReleaseBindingOrFail(contract);
+	if (releaseFindings.length) {
+		console.error(releaseFindings.join('\n'));
+		console.error('');
+		console.error(
+			'The vendored tree is not bound to the pinned release: a file or its recorded checksum'
+		);
+		console.error(
+			'does not match the release registry manifest at the pinned commit. Re-vendor through the'
+		);
+		console.error('`greater` CLI — never repair bytes or checksums by hand.');
+		process.exit(1);
+	}
+
+	const [tag] = [...tags.keys()];
+	console.log(`greater channels in lockstep at ${tag}, bound to the pin in ${CONTRACT}.`);
+	console.log(
+		`  TARBALL-PIN: ${tags.get(tag).length} package.json pins at ${expected.release_tag}`
+	);
+	console.log(`  CLI-COPY:    components.json installMode=vendored ref=${components.ref}`);
+	console.log(
+		`               ${(components.installed ?? []).length} vendored modules, all at the pinned ref, none modified`
+	);
+};
+
+main().catch((error) => {
+	console.error(
+		`CON-4 could not complete: ${error instanceof Error ? error.message : String(error)}`
+	);
+	process.exit(1);
+});
