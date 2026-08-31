@@ -210,6 +210,118 @@ test('a genuinely commented-out sink does not fail the audit', () => {
 	}
 });
 
+/* ============================================================
+   The preview display sink — the one exception, content-bound
+   ============================================================ */
+
+/**
+ * Check 3 admits exactly one owned sink, `src/lib/review/PreviewBody.svelte`,
+ * and check 6 binds its shape. These probes plant violations of the binding
+ * OVER the real file (restoring it in `finally`) and read the audit's exit
+ * code, so what is asserted is the gate's behaviour over the shipped sink,
+ * not a copy of it. The clean baseline above already proves the shipped sink
+ * passes — these prove the binding bites when it moves.
+ */
+const DISPLAY_SINK = 'src/lib/review/PreviewBody.svelte';
+
+/** Plant a broken display sink, run the audit, restore the original. */
+function withPlantedSink(contents, body) {
+	const original = readFileSync(join(repoRoot, DISPLAY_SINK), 'utf8');
+	writeFileSync(join(repoRoot, DISPLAY_SINK), contents);
+	try {
+		body();
+	} finally {
+		writeFileSync(join(repoRoot, DISPLAY_SINK), original);
+	}
+}
+
+test('a second sink in the display component fails the binding', () => {
+	withPlantedSink(
+		'<script lang="ts">\n\timport type { DraftPreview } from \'$lib/cms/review\';\n' +
+			'\tlet { preview }: { preview: DraftPreview } = $props();\n</script>\n' +
+			'{#if preview.success && preview.html}\n\t{@html preview.html}\n{/if}\n' +
+			'{@html preview.html}\n',
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a second sink must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes(`[preview display sink binding] ${DISPLAY_SINK} carries 2 {@html} sinks`),
+				`the binding check must count the sinks it admitted:\n${output}`
+			);
+		}
+	);
+});
+
+test('a sink bound to anything other than preview.html fails the binding', () => {
+	withPlantedSink(
+		'<script lang="ts">\n\timport type { DraftPreview } from \'$lib/cms/review\';\n' +
+			'\tlet { preview }: { preview: DraftPreview } = $props();\n' +
+			'\tconst reshaped = preview.html;\n</script>\n' +
+			'{#if preview.success && preview.html}\n\t{@html reshaped}\n{/if}\n',
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a sink bound to a computed value must fail:\n${output}`);
+			assert.ok(
+				output.includes('no longer binds its sink to `preview.html` verbatim'),
+				`the binding check must name the field the sink may display:\n${output}`
+			);
+		}
+	);
+});
+
+test('a value import in the display component fails the binding', () => {
+	withPlantedSink(
+		'<script lang="ts">\n' +
+			"\timport { sanitizeHtml } from '$lib/greater/utils';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\tlet { preview }: { preview: DraftPreview } = $props();\n</script>\n' +
+			'{#if preview.success && preview.html}\n\t{@html preview.html}\n{/if}\n',
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a value import must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('carries a value import'),
+				`the binding check must reject runtime-reachable imports:\n${output}`
+			);
+		}
+	);
+});
+
+test('a transform named in live code fails the binding', () => {
+	withPlantedSink(
+		'<script lang="ts">\n\timport type { DraftPreview } from \'$lib/cms/review\';\n' +
+			'\tlet { preview }: { preview: DraftPreview } = $props();\n' +
+			'\tconst sanitizeHtml = (value: string) => value;\n</script>\n' +
+			'{#if preview.success && preview.html}\n\t{@html preview.html}\n{/if}\n',
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a sanitizer in the live sink must fail:\n${output}`);
+			assert.ok(
+				output.includes('names "sanitizeHtml"'),
+				`the binding check must reject a second sanitization:\n${output}`
+			);
+		}
+	);
+});
+
+test('any other owned sink still fails, with the exception named', () => {
+	// The exception admits ONE file. A sink planted anywhere else must still
+	// fail check 3, and the finding must point at the pinned display sink as
+	// the only permitted one.
+	plant(SINK_FIXTURE, '<div>{@html planted}</div>\n');
+
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, output);
+		assert.ok(
+			output.includes(`the only pinned display sink is ${DISPLAY_SINK}`),
+			`check 3 must name the one exception it admits:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, SINK_FIXTURE), { force: true });
+	}
+});
+
 test('the probes leave the tree exactly as they found it', () => {
 	// Planting inside the real repo is the only way to run the audit as CI runs
 	// it. This is the assertion that keeps that honest.

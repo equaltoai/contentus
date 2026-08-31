@@ -256,6 +256,18 @@
         "line": 72,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary to list a directory's tracked files, NUL-separated and rooted with `-C`, which is the reading three probes share so none of them lists a directory a concurrent probe is planting fixtures in. No repository file is executed."
+      },
+      {
+        "file": "tests/review-preview-render.test.mjs",
+        "line": 3,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs the same resolve hook family `tests/review-adapters.test.mjs` discloses: it maps the vendored review chrome's `.js`-spelled relative imports onto the real `.ts` modules, and the `src/lib/greater/utils` barrel directory — the CLI's alias-target substitution, which Node cannot load — onto the module owning the one symbol the import chain consumes. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probes compile and render the real vendored components. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
+        "file": "tests/review-preview-render.test.mjs",
+        "line": 113,
+        "expression": "import(pathToFileURL(file).href)",
+        "reason": "Loads a server-compiled copy of a real repository component the probe has just written to a temp directory — svelte/compiler output of the shipped `PreviewBody` and `QueueCard` sources, imports rewritten to the repository's own modules — so the rendered markup is evidence about the components that run. The bytes are this pinned probe's compiler output; there is no repository file to hash."
       }
     ],
     "sha256": {
@@ -263,7 +275,7 @@
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-graphql-documents.mjs": "0914bf2be0d768b70ff47b02d07b02d0bd7cd92e8da6a0f60eab7409607a85f0",
-      "scripts/audit-renderer-authority.mjs": "1b4b5f236947d0b3a452881bc178b3e9a4d8e6fe19b349f08ac55150509f7451",
+      "scripts/audit-renderer-authority.mjs": "c0690b1d6863a5066f8c6b5c6f71efe4c48151764231cd61558b1f0c4422695d",
       "scripts/audit-seam-graph.mjs": "ad9a54dff7facf374bee4495e4b661d68a51a40627f65d43f4fb3b3552dc06f7",
       "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
@@ -312,16 +324,16 @@
       "tests/messaging-session.test.mjs": "4be22b812fc7b35b1ca66676aa73a4f9144e1fabdbe18f95f248ccae92c8d528",
       "tests/mobile-chrome.test.mjs": "6a1ea66c9d4b298c4449a97312ad2a7fe9f6e743a25d039bad1959ef718c55a4",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
-      "tests/renderer-authority-audit.test.mjs": "d8ed3deb435c7f2fb92f11ea9cec6adde7862152a0001ef0f728ac14c9cc5ba7",
+      "tests/renderer-authority-audit.test.mjs": "d1dcedac831b0a3401beb8a00dd7b95be1b100f314ebc36147fce7016f70318a",
       "tests/renderer-authority.test.mjs": "c246f85eb4b59937610b83ba0604a9678c65a8f32deb9f43582c0e02fcd3f1f6",
-      "tests/review-adapters.test.mjs": "0475990df80b097374ba2ba61fa8c7e8f43b463177dfc615a7fc75e7edcdf705",
+      "tests/review-adapters.test.mjs": "83771e9b5cadb9e235cc50e11367d18b6bf9c1504457f797d9b5394f89a2e966",
       "tests/review-round-trip.test.mjs": "8a3e525affd543cfcc1c5aae314f344e30821369bad86353deaa63bcff556285",
-      "tests/review.test.mjs": "1f83db67c1dc699530bfa064e7f7f7492c350999feb13a0565675545a8627b1a",
+      "tests/review.test.mjs": "ce07e44bbd27a72402db78a09f10a6dc17762a184e83ab3b60b1b0e6bf954cf0",
       "tests/schema-provenance.test.mjs": "d0a48b24531d18200e94e8d6b466b668f042ed3a8efb216f241b943f78893a14",
       "tests/seam-graph.test.mjs": "41ecf50c046bfdff0f6eaafee51ddf8f45f16bf22885907362c492a265c04280",
       "tests/share-flow-probe.test.mjs": "2732956b719316e1a170ed93ca800fc0eabfb46d3e9e28e1cc6aaac17518c78a",
       "tests/ssr-messages.test.mjs": "e192d936c27ce5045bcd6bbfb4d258f6dbfe1e4a6b8c3b82e96d28c6c215a683",
-      "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
+      "tests/ssr-review.test.mjs": "ca430e46625143850735135a150165f84e8f5d71ed8f2e3b0144a8fb9de67b35",
       "tests/ssr-routes.test.mjs": "185043b629e875a2b66d2342468a348ca0cf524663beda637a39614d016acde4",
       "tests/ssr-timelines.test.mjs": "1b585873f1092f119c05dab7460027ebc4ca9599210a3365c25e81f6d927808b",
       "tests/stylesheet.test.mjs": "666d465a3323769c68f047a48f685ae2f54a220863201f51586c984ce1e9f4e4",
@@ -331,7 +343,8 @@
       "tests/timeline-subscription.test.mjs": "c02c20e9547b6cc8977b8655ce167e0007a20487c03423458f815584058b1848",
       "tests/vendored-content-renderer.test.mjs": "a6fe1483279fad32b037b25c7a2dc09795b97f164923c8d9d6724802510e7936",
       "tests/vendored-messaging-render.test.mjs": "4634a97b213685733fb03d8e27114f0f60224a7b60c3a145805efc4ce2f26e80",
-      "tests/vendored-runes.test.mjs": "b35d47a32182afedc28fd80ee797f94602514efaafbdba22f2fb2d31dda10bb2"
+      "tests/vendored-runes.test.mjs": "b35d47a32182afedc28fd80ee797f94602514efaafbdba22f2fb2d31dda10bb2",
+      "tests/review-preview-render.test.mjs": "bae0ff6726e462cb012c2dbd2429d1f56ddde7a8952000734bf43b7df47e61d7"
     }
   },
   "install_manifest": {
@@ -511,17 +524,33 @@
       "  payload into the verdict record when present — runtime-harmless, but",
       "  the narrowing claim above measures types only, not this pass-through.",
       "",
+      "  0.13.5 -> 0.13.7 at contentus #112 (live principal review). The release",
+      "  (upstream #1055/#1058) teaches the review chrome this client mounts to",
+      "  demote a stale approval out of the success tone: `resolveReviewState`",
+      "  consumes Lesser's own `DraftReviewVerdictRecord.stale` / `.current`",
+      "  markers, emits the `stale-approved` descriptor with an explanation that",
+      "  the recorded approval no longer counts, and QueueCard/AttributionStrip",
+      "  render that detail beside the badge. It also syncs the generated",
+      "  adapters to the Lesser v1.6.28 + Lesser Host v1.6.8 contract, which is",
+      "  the contract this milestone's authenticated preview document moves to",
+      "  `draftPreview(id:, includeAccessUrls: true)` against, and the contract",
+      "  the lesser schema pin in contracts/lesser/ moved to in the same change.",
+      "  FaceTheory stays v4.0.9, the version 0.13.7 itself pins. The bump's own",
+      "  `update --all` (at `--ref greater-v0.13.7`) summary is recorded in the",
+      "  milestone PR body with the dry-run/real output and the before/after",
+      "  manifest audit.",
+      "",
       "CON-4 forces the rest, at every bump: each `installed[]` entry must carry",
       "`vendored_ref`, so the whole vendored tree and every tarball pin move together, in",
       "one commit, through the CLI. The alternative — hand-copying components — is the",
       "vendored-source edit this repository refuses outright."
     ],
-    "release_tag": "greater-v0.13.5",
-    "vendored_ref": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
-    "cli_version": "0.13.5",
+    "release_tag": "greater-v0.13.7",
+    "vendored_ref": "4592c439b3b0e53ba47b7cddebab196c1f88abdf",
+    "cli_version": "0.13.7",
     "cli_asset": {
-      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.5/greater-components-cli.tgz",
-      "sha256": "e560e7b807584cb760f528af261a0eabd2814ec0d51266a950d26ddfa6007736"
+      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz",
+      "sha256": "14aa235a46721317d717b53969d7e61e2745bc45fa13f9dcddbe37b101400b9a"
     }
   },
   "workflows": {

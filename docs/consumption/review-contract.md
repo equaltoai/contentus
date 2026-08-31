@@ -19,6 +19,13 @@ was its entire premise, so the ask names a flow this client no longer offers.
 It is the one entry below closed by a change here rather than upstream, which is
 why it records its reasoning at length instead of a release tag.
 
+#112 (2026-08-31) moved both greater channels to **greater-v0.13.7** (release
+commit `4592c439`; the stale-approval review chrome of upstream #1055/#1058)
+and the schema pin to **lesser v1.6.28** (tag `8f483cc5`) — the contract the
+authenticated preview's `includeAccessUrls: true` opt-in consumes. See "The
+preview's media opt-in and display" and "Stale approval vs current approval"
+below.
+
 A thin consumption note, not a redefinition of anyone's contract. It records
 what contentus observed while wiring Face 2, what it decided, and what it did
 not build because the contract does not currently support it.
@@ -30,13 +37,60 @@ not build because the contract does not currently support it.
 | `sharedDraftReviews(first, after)`             | `/review` queue            | `requireAuth`; the caller's own active grants                          |
 | `myDrafts(contentType: ARTICLE, first, after)` | `/review` queue            | `requireAuth`; the caller's own drafts                                 |
 | `draftReview(id)`                              | `/review/drafts/{id}` rail | `DraftReviewForCaller` — **owner or active grantee**                   |
-| `draftPreview(id)`                             | workspace preview panel    | `DraftReviewForCaller` — **owner or active grantee**                   |
+| `draftPreview(id, includeAccessUrls: true)`    | workspace preview panel    | `DraftReviewForCaller` — **owner or active grantee**                   |
 | `submitDraftReview(draftId, verdict, notes)`   | verdict actions            | active grant required; **owner refused** unless they are the principal |
 | `publishDraft(id)`                             | publish action             | the cumulative approval gate, enforced in `DraftService`               |
 | `scheduleDraft(id, scheduledAt)`               | schedule action            | `requireCMSSchedulingEnabled` + the same gate                          |
 
 No query in `src/lib/cms/review.ts` selects `Draft.content`. Not "selects it and
 declines to render it" — does not ask for it.
+
+### The preview's media opt-in and display (lesser v1.6.28, #112)
+
+Since lesser v1.6.28 the review operations take an opt-in `includeAccessUrls`
+argument. Bearer URL minting is intentionally NOT the default: the un-opted
+`draftPreview` renders its media without a usable `src`, while the opted-in
+branch (`RenderDraftPreviewWithMedia`, lesser `graph/query_resolvers_cms.go`)
+mints the per-usage short-lived access URLs and composes them into the very
+`renderedHtml` the document selects — a bound image reaches the reviewer as the
+`<figure><img …></figure>` lesser authored.
+
+The operator failure behind #112 was the un-opted read: an image was bound, the
+review DOM carried no figure, and lesser-body's MCP read — which opted in —
+showed the same draft with the figure present. Contentus therefore opts in on
+`DRAFT_PREVIEW_QUERY`, and on NOTHING ELSE: the queue projections, the verdict
+submission, and the publish mutation display no body, so a minted URL asked for
+there would be a short-lived credential with no display to serve. The opt-in is
+pinned to the single document by `tests/review.test.mjs`, and the transport
+never attempts the preview without a session (`tests/review-adapters.test.mjs`).
+
+Display contract: the preview pane shows `preview.html` through
+`src/lib/review/PreviewBody.svelte` — the one owned HTML sink in the
+repository, content-bound by `scripts/audit-renderer-authority.mjs` (exactly
+one sink, bound to the projection field, type-only imports, no transform).
+lesser rendered AND sanitized these bytes, so the pane applies no second pass:
+the vendored fediverse allowlist in `Article.Content` strips lesser's own
+`<figure>`/`<img>`, and re-filtering trusted server output is how the image
+disappeared in the first place. The minted URLs are short-lived bearer
+artifacts; they exist only on the authenticated client-side read and never in
+SSR, the public hydration payload, fixtures, or logs.
+
+### Stale approval vs current approval (greater-v0.13.7, #112)
+
+`resolveReviewState` in the vendored review chrome (greater-v0.13.7, upstream
+#1055/#1058) consumes lesser's own `DraftReviewVerdictRecord.stale` /
+`.current` markers on the newest recorded verdict. An `APPROVED` the draft
+outgrew — media or content changed after it — resolves to the `stale-approved`
+state: the label reads "Approved (superseded)", the detail states that the
+approval no longer counts (naming the principal rule when lesser's
+`publishEligibility` says it is in force and unsatisfied), and the chrome takes
+the neutral dashed tone instead of the approved green. Staleness is consumed
+from lesser, never inferred: absent markers leave a recorded approval standing.
+Contentus adopts the released resolver and descriptors without copying them —
+`tests/review-adapters.test.mjs` drives the shipped transport and feeds its
+projection to the vendored resolver; `tests/review-preview-render.test.mjs`
+renders the released `QueueCard` for stale and current fixtures. The publish
+control remains governed solely by lesser's `publishEligibility` projection.
 
 ## The four contract facts that shaped the UI
 

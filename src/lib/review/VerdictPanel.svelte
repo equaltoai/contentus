@@ -72,6 +72,15 @@ Apollo client it does not otherwise need.
 		{state.label}{state.source === 'none' ? '' : ` — ${REVIEW_STATE_QUALIFIER}`}
 	</p>
 
+	{#if state.detail}
+		<!-- The released descriptor's explanation, rendered as visible text the way
+		     the vendored QueueCard and AttributionStrip render it: the meaning never
+		     depends on badge colour. Today this is the stale-approval sentence —
+		     lesser's markers voided the newest recorded approval for the current
+		     revision, and the draft is NOT approved no matter how this history reads. -->
+		<p class="contentus-review-note contentus-review-state-detail">{state.detail}</p>
+	{/if}
+
 	{#if verdicts.length > 0}
 		<!-- The recorded history, as lesser returned it. A verdict marked `stale`
 		     is lesser's own comparison saying the draft changed after this verdict

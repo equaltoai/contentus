@@ -13,15 +13,21 @@
  * quietly become a second canonical renderer. This audit makes the erosion
  * fail the build.
  *
- * Five checks:
+ * Six checks:
  *
  *   1. No Markdown-rendering package is a direct contentus dependency.
  *   2. No contentus-owned source imports a Markdown/HTML rendering package.
- *   3. No contentus-owned Svelte template contains an `{@html}` sink.
+ *   3. No contentus-owned Svelte template contains an `{@html}` sink — with
+ *      ONE pinned exception: the lesser-preview display sink below, which
+ *      check 6 content-binds rather than trusts.
  *   4. The vendored blog face still ESCAPES non-HTML content instead of
  *      rendering it.
  *   5. Every source file under `src/` is classified — owned and therefore
  *      scanned by 2 and 3, or explicitly declared vendored.
+ *   6. The preview display sink is exactly the pinned file and exactly the
+ *      pinned shape: one sink, bound to `preview.html` verbatim, type-only
+ *      imports, no transform. The exception check 3 admits is narrower than
+ *      the rule it suspends, and this check is what makes it so.
  *
  * Check 5 exists because checks 2 and 3 are only ever as good as their list of
  * directories, and that list silently fell behind: `src/lib/compose` was
@@ -198,6 +204,35 @@ const VENDORED_SOURCE_FILES = [
 const VENDORED_ARTICLE_CONTENT = 'src/lib/greater/faces/blog/components/Article/Content.svelte';
 
 /**
+ * The ONE contentus-owned template permitted to carry an `{@html}` sink.
+ *
+ * The body it displays is `draftPreview.renderedHtml` — HTML lesser rendered
+ * AND sanitized server-side (`cms.RenderDraftPreviewWithMedia`), behind the
+ * authenticated preview read. lesser is therefore the single renderer and
+ * sanitizer of these bytes, and contentus's job reduces to displaying them.
+ *
+ * Why that display does not go through the vendored blog face like every other
+ * body: `Article.Content`'s defence-in-depth pass is an allowlist shaped for
+ * UNTRUSTED FEDIVERSE content, and it strips the lesser-authored
+ * `<figure>`/`<img>` that `includeAccessUrls: true` exists to serve — the
+ * operator failure behind #112 was exactly a bound image the review DOM never
+ * showed. Re-filtering trusted server output is not added safety; it is a
+ * second opinion disagreeing with the named authority, and the milestone
+ * contract forbids it ("never secondary sanitization"). The public article
+ * path keeps its vendored defence pass untouched; this exception is the
+ * authenticated preview only.
+ *
+ * The exception is a PERMISSION, and a permission without a shape is a hole.
+ * Check 6 below binds the shape: exactly one sink, bound to `preview.html`
+ * verbatim (the projection field `toDraftPreview` nulls unless lesser reported
+ * success), type-only imports, no transform. `tests/renderer-authority-audit
+ * .test.mjs` plants violations of the binding and fails. A preview display that
+ * grows a second sink, a value import, or a function call between lesser's
+ * bytes and the DOM is a renderer-authority change, and it fails here first.
+ */
+const PREVIEW_DISPLAY_SINK = 'src/lib/review/PreviewBody.svelte';
+
+/**
  * Extensions the walk opens: source this toolchain executes or compiles.
  *
  * Deliberately wider than what the repo happens to contain today, because the
@@ -294,15 +329,72 @@ function checkHtmlSinks() {
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
 			if (!file.endsWith('.svelte')) continue;
+			const path = relative(repoRoot, file);
+			// The one pinned exception, content-bound by checkPreviewDisplaySink
+			// below. Skipping it here is not trusting it: the binding check reads
+			// the same file and fails on any shape other than the pinned one.
+			if (path === PREVIEW_DISPLAY_SINK) continue;
 			const withoutComments = stripComments(readFileSync(file, 'utf8'));
 			if (/\{@html\b/.test(withoutComments)) {
 				problems.push(
-					`${relative(repoRoot, file)} contains an {@html} sink — contentus-owned templates ` +
-						'must not inject HTML; body display goes through the vendored blog face.'
+					`${path} contains an {@html} sink — contentus-owned templates ` +
+						'must not inject HTML; body display goes through the vendored blog face, ' +
+						`and the only pinned display sink is ${PREVIEW_DISPLAY_SINK}.`
 				);
 			}
 		}
 	}
+	return problems;
+}
+
+/**
+ * The content binding for the ONE display sink check 3 admits.
+ *
+ * Each assertion here is a way the permission could widen, stated before the
+ * code so a future edit argues with the audit rather than around it: a second
+ * sink, a sink bound to anything other than the `preview.html` projection
+ * field, a value import that could carry a transform, or a sanitizer/rewriter
+ * touching lesser's bytes on the way to the DOM.
+ */
+function checkPreviewDisplaySink() {
+	const problems = [];
+	let content;
+	try {
+		content = readFileSync(join(repoRoot, PREVIEW_DISPLAY_SINK), 'utf8');
+	} catch {
+		return [
+			`${PREVIEW_DISPLAY_SINK} is missing. If the preview display moved, move the pin, ` +
+				'this check, and its probes together — never delete the check and leave the sink.',
+		];
+	}
+
+	const withoutComments = stripComments(content);
+
+	const sinks = [...withoutComments.matchAll(/\{@html\b/g)];
+	if (sinks.length !== 1)
+		problems.push(
+			`${PREVIEW_DISPLAY_SINK} carries ${sinks.length} {@html} sinks — the disclosure admits exactly one.`
+		);
+
+	if (!/\{@html\s+preview\.html\s*\}/.test(withoutComments))
+		problems.push(
+			`${PREVIEW_DISPLAY_SINK} no longer binds its sink to \`preview.html\` verbatim — ` +
+				'the sink must display the DraftPreview projection field, never something computed from it.'
+		);
+
+	for (const match of content.matchAll(/^\s*import\s+(?!type\b)[^;]+;?/gm))
+		problems.push(
+			`${PREVIEW_DISPLAY_SINK} carries a value import (${match[0].trim()}) — the display sink ` +
+				'holds type-only imports, so nothing runtime-reachable can stand between lesser and the DOM.'
+		);
+
+	for (const forbidden of ['sanitizeHtml', 'DOMPurify', 'linkify', 'marked', 'remark'])
+		if (new RegExp(`\\b${forbidden}\\b`).test(withoutComments))
+			problems.push(
+				`${PREVIEW_DISPLAY_SINK} names "${forbidden}" — the preview display applies no second ` +
+					'sanitization and no rewrite to lesser-rendered HTML.'
+			);
+
 	return problems;
 }
 
@@ -388,6 +480,7 @@ function main() {
 		['owned-source {@html} sinks', checkHtmlSinks()],
 		['vendored blog-face escape fallback', checkVendoredEscapeFallback()],
 		['owned-source coverage', checkOwnedSourceCoverage()],
+		['preview display sink binding', checkPreviewDisplaySink()],
 	];
 
 	console.log('# Renderer-authority audit\n');

@@ -71,6 +71,18 @@ Nothing local that would paper over it. Specifically:
   greater's `sanitizeHtml` to HTML-format content as defence-in-depth. That is
   upstream-owned code, not a contentus renderer, and contentus does not
   second-guess it.
+- **The ONE owned display sink** is `src/lib/review/PreviewBody.svelte`, the
+  authenticated review preview, added for #112 (2026-08-31). It displays
+  `draftPreview.renderedHtml` — HTML lesser rendered AND sanitized server-side,
+  fetched behind `includeAccessUrls: true` — with no second pass: the fediverse
+  allowlist in `Article.Content` strips lesser's own `<figure>`/`<img>`, which
+  is exactly the operator-reported failure this closes. lesser is the single
+  renderer and sanitizer of those bytes; displaying them untransformed is
+  renderer authority honored, not bypassed. The sink is pinned by
+  `scripts/audit-renderer-authority.mjs` (one sink, bound to `preview.html`
+  verbatim, type-only imports, no transform) and probed by
+  `tests/renderer-authority-audit.test.mjs`; every other owned template still
+  fails the build on an HTML sink.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
