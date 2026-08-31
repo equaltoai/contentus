@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -25,8 +25,9 @@ import {
  *
  * THE FIX. CON-4 now re-derives every vendored file from the release's OWN
  * registry manifest (`registry/index.json` at the pinned commit, digest-pinned
- * in `contentus-pinned-repo-contract.json` under `greater.registry_index` with
- * a bound URL): the on-disk bytes and the recorded checksum must each match the
+ * in `contentus-pinned-repo-contract.json` under `greater.registry_index`, with
+ * network coordinates derived independently by the authenticator): the on-disk
+ * bytes and the recorded checksum must each match the
  * release's canonical bytes for the file's source path — or the digest-verified
  * greater CLI's documented import-transform of those bytes. A coordinated
  * file+checksum edit leaves the recorded checksum disagreeing with the release
@@ -265,6 +266,28 @@ test('an unlisted executable file under a vendored root fails the real verifier 
 		);
 	} finally {
 		rmSync(absolute, { force: true });
+	}
+});
+
+test('mixed-case executable extensions and symlinks under vendored roots fail CON-4 (round-4 F4/F7)', () => {
+	const mixedCase = join(repoRoot, 'src/lib/components/__r4_unlisted_probe__.TS');
+	const symlink = join(repoRoot, 'src/lib/components/__r4_symlink_probe__.ts');
+	writeFileSync(mixedCase, 'export const planted = true;\n');
+	symlinkSync('Review/QueueCard.svelte', symlink);
+	try {
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, output);
+		assert.ok(
+			output.includes('__r4_unlisted_probe__.TS') && output.includes('no manifest entry lists'),
+			output
+		);
+		assert.ok(
+			output.includes('__r4_symlink_probe__.ts') && output.includes('symlinks are forbidden'),
+			output
+		);
+	} finally {
+		rmSync(mixedCase, { force: true });
+		rmSync(symlink, { force: true });
 	}
 });
 

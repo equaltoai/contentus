@@ -34,13 +34,11 @@ jobs:
       # into a soft one.
       - name: Fetch the pinned greater CLI release asset
         run: node gov-infra/verifiers/install-greater-cli.mjs
-      # R2-3: the registry-index pin's independent trust anchor. The pin digest
-      # lives in the repo it authenticates, so a coordinated same-diff edit to
-      # vendored bytes, components.json, the committed index, AND that digest
-      # moves CON-4/CON-5 at once. This step fetches the release's OWN immutable
-      # registry manifest from the pinned commit URL and demands it match the
-      # pin AND the committed copy — a re-authored pin cannot re-author what the
-      # URL serves, and MAI-4 binds this step so it cannot be quietly dropped.
+      # The verifier derives Greater's owner/repository/tag/commit/path internally,
+      # verifies GitHub's published release and tag resolve to the exact allowed
+      # commit, then fetches the registry index from that immutable commit. Contract
+      # URL/digest fields are comparison subjects, never network trust coordinates.
+      # MAI-4 requires this unique, unconditional step before the rubric consumer.
       - name: Authenticate the registry index against the release URL
         run: node gov-infra/verifiers/authenticate-release-index.mjs
       - name: Run governance rubric

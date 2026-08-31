@@ -1233,6 +1233,7 @@ const execSentinels = new Set([
 	'pnpm run lint',
 	'bash gov-infra/verifiers/gov-verify-rubric.sh',
 	'node gov-infra/verifiers/install-greater-cli.mjs',
+	'node gov-infra/verifiers/authenticate-release-index.mjs',
 	'node scripts/dco-check.mjs "${BASE_SHA}" "${HEAD_SHA}"',
 	'node scripts/main-guard-check.mjs "${BASE_REF}" "${HEAD_REF}" "${HEAD_REPOSITORY}" "${CURRENT_REPOSITORY}"',
 ]);
@@ -1460,6 +1461,19 @@ export function validateRequiredWorkflows(
 							`${file}: required workflow executable sentinel missing (${sentinel})${/\bcase\b/.test(executable) ? '; case syntax is unsupported' : ''}`
 						);
 				}
+			if (name === 'gov-rubric.yml' && !allJobsDisabled) {
+				const authentication = 'node gov-infra/verifiers/authenticate-release-index.mjs';
+				const rubric = 'bash gov-infra/verifiers/gov-verify-rubric.sh';
+				const occurrences = executable.split(authentication).length - 1;
+				if (occurrences !== 1)
+					findings.push(
+						`${file}: release authentication must occur exactly once, found ${occurrences}`
+					);
+				if (executable.indexOf(authentication) > executable.indexOf(rubric))
+					findings.push(
+						`${file}: release authentication must complete before the governance rubric consumes release binding`
+					);
+			}
 		} catch (error) {
 			if (!isWorkflowStructureError(error)) throw error;
 			findings.push(`${file}: invalid workflow structure (${error.message})`);

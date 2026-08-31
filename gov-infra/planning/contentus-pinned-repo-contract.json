@@ -143,26 +143,26 @@
     "unfollowable_loads_disclosed": [
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 194,
+        "line": 203,
         "expression": "spawnSync",
         "reason": "Runs the system `npm` binary to install the greater CLI's declared runtime dependencies (zod, fs-extra) into the quarantine the verifier extracts from the digest-verified release tarball, with `--ignore-scripts` — SEC-7's exact dependency boundary. No repository file is handed to `npm`: the target package.json lives inside the verified archive, outside any repo-local hash boundary."
       },
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 219,
+        "line": 228,
         "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, sourcePathsModule)).href\n\t)",
         "reason": "Loads the greater CLI's canonical virtual-path mapping module (`dist/utils/source-paths.js`, named by the `sourcePathsModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the mapping that decides each vendored file's release source is the CLI's own, not a repository copy. The path is assembled at run time inside the quarantine; the archive member it came from is verified against the pinned release-asset digest before extraction."
       },
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 222,
+        "line": 231,
         "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, transformModule)).href\n\t)",
         "reason": "Loads the greater CLI's canonical import-transform module (`dist/utils/transform.js`, named by the `transformModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the transform that re-derives the vendored bytes is the CLI's own, not a repository copy. Same quarantine provenance as the source-paths load above; the archive member is verified against the pinned release-asset digest before extraction."
       },
 
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 225,
+        "line": 234,
         "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, installPathModule)).href\n\t)",
         "reason": "Loads the greater CLI's canonical install-path mapping module (dist/utils/install-path.js, named by the installPathModule constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the disk path each manifest virtual path resolves to is the CLI's own mapping, not a repository copy. Same quarantine provenance as the source-paths and transform loads; the archive member is verified against the pinned release-asset digest before extraction. This is the R2-4 mapping fix: components.json aliases do not cover every registry segment (shared/... components install under src/lib/components/...), and a mapping this gate re-implements can drift from the one that installed the files."
       },
@@ -241,7 +241,7 @@
       },
       {
         "file": "tests/greater-release-binding.test.mjs",
-        "line": 50,
+        "line": 51,
         "expression": "spawnSync",
         "reason": "Runs the CON-4 verifier (`gov-infra/verifiers/check-greater-pins.mjs`) in a child process against the real tree with a planted coordinated vendored-file+checksum edit, which is how this probe asserts the release binding rejects the F4 attack shape. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
         "binds": ["gov-infra/verifiers/check-greater-pins.mjs"]
@@ -305,12 +305,14 @@
     "sha256": {
       "gov-infra/verifiers/check-greater-pins.mjs": "760e913b695e3160a5c6e6843c32580ef1843621796bb2d9d185d53e582c61e8",
       "gov-infra/verifiers/check-package-scripts.mjs": "55e2bb2d2661048050817071bc5d3407b7fe74612f27eafd3caa491d5bb26919",
-      "gov-infra/verifiers/release-binding.mjs": "94eb36c4ea12a19da1fe7544b505170c59f86927619c625d315007491a703b8f",
+      "gov-infra/verifiers/authenticate-release-index.mjs": "f4fbca5d211fae60deca2defa84a00bc5274ad507a456131ae01955a3f24ca8a",
+      "gov-infra/verifiers/release-binding.mjs": "cd7fd6e14be007211a5e4351d8ea9a9dc17ed95f0cd7906e2cb8062958ab393c",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
+      "gov-infra/verifiers/validate-workflows.mjs": "cad0d317c4fa7c946b846eeec70724fa8dbf416045a98ab81a038e7f4a1c3b98",
       "gov-infra/verifiers/verified-tarball.mjs": "7c4f48da792731656a35273c4b1e4104db4034c4ec8281e67232be8434857314",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-graphql-documents.mjs": "0914bf2be0d768b70ff47b02d07b02d0bd7cd92e8da6a0f60eab7409607a85f0",
-      "scripts/audit-renderer-authority.mjs": "549e302b917c1da0577d84b10ef5c56d5e9b276ad0be2bb91ca970e62d903f3f",
+      "scripts/audit-renderer-authority.mjs": "15491469ea2957db85297c806c0e204a507fe55d04df24f0056f542b497af5c7",
       "scripts/audit-seam-graph.mjs": "ad9a54dff7facf374bee4495e4b661d68a51a40627f65d43f4fb3b3552dc06f7",
       "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
@@ -322,7 +324,7 @@
       "scripts/lib/graphql-inventory.mjs": "247330fc23b02e248cbb4f093204a5f7c6729e0dc7de275fcf8222210555aacf",
       "scripts/lib/module-imports.mjs": "03ef1380e131c9ae8625d9d2ac6f7a66cc608cfce5e0c689c0a0f011a2e7cd5c",
       "scripts/lib/schema-pin.mjs": "e173e93932ed0fa671d1082891da514f2b8df6dc6115804af18c9ebd0526e856",
-      "scripts/lib/source-scan.mjs": "b63553b097a8c408672abf7844f99fdd133cefb7b7004a09b2e913f8274203ae",
+      "scripts/lib/source-scan.mjs": "4ce36a5a78962d850cb9ef765f1f5a1dbdee2425be6238511a688d480e752830",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/probe-live-contract.mjs": "9b2f71f2d9dce3d4a829c2317586e8792265099a44f2e9b77afb25f20f625a5d",
       "scripts/probe-share-flow.mjs": "0dcc58259f912232776aa4c2790255f9264388b3f56a4bfc63deb877fba6847f",
@@ -341,6 +343,7 @@
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
+      "tests/authenticate-release-index.test.mjs": "1950b2fa73c3bd075bbcbf099d3a5ad05af435e4204e27600bf3282b56054e39",
       "tests/cms-graphql.test.mjs": "b68fd637f56b28001e226d68a964b2a3cedb8353640218c72a21d52550afdd7a",
       "tests/compose.test.mjs": "c13d10a0ef01b38bccbd0b662d04ccf75d0b9add5196a20472736509d4f964bf",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
@@ -349,7 +352,7 @@
       "tests/drones-mobile.test.mjs": "e6d153c03bf942c04113bcceffdedf84cc8028b95570f10071f02e44425d9fc4",
       "tests/drones-roster.test.mjs": "ba213606df245962697b3f1050828b163f3a4b3d110388452beec242720047a8",
       "tests/graphql-documents.test.mjs": "3fb1ac32868a44fff9c543af506568092d9da7604622df34282210b036d2504a",
-      "tests/greater-release-binding.test.mjs": "b2d12b72b62bd703c7a1541e6b7237994623e841880a68e8e35674cb0dcf542a",
+      "tests/greater-release-binding.test.mjs": "587c1259796445aa33d3fcfc044bcae0667ad1af3f3a70d9a6caafb321ddba68",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/instance-info.test.mjs": "cf463d0831e9c38b3c32164a00d296513771fdf18666ab57934932db7934459e",
@@ -361,7 +364,7 @@
       "tests/messaging-session.test.mjs": "4be22b812fc7b35b1ca66676aa73a4f9144e1fabdbe18f95f248ccae92c8d528",
       "tests/mobile-chrome.test.mjs": "6a1ea66c9d4b298c4449a97312ad2a7fe9f6e743a25d039bad1959ef718c55a4",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
-      "tests/renderer-authority-audit.test.mjs": "ce1e48a96271952a370b0ad53ff00e8406f1fe0431fbb3f839a5208e8bba1ad8",
+      "tests/renderer-authority-audit.test.mjs": "cd22c50ac795279925f5714d9bd1083dafb18047d39dfc37153886c1325d2b8b",
       "tests/renderer-authority.test.mjs": "c246f85eb4b59937610b83ba0604a9678c65a8f32deb9f43582c0e02fcd3f1f6",
       "tests/review-adapters.test.mjs": "83771e9b5cadb9e235cc50e11367d18b6bf9c1504457f797d9b5394f89a2e966",
       "tests/review-csp.test.mjs": "a594eb3290ad1d028f5895d8441bda352ab3fa7a5c4f03454299fb9055e746dd",
@@ -382,7 +385,8 @@
       "tests/timeline-subscription.test.mjs": "c02c20e9547b6cc8977b8655ce167e0007a20487c03423458f815584058b1848",
       "tests/vendored-content-renderer.test.mjs": "a6fe1483279fad32b037b25c7a2dc09795b97f164923c8d9d6724802510e7936",
       "tests/vendored-messaging-render.test.mjs": "4634a97b213685733fb03d8e27114f0f60224a7b60c3a145805efc4ce2f26e80",
-      "tests/vendored-runes.test.mjs": "2c9c3e48dec69b6389da60abb5af9671e51a70948d21b88503beac1a5834c143"
+      "tests/vendored-runes.test.mjs": "2c9c3e48dec69b6389da60abb5af9671e51a70948d21b88503beac1a5834c143",
+      "tests/workflow-release-order.test.mjs": "228e5f8a4a88e477e9c6afd37fa382ff48ed2b52a243351bc2bd63b1a9d7feb5"
     }
   },
   "install_manifest": {

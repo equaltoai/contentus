@@ -321,6 +321,23 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 			(node.expression.name.text === 'create' || node.expression.name.text === 'fromEntries')
 		)
 			return true;
+		if (
+			ts.isCallExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			node.expression.text === '$state' &&
+			node.arguments.length === 1 &&
+			(ts.isObjectLiteralExpression(node.arguments[0]) ||
+				ts.isArrayLiteralExpression(node.arguments[0]))
+		)
+			return true;
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			ts.isIdentifier(node.expression.expression) &&
+			node.expression.expression.text === 'JSON' &&
+			node.expression.name.text === 'parse'
+		)
+			return true;
 		return false;
 	};
 	const containerReceivers = new Set();
@@ -357,6 +374,47 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 	});
 	const isDocumentish = (names) =>
 		names.has('document') || [...names].some((name) => documentAliases.has(name));
+	const dangerousMethodAliases = new Map();
+	const constantStrings = new Map();
+	const dangerousMethodName = (node) => {
+		const access = propertyName(node);
+		if (!access || access.computed) return null;
+		return [
+			'write',
+			'writeln',
+			'insertAdjacentHTML',
+			'createContextualFragment',
+			'parseFromString',
+		].includes(access.name)
+			? access.name
+			: null;
+	};
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && node.initializer) {
+			if (ts.isIdentifier(node.name)) {
+				const literal = foldPropertyKey(node.initializer);
+				if (literal !== null) constantStrings.set(node.name.text, literal);
+			}
+			if (ts.isIdentifier(node.name)) {
+				const method = dangerousMethodName(node.initializer);
+				if (method) dangerousMethodAliases.set(node.name.text, method);
+			}
+			if (ts.isObjectBindingPattern(node.name) && isDocumentObject(node.initializer)) {
+				for (const element of node.name.elements) {
+					const property = element.propertyName ?? element.name;
+					const method = ts.isIdentifier(property) ? property.text : foldPropertyKey(property);
+					if (method === 'write' || method === 'writeln') {
+						if (ts.isIdentifier(element.name))
+							dangerousMethodAliases.set(element.name.text, method);
+					}
+				}
+			}
+		}
+	});
+	const foldLocalKey = (node) =>
+		ts.isIdentifier(node) && constantStrings.has(node.text)
+			? constantStrings.get(node.text)
+			: foldPropertyKey(node);
 
 	eachNode(sourceFile, (node) => {
 		if (ts.isBinaryExpression(node)) {
@@ -404,6 +462,12 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		}
 		if (ts.isCallExpression(node)) {
 			const callee = propertyName(node.expression);
+			if (ts.isIdentifier(node.expression) && dangerousMethodAliases.has(node.expression.text)) {
+				findings.push(
+					`${file} calls an alias of .${dangerousMethodAliases.get(node.expression.text)}(…) — an alternate raw-HTML primitive`
+				);
+				return;
+			}
 			if (callee && callee.computed) {
 				if (!receiverCleared(callee.object)) {
 					findings.push(
@@ -415,10 +479,69 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 				return;
 			}
 			if (callee) {
-				if (callee.name === 'insertAdjacentHTML' || callee.name === 'createContextualFragment') {
+				if (
+					callee.name === 'insertAdjacentHTML' ||
+					callee.name === 'createContextualFragment' ||
+					callee.name === 'parseFromString'
+				) {
 					findings.push(
 						`${file} calls .${callee.name}(…) — an alternate raw-HTML sink that bypasses {@html} scanning`
 					);
+					return;
+				}
+				if (callee.name === 'setAttribute' || callee.name === 'setAttributeNS') {
+					const keyArgument = node.arguments[callee.name === 'setAttributeNS' ? 1 : 0];
+					const key = foldLocalKey(keyArgument);
+					if (key === 'srcdoc' || key === null)
+						findings.push(
+							`${file} calls .${callee.name}(…) with ${key === null ? 'a computed key that could be srcdoc' : "'srcdoc'"} — an alternate raw-HTML sink`
+						);
+					return;
+				}
+				if (
+					callee.name === 'defineProperty' &&
+					ts.isIdentifier(callee.object) &&
+					callee.object.text === 'Object'
+				) {
+					const key = foldPropertyKey(node.arguments[1]);
+					if (key === null || RAW_HTML_PROPERTY.has(key))
+						findings.push(
+							`${file} calls Object.defineProperty with ${key === null ? 'a computed raw-HTML-capable key' : `'${key}'`} — an alternate raw-HTML sink`
+						);
+					return;
+				}
+				if (
+					callee.name === 'defineProperties' &&
+					ts.isIdentifier(callee.object) &&
+					callee.object.text === 'Object'
+				) {
+					const descriptors = node.arguments[1];
+					if (!ts.isObjectLiteralExpression(descriptors)) {
+						findings.push(
+							`${file} calls Object.defineProperties with computed descriptors — they could define raw-HTML properties`
+						);
+					} else {
+						for (const descriptor of descriptors.properties) {
+							const key =
+								ts.isPropertyAssignment(descriptor) && ts.isComputedPropertyName(descriptor.name)
+									? foldPropertyKey(descriptor.name.expression)
+									: descriptor.name && ts.isIdentifier(descriptor.name)
+										? descriptor.name.text
+										: foldPropertyKey(descriptor.name);
+							if (key === null || RAW_HTML_PROPERTY.has(key))
+								findings.push(
+									`${file} calls Object.defineProperties with ${key === null ? 'a computed raw-HTML-capable key' : `'${key}'`} — an alternate raw-HTML sink`
+								);
+						}
+					}
+					return;
+				}
+				if (callee.name === 'call' || callee.name === 'apply' || callee.name === 'bind') {
+					const method = dangerousMethodName(callee.object);
+					if (method)
+						findings.push(
+							`${file} invokes .${method} through .${callee.name}(…) — an alternate raw-HTML primitive`
+						);
 					return;
 				}
 				if (callee.name === 'write' || callee.name === 'writeln') {
@@ -808,6 +931,16 @@ function isAuthorizedPreviewBinding(node, identifier, previewResults) {
 		return true;
 	if (
 		ts.isCallExpression(node) &&
+		ts.isPropertyAccessExpression(node.expression) &&
+		ts.isIdentifier(node.expression.expression) &&
+		node.expression.expression.text === '$state' &&
+		node.expression.name.text === 'raw' &&
+		node.arguments.length === 1 &&
+		node.arguments[0].kind === ts.SyntaxKind.NullKeyword
+	)
+		return true;
+	if (
+		ts.isCallExpression(node) &&
 		ts.isIdentifier(node.expression) &&
 		node.expression.text === '$state' &&
 		node.arguments.length === 1 &&
@@ -843,17 +976,22 @@ function isAuthorizedPreviewBinding(node, identifier, previewResults) {
 export function previewInvocationFindings(file, source) {
 	const ast = parseSvelte(file, source);
 	const invocations = [];
+	const dynamicInvocations = [];
 	const visit = (node) => {
 		if (!node || typeof node !== 'object') return;
 		if (node.type === 'Component' && node.name === 'PreviewBody') invocations.push(node);
+		if (
+			node.type === 'SvelteComponent' &&
+			node.expression?.type === 'Identifier' &&
+			node.expression.name === 'PreviewBody'
+		)
+			dynamicInvocations.push(node);
 		for (const key of Object.keys(node)) {
 			if (key === 'parent') continue;
 			visit(node[key]);
 		}
 	};
 	visit(ast.fragment);
-	if (invocations.length === 0) return [];
-
 	const findings = [];
 	const scriptText = svelteScriptContents(file, source)
 		.map(({ text }) => text)
@@ -867,6 +1005,45 @@ export function previewInvocationFindings(file, source) {
 		];
 	}
 	const previewResults = loadDraftPreviewResultIdentifiers(sourceFile);
+	const previewImports = [];
+	eachNode(sourceFile, (node) => {
+		if (
+			ts.isImportDeclaration(node) &&
+			ts.isStringLiteral(node.moduleSpecifier) &&
+			/(?:^|\/)PreviewBody\.svelte$/.test(node.moduleSpecifier.text)
+		)
+			previewImports.push(node);
+	});
+	const canonicalFile = 'src/lib/routes/ReviewWorkspace.svelte';
+	if (previewImports.length || invocations.length || dynamicInvocations.length) {
+		if (file !== canonicalFile)
+			findings.push(
+				`${file} reaches PreviewBody outside ${canonicalFile} — wrappers and cross-file forwarding are not an authorized direct path`
+			);
+		if (previewImports.length !== 1)
+			findings.push(
+				`${file} imports PreviewBody ${previewImports.length} times — the authorized route has exactly one canonical import`
+			);
+		for (const declaration of previewImports) {
+			const local = declaration.importClause?.name?.text;
+			if (
+				declaration.moduleSpecifier.text !== '$lib/review/PreviewBody.svelte' ||
+				local !== 'PreviewBody'
+			)
+				findings.push(
+					`${file} aliases or reroutes the PreviewBody import — the authorized route uses the canonical default binding`
+				);
+		}
+		if (dynamicInvocations.length)
+			findings.push(
+				`${file} dynamically invokes PreviewBody — a dynamic component route cannot be statically proven direct`
+			);
+		if (invocations.length !== 1)
+			findings.push(
+				`${file} has ${invocations.length} static PreviewBody invocations — the authorized route has exactly one`
+			);
+	}
+	if (invocations.length === 0) return findings;
 
 	for (const component of invocations) {
 		const attribute = (component.attributes ?? []).find(
@@ -898,6 +1075,28 @@ export function previewInvocationFindings(file, source) {
 			continue;
 		}
 		const identifier = expression.name;
+		if (identifier !== 'preview')
+			findings.push(
+				`${file} forwards ${identifier} to PreviewBody — the canonical invocation must pass the load result binding named preview directly`
+			);
+		const aliases = new Set([identifier]);
+		let aliasesChanged = true;
+		while (aliasesChanged) {
+			aliasesChanged = false;
+			eachNode(sourceFile, (node) => {
+				if (
+					ts.isVariableDeclaration(node) &&
+					ts.isIdentifier(node.name) &&
+					node.initializer &&
+					ts.isIdentifier(node.initializer) &&
+					aliases.has(node.initializer.text) &&
+					!aliases.has(node.name.text)
+				) {
+					aliases.add(node.name.text);
+					aliasesChanged = true;
+				}
+			});
+		}
 
 		eachNode(sourceFile, (node) => {
 			if (ts.isVariableDeclaration(node)) {
@@ -948,6 +1147,20 @@ export function previewInvocationFindings(file, source) {
 						`${file} spreads ${identifier} into a new object — reconstructing the DraftPreview between loadDraftPreview and the sink`
 					);
 				}
+			}
+			if (ts.isCallExpression(node)) {
+				const callee = propertyName(node.expression);
+				if (!callee || !ts.isIdentifier(callee.object)) return;
+				const receiver = node.arguments[0];
+				if (!receiver || !ts.isIdentifier(receiver) || !aliases.has(receiver.text)) return;
+				if (
+					(callee.object.text === 'Object' &&
+						['assign', 'defineProperty', 'defineProperties'].includes(callee.name)) ||
+					(callee.object.text === 'Reflect' && callee.name === 'set')
+				)
+					findings.push(
+						`${file} mutates ${receiver.text} through ${callee.object.text}.${callee.name}(…) — lesser's preview value must remain verbatim`
+					);
 			}
 		});
 	}

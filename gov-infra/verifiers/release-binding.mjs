@@ -11,8 +11,8 @@
  *
  * THE INDEPENDENT BINDING. The release's OWN registry manifest —
  * `registry/index.json` at the pinned vendoring commit, digest-pinned in
- * `contentus-pinned-repo-contract.json` under `greater.registry_index` with a
- * bound URL — carries the canonical per-file checksum of every file the
+ * `contentus-pinned-repo-contract.json` under `greater.registry_index` —
+ * carries the canonical per-file checksum of every file the
  * release ships. For each vendored file this verifier re-derives the bytes
  * from that release manifest and demands the working tree match:
  *
@@ -51,11 +51,12 @@
  * THE PIN'S ANCHOR (round-2 R2-3). The `registry_index.sha256` pin lives in the
  * repository it authenticates, so a coordinated same-diff re-authoring moved it
  * with the bytes. `gov-infra/verifiers/authenticate-release-index.mjs` is the
- * independent anchor: it fetches the immutable `registry_index.url` (the
- * release's own manifest at the pinned commit) and requires it to match the pin
- * AND the committed copy. That networked step runs in CI (and is bound there by
- * MAI-4); this offline walk runs over the committed bytes the network vouched
- * for.
+ * independent anchor: it derives the fixed Greater repository, tag, exact
+ * commit and registry path internally, verifies GitHub's release/tag metadata,
+ * and requires the fetched bytes to match the pin AND committed copy. Contract
+ * URL fields do not choose that network source. The networked step runs in CI
+ * (and is ordered before this consumer by MAI-4); this offline walk runs over
+ * the committed bytes the network vouched for.
  *
  * FAIL-CLOSED. A missing or mismatched release artifact, an unparseable index,
  * an absent CLI tarball, or a quarantined CLI that cannot be built is a
@@ -65,7 +66,15 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -274,7 +283,7 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 		findings.push(
 			`${indexPath} does not match the pinned registry-index digest ` +
 				`(pinned ${indexPin.sha256}, actual ${indexDigest}) — the committed release artifact ` +
-				'changed; fetch the bound URL to re-derive the true digest'
+				'changed; run the canonical release authenticator to re-derive the true digest'
 		);
 		return findings;
 	}
@@ -461,7 +470,7 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 		'jsx',
 		'svelte',
 	];
-	const EXECUTABLE_SOURCE = new RegExp(`\\.(${EXECUTABLE_SOURCE_EXTENSIONS.join('|')})$`);
+	const EXECUTABLE_SOURCE = new RegExp(`\\.(${EXECUTABLE_SOURCE_EXTENSIONS.join('|')})$`, 'i');
 	const vendoredRoots = new Set();
 	for (const target of Object.values(aliases)) {
 		if (typeof target === 'string' && /^src\/lib\/[^/]+$/.test(target)) vendoredRoots.add(target);
@@ -490,8 +499,17 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 		}
 		for (const entry of entries) {
 			const relativePath = `${dir}/${entry.name}`;
-			if (entry.isDirectory()) found.push(...walkExecutables(relativePath));
-			else if (entry.isFile() && EXECUTABLE_SOURCE.test(entry.name)) found.push(relativePath);
+			const stats = lstatSync(join(repoRoot, relativePath));
+			if (stats.isSymbolicLink()) {
+				findings.push(`${relativePath}: symlinks are forbidden under vendored roots`);
+				continue;
+			}
+			if (stats.isDirectory()) found.push(...walkExecutables(relativePath));
+			else if (EXECUTABLE_SOURCE.test(entry.name)) {
+				if (!stats.isFile())
+					findings.push(`${relativePath}: executable vendored entry is not a regular file`);
+				else found.push(relativePath);
+			}
 		}
 		return found;
 	};

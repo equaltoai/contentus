@@ -87,7 +87,24 @@ test('an unclassified file fails the audit whatever its executable extension', (
 	// are the extensions this toolchain executes or compiles, asserted
 	// independently — `.mts` is the one that was missed, `.svelte` the control
 	// that was already caught.
-	const extensions = ['mts', 'cts', 'cjs', 'tsx', 'jsx', 'ts', 'js', 'mjs', 'svelte'];
+	const extensions = [
+		'mts',
+		'cts',
+		'cjs',
+		'tsx',
+		'jsx',
+		'ts',
+		'js',
+		'mjs',
+		'svelte',
+		'TS',
+		'Js',
+		'MJS',
+		'cJs',
+		'TSX',
+		'JsX',
+		'SVELTE',
+	];
 
 	for (const extension of extensions) {
 		const relativePath = `${UNCLASSIFIED_DIR}/renderer.${extension}`;
@@ -645,6 +662,80 @@ test('an object spread of the preview in the calling file fails the audit (round
 	);
 });
 
+test('preview mutation APIs fail independently of direct property writes (round-4 F1)', () => {
+	const mutations = [
+		"Object.assign(preview, { html: '<p>planted</p>' });",
+		"Reflect.set(preview, 'html', '<p>planted</p>');",
+		"Object.defineProperty(preview, 'html', { value: '<p>planted</p>' });",
+	];
+	for (const mutation of mutations) {
+		withPlantedWorkspace(
+			(source) =>
+				source.replace(
+					PREVIEW_STATE_ANCHOR,
+					PREVIEW_STATE_ANCHOR + `\t$effect(() => { ${mutation} });\n`
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `${mutation} must fail the production audit:\n${output}`);
+				assert.match(output, /mutates preview through/);
+			}
+		);
+	}
+});
+
+test('wrapper, dynamic-component, and store-mediated PreviewBody routes fail (round-4 F1)', () => {
+	const wrapper = `${OWNED_DIR}/__r4_preview_wrapper__.svelte`;
+	plant(
+		wrapper,
+		'<script lang="ts">\nimport PreviewBody from \'$lib/review/PreviewBody.svelte\';\nlet { p } = $props();\n</script>\n<PreviewBody preview={p} />\n'
+	);
+	try {
+		let result = runAudit();
+		assert.equal(result.status, 1, result.output);
+		assert.match(result.output, /wrappers and cross-file forwarding/);
+	} finally {
+		rmSync(join(repoRoot, wrapper), { force: true });
+	}
+
+	for (const replacement of [
+		'<svelte:component this={PreviewBody} preview={preview} />',
+		'<PreviewBody preview={$pv} />',
+	]) {
+		withPlantedWorkspace(
+			(source) =>
+				source
+					.replace(
+						PREVIEW_STATE_ANCHOR,
+						PREVIEW_STATE_ANCHOR +
+							(replacement.includes('$pv')
+								? '\tconst pv = { subscribe() {}, set() {}, update() {} };\n'
+								: '')
+					)
+					.replace(PREVIEW_INVOCATION, replacement),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `${replacement} must fail the production audit:\n${output}`);
+				assert.match(output, /dynamic component route|canonical invocation must pass/);
+			}
+		);
+	}
+});
+
+test('$state.raw(null) is an authorized null initialization (round-4 F6 positive)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				'let preview = $state.raw<DraftPreview | null>(null);\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 0, output);
+		}
+	);
+});
+
 /* ============================================================
    R2-2 — the round-2 alternate sink / parser evasions
    ============================================================ */
@@ -852,7 +943,9 @@ test('legitimate non-sink shapes stay clean (R2-2 negative controls)', () => {
 			'export const c = (lower: string, value: string) => {\n' +
 			'\tconst headers: Record<string, string> = {};\n' +
 			'\theaders[lower] = value;\n' +
-			'};\n'
+			'};\n' +
+			'export const d = (key: string, value: string) => { const state = $state({}); state[key] = value; };\n' +
+			"export const e = (key: string, value: string) => { const data = JSON.parse('{}'); data[key] = value; };\n"
 	);
 	plant(sveltePath, '<p>no sinks here</p>\n');
 
@@ -862,5 +955,34 @@ test('legitimate non-sink shapes stay clean (R2-2 negative controls)', () => {
 	} finally {
 		rmSync(join(repoRoot, tsPath), { force: true });
 		rmSync(join(repoRoot, sveltePath), { force: true });
+	}
+});
+
+test('round-4 alternate sink laundering forms fail the production audit (F2)', () => {
+	const attacks = [
+		"Object.defineProperty(el, 'innerHTML', { value: html });",
+		"Object.defineProperty(frame, 'srcdoc', { value: html });",
+		'Object.defineProperties(el, { innerHTML: { value: html } });',
+		"frame.setAttribute('srcdoc', html);",
+		"frame.setAttributeNS(null, 'srcdoc', html);",
+		'Range.prototype.createContextualFragment.call(range, html);',
+		'document.write.call(document, html);',
+		'Element.prototype.insertAdjacentHTML.call(el, "beforeend", html);',
+		'const { write } = document; write(html);',
+		"new DOMParser().parseFromString(html, 'text/html');",
+	];
+	for (let index = 0; index < attacks.length; index += 1) {
+		const relativePath = `${OWNED_DIR}/__r4_sink_${index}__.ts`;
+		plant(
+			relativePath,
+			`export const attack = (el: any, frame: any, range: any, html: string) => { ${attacks[index]} };\n`
+		);
+		try {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `${attacks[index]} must fail the production audit:\n${output}`);
+			assert.ok(output.includes(`[alternate raw-HTML sinks] ${relativePath}`), output);
+		} finally {
+			rmSync(join(repoRoot, relativePath), { force: true });
+		}
 	}
 });

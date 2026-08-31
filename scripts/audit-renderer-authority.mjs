@@ -300,7 +300,7 @@ const EXECUTABLE_SOURCE_EXTENSIONS = [
 	'svelte',
 ];
 
-const EXECUTABLE_SOURCE = new RegExp(`\\.(${EXECUTABLE_SOURCE_EXTENSIONS.join('|')})$`);
+const EXECUTABLE_SOURCE = new RegExp(`\\.(${EXECUTABLE_SOURCE_EXTENSIONS.join('|')})$`, 'i');
 
 function walkFiles(dir) {
 	const absolute = join(repoRoot, dir);
@@ -370,7 +370,7 @@ function checkImports() {
 			let specifiers;
 			let computed;
 			try {
-				if (path.endsWith('.svelte')) {
+				if (path.toLowerCase().endsWith('.svelte')) {
 					const script = liveScript(path, source);
 					specifiers = moduleSpecifiers(script);
 					computed = computedImports(script);
@@ -418,7 +418,7 @@ function checkHtmlSinks() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
-			if (!file.endsWith('.svelte')) continue;
+			if (!file.toLowerCase().endsWith('.svelte')) continue;
 			const path = relative(repoRoot, file);
 			// The one pinned exception, content-bound by checkPreviewDisplaySink
 			// below. Skipping it here is not trusting it: the binding check reads
@@ -462,7 +462,7 @@ function checkAlternateHtmlSinks() {
 			const path = relative(repoRoot, file);
 			const source = readFileSync(file, 'utf8');
 			try {
-				if (path.endsWith('.svelte')) {
+				if (path.toLowerCase().endsWith('.svelte')) {
 					problems.push(...alternateSinksInSvelte(path, source));
 				} else {
 					problems.push(
@@ -670,7 +670,7 @@ function checkPreviewValuePath() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
-			if (!file.endsWith('.svelte')) continue;
+			if (!file.toLowerCase().endsWith('.svelte')) continue;
 			const path = relative(repoRoot, file);
 			try {
 				problems.push(...previewInvocationFindings(path, readFileSync(file, 'utf8')));
