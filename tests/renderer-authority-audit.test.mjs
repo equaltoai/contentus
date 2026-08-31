@@ -591,14 +591,13 @@ test('a direct assignment of a reconstructed DraftPreview fails the audit (round
 	// PreviewBody still reads `preview.html`, so a sink-only binding would pass.
 	withPlantedWorkspace(
 		(source) =>
-			source
-				.replace(
-					PREVIEW_STATE_ANCHOR,
-					PREVIEW_STATE_ANCHOR +
-						'\t$effect(() => {\n' +
-						"\t\tpreview = { ...preview, html: preview.html.replace(/x/g, 'y') };\n" +
-						'\t});\n'
-				),
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\t$effect(() => {\n' +
+					"\t\tpreview = { ...preview, html: preview.html.replace(/x/g, 'y') };\n" +
+					'\t});\n'
+			),
 		() => {
 			const { status, output } = runAudit();
 			assert.equal(status, 1, `a reconstructed DraftPreview must fail the audit:\n${output}`);
@@ -661,7 +660,10 @@ test('an object spread of the preview in the calling file fails the audit (round
 
 test('a folded computed key targeting innerHTML fails the audit (R2-2)', () => {
 	const relativePath = `${OWNED_DIR}/__r2_computed_key__.ts`;
-	plant(relativePath, "export const p = (el: HTMLElement, html: string) => {\n\tel['inner' + 'HTML'] = html;\n};\n");
+	plant(
+		relativePath,
+		"export const p = (el: HTMLElement, html: string) => {\n\tel['inner' + 'HTML'] = html;\n};\n"
+	);
 
 	try {
 		const { status, output } = runAudit();
@@ -705,7 +707,9 @@ test('Reflect.set with a raw-HTML property fails the audit (R2-2)', () => {
 		const { status, output } = runAudit();
 		assert.equal(status, 1, `Reflect.set must fail the audit:\n${output}`);
 		assert.ok(
-			output.includes(`[alternate raw-HTML sinks] ${relativePath} calls Reflect.set with 'innerHTML'`),
+			output.includes(
+				`[alternate raw-HTML sinks] ${relativePath} calls Reflect.set with 'innerHTML'`
+			),
 			`check 7 must name the Reflect.set target:\n${output}`
 		);
 	} finally {
@@ -717,14 +721,16 @@ test('Object.assign with a raw-HTML key fails the audit (R2-2)', () => {
 	const relativePath = `${OWNED_DIR}/__r2_object_assign__.ts`;
 	plant(
 		relativePath,
-		"export const p = (el: HTMLElement, html: string) => {\n\tObject.assign(el, { innerHTML: html });\n};\n"
+		'export const p = (el: HTMLElement, html: string) => {\n\tObject.assign(el, { innerHTML: html });\n};\n'
 	);
 
 	try {
 		const { status, output } = runAudit();
 		assert.equal(status, 1, `Object.assign must fail the audit:\n${output}`);
 		assert.ok(
-			output.includes(`[alternate raw-HTML sinks] ${relativePath} calls Object.assign with 'innerHTML'`),
+			output.includes(
+				`[alternate raw-HTML sinks] ${relativePath} calls Object.assign with 'innerHTML'`
+			),
 			`check 7 must name the dangerous key:\n${output}`
 		);
 	} finally {
@@ -755,7 +761,7 @@ test('a script-side frame.srcdoc write fails the audit (R2-2)', () => {
 	const relativePath = `${OWNED_DIR}/__r2_srcdoc_write__.ts`;
 	plant(
 		relativePath,
-		'export const p = (html: string) => {\n\tconst frame = document.createElement(\'iframe\');\n\tframe.srcdoc = html;\n};\n'
+		"export const p = (html: string) => {\n\tconst frame = document.createElement('iframe');\n\tframe.srcdoc = html;\n};\n"
 	);
 
 	try {
@@ -777,10 +783,7 @@ test('an iframe attribute spread fails the audit, in Svelte markup and JSX (R2-2
 		'<script lang="ts">\n\tconst frameProps: Record<string, string> = { srcdoc: \'<p>planted</p>\' };\n</script>\n\n<iframe {...frameProps}></iframe>\n'
 	);
 	const tsxPath = `${OWNED_DIR}/__r2_iframe_spread__.tsx`;
-	plant(
-		tsxPath,
-		'export const p = (props: Record<string, string>) => <iframe {...props} />;\n'
-	);
+	plant(tsxPath, 'export const p = (props: Record<string, string>) => <iframe {...props} />;\n');
 
 	try {
 		const { status, output } = runAudit();
@@ -820,16 +823,15 @@ test('an aliased document write fails the audit (R2-2)', () => {
 
 test('a non-literal dynamic import fails the audit (R2-2)', () => {
 	const relativePath = `${OWNED_DIR}/__r2_dynamic_pkg__.ts`;
-	plant(
-		relativePath,
-		'export const load = (pkg: string) => import(pkg);\n'
-	);
+	plant(relativePath, 'export const load = (pkg: string) => import(pkg);\n');
 
 	try {
 		const { status, output } = runAudit();
 		assert.equal(status, 1, `a computed dynamic import must fail the audit:\n${output}`);
 		assert.ok(
-			output.includes(`[owned-source imports] ${relativePath} loads a module no static read can name`),
+			output.includes(
+				`[owned-source imports] ${relativePath} loads a module no static read can name`
+			),
 			`check 2 must fail closed on the computed specifier:\n${output}`
 		);
 	} finally {
@@ -846,7 +848,7 @@ test('legitimate non-sink shapes stay clean (R2-2 negative controls)', () => {
 	plant(
 		tsPath,
 		"export const a = () => process.stdout.write('x');\n" +
-			"export const b = (state: any, partial: any) => { Object.assign(state, partial); };\n" +
+			'export const b = (state: any, partial: any) => { Object.assign(state, partial); };\n' +
 			'export const c = (lower: string, value: string) => {\n' +
 			'\tconst headers: Record<string, string> = {};\n' +
 			'\theaders[lower] = value;\n' +

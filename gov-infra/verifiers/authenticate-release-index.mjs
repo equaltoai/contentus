@@ -63,8 +63,10 @@ if (typeof vendoredRef !== 'string' || !/^[0-9a-f]{40}$/.test(vendoredRef)) {
 
 const committedIndex = join('gov-infra', 'release', `registry-index-${vendoredRef}.json`);
 if (!existsSync(committedIndex)) {
-	console.error(`${committedIndex} is missing — the committed release artifact the offline gate ` +
-		'trusts must exist to be authenticated against the URL');
+	console.error(
+		`${committedIndex} is missing — the committed release artifact the offline gate ` +
+			'trusts must exist to be authenticated against the URL'
+	);
 	process.exit(1);
 }
 
@@ -72,7 +74,9 @@ let response;
 try {
 	response = await fetch(pin.url);
 } catch (error) {
-	console.error(`could not fetch ${pin.url}: ${error instanceof Error ? error.message : String(error)}`);
+	console.error(
+		`could not fetch ${pin.url}: ${error instanceof Error ? error.message : String(error)}`
+	);
 	console.error('The registry-index anchor is the immutable release URL; an anchor that cannot');
 	console.error('be reached cannot authenticate the committed copy — failing closed.');
 	process.exit(1);
@@ -107,5 +111,7 @@ if (committedDigest !== pin.sha256) {
 }
 
 console.log(`Registry index authenticated: ${pin.url}`);
-console.log(`  fetched sha256 ${fetchedDigest} matches the pin and the committed ${committedIndex}`);
+console.log(
+	`  fetched sha256 ${fetchedDigest} matches the pin and the committed ${committedIndex}`
+);
 console.log('CON-4 now runs over bytes the immutable release URL vouched for.');

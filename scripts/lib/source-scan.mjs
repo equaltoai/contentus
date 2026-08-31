@@ -355,7 +355,8 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 			documentAliases.add(node.left.text);
 		}
 	});
-	const isDocumentish = (names) => names.has('document') || [...names].some((name) => documentAliases.has(name));
+	const isDocumentish = (names) =>
+		names.has('document') || [...names].some((name) => documentAliases.has(name));
 
 	eachNode(sourceFile, (node) => {
 		if (ts.isBinaryExpression(node)) {
@@ -435,7 +436,11 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 					}
 					return;
 				}
-				if (callee.name === 'set' && ts.isIdentifier(callee.object) && callee.object.text === 'Reflect') {
+				if (
+					callee.name === 'set' &&
+					ts.isIdentifier(callee.object) &&
+					callee.object.text === 'Reflect'
+				) {
 					const key = node.arguments[1];
 					const folded = foldPropertyKey(key);
 					if (folded !== null) {
@@ -451,7 +456,11 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 					}
 					return;
 				}
-				if (callee.name === 'assign' && ts.isIdentifier(callee.object) && callee.object.text === 'Object') {
+				if (
+					callee.name === 'assign' &&
+					ts.isIdentifier(callee.object) &&
+					callee.object.text === 'Object'
+				) {
 					const receiver = node.arguments[0];
 					if (receiver && isDocumentObject(receiver)) {
 						findings.push(
@@ -468,8 +477,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 								: ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)
 									? property.name.expression
 									: property.name;
-							const folded =
-								key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
+							const folded = key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
 							if (folded !== null && RAW_HTML_PROPERTY.has(folded)) {
 								findings.push(
 									`${file} calls Object.assign with '${folded}' in a source object — it can write a raw-HTML property`
@@ -898,7 +906,10 @@ export function previewInvocationFindings(file, source) {
 					findings.push(
 						`${file} binds ${identifier} from ${node.initializer
 							?.getText(sourceFile)
-							.slice(0, 80)}… — the preview value must be the loadDraftPreview result verbatim, never derived or reconstructed`
+							.slice(
+								0,
+								80
+							)}… — the preview value must be the loadDraftPreview result verbatim, never derived or reconstructed`
 					);
 				}
 				return;
@@ -909,7 +920,10 @@ export function previewInvocationFindings(file, source) {
 						findings.push(
 							`${file} assigns ${identifier} from ${node.right
 								?.getText(sourceFile)
-								.slice(0, 80)}… — the preview value must be the loadDraftPreview result verbatim, never derived or reconstructed`
+								.slice(
+									0,
+									80
+								)}… — the preview value must be the loadDraftPreview result verbatim, never derived or reconstructed`
 						);
 					}
 					return;
