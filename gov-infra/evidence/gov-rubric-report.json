@@ -1,10 +1,10 @@
 {
   "$schema": "https://gov.pai.dev/schemas/gov-rubric-report.schema.json",
   "schemaVersion": 1,
-  "timestamp": "2026-08-31T21:00:37Z",
+  "timestamp": "2026-08-31T22:48:59Z",
   "source": {
-    "sha": "bd99466ef2a0e712dbbba514f556a3e694264ba0",
-    "tree": "f9fd90d2366c734301a105d1d059404b43fd60d1",
+    "sha": "e63905f5a8c76c14dc9404426898701035e66ad0",
+    "tree": "65ac0f4a3445752e22ec841cac37e75f5a1ec241",
     "worktree": "clean",
     "note": "The commit this run scanned, read before any control ran. Evidence is committed after the run, so in a committed report this names the PARENT of the commit carrying it, never that commit itself; check it with git log -1 --format=%P on the evidence commit. worktree reports whether anything outside gov-infra/evidence was uncommitted when the run started."
   },
