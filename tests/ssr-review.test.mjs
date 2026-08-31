@@ -50,8 +50,10 @@ test('the review queue server-renders a complete document', async () => {
 test('an auth-required route is never cached and never indexed', async () => {
 	// The residual risk in that 200 is a shared cache or a crawler treating a
 	// protected surface as ordinary public content. Both are the origin's to
-	// prevent — lesser injects no headers on `/l` routes — so contentus sets
-	// them, on every route whose descriptor carries `requiresAuth`.
+	// prevent — the origin owns its headers on `/l` routes (lesser-host's
+	// CloudFront policy for the client install is a non-overriding fallback,
+	// and it sets neither of these) — so contentus sets them, on every route
+	// whose descriptor carries `requiresAuth`.
 	for (const path of ['/l/review', '/l/review/drafts/draft-123', '/l/compose']) {
 		const { headers, status } = await render(path);
 

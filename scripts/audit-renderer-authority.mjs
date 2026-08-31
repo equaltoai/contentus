@@ -13,21 +13,40 @@
  * quietly become a second canonical renderer. This audit makes the erosion
  * fail the build.
  *
- * Six checks:
+ * Seven checks:
  *
  *   1. No Markdown-rendering package is a direct contentus dependency.
- *   2. No contentus-owned source imports a Markdown/HTML rendering package.
+ *   2. No contentus-owned source imports a Markdown/HTML rendering package —
+ *      read with the same TypeScript parser the toolchain runs, so a dynamic
+ *      `import('marked')` is as visible as a static one and a package name in
+ *      a comment or string is not a finding.
  *   3. No contentus-owned Svelte template contains an `{@html}` sink — with
  *      ONE pinned exception: the lesser-preview display sink below, which
- *      check 6 content-binds rather than trusts.
+ *      check 6 content-binds rather than trusts. Read with the Svelte
+ *      compiler, so a comment or a string can never hide a live tag (round-1
+ *      bypass A) and a commented-out tag is not a finding.
  *   4. The vendored blog face still ESCAPES non-HTML content instead of
  *      rendering it.
  *   5. Every source file under `src/` is classified — owned and therefore
- *      scanned by 2 and 3, or explicitly declared vendored.
+ *      scanned by 2, 3, and 7, or explicitly declared vendored.
  *   6. The preview display sink is exactly the pinned file and exactly the
  *      pinned shape: one sink, bound to `preview.html` verbatim, type-only
  *      imports, no transform. The exception check 3 admits is narrower than
  *      the rule it suspends, and this check is what makes it so.
+ *   7. No contentus-owned executable source reaches the DOM through an
+ *      alternate raw-HTML sink — `.innerHTML` / `.outerHTML` writes,
+ *      `.insertAdjacentHTML` calls, `document.write`, `srcdoc` attributes —
+ *      the sink shapes `{@html}` scanning cannot see (round-1 bypass C).
+ *
+ * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
+ * bypasses against the previous comment-stripped regex gate: a `/*` inside a
+ * quoted template expression hid a second computed `{@html}` sink; a
+ * script-side reassignment of `preview.html` passed a binding that only
+ * counted sinks; alternate sinks were unscanned. All three are properties of
+ * reading text with comments removed. The Svelte compiler and TypeScript
+ * parser decide what is comment, what is string, what is a live tag, and what
+ * is an assignment — `scripts/lib/source-scan.mjs` is the one copy of that
+ * reading, imported here and driven by the probes.
  *
  * Check 5 exists because checks 2 and 3 are only ever as good as their list of
  * directories, and that list silently fell behind: `src/lib/compose` was
@@ -54,8 +73,17 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
-import { stripComments } from './lib/strip-comments.mjs';
+import { liveScript, moduleSpecifiers } from './lib/module-imports.mjs';
+import {
+	alternateSinksInScript,
+	alternateSinksInSvelte,
+	previewDisplayScriptFindings,
+	svelteConstTags,
+	svelteHtmlTags,
+	svelteScriptContents,
+} from './lib/source-scan.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -227,8 +255,9 @@ const VENDORED_ARTICLE_CONTENT = 'src/lib/greater/faces/blog/components/Article/
  * verbatim (the projection field `toDraftPreview` nulls unless lesser reported
  * success), type-only imports, no transform. `tests/renderer-authority-audit
  * .test.mjs` plants violations of the binding and fails. A preview display that
- * grows a second sink, a value import, or a function call between lesser's
- * bytes and the DOM is a renderer-authority change, and it fails here first.
+ * grows a second sink, a value import, a function call, a `$effect`, a
+ * markup `{@const}`, or any other statement between lesser's bytes and the DOM
+ * is a renderer-authority change, and it fails here first.
  */
 const PREVIEW_DISPLAY_SINK = 'src/lib/review/PreviewBody.svelte';
 
@@ -293,20 +322,38 @@ function checkDependencies() {
 	);
 }
 
+/**
+ * Check 2's scanner lives in `./lib/module-imports.mjs`, imported above.
+ *
+ * It is a module rather than a local function for the same governance reason
+ * `./lib/source-scan.mjs` exists: the reading this gate runs and the reading
+ * the probes drive must be the same bytes. `moduleSpecifiers` parses with the
+ * TypeScript parser — comments and strings are trivia, dynamic `import(…)` is
+ * as visible as a static `from`, and an unparseable file is a finding, never
+ * an empty scan. For a Svelte file, `liveScript` hands it the compiler's own
+ * script blocks plus the markup's `import(…)` calls.
+ */
 function checkImports() {
 	const problems = [];
-	const pattern = new RegExp(
-		`from\\s+['"](${FORBIDDEN_RENDERER_PACKAGES.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(/[^'"]*)?['"]`,
-		'g'
-	);
-
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
-			const content = readFileSync(file, 'utf8');
-			for (const match of content.matchAll(pattern)) {
-				problems.push(
-					`${relative(repoRoot, file)} imports "${match[1]}" — renderer authority is lesser's.`
+			const path = relative(repoRoot, file);
+			const source = readFileSync(file, 'utf8');
+			let specifiers;
+			try {
+				if (path.endsWith('.svelte')) specifiers = moduleSpecifiers(liveScript(path, source));
+				else specifiers = moduleSpecifiers(source, { jsx: /\.(tsx|jsx)$/.test(path) });
+			} catch (error) {
+				problems.push(`${path} could not be read as module source: ${error.message}`);
+				continue;
+			}
+			for (const specifier of specifiers) {
+				const forbidden = FORBIDDEN_RENDERER_PACKAGES.find(
+					(name) => specifier === name || specifier.startsWith(`${name}/`)
 				);
+				if (forbidden) {
+					problems.push(`${path} imports "${forbidden}" — renderer authority is lesser's.`);
+				}
 			}
 		}
 	}
@@ -314,15 +361,15 @@ function checkImports() {
 }
 
 /**
- * Check 3's scanner lives in `./lib/strip-comments.mjs`, imported above.
+ * Check 3's scanner lives in `./lib/source-scan.mjs`, imported above.
  *
- * It is a module rather than a local function for one reason, and it is a
- * governance one: the probe that proves this scan reads a nested delimiter the
- * way a parser does has to drive THIS code, not a copy of it. Two copies stay
- * identical right up until they do not, and the failure is silent in the
- * dangerous direction — a green regression over a gate that has stopped seeing
- * live sinks. See that module's header for what the scan does and why it is not
- * a regex.
+ * It reads every owned template with the Svelte compiler and reports each
+ * `HtmlTag` — the modern-AST node type for `{@html}`. That is the entire
+ * content of the round-1 bypass this replaced: a `/*` inside a quoted template
+ * expression could hide a second live sink from a comment-stripping scan,
+ * because stripping text is not parsing. The compiler knows what is a string,
+ * what is a comment, and what is a live tag; a file it cannot parse is a
+ * finding, never a clean scan.
  */
 function checkHtmlSinks() {
 	const problems = [];
@@ -334,13 +381,53 @@ function checkHtmlSinks() {
 			// below. Skipping it here is not trusting it: the binding check reads
 			// the same file and fails on any shape other than the pinned one.
 			if (path === PREVIEW_DISPLAY_SINK) continue;
-			const withoutComments = stripComments(readFileSync(file, 'utf8'));
-			if (/\{@html\b/.test(withoutComments)) {
-				problems.push(
-					`${path} contains an {@html} sink — contentus-owned templates ` +
-						'must not inject HTML; body display goes through the vendored blog face, ' +
-						`and the only pinned display sink is ${PREVIEW_DISPLAY_SINK}.`
-				);
+			try {
+				const tags = svelteHtmlTags(path, readFileSync(file, 'utf8'));
+				if (tags.length > 0) {
+					problems.push(
+						`${path} contains an {@html} sink — contentus-owned templates ` +
+							'must not inject HTML; body display goes through the vendored blog face, ' +
+							`and the only pinned display sink is ${PREVIEW_DISPLAY_SINK}.`
+					);
+				}
+			} catch (error) {
+				problems.push(`${path} could not be scanned for {@html} sinks: ${error.message}`);
+			}
+		}
+	}
+	return problems;
+}
+
+/**
+ * Check 7 — alternate raw-HTML sinks in owned executable source.
+ *
+ * The `{@html}` ban is only as strong as the set of sink shapes it names.
+ * Round-1 bypass C demonstrated the rest: a `.ts` file writing `el.innerHTML`,
+ * a template carrying `<iframe srcdoc=…>` — each passed a gate that scanned
+ * only for `{@html` in `.svelte` files. This check scans ALL owned executable
+ * source (the same extension set the walk opens) for the alternate shapes,
+ * read with the same parsers: `.innerHTML`/`.outerHTML` writes, compound and
+ * update forms and the `el['innerHTML']` spelling; `.insertAdjacentHTML` and
+ * `document.write`/`document.writeln` calls; `srcdoc` attributes in templates
+ * and JSX. Vendored greater source stays out, exactly as it does for checks 2
+ * and 3 — greater's sanitizer boundary is disclosed, not ours to re-judge.
+ */
+function checkAlternateHtmlSinks() {
+	const problems = [];
+	for (const dir of OWNED_SOURCE_DIRS) {
+		for (const file of walkFiles(dir)) {
+			const path = relative(repoRoot, file);
+			const source = readFileSync(file, 'utf8');
+			try {
+				if (path.endsWith('.svelte')) {
+					problems.push(...alternateSinksInSvelte(path, source));
+				} else {
+					problems.push(
+						...alternateSinksInScript(path, source, { jsx: /\.(tsx|jsx)$/.test(path) })
+					);
+				}
+			} catch (error) {
+				problems.push(`${path} could not be scanned for raw-HTML sinks: ${error.message}`);
 			}
 		}
 	}
@@ -353,8 +440,11 @@ function checkHtmlSinks() {
  * Each assertion here is a way the permission could widen, stated before the
  * code so a future edit argues with the audit rather than around it: a second
  * sink, a sink bound to anything other than the `preview.html` projection
- * field, a value import that could carry a transform, or a sanitizer/rewriter
- * touching lesser's bytes on the way to the DOM.
+ * field, a value import that could carry a transform, a script statement or
+ * markup `{@const}` that could hide one, or a sanitizer/rewriter touching
+ * lesser's bytes on the way to the DOM. Read with the Svelte compiler and
+ * TypeScript parser, so a comment or string can neither hide a violation nor
+ * become a false positive (round-1 bypasses A and B).
  */
 function checkPreviewDisplaySink() {
 	const problems = [];
@@ -368,32 +458,79 @@ function checkPreviewDisplaySink() {
 		];
 	}
 
-	const withoutComments = stripComments(content);
+	const path = PREVIEW_DISPLAY_SINK;
+	let tags;
+	try {
+		tags = svelteHtmlTags(path, content);
+	} catch (error) {
+		return [`${path} could not be parsed: ${error.message}`];
+	}
 
-	const sinks = [...withoutComments.matchAll(/\{@html\b/g)];
-	if (sinks.length !== 1)
+	if (tags.length !== 1)
 		problems.push(
-			`${PREVIEW_DISPLAY_SINK} carries ${sinks.length} {@html} sinks — the disclosure admits exactly one.`
+			`${path} carries ${tags.length} {@html} sinks — the disclosure admits exactly one.`
 		);
 
-	if (!/\{@html\s+preview\.html\s*\}/.test(withoutComments))
-		problems.push(
-			`${PREVIEW_DISPLAY_SINK} no longer binds its sink to \`preview.html\` verbatim — ` +
-				'the sink must display the DraftPreview projection field, never something computed from it.'
-		);
-
-	for (const match of content.matchAll(/^\s*import\s+(?!type\b)[^;]+;?/gm))
-		problems.push(
-			`${PREVIEW_DISPLAY_SINK} carries a value import (${match[0].trim()}) — the display sink ` +
-				'holds type-only imports, so nothing runtime-reachable can stand between lesser and the DOM.'
-		);
-
-	for (const forbidden of ['sanitizeHtml', 'DOMPurify', 'linkify', 'marked', 'remark'])
-		if (new RegExp(`\\b${forbidden}\\b`).test(withoutComments))
+	const sink = tags[0];
+	if (sink) {
+		const expression = sink.expression;
+		const bindsPreviewHtml =
+			expression?.type === 'MemberExpression' &&
+			expression.object?.type === 'Identifier' &&
+			expression.object.name === 'preview' &&
+			expression.property?.type === 'Identifier' &&
+			expression.property.name === 'html' &&
+			!expression.computed;
+		if (!bindsPreviewHtml)
 			problems.push(
-				`${PREVIEW_DISPLAY_SINK} names "${forbidden}" — the preview display applies no second ` +
-					'sanitization and no rewrite to lesser-rendered HTML.'
+				`${path} no longer binds its sink to \`preview.html\` verbatim — ` +
+					'the sink must display the DraftPreview projection field, never something computed from it.'
 			);
+	}
+
+	for (const finding of previewDisplayScriptFindings(path, svelteScriptContents(path, content)))
+		problems.push(finding);
+
+	for (const tag of svelteConstTags(path, content)) {
+		const text = content.slice(tag.start, tag.end);
+		problems.push(
+			`${path} declares a markup \`{@const}\` (${text.trim()}) — a markup binding can shadow the ` +
+				'`preview` prop; the display sink must read the component prop directly.'
+		);
+	}
+
+	// Names that would mean a second sanitization or a rewrite — scanned over
+	// the parsed script identifiers so prose can name them without tripping the
+	// gate, while a live binding cannot hide. (The statement binding above
+	// already rejects any runtime statement carrying one; this names the shape.)
+	for (const { text: script } of svelteScriptContents(path, content)) {
+		try {
+			const sourceFile = ts.createSourceFile(
+				'probe.ts',
+				script,
+				ts.ScriptTarget.Latest,
+				true,
+				ts.ScriptKind.TS
+			);
+			const visit = (node) => {
+				if (!node || typeof node !== 'object') return;
+				if (ts.isIdentifier(node)) {
+					for (const forbidden of ['sanitizeHtml', 'DOMPurify', 'linkify', 'marked', 'remark']) {
+						if (node.text === forbidden) {
+							problems.push(
+								`${path} names "${forbidden}" — the preview display applies no second ` +
+									'sanitization and no rewrite to lesser-rendered HTML.'
+							);
+						}
+					}
+				}
+				ts.forEachChild(node, visit);
+			};
+			visit(sourceFile);
+		} catch {
+			// The parse failure is already reported by previewDisplayScriptFindings.
+		}
+	}
 
 	return problems;
 }
@@ -481,6 +618,7 @@ function main() {
 		['vendored blog-face escape fallback', checkVendoredEscapeFallback()],
 		['owned-source coverage', checkOwnedSourceCoverage()],
 		['preview display sink binding', checkPreviewDisplaySink()],
+		['alternate raw-HTML sinks', checkAlternateHtmlSinks()],
 	];
 
 	console.log('# Renderer-authority audit\n');

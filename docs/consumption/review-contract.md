@@ -67,7 +67,10 @@ never attempts the preview without a session (`tests/review-adapters.test.mjs`).
 Display contract: the preview pane shows `preview.html` through
 `src/lib/review/PreviewBody.svelte` — the one owned HTML sink in the
 repository, content-bound by `scripts/audit-renderer-authority.mjs` (exactly
-one sink, bound to the projection field, type-only imports, no transform).
+one sink, bound to the projection field, type-only imports, no transform, no
+script statement beyond the one `$props()` destructure, and no alternate
+raw-HTML sink — `.innerHTML`, `srcdoc`, `insertAdjacentHTML`, `document.write`
+— anywhere in owned source).
 lesser rendered AND sanitized these bytes, so the pane applies no second pass:
 the vendored fediverse allowlist in `Article.Content` strips lesser's own
 `<figure>`/`<img>`, and re-filtering trusted server output is how the image

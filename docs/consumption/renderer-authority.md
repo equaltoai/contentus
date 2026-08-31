@@ -79,10 +79,14 @@ Nothing local that would paper over it. Specifically:
   is exactly the operator-reported failure this closes. lesser is the single
   renderer and sanitizer of those bytes; displaying them untransformed is
   renderer authority honored, not bypassed. The sink is pinned by
-  `scripts/audit-renderer-authority.mjs` (one sink, bound to `preview.html`
-  verbatim, type-only imports, no transform) and probed by
+  `scripts/audit-renderer-authority.mjs` — read with the Svelte compiler and
+  TypeScript parser since the round-1 adversarial review (one sink, bound to
+  `preview.html` verbatim, type-only imports, no script statement beyond the
+  one `$props()` destructure, no markup `{@const}`) and probed by
   `tests/renderer-authority-audit.test.mjs`; every other owned template still
-  fails the build on an HTML sink.
+  fails the build on an HTML sink, and every owned executable file fails on an
+  alternate raw-HTML sink (`.innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+  `document.write`, `srcdoc`).
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
