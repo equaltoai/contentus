@@ -27,7 +27,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-f1nlQjth.js                726.24 kB │ gzip: 219.82 kB
 
-✓ built in 1.08s
+✓ built in 1.11s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -38,12 +38,12 @@ build/client/assets/entry-client-f1nlQjth.js                726.24 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 791 modules transformed.
+[2Ktransforming...✓ 792 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,158.31 kB │ gzip: 280.14 kB
+build/server/handler.mjs  1,159.33 kB │ gzip: 280.50 kB
 
-✓ built in 1.03s
+✓ built in 1.05s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
@@ -68,7 +68,7 @@ Schema:     contracts/lesser/graphql-schema.graphql
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
 Documents:  49 in 11 inventoried module(s), 49 operation(s)
-Swept:      65 contentus-authored .ts module(s) under src/, out of 1730 tracked file(s) there
+Swept:      66 contentus-authored .ts module(s) under src/, out of 1731 tracked file(s) there
 
 graphql-contract: PASS
 
@@ -83,6 +83,7 @@ graphql-contract: PASS
 - vendored blog-face escape fallback: clean
 - owned-source coverage: clean
 - preview display sink binding: clean
+- alternate raw-HTML sinks: clean
 
 - Forbidden renderer packages checked: 17
 - Contentus-owned source roots scanned: 17
@@ -135,8 +136,8 @@ CSP audit: clean.
 
 - Build passes recorded: client, server
 - Modules the client build resolved / loaded: 814 / 814
-- Modules the server build resolved / loaded: 797 / 790
-- Dependency edges recorded: 4606
+- Modules the server build resolved / loaded: 798 / 791
+- Dependency edges recorded: 4607
 - Distinct edges into the face: 49
 - Findings: 0
 
