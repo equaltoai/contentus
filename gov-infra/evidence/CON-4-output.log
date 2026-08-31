@@ -1,4 +1,4 @@
-  RELEASE-BINDING: 1516 vendored files bound to greater-v0.13.7@4592c439b3b0e53ba47b7cddebab196c1f88abdf (1441 canonical, 75 CLI-transform); registry index cd005f57bba3… verified against the pin
+  RELEASE-BINDING: 1602 vendored files bound to greater-v0.13.7@4592c439b3b0e53ba47b7cddebab196c1f88abdf (1489 canonical, 113 CLI-transform, 0 unlisted executables outside the release universe); registry index cd005f57bba3… verified against the pin
 greater channels in lockstep at greater-v0.13.7, bound to the pin in gov-infra/planning/contentus-pinned-repo-contract.json.
   TARBALL-PIN: 14 package.json pins at greater-v0.13.7
   CLI-COPY:    components.json installMode=vendored ref=4592c439b3b0e53ba47b7cddebab196c1f88abdf
