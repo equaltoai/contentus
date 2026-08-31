@@ -36,6 +36,27 @@
  * before it is used). The pin's `url` is the release's own file at the pinned
  * commit, so the digest is independently re-derivable by fetching it.
  *
+ * UNIVERSE EQUALITY, BOTH DIRECTIONS (round-2 R2-4). The round-2 attack proved
+ * the binding still skipped two mutation classes: a manifest-listed file deleted
+ * from disk (`!existsSync(…) continue`) and an executable file added under a
+ * vendored root that no manifest entry lists. The walk now resolves every
+ * manifest path through the greater CLI's OWN install mapping
+ * (`dist/utils/install-path.js`, from the digest-verified quarantine), requires
+ * every manifest-listed path to exist on disk and match, and requires every
+ * executable file under the vendored roots to appear in the authenticated
+ * release universe — byte-identical to the release's canonical file or the
+ * CLI's documented transform of it. A deleted file or an unlisted file is a
+ * FINDING.
+ *
+ * THE PIN'S ANCHOR (round-2 R2-3). The `registry_index.sha256` pin lives in the
+ * repository it authenticates, so a coordinated same-diff re-authoring moved it
+ * with the bytes. `gov-infra/verifiers/authenticate-release-index.mjs` is the
+ * independent anchor: it fetches the immutable `registry_index.url` (the
+ * release's own manifest at the pinned commit) and requires it to match the pin
+ * AND the committed copy. That networked step runs in CI (and is bound there by
+ * MAI-4); this offline walk runs over the committed bytes the network vouched
+ * for.
+ *
  * FAIL-CLOSED. A missing or mismatched release artifact, an unparseable index,
  * an absent CLI tarball, or a quarantined CLI that cannot be built is a
  * FINDING — never a PASS. There is no network in this path: the committed
@@ -44,7 +65,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -135,6 +156,7 @@ async function loadCliDerivation({ repoRoot, pin }) {
 		'package/dist/utils/source-paths.js',
 		'package/dist/utils/transform.js',
 		'package/dist/utils/config.js',
+		'package/dist/utils/install-path.js',
 	];
 	const members = new Map(
 		entries.filter((entry) => entry.kind === 'file').map((entry) => [entry.name, entry])
@@ -192,6 +214,7 @@ async function loadCliDerivation({ repoRoot, pin }) {
 
 	const sourcePathsModule = 'source-paths.js';
 	const transformModule = 'transform.js';
+	const installPathModule = 'install-path.js';
 	const moduleDirectory = 'dist/utils';
 	const sourcePaths = await import(
 		pathToFileURL(join(quarantine, moduleDirectory, sourcePathsModule)).href
@@ -199,9 +222,18 @@ async function loadCliDerivation({ repoRoot, pin }) {
 	const transform = await import(
 		pathToFileURL(join(quarantine, moduleDirectory, transformModule)).href
 	);
+	const installPath = await import(
+		pathToFileURL(join(quarantine, moduleDirectory, installPathModule)).href
+	);
 	return {
 		buildSourcePathCandidates: sourcePaths.buildSourcePathCandidates,
 		transformImports: transform.transformImports,
+		// The CLI's OWN install mapping — where a registry manifest virtual path
+		// lands on disk. components.json aliases do not cover every registry
+		// segment (`shared/…` components install under `src/lib/components/…`),
+		// and a mapping this gate re-implements can drift from the one that
+		// installed the files; the CLI's module is the single copy.
+		getInstalledFilePath: installPath.getInstalledFilePath,
 	};
 }
 
@@ -261,6 +293,18 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 		return findings;
 	}
 
+	// --- The CLI derivation: the canonical path mapping and transform ---------
+	// Loaded before the record walk because the disk-path resolution below is
+	// the CLI's own install mapping (`getInstalledFilePath`), not a copy.
+	let cli;
+	try {
+		cli = await loadCliDerivation({ repoRoot, pin });
+	} catch (error) {
+		findings.push(error.message);
+		return findings;
+	}
+	const buildCandidates = (virtualPath) => cli.buildSourcePathCandidates({}, virtualPath);
+
 	// --- The working manifest: every installed file, disk and recorded checksum --
 	let components;
 	try {
@@ -271,36 +315,60 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 	}
 	const aliases = components.aliases ?? {};
 
+	// R2-4 direction A: every manifest-listed path must EXIST on disk. The
+	// round-2 finding was that the walk skipped a manifest-listed file deleted
+	// from disk (`!existsSync(…) continue`), so a deleted vendored byte was
+	// silently unbound — and the aliases-only resolver skipped whole
+	// `shared/…` components whose install targets are not alias roots. Records
+	// are therefore resolved through the CLI's own install mapping and a
+	// missing file is a record with no bytes: a finding, never a skip.
 	const records = [];
 	for (const entry of components.installed ?? []) {
 		for (const checksumEntry of entry.checksums ?? []) {
 			const virtualPath = checksumEntry.path;
-			const diskPath = resolveDiskPath(virtualPath, aliases);
-			if (!diskPath || !existsSync(join(repoRoot, diskPath))) continue;
+			let diskPath;
+			try {
+				diskPath = cli.getInstalledFilePath(virtualPath, components);
+			} catch {
+				findings.push(
+					`${virtualPath} (installed as ${entry.name}): the greater CLI's install mapping ` +
+						'cannot resolve this manifest path to a disk location — a manifest entry the binding ' +
+						'cannot find is an unbound entry'
+				);
+				continue;
+			}
+			if (typeof diskPath !== 'string' || !diskPath.startsWith(resolve(repoRoot))) {
+				findings.push(
+					`${virtualPath} (installed as ${entry.name}): the greater CLI's install mapping ` +
+						`resolves outside the repository (${diskPath ?? 'null'}) — an unresolvable manifest path`
+				);
+				continue;
+			}
+			const relativeDisk = diskPath.slice(resolve(repoRoot).length + 1);
 			records.push({
 				entry: entry.name,
 				virtualPath,
-				diskPath,
-				diskSri: sriOf(readFileSync(join(repoRoot, diskPath))),
+				diskPath: relativeDisk,
+				diskSri: existsSync(join(repoRoot, relativeDisk))
+					? sriOf(readFileSync(join(repoRoot, relativeDisk)))
+					: null,
 				recordedChecksum: checksumEntry.checksum,
 			});
 		}
 	}
 
-	// --- The CLI derivation: the canonical path mapping and transform ---------
-	let cli;
-	try {
-		cli = await loadCliDerivation({ repoRoot, pin });
-	} catch (error) {
-		findings.push(error.message);
-		return findings;
-	}
-	const buildCandidates = (virtualPath) => cli.buildSourcePathCandidates({}, virtualPath);
-
 	// --- Bind each record to the release --------------------------------------
 	let canonicalCount = 0;
 	let transformedCount = 0;
 	for (const record of records) {
+		if (record.diskSri === null) {
+			findings.push(
+				`${record.virtualPath} (installed as ${record.entry}): the manifest lists this file but it ` +
+					`is absent from disk (${record.diskPath}) — a manifest-listed vendored file deleted from ` +
+					'the tree is invisible to a binding that only walks existing files'
+			);
+			continue;
+		}
 		const candidates = buildCandidates(record.virtualPath);
 		const releaseCandidates = candidates
 			.filter((repoPath) => typeof checksums[repoPath] === 'string')
@@ -371,10 +439,107 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 		}
 	}
 
+	// --- R2-4 direction B: the disk side of the universe equality ------------
+	// Every executable file under the owned vendored Greater roots must appear
+	// in the authenticated release universe — the round-2 finding was that an
+	// unlisted executable file added under a vendored root (an `innerHTML` sink
+	// plant, say) was invisible to a walk that only iterated the manifest.
+	// "In the release universe" means byte-identical to the release's canonical
+	// file for a mapped source path, or to the greater CLI's documented
+	// transform of it. The roots are the alias targets beneath `src/lib/` plus
+	// the `lib/…` manifest segments — the directories the CLI installs into —
+	// and the walk mirrors the audit's executable extension set so a `.mts`
+	// added under a vendored root is as visible as a `.ts`.
+	const EXECUTABLE_SOURCE_EXTENSIONS = [
+		'ts',
+		'mts',
+		'cts',
+		'tsx',
+		'js',
+		'mjs',
+		'cjs',
+		'jsx',
+		'svelte',
+	];
+	const EXECUTABLE_SOURCE = new RegExp(`\\.(${EXECUTABLE_SOURCE_EXTENSIONS.join('|')})$`);
+	const vendoredRoots = new Set();
+	for (const target of Object.values(aliases)) {
+		if (typeof target === 'string' && /^src\/lib\/[^/]+$/.test(target)) vendoredRoots.add(target);
+	}
+	for (const entry of components.installed ?? []) {
+		for (const checksumEntry of entry.checksums ?? []) {
+			const segment = checksumEntry.path.split('/')[0];
+			if (segment === 'lib') vendoredRoots.add(`src/lib/${checksumEntry.path.split('/')[1] ?? ''}`);
+		}
+	}
+	const diskToVirtuals = (diskPath) => {
+		const out = [];
+		for (const [key, target] of Object.entries(aliases)) {
+			if (typeof target === 'string' && diskPath.startsWith(`${target}/`))
+				out.push(`${key}${diskPath.slice(target.length)}`);
+		}
+		return out;
+	};
+	const walkExecutables = (dir) => {
+		const found = [];
+		let entries;
+		try {
+			entries = readdirSync(join(repoRoot, dir), { withFileTypes: true });
+		} catch {
+			return found;
+		}
+		for (const entry of entries) {
+			const relativePath = `${dir}/${entry.name}`;
+			if (entry.isDirectory()) found.push(...walkExecutables(relativePath));
+			else if (entry.isFile() && EXECUTABLE_SOURCE.test(entry.name)) found.push(relativePath);
+		}
+		return found;
+	};
+	const manifestDiskPaths = new Set(records.map((record) => record.diskPath));
+	let unlistedCount = 0;
+	for (const root of [...vendoredRoots].sort()) {
+		for (const diskPath of walkExecutables(root)) {
+			if (manifestDiskPaths.has(diskPath)) continue;
+			const diskSri = sriOf(readFileSync(join(repoRoot, diskPath)));
+			let inReleaseUniverse = false;
+			for (const virtualPath of diskToVirtuals(diskPath)) {
+				for (const repoPath of buildCandidates(virtualPath)) {
+					if (typeof checksums[repoPath] !== 'string') continue;
+					if (checksums[repoPath] === diskSri) {
+						inReleaseUniverse = true;
+						break;
+					}
+					const sourcePath = join(SOURCE_ROOT(repoRoot), repoPath);
+					if (!existsSync(sourcePath)) continue;
+					const sourceBytes = readFileSync(sourcePath);
+					if (sriOf(sourceBytes) !== checksums[repoPath]) continue;
+					const transformed = cli.transformImports(sourceBytes.toString('utf8'), components, virtualPath, {
+						consumerRoot: resolve(repoRoot),
+						sourceFilePath: diskPath,
+					});
+					if (transformed && sriOf(Buffer.from(transformed.content)) === diskSri) {
+						inReleaseUniverse = true;
+						break;
+					}
+				}
+				if (inReleaseUniverse) break;
+			}
+			if (!inReleaseUniverse) {
+				unlistedCount += 1;
+				findings.push(
+					`${diskPath}: an executable file under the vendored roots that no manifest entry lists ` +
+						`and no release file matches (${release_tag}@${vendored_ref}) — an unlisted file is ` +
+						'invisible to every checksum, so it must not exist under a vendored root'
+				);
+			}
+		}
+	}
+
 	if (findings.length === 0) {
 		console.log(
 			`  RELEASE-BINDING: ${records.length} vendored files bound to ${release_tag}@${vendored_ref} ` +
-				`(${canonicalCount} canonical, ${transformedCount} CLI-transform); registry index ` +
+				`(${canonicalCount} canonical, ${transformedCount} CLI-transform, ${unlistedCount} unlisted ` +
+				`executables outside the release universe); registry index ` +
 				`${indexDigest.slice(0, 12)}… verified against the pin`
 		);
 	}

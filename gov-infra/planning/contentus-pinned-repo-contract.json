@@ -143,21 +143,28 @@
     "unfollowable_loads_disclosed": [
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 172,
+        "line": 194,
         "expression": "spawnSync",
         "reason": "Runs the system `npm` binary to install the greater CLI's declared runtime dependencies (zod, fs-extra) into the quarantine the verifier extracts from the digest-verified release tarball, with `--ignore-scripts` — SEC-7's exact dependency boundary. No repository file is handed to `npm`: the target package.json lives inside the verified archive, outside any repo-local hash boundary."
       },
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 196,
+        "line": 219,
         "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, sourcePathsModule)).href\n\t)",
         "reason": "Loads the greater CLI's canonical virtual-path mapping module (`dist/utils/source-paths.js`, named by the `sourcePathsModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the mapping that decides each vendored file's release source is the CLI's own, not a repository copy. The path is assembled at run time inside the quarantine; the archive member it came from is verified against the pinned release-asset digest before extraction."
       },
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
-        "line": 199,
+        "line": 222,
         "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, transformModule)).href\n\t)",
         "reason": "Loads the greater CLI's canonical import-transform module (`dist/utils/transform.js`, named by the `transformModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the transform that re-derives the vendored bytes is the CLI's own, not a repository copy. Same quarantine provenance as the source-paths load above; the archive member is verified against the pinned release-asset digest before extraction."
+      },
+
+      {
+        "file": "gov-infra/verifiers/release-binding.mjs",
+        "line": 225,
+        "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, installPathModule)).href\n\t)",
+        "reason": "Loads the greater CLI's canonical install-path mapping module (dist/utils/install-path.js, named by the installPathModule constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the disk path each manifest virtual path resolves to is the CLI's own mapping, not a repository copy. Same quarantine provenance as the source-paths and transform loads; the archive member is verified against the pinned release-asset digest before extraction. This is the R2-4 mapping fix: components.json aliases do not cover every registry segment (shared/... components install under src/lib/components/...), and a mapping this gate re-implements can drift from the one that installed the files."
       },
       {
         "file": "scripts/audit-graphql-documents.mjs",
@@ -298,7 +305,7 @@
     "sha256": {
       "gov-infra/verifiers/check-greater-pins.mjs": "760e913b695e3160a5c6e6843c32580ef1843621796bb2d9d185d53e582c61e8",
       "gov-infra/verifiers/check-package-scripts.mjs": "55e2bb2d2661048050817071bc5d3407b7fe74612f27eafd3caa491d5bb26919",
-      "gov-infra/verifiers/release-binding.mjs": "ff90da54e80e1742cbdd04c899600d8cb5b12e098d481166ea9ff9ff3efc3dfe",
+      "gov-infra/verifiers/release-binding.mjs": "8253a5198cb093d6227fc2a7f9292b32306d06548f5cdb87e025fbb9f39b7d19",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
       "gov-infra/verifiers/verified-tarball.mjs": "7c4f48da792731656a35273c4b1e4104db4034c4ec8281e67232be8434857314",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
@@ -342,7 +349,7 @@
       "tests/drones-mobile.test.mjs": "e6d153c03bf942c04113bcceffdedf84cc8028b95570f10071f02e44425d9fc4",
       "tests/drones-roster.test.mjs": "ba213606df245962697b3f1050828b163f3a4b3d110388452beec242720047a8",
       "tests/graphql-documents.test.mjs": "3fb1ac32868a44fff9c543af506568092d9da7604622df34282210b036d2504a",
-      "tests/greater-release-binding.test.mjs": "37701000a5d3971f3c456844faf6e1a108212403833a5998093d9836902cb372",
+      "tests/greater-release-binding.test.mjs": "b2d12b72b62bd703c7a1541e6b7237994623e841880a68e8e35674cb0dcf542a",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/instance-info.test.mjs": "cf463d0831e9c38b3c32164a00d296513771fdf18666ab57934932db7934459e",
@@ -375,7 +382,7 @@
       "tests/timeline-subscription.test.mjs": "c02c20e9547b6cc8977b8655ce167e0007a20487c03423458f815584058b1848",
       "tests/vendored-content-renderer.test.mjs": "a6fe1483279fad32b037b25c7a2dc09795b97f164923c8d9d6724802510e7936",
       "tests/vendored-messaging-render.test.mjs": "4634a97b213685733fb03d8e27114f0f60224a7b60c3a145805efc4ce2f26e80",
-      "tests/vendored-runes.test.mjs": "b35d47a32182afedc28fd80ee797f94602514efaafbdba22f2fb2d31dda10bb2"
+      "tests/vendored-runes.test.mjs": "2c9c3e48dec69b6389da60abb5af9671e51a70948d21b88503beac1a5834c143"
     }
   },
   "install_manifest": {

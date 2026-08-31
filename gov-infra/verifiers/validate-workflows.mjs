@@ -72,6 +72,11 @@ const requiredWorkflows = {
 		// is no archive to extract and the control reports BLOCKED; MAI-4 binds the
 		// step so it cannot be quietly dropped to convert a hard gate into a soft one.
 		'node gov-infra/verifiers/install-greater-cli.mjs',
+		// The R2-3 anchor step: fetches the release's own immutable registry
+		// manifest and requires it to match the pin AND the committed copy, so a
+		// coordinated same-diff edit to the index + pin digest cannot authenticate.
+		// The step is bound here so removing it to soften the anchor fails MAI-4.
+		'node gov-infra/verifiers/authenticate-release-index.mjs',
 	],
 	// Both of the workflows that carry event-derived data run their logic from a
 	// script pinned by content in the repo contract, because event-derived data may

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -206,6 +206,69 @@ test('a coordinated vendored-file+checksum edit fails the real verifier on both 
 });
 
 test('the probes leave the tree exactly as they found it', () => {
+	const { status, output } = runVerifier();
+	assert.equal(status, 0, output);
+});
+
+/* ============================================================
+   R2-4 — manifest/disk universe equality, both directions
+   ============================================================ */
+
+/**
+ * The round-2 attack closed F4's coordinated-edit shape but proved the binding
+ * still skipped two whole classes of mutation: a manifest-listed vendored file
+ * deleted from disk (`!existsSync(…) continue`), and an executable file added
+ * under a vendored root that no manifest entry lists. Both are now findings —
+ * the manifest must exist on disk, and the disk must be inside the release
+ * universe. These probes plant each mutation over the REAL tree and read the
+ * REAL verifier's exit code.
+ */
+const MANIFESTED_FILE = join(repoRoot, 'src/lib/greater/icons/app.d.ts');
+const MANIFESTED_VIRTUAL = 'greater/icons/app.d.ts';
+
+test('a manifest-listed vendored file deleted from disk fails the real verifier (R2-4)', () => {
+	const original = readFileSync(MANIFESTED_FILE, 'utf8');
+	const moved = `${MANIFESTED_FILE}.r2-deleted`;
+	writeFileSync(moved, original);
+
+	try {
+		// The file is gone from its manifest-listed path.
+		writeFileSync(MANIFESTED_FILE, '');
+		rmSync(MANIFESTED_FILE);
+
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `a deleted manifest-listed file must fail the verifier:\n${output}`);
+		assert.ok(
+			output.includes(MANIFESTED_VIRTUAL) && output.includes('absent from disk'),
+			`the missing file must be named as absent:\n${output}`
+		);
+	} finally {
+		writeFileSync(MANIFESTED_FILE, original);
+		rmSync(moved, { force: true });
+	}
+});
+
+test('an unlisted executable file under a vendored root fails the real verifier (R2-4)', () => {
+	const relativePath = 'src/lib/components/__r2_unlisted_probe__.ts';
+	const absolute = join(repoRoot, relativePath);
+	writeFileSync(
+		absolute,
+		'export const unlisted = (el: HTMLElement, html: string) => {\n\tel.innerHTML = html;\n};\n'
+	);
+
+	try {
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `an unlisted vendored file must fail the verifier:\n${output}`);
+		assert.ok(
+			output.includes(relativePath) && output.includes('no manifest entry lists'),
+			`the unlisted file must be named:\n${output}`
+		);
+	} finally {
+		rmSync(absolute, { force: true });
+	}
+});
+
+test('the probes leave the tree exactly as they found it (R2-4)', () => {
 	const { status, output } = runVerifier();
 	assert.equal(status, 0, output);
 });
