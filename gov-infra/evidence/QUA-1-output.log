@@ -19,15 +19,15 @@ svelte-check found 0 errors and 0 warnings
 > vite build
 
 vite v8.2.0 building client environment for production...
-[2Ktransforming...✓ 814 modules transformed.
+[2Ktransforming...✓ 815 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-B6yOGUdP.js                725.36 kB │ gzip: 219.64 kB
+build/client/assets/entry-client-f1nlQjth.js                726.24 kB │ gzip: 219.82 kB
 
-✓ built in 1.28s
+✓ built in 1.08s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -38,18 +38,18 @@ build/client/assets/entry-client-B6yOGUdP.js                725.36 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 790 modules transformed.
+[2Ktransforming...✓ 791 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,158.26 kB │ gzip: 280.14 kB
+build/server/handler.mjs  1,158.31 kB │ gzip: 280.14 kB
 
-✓ built in 1.19s
+✓ built in 1.03s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 349923 bytes, 144 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 351709 bytes, 144 --tc-* definitions, integrity assertions passed
 brand assets: copied 13 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -62,13 +62,13 @@ brand assets: copied 13 files to build/client/brand/
 # GraphQL contract audit
 
 Schema:     contracts/lesser/graphql-schema.graphql
-            112322 chars, sha256 21fc0d07e7a5af3065a6fb4c2b9d0f3770a4df1b607975209b310e293ff0a736
-            equaltoai/lesser@1ce2dc975bd212c11ffc6b4fca0035bae039bd60:docs/contracts/graphql-schema.graphql
-            blob 558c4cf1fbc2d369cc2909786ad50fbe8f68bb58 (contracts/lesser/provenance.json)
+            125619 chars, sha256 900d7a5b2d35a19933d809229b5bbd7424702d0c5273f943c6fd5a8ff7369f0e
+            equaltoai/lesser@8f483cc5f9fe46ffc845d70297f32f6ab8d7bcbf:docs/contracts/graphql-schema.graphql
+            blob 458453ea0c117bf0bbc9f5b365fe8832cfa4ecae (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
 Documents:  49 in 11 inventoried module(s), 49 operation(s)
-Swept:      65 contentus-authored .ts module(s) under src/, out of 1729 tracked file(s) there
+Swept:      65 contentus-authored .ts module(s) under src/, out of 1730 tracked file(s) there
 
 graphql-contract: PASS
 
@@ -82,6 +82,7 @@ graphql-contract: PASS
 - owned-source {@html} sinks: clean
 - vendored blog-face escape fallback: clean
 - owned-source coverage: clean
+- preview display sink binding: clean
 
 - Forbidden renderer packages checked: 17
 - Contentus-owned source roots scanned: 17
@@ -133,9 +134,9 @@ CSP audit: clean.
 # Seam graph audit — faces 6–7 (src/lib/agents, src/lib/drones)
 
 - Build passes recorded: client, server
-- Modules the client build resolved / loaded: 813 / 813
-- Modules the server build resolved / loaded: 796 / 789
-- Dependency edges recorded: 4603
+- Modules the client build resolved / loaded: 814 / 814
+- Modules the server build resolved / loaded: 797 / 790
+- Dependency edges recorded: 4606
 - Distinct edges into the face: 49
 - Findings: 0
 

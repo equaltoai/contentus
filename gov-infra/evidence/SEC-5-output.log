@@ -9,6 +9,7 @@
 - owned-source {@html} sinks: clean
 - vendored blog-face escape fallback: clean
 - owned-source coverage: clean
+- preview display sink binding: clean
 
 - Forbidden renderer packages checked: 17
 - Contentus-owned source roots scanned: 17
