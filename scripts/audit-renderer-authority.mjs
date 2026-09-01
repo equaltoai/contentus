@@ -79,13 +79,35 @@
  *      owned barrels are never trusted owned components; and the value
  *      identity additionally follows late-populated containers, collection
  *      transforms, element access through folded keys, setters, inherited
- *      constructors, and generator yields.
+ *      constructors, and generator yields. Round-8 (R8-2) closes the
+ *      local-function return laundering the round-8 review planted: when a
+ *      call site hands a value-carrying argument to a local function, the
+ *      callee's parameter joins the value names, so a `return p` marks the
+ *      callee preview-returning and declaration, inline, `await`, and
+ *      `.then` reads of the result bind the identity — sync, async,
+ *      generator, arrow, and multi-hop chains alike, with `.then`/`.catch`
+ *      callbacks on a value-carrying expression binding their parameter and
+ *      `await`/`Promise.resolve` read as same-reference wrappers;
+ *      unresolvable callees receiving the value stay fail-closed, and an
+ *      import the bundler resolves only through `resolve.alias` is
+ *      classified by its alias target rather than read as a benign package
+ *      (R8-1).
  *   9. The executable source universe is derived from reachability, not from
  *      the `src/` walk (round-7 R7-2): an executable module outside the
  *      classified owned/vendored roots that an owned file or a build entry
  *      loads — by static or dynamic import, re-export, glob, relative alias,
  *      root-relative path, query-suffixed specifier, case variant, or
  *      symlink — is a finding, and the chain is followed hop by hop.
+ *      Round-8 (R8-1/R8-3) adds the route spellings the round-8 review
+ *      planted: the bundler's `resolve.alias` table is parsed from the
+ *      governed root modules (string, object, array, `.map`-generated, and
+ *      regex-find entries; an unreadable entry or a replacement the scan
+ *      cannot place inside the repository fails closed), alias-resolved
+ *      specifiers join the closure like spelled ones, a bare specifier no
+ *      alias claims and no installed package answers for fails closed, and
+ *      `import.meta.glob` collects no-substitution template literals and
+ *      arrays of patterns beside plain strings, failing closed on any
+ *      non-literal glob argument.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -119,7 +141,8 @@
  * chain.
  */
 
-import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -134,10 +157,12 @@ import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,
 	eachNode,
+	parseResolveAliases,
 	parseTypeScript,
 	previewDisplayScriptFindings,
 	previewForwardingFindings,
 	previewInvocationFindings,
+	resolveAliasedSpecifier,
 	svelteConstTags,
 	svelteHtmlTags,
 	svelteScriptContents,
@@ -818,25 +843,113 @@ function resolveUniverseSpecifier(specifier, fromFile) {
 }
 
 /**
+ * The modules Node itself answers for — never an executable outsider.
+ * `node:test` is a builtin the `builtinModules` list does not name (it is a
+ * runner module, not a loadable library), so it joins by hand.
+ */
+const NODE_BUILTIN_MODULES = new Set([...builtinModules, 'test']);
+
+/**
+ * R8-1: whether a BARE specifier is answered for by an installed package (or
+ * a Node builtin). The package root is the first segment, or the first two
+ * for a scoped name; a specifier no alias claims and no package answers for
+ * is a route no static read can prove, and the scans fail closed on it.
+ */
+function bareSpecifierPackage(specifier) {
+	const stripped = specifier.startsWith('node:') ? specifier.slice('node:'.length) : specifier;
+	const root = stripped.startsWith('@')
+		? stripped.split('/').slice(0, 2).join('/')
+		: stripped.split('/')[0];
+	if (NODE_BUILTIN_MODULES.has(root)) return true;
+	return existsSync(join(repoRoot, 'node_modules', root, 'package.json'));
+}
+
+/**
+ * R8-1: the build's `resolve.alias` table, read from the governed root
+ * modules with the same parser reading everything else in this audit uses.
+ * Replacements fold relative to the config file — the governed root modules
+ * sit at the repository root, so a `./` prefix strips to a repository-relative
+ * path; a replacement the fold cannot place inside the repository (an absolute
+ * path, a helper the fold cannot follow when the entry itself still resolved)
+ * keeps the entry's find with a NULL replacement, which both scans judge as
+ * unproven for any specifier it matches. Entries the parser could not read at
+ * all land in `unresolved`, reported once by the universe check and turned
+ * into fail-closed verdicts by both scans.
+ */
+function readBuildAliases() {
+	const aliases = [];
+	const unresolved = [];
+	for (const rootModule of GOVERNED_ROOT_MODULES) {
+		let source;
+		try {
+			source = readFileSync(join(repoRoot, rootModule), 'utf8');
+		} catch {
+			continue; // a governed root module that does not exist aliases nothing
+		}
+		let parsed;
+		try {
+			parsed = parseResolveAliases(source, { file: rootModule });
+		} catch (error) {
+			unresolved.push(`${rootModule} could not be parsed: ${error.message}`);
+			continue;
+		}
+		for (const snippet of parsed.unresolved) unresolved.push(`${rootModule}: ${snippet}`);
+		for (const { find, replacement } of parsed.aliases) {
+			let normalized;
+			if (replacement.startsWith('./')) normalized = replacement.slice(2);
+			else if (!replacement.startsWith('/')) normalized = replacement;
+			else normalized = null; // absolute, outside the repository reading
+			aliases.push({ find, replacement: normalized });
+		}
+	}
+	return { aliases, unresolved };
+}
+
+/**
  * The `import.meta.glob('pattern')` arguments in script text — Vite expands
  * them into imports of every file the pattern matches, so a glob that reaches
  * outside the classified roots loads it exactly as a spelled import would.
+ *
+ * R8-3 (round-8 H-2): the bundler accepts a no-substitution template literal
+ * and an ARRAY of patterns beside the plain string, and the round-7 reading
+ * collected only `isStringLiteral` first arguments — both alternate spellings
+ * of the same plant sailed through. Every pattern position is collected now,
+ * and any argument or array element that is not a string or no-substitution
+ * template literal lands in `unresolved`, which the universe check fails
+ * closed on: an unreadable glob could enumerate any module.
  */
 function importMetaGlobPatterns(source, { jsx = false } = {}) {
 	const sourceFile = parseTypeScript(source, { jsx });
 	const patterns = [];
+	const unresolved = [];
 	eachNode(sourceFile, (node) => {
-		if (
+		if (!(
 			ts.isCallExpression(node) &&
 			ts.isPropertyAccessExpression(node.expression) &&
 			node.expression.name.text === 'glob' &&
 			ts.isMetaProperty(node.expression.expression)
-		) {
-			const argument = node.arguments[0];
-			if (argument && ts.isStringLiteral(argument)) patterns.push(argument.text);
+		))
+			return;
+		const argument = node.arguments[0];
+		if (!argument) {
+			unresolved.push('import.meta.glob()');
+			return;
 		}
+		if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
+			patterns.push(argument.text);
+			return;
+		}
+		if (ts.isArrayLiteralExpression(argument)) {
+			for (const element of argument.elements) {
+				if (ts.isStringLiteral(element) || ts.isNoSubstitutionTemplateLiteral(element))
+					patterns.push(element.text);
+				else unresolved.push(element.getText(sourceFile).slice(0, 60));
+			}
+			return;
+		}
+		unresolved.push(argument.getText(sourceFile).slice(0, 60));
 	});
-	return patterns;
+	return { patterns, unresolved };
 }
 
 /** Compile a Vite-style glob pattern into a matcher over repository paths. */
@@ -927,6 +1040,28 @@ function checkExecutableSourceUniverse() {
 		return null;
 	};
 
+	// --- the build's alias table (R8-1) ----------------------------------------
+	// The bundler's `resolve.alias` is a route spelling like any other: the
+	// round-8 C-1 plant loaded a root-level shim through an owned file's
+	// `import AliasShim from '@shim'` with only the alias table in
+	// `vite.config.ts` naming the target. The table is parsed from the
+	// governed root modules, alias-resolved specifiers join the closure like
+	// spelled ones, and an entry the scan cannot read fails closed.
+	const { aliases: buildAliasTable, unresolved: aliasUnresolvedEntries } = readBuildAliases();
+	for (const entry of aliasUnresolvedEntries) {
+		problems.push(
+			`${entry} — a resolve.alias entry the scan cannot read could route any specifier to any module`
+		);
+	}
+	for (const { find, replacement } of buildAliasTable) {
+		if (replacement !== null) continue;
+		const named = find instanceof RegExp ? find.toString() : `"${find}"`;
+		problems.push(
+			`the build config aliases ${named} to a target the scan cannot place inside the repository — ` +
+				'an alias route no static read can follow fails closed'
+		);
+	}
+
 	// --- the reachability closure ---------------------------------------------
 	const queue = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
@@ -942,6 +1077,7 @@ function checkExecutableSourceUniverse() {
 	}
 	const visited = new Set();
 	const reported = new Set();
+	const reportedBare = new Set();
 	while (queue.length > 0) {
 		const current = queue.shift();
 		if (visited.has(current)) continue;
@@ -954,15 +1090,15 @@ function checkExecutableSourceUniverse() {
 		}
 		const jsx = /\.(tsx|jsx)$/i.test(current);
 		let specifiers;
-		let patterns;
+		let globbed;
 		try {
 			if (current.toLowerCase().endsWith('.svelte')) {
 				const script = liveScript(current, source);
 				specifiers = moduleSpecifiers(script);
-				patterns = importMetaGlobPatterns(script);
+				globbed = importMetaGlobPatterns(script);
 			} else {
 				specifiers = moduleSpecifiers(source, { jsx });
-				patterns = importMetaGlobPatterns(source, { jsx });
+				globbed = importMetaGlobPatterns(source, { jsx });
 			}
 		} catch (error) {
 			problems.push(
@@ -980,18 +1116,71 @@ function checkExecutableSourceUniverse() {
 			queue.push(target); // the chain continues: an outsider can load an outsider
 		};
 		for (const specifier of specifiers) {
-			const base = resolveUniverseSpecifier(modulePath(specifier), current);
-			if (base === null) continue;
+			const cleaned = modulePath(specifier);
+			const base = resolveUniverseSpecifier(cleaned, current);
+			if (base === null) {
+				// BARE SPECIFIER (R8-1): the alias table is read exactly as the
+				// bundler reads it — a matched entry routes the specifier to its
+				// replacement, scanned like any spelled route. An entry the scan
+				// matched but cannot follow is a finding; a specifier no alias
+				// claims and no installed package answers for is a route no
+				// static read can prove, and it fails closed too.
+				const aliased = resolveAliasedSpecifier(cleaned, buildAliasTable);
+				if (aliased !== null) {
+					if (aliased.kind === 'path') {
+						const hit = matchCandidate(aliased.path);
+						if (hit) record(hit, `loads it through a resolve alias ("${specifier}")`);
+					} else {
+						const key = `${current}\u0000${cleaned}`;
+						if (!reportedBare.has(key)) {
+							reportedBare.add(key);
+							problems.push(
+								`${current} loads "${specifier}" through a resolve alias the scan cannot follow — ` +
+									'an alias route no static read can prove fails closed'
+							);
+						}
+					}
+					continue;
+				}
+				if (aliasUnresolvedEntries.length > 0) {
+					const key = `${current}\u0000${cleaned}`;
+					if (!reportedBare.has(key)) {
+						reportedBare.add(key);
+						problems.push(
+							`${current} loads "${specifier}" — an unreadable resolve.alias entry could capture the specifier, ` +
+								'so no static read can prove it stays out of the executable universe'
+						);
+					}
+					continue;
+				}
+				if (!bareSpecifierPackage(cleaned)) {
+					const key = `${current}\u0000${cleaned}`;
+					if (!reportedBare.has(key)) {
+						reportedBare.add(key);
+						problems.push(
+							`${current} loads "${specifier}" — the specifier matches no resolve alias and no installed package, ` +
+								'so no static read can prove it stays out of the executable universe'
+						);
+					}
+				}
+				continue;
+			}
 			const hit = matchCandidate(base);
 			if (hit) record(hit, `loads it ("${specifier}")`);
 		}
-		for (const pattern of patterns) {
+		for (const pattern of globbed.patterns) {
 			const base = resolveUniverseSpecifier(pattern, current);
 			if (base === null) continue;
 			const matcher = globToRegExp(base);
 			for (const path of candidates) {
 				if (matcher.test(path)) record(path, `globs it ("${pattern}")`);
 			}
+		}
+		for (const snippet of globbed.unresolved) {
+			problems.push(
+				`${current} calls import.meta.glob with an argument no static read can enumerate (${snippet}) — ` +
+					'an unreadable glob could load any module'
+			);
 		}
 	}
 
@@ -1063,11 +1252,20 @@ function checkPreviewValuePath() {
 			}
 		}
 	}
+	// R8-1: the cross-file reading gets the SAME alias table the universe
+	// check reads — an import whose specifier only the bundler's alias table
+	// resolves is classified by its alias target (owned, vendored, or
+	// unproven when it escapes the classified roots), and a bare specifier no
+	// alias claims is benign only while an installed package answers for it.
+	const { aliases: resolveAliasTable, unresolved: resolveAliasUnresolved } = readBuildAliases();
 	problems.push(
 		...previewForwardingFindings(ownedSvelteFiles, {
 			modules: ownedModuleSources,
 			vendoredRoots: VENDORED_SOURCE_ROOTS,
 			vendoredFiles: VENDORED_SOURCE_FILES,
+			resolveAliases: resolveAliasTable,
+			aliasUnresolved: resolveAliasUnresolved.length > 0,
+			packageInstalled: bareSpecifierPackage,
 		})
 	);
 	return problems;

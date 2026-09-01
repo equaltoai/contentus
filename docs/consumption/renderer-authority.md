@@ -102,13 +102,26 @@ Nothing local that would paper over it. Specifically:
   Round-5 (R5-1) widened the value binding from the identifier to the VALUE:
   the reading follows the preview reference through declaration and assignment
   aliases, TypeScript wrapper nodes (`(preview)`, `preview!`, `preview as X`),
-  the same-reference runes `$state`/`$state.raw`, object-literal containers and
-  their property reads, array/map containers that receive the value, and local
-  functions that return it — a write to `.html` on any of them is a finding, a
-  mutation API (`Object.assign`, `Reflect.set`, `defineProperty`,
-  `defineProperties`) receiving any of them is a finding, and a CALL handed the
-  value is a finding unless the callee is a local function this reading proves
-  never writes to its parameters; an imported or unproven callee fails closed.
+  the same-reference runes `$state`/`$state.raw`, object-literal containers
+  and their property reads, array/map containers that receive the value, and
+  the results of local functions proven to return it. As round-5 through
+  round-7 shipped, that last carrier was narrower than it read: a function
+  counted as returning the value only when its return expression was ALREADY a
+  tracked name, so a relay taking the value as a parameter (`function relay(p)
+{ return p }`) was not a carrier — the parameter never joined the value
+  names, and a write to the relay's result laundered the identity clean. The
+  round-8 review planted exactly that (R8-2); the reading now binds a local
+  callee's parameters as value names whenever a call site hands the value in,
+  so a parameter relay IS a carrier, and declaration, inline, `await`, and
+  `.then` reads of the call's result bind the identity — sync, async,
+  generator, arrow, and multi-hop local call chains alike. `.then`/`.catch`
+  callbacks on a value-carrying expression bind their parameter the same way,
+  and `await`/`Promise.resolve(<value>)` are read as same-reference wrappers.
+  A write to `.html` on any of these is a finding, a mutation API
+  (`Object.assign`, `Reflect.set`, `defineProperty`, `defineProperties`)
+  receiving any of them is a finding, and a CALL handed the value is a finding
+  unless the callee is a local function this reading proves never writes to
+  its parameters; an imported or unproven callee fails closed.
   Dynamic routes fail closed too: a `svelte:component` in a file that reaches
   PreviewBody, or any dynamic `import('…PreviewBody.svelte')` in owned source,
   cannot be statically proven direct, and the canonical file with no static
@@ -179,10 +192,16 @@ aliases feed the same resolution; and the canonical file's MARKUP gets the
 same PreviewBody-name scan its script always had. **R7-2** derives the
 executable source universe from reachability instead of the `src/` walk: an
 executable module outside the classified owned/vendored roots that owned
-code or a build entry loads — static or dynamic import, re-export, glob,
-relative alias, root-relative path, query-suffixed specifier, case variant,
-or symlink — is a finding, followed hop by hop, with dependencies, generated
-output, and the governance tree left to their existing controls. **R7-3**
+code or a build entry loads — by the route spellings the round-7 gate
+modeled, static or dynamic import, re-export, string-literal glob, relative
+alias, root-relative path, query-suffixed specifier, case variant, or
+symlink — is a finding, followed hop by hop, with dependencies, generated
+output, and the governance tree left to their existing controls. That list
+was the round-7 model, not an exhaustive route set: the round-8 review
+planted two routes it did not cover — the bundler's `resolve.alias` table
+and the template-literal/array glob spellings — and round 8 adds them (with
+the value-path relay laundering, R8-2, described in the round-5 paragraph
+above). **R7-3**
 follows the preview identity into containers populated AFTER declaration
 (`stash.body = preview; stash.body.html = …`), through identity-carrying
 collection transforms (`map`/`filter`/`find`/`reduce` and friends, failing
@@ -197,11 +216,34 @@ binding (`const m = host.insertAdjacentHTML; const inj = m.bind(host);
   inj(…)`), computed `Object.assign` keys folded through constant strings with
 unresolved computed keys failing closed, `Reflect.apply` and
 `Reflect.construct` dispatch, and the Sanitizer-API spellings `setHTML` and
-`setHTMLUnsafe` beside `setHTMLUnchecked`. What this gate is, stays stated:
-a static analysis over the owned module graph that proves the shapes it
-models and fails closed on the shapes it cannot resolve — it is not a
-dynamic guarantee, and a future shape that defeats it is a probe to add, not
-a prose correction.
+`setHTMLUnsafe` beside `setHTMLUnchecked`.
+
+Round-8 (R8-1/R8-2/R8-3) closed the shapes the round-8 adversarial review
+planted against that state, and this note again records only what the gate
+proves. **R8-1** reads the bundler's `resolve.alias` table from the governed
+root modules (`vite.config.ts`, `svelte.config.js`) with the same parser
+reading everything else: the array spelling of `{ find, replacement }`
+entries, the object spelling, shorthand and identifier-bound tables,
+`.map`-generated entry runs, string and regex `find`, and replacements
+folded through constant strings, templates, `path.resolve(root, …)`, and the
+config's own root binding. Alias-resolved specifiers join the executable
+source universe and the cross-file component-callee resolution exactly like
+spelled routes, so an alias whose target sits outside the classified roots
+is classified and scanned as the reachability route it is, and an alias into
+the owned or vendored roots stays clean. The fold is bounded and fails
+closed: an alias entry it cannot read, a replacement it cannot place inside
+the repository, and a bare specifier that matches no alias and no installed
+package are findings rather than benign, while Node builtins and installed
+packages stay benign. **R8-2** is the value-path closure described in the
+round-5 paragraph above. **R8-3** collects every `import.meta.glob` argument
+shape the bundler accepts — a plain string, a no-substitution template
+literal, and an array whose elements are strings or no-substitution template
+literals — and fails closed on any other argument or array element, since a
+glob the scan cannot enumerate could load any module. What this gate is,
+stays stated: a static analysis over the owned module graph that proves the
+shapes it models and fails closed on the shapes it cannot resolve — it is
+not a dynamic guarantee, and a future shape that defeats it is a probe to
+add, not a prose correction.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as

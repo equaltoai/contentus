@@ -2458,6 +2458,10 @@ function previewValuePathFindings(file, sourceFile) {
 	const holdsValue = (expr) => {
 		if (!expr) return false;
 		const inner = unwrapValueNode(expr);
+		// R8-2: `await` resolves to the awaited expression's fulfillment value —
+		// `await relayAsync(preview)` IS the reference the relay returns, so the
+		// identity survives the await exactly as it survives the call.
+		if (ts.isAwaitExpression(inner)) return holdsValue(inner.expression);
 		if (ts.isIdentifier(inner)) return valueNames.has(inner.text);
 		if (ts.isPropertyAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
 			const props = containerPaths.get(inner.expression.text);
@@ -2484,6 +2488,17 @@ function previewValuePathFindings(file, sourceFile) {
 			if (rune) return holdsValue(rune);
 			if (ts.isIdentifier(inner.expression) && previewReturning.has(inner.expression.text))
 				return true;
+			// R8-2: `Promise.resolve(<value>)` fulfills with the value itself —
+			// the expression carries the reference exactly as its argument does,
+			// which is what lets a `.then` on it bind the callback's parameter.
+			if (
+				ts.isPropertyAccessExpression(inner.expression) &&
+				ts.isIdentifier(inner.expression.expression) &&
+				inner.expression.expression.text === 'Promise' &&
+				inner.expression.name.text === 'resolve' &&
+				inner.arguments.length === 1
+			)
+				return holdsValue(inner.arguments[0]);
 			if (
 				ts.isPropertyAccessExpression(inner.expression) &&
 				ts.isIdentifier(inner.expression.expression) &&
@@ -2778,6 +2793,64 @@ function previewValuePathFindings(file, sourceFile) {
 			if (!param) return;
 			for (const name of bindingNames(param.name)) {
 				if (addValueName(name)) changed = true;
+			}
+		});
+
+		// R8-2: `.then` and `.catch` on a value-carrying expression hand the
+		// reference to the callback's first parameter — `relayAsync(preview)
+		// .then((p) => { p.html = … })` writes on the resolved value exactly as
+		// a declaration read of the relay's result would. The receiver test
+		// reads through awaits, preview-returning calls, and `Promise.resolve`,
+		// so every promise wrapper of the reference is covered by the same
+		// binding the direct spelling gets.
+		eachNode(sourceFile, (node) => {
+			if (!ts.isCallExpression(node)) return;
+			const callee = propertyName(node.expression);
+			if (!callee || callee.computed) return;
+			if (callee.name !== 'then' && callee.name !== 'catch') return;
+			if (!holdsValue(callee.object)) return;
+			const callback = node.arguments[0];
+			if (!callback || !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) return;
+			const param = callback.parameters[0];
+			if (!param) return;
+			for (const name of bindingNames(param.name)) {
+				if (addValueName(name)) changed = true;
+			}
+		});
+
+		// R8-2: CALL-SITE PARAMETER BINDING. When a call or `new` hands a
+		// value-carrying argument to a LOCAL function, the callee's parameter
+		// at that position holds the reference — it joins the value names, so a
+		// `return p` marks the callee preview-returning, a write to `p.html`
+		// inside the callee is caught by the write scan, and multi-hop chains
+		// propagate one hop per fixed-point pass. A rest parameter receives any
+		// argument from its position on; a destructured parameter's leaves are
+		// references INTO the value and bind conservatively. Callees this
+		// reading cannot resolve stay in the call scan's fail-closed branch.
+		eachNode(sourceFile, (node) => {
+			if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
+			const args = node.arguments ?? [];
+			if (!args.some((argument) => holdsValue(argument))) return;
+			const calleeExpr = unwrapValueNode(node.expression);
+			if (!ts.isIdentifier(calleeExpr)) return;
+			const infos = functions.get(calleeExpr.text);
+			if (!infos) return;
+			for (const { node: fnNode, paramNames } of infos) {
+				// `paramNames === null` is the unproven inherited constructor;
+				// the call scan already fails closed on it, and no local parameter
+				// exists to bind.
+				if (paramNames === null) continue;
+				const params = fnNode.parameters ?? [];
+				for (let index = 0; index < params.length; index += 1) {
+					const param = params[index];
+					const carries = param.dotDotDotToken
+						? args.slice(index).some((argument) => holdsValue(argument))
+						: args[index] !== undefined && holdsValue(args[index]);
+					if (!carries) continue;
+					for (const name of bindingNames(param.name)) {
+						if (addValueName(name)) changed = true;
+					}
+				}
 			}
 		});
 
@@ -3831,6 +3904,17 @@ export function previewForwardingFindings(files, options = {}) {
 	const modules = options.modules ?? files;
 	const vendoredRoots = options.vendoredRoots ?? [];
 	const vendoredFiles = new Set(options.vendoredFiles ?? []);
+	// R8-1: the build's `resolve.alias` table, parsed from the governed root
+	// modules by the audit and handed in normalized to repository-relative
+	// replacement paths (a null replacement is an entry the scan matched but
+	// cannot follow — outside the repository or unreadable). `aliasUnresolved`
+	// says at least one alias ENTRY could not be read at all, in which case any
+	// bare specifier could be its target. `packageInstalled` answers whether a
+	// bare specifier an alias does not claim is answered for by an installed
+	// package — one that is not is a route no static read can prove.
+	const resolveAliases = options.resolveAliases ?? [];
+	const aliasUnresolved = options.aliasUnresolved === true;
+	const packageInstalled = options.packageInstalled ?? (() => true);
 	const isVendoredPath = (path) =>
 		vendoredFiles.has(path) ||
 		vendoredRoots.some((root) => path === root || path.startsWith(`${root}/`));
@@ -4339,6 +4423,40 @@ export function previewForwardingFindings(files, options = {}) {
 		return null;
 	};
 
+	/**
+	 * R8-1: classify a BARE specifier — one `$lib`/relative resolution declined.
+	 * The build's `resolve.alias` table is read FIRST, exactly as the bundler
+	 * reads it: a matched alias routes the specifier to its replacement, judged
+	 * like any spelled path (owned, vendored, or unproven when it escapes the
+	 * classified roots or the scan cannot follow it). A specifier no alias
+	 * claims is a package ONLY when an installed package answers for it and no
+	 * unreadable alias entry could capture the name; otherwise the route cannot
+	 * be statically proven and fails closed.
+	 */
+	const classifyBareSpecifier = (specifier, importedName) => {
+		const aliased = resolveAliasedSpecifier(specifier, resolveAliases);
+		if (aliased !== null) {
+			if (aliased.kind === 'unproven') return { kind: 'unproven' };
+			const path = aliased.path;
+			const withExt = files.has(path)
+				? path
+				: files.has(`${path}.svelte`)
+					? `${path}.svelte`
+					: null;
+			if (withExt) return { kind: 'owned', path: withExt };
+			if (isVendoredPath(path)) return { kind: 'external' };
+			if (path.startsWith('src/') || path.startsWith('scripts/')) {
+				const traced = traceBarrel(path, importedName, new Set(), 0);
+				if (traced) return { kind: 'owned', path: traced };
+			}
+			// The alias routes OUTSIDE the classified roots — the universe
+			// check's territory. It can never be a trusted owned component.
+			return { kind: 'unproven' };
+		}
+		if (aliasUnresolved) return { kind: 'unproven' };
+		return packageInstalled(specifier) ? { kind: 'external' } : { kind: 'unproven' };
+	};
+
 	const resolveSimpleName = (name, flow) => {
 		const entry = flow.imports.get(name);
 		if (entry !== undefined) {
@@ -4346,11 +4464,12 @@ export function previewForwardingFindings(files, options = {}) {
 			// component; its members are judged at the member site as unproven.
 			if (entry.importedName === '*') {
 				const resolved = resolveOwnedSpecifier(entry.specifier, flow.fromPath);
-				if (resolved === null || isVendoredPath(resolved)) return { kind: 'external' };
+				if (resolved === null) return classifyBareSpecifier(entry.specifier, entry.importedName);
+				if (isVendoredPath(resolved)) return { kind: 'external' };
 				return { kind: 'owned-namespace', specifier: entry.specifier };
 			}
 			const resolved = resolveOwnedSpecifier(entry.specifier, flow.fromPath);
-			if (resolved === null) return { kind: 'external' };
+			if (resolved === null) return classifyBareSpecifier(entry.specifier, entry.importedName);
 			const withExt = files.has(resolved)
 				? resolved
 				: files.has(`${resolved}.svelte`)
@@ -4705,4 +4824,369 @@ export function previewForwardingFindings(files, options = {}) {
 	}
 
 	return findings;
+}
+
+/* -------------------------------------------------------------------------
+ * R8-1 — the build's `resolve.alias` table, read from the governed root
+ * modules (round-8 C-1).
+ *
+ * The round-8 review planted a second preview route the round-7 universe
+ * check could not see: a root-level shim that imports PreviewBody and
+ * rewrites `preview.html`, loaded through an owned file's `import AliasShim
+ * from '@shim'`, with the ONLY thing naming `@shim` sitting in the bundler's
+ * alias table in `vite.config.ts` — a governed root module the gate already
+ * read for imports yet never parsed for aliases. Every other route spelling
+ * (static and dynamic import, re-export, glob, relative alias, root-relative
+ * path, query suffix, case variant, symlink) was followed; the bundler's own
+ * alias table was not, and a bare specifier nobody resolved classified
+ * benign by default.
+ *
+ * The reading here is the same discipline the rest of this module runs: the
+ * TypeScript parser decides what is an alias entry, a foldable replacement,
+ * or a hole — and a shape the fold cannot read is UNRESOLVED, which the
+ * consumers turn into a finding rather than a clean scan.
+ * ---------------------------------------------------------------------- */
+
+/** The paths a `path.resolve(…)` argument list folds to, or null. */
+function foldResolveArguments(args, fold) {
+	const folded = [];
+	for (const argument of args) {
+		const value = fold(argument);
+		if (value === null) return null;
+		folded.push(value);
+	}
+	if (folded.length === 0) return null;
+	if (folded[0].startsWith('/')) return folded.join('/').replace(/\/{2,}/g, '/');
+	const segments = [];
+	for (const part of folded) {
+		for (const segment of part.split('/')) {
+			if (segment === '' || segment === '.') continue;
+			if (segment === '..') {
+				segments.pop();
+				continue;
+			}
+			segments.push(segment);
+		}
+	}
+	return segments.length === 0 ? '.' : `./${segments.join('/')}`;
+}
+
+/**
+ * The `resolve.alias` entries a build-config source declares. Returns
+ * `{ aliases, unresolved }`: each alias is `{ find: string | RegExp,
+ * replacement: string }` with the replacement folded RELATIVE TO THE CONFIG
+ * FILE (`./…` for paths built from the config's own directory; a literal
+ * string passes through as written), and each unresolved entry is a short
+ * text snippet of a shape the fold could not read. The governed root modules
+ * sit at the repository root, so the audit strips the `./` to normalize.
+ *
+ * Covered spellings: an array of `{ find, replacement }` objects, an object
+ * mapping find to replacement, shorthand and identifier-bound tables, string
+ * and regex `find`, string/template/`path.resolve(root, …)` replacements,
+ * and entries generated by spreading an array-literal `.map`. Anything else
+ * — a computed find, an unresolvable replacement, a regex built by a call —
+ * lands in `unresolved`, and the consumers fail closed on it.
+ */
+export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = false } = {}) {
+	const sourceFile = parseTypeScript(source, { file, jsx });
+	const aliases = [];
+	const unresolved = [];
+
+	// The variable declarations the fold can chase, one hop at a time.
+	const declarations = new Map();
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+			if (!declarations.has(node.name.text)) declarations.set(node.name.text, node.initializer);
+		}
+	});
+
+	// The names `node:path` and `node:url` answer for, so a folded
+	// `path.resolve(root, …)` is really the path module's and a folded root is
+	// really `fileURLToPath(new URL('.', import.meta.url))` — a rebound name
+	// stops the fold instead of feeding it a lie.
+	const pathNames = new Set();
+	const urlNames = new Set();
+	eachNode(sourceFile, (node) => {
+		if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) return;
+		const target = node.moduleSpecifier.text;
+		const clause = node.importClause;
+		if (target === 'node:path' || target === 'path') {
+			if (clause?.name) pathNames.add(clause.name.text);
+		}
+		if (target === 'node:url' || target === 'url') {
+			if (clause?.name) urlNames.add(clause.name.text);
+			if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+				for (const element of clause.namedBindings.elements)
+					if (element.name.text === 'fileURLToPath' && !element.propertyName)
+						urlNames.add(element.name.text);
+			}
+		}
+	});
+
+	/** The config's own directory: `fileURLToPath(new URL('.', import.meta.url))`. */
+	const isConfigRootExpression = (node) => {
+		if (!node) return false;
+		if (
+			!ts.isCallExpression(node) ||
+			!ts.isIdentifier(node.expression) ||
+			node.expression.text !== 'fileURLToPath' ||
+			!urlNames.has('fileURLToPath') ||
+			node.arguments.length !== 1 ||
+			!ts.isNewExpression(node.arguments[0]) ||
+			!ts.isIdentifier(node.arguments[0].expression) ||
+			node.arguments[0].expression.text !== 'URL' ||
+			!node.arguments[0].arguments ||
+			!ts.isStringLiteral(node.arguments[0].arguments[0]) ||
+			(node.arguments[0].arguments[0].text !== '.' && node.arguments[0].arguments[0].text !== './')
+		)
+			return false;
+		// `import.meta.url` reaches the parser as a PropertyAccess over the
+		// `import.meta` MetaProperty; a bare `import.meta` is admitted too.
+		const urlArgument = node.arguments[0].arguments[1];
+		return (
+			Boolean(urlArgument) &&
+			(ts.isMetaProperty(urlArgument) ||
+				(ts.isPropertyAccessExpression(urlArgument) &&
+					ts.isMetaProperty(urlArgument.expression) &&
+					urlArgument.name.text === 'url'))
+		);
+	};
+
+	/**
+	 * Fold an expression to the path string it names, or null. `.` names the
+	 * config's own directory. Depth-bounded, cycle-guarded, and conservative:
+	 * any node the fold does not model is null, which the caller records as an
+	 * unresolved entry.
+	 */
+	const fold = (node, locals, depth) => {
+		if (!node || depth > 8) return null;
+		if (ts.isParenthesizedExpression(node)) return fold(node.expression, locals, depth + 1);
+		if (ts.isStringLiteral(node)) return node.text;
+		if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+		if (ts.isTemplateExpression(node)) {
+			let text = node.head.text;
+			for (const span of node.templateSpans) {
+				const folded = fold(span.expression, locals, depth + 1);
+				if (folded === null) return null;
+				text += folded + span.literal.text;
+			}
+			return text;
+		}
+		if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+			const left = fold(node.left, locals, depth + 1);
+			const right = fold(node.right, locals, depth + 1);
+			if (left === null || right === null) return null;
+			return left + right;
+		}
+		if (ts.isIdentifier(node)) {
+			if (locals && locals.has(node.text)) return locals.get(node.text);
+			const initializer = declarations.get(node.text);
+			if (!initializer) return null;
+			if (isConfigRootExpression(initializer)) return '.';
+			return fold(initializer, locals, depth + 1);
+		}
+		if (isConfigRootExpression(node)) return '.';
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			node.expression.name.text === 'resolve' &&
+			ts.isIdentifier(node.expression.expression) &&
+			pathNames.has(node.expression.expression.text)
+		)
+			return foldResolveArguments(node.arguments, (argument) => fold(argument, locals, depth + 1));
+		return null;
+	};
+
+	/** Read one `{ find, replacement }` object, or null on any unreadable part. */
+	const readAliasEntry = (objectLiteral, locals) => {
+		let findNode = null;
+		let replacementNode = null;
+		for (const property of objectLiteral.properties) {
+			if (!ts.isPropertyAssignment(property)) return null;
+			let key = null;
+			if (ts.isIdentifier(property.name)) key = property.name.text;
+			else if (ts.isStringLiteral(property.name)) key = property.name.text;
+			else if (ts.isComputedPropertyName(property.name))
+				key = fold(property.name.expression, locals, 0);
+			if (key === null) return null;
+			if (key === 'find') findNode = property.initializer;
+			if (key === 'replacement') replacementNode = property.initializer;
+		}
+		if (!findNode || !replacementNode) return null;
+		let find;
+		if (ts.isRegularExpressionLiteral(findNode)) {
+			const text = findNode.text;
+			const lastSlash = text.lastIndexOf('/');
+			try {
+				find = new RegExp(text.slice(1, lastSlash), text.slice(lastSlash + 1));
+			} catch {
+				return null;
+			}
+		} else {
+			find = fold(findNode, locals, 0);
+			if (find === null) return null;
+		}
+		const replacement = fold(replacementNode, locals, 0);
+		if (replacement === null) return null;
+		return { find, replacement };
+	};
+
+	/** The elements of the ARRAY spelling, including `.map`-generated runs. */
+	const readAliasArray = (arrayLiteral, locals) => {
+		for (const element of arrayLiteral.elements) {
+			if (ts.isOmittedExpression(element)) continue;
+			if (ts.isObjectLiteralExpression(element)) {
+				const entry = readAliasEntry(element, locals);
+				if (entry) aliases.push(entry);
+				else unresolved.push(element.getText(sourceFile).slice(0, 80));
+				continue;
+			}
+			if (ts.isSpreadElement(element) || ts.isSpreadAssignment(element)) {
+				const expression = element.expression;
+				// `...names.map((name) => ({ find: name, replacement: … }))`
+				// over an array literal: bind the parameter to each element and
+				// read the generated entries one by one.
+				if (
+					ts.isCallExpression(expression) &&
+					ts.isPropertyAccessExpression(expression.expression) &&
+					expression.expression.name.text === 'map' &&
+					ts.isArrayLiteralExpression(expression.expression.expression) &&
+					expression.arguments.length === 1 &&
+					(ts.isArrowFunction(expression.arguments[0]) ||
+						ts.isFunctionExpression(expression.arguments[0])) &&
+					expression.arguments[0].parameters.length === 1 &&
+					ts.isIdentifier(expression.arguments[0].parameters[0].name)
+				) {
+					const callback = expression.arguments[0];
+					const parameterName = callback.parameters[0].name.text;
+					let bodyObject = null;
+					if (!ts.isBlock(callback.body)) bodyObject = unwrapValueNode(callback.body);
+					else {
+						const returns = [];
+						eachNode(callback.body, (node) => {
+							if (ts.isReturnStatement(node) && node.expression) returns.push(node.expression);
+						});
+						if (returns.length === 1) bodyObject = unwrapValueNode(returns[0]);
+					}
+					if (!bodyObject || !ts.isObjectLiteralExpression(bodyObject)) {
+						unresolved.push(element.getText(sourceFile).slice(0, 80));
+						continue;
+					}
+					for (const item of expression.expression.expression.elements) {
+						const folded = fold(item, locals, 0);
+						if (folded === null) {
+							unresolved.push(item.getText(sourceFile).slice(0, 80));
+							continue;
+						}
+						const entry = readAliasEntry(
+							bodyObject,
+							new Map([...(locals ?? []), [parameterName, folded]])
+						);
+						if (entry) aliases.push(entry);
+						else unresolved.push(bodyObject.getText(sourceFile).slice(0, 80));
+					}
+					continue;
+				}
+				unresolved.push(element.getText(sourceFile).slice(0, 80));
+				continue;
+			}
+			unresolved.push(element.getText(sourceFile).slice(0, 80));
+		}
+	};
+
+	/** The entries of the OBJECT spelling: every key is a find. */
+	const readAliasObject = (objectLiteral, locals) => {
+		for (const property of objectLiteral.properties) {
+			if (!ts.isPropertyAssignment(property)) {
+				unresolved.push(property.getText(sourceFile).slice(0, 80));
+				continue;
+			}
+			let key = null;
+			if (ts.isIdentifier(property.name)) key = property.name.text;
+			else if (ts.isStringLiteral(property.name)) key = property.name.text;
+			else if (ts.isComputedPropertyName(property.name))
+				key = fold(property.name.expression, locals, 0);
+			const replacement = key === null ? null : fold(property.initializer, locals, 0);
+			if (key === null || replacement === null) {
+				unresolved.push(property.getText(sourceFile).slice(0, 80));
+				continue;
+			}
+			aliases.push({ find: key, replacement });
+		}
+	};
+
+	let found = false;
+	eachNode(sourceFile, (node) => {
+		if (found) return;
+		let initializer = null;
+		if (
+			ts.isPropertyAssignment(node) &&
+			((ts.isIdentifier(node.name) && node.name.text === 'alias') ||
+				(ts.isStringLiteral(node.name) && node.name.text === 'alias'))
+		)
+			initializer = node.initializer;
+		else if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'alias')
+			initializer = declarations.get('alias') ?? null;
+		if (!initializer) return;
+		found = true;
+		// An identifier-bound table: chase the declaration one hop.
+		if (ts.isIdentifier(initializer)) {
+			const bound = declarations.get(initializer.text);
+			if (!bound) {
+				unresolved.push(initializer.text);
+				return;
+			}
+			initializer = bound;
+		}
+		if (ts.isArrayLiteralExpression(initializer)) readAliasArray(initializer, null);
+		else if (ts.isObjectLiteralExpression(initializer)) readAliasObject(initializer, null);
+		else unresolved.push(initializer.getText(sourceFile).slice(0, 80));
+	});
+
+	return { aliases, unresolved };
+}
+
+/**
+ * Resolve a specifier through a normalized alias table — the audit supplies
+ * entries whose replacements are repository-relative paths, or null for an
+ * entry the scan matched but cannot follow (outside the repository root or
+ * unreadable). Returns `{ kind: 'path', path }` when an entry routes the
+ * specifier, `{ kind: 'unproven' }` when a matched entry cannot be followed,
+ * and null when no entry matches. String finds follow the bundler's
+ * semantics: exact match, or a prefix followed by `/`; regex finds apply
+ * the bundler's own `specifier.replace(find, replacement)`.
+ */
+export function resolveAliasedSpecifier(specifier, resolveAliasEntries) {
+	for (const entry of resolveAliasEntries ?? []) {
+		if (entry.replacement === null || entry.replacement === undefined) {
+			// An entry the scan cannot follow: it captures the specifier if its
+			// find matches, and the route is unproven either way the consumer
+			// needs.
+			const matches =
+				entry.find instanceof RegExp
+					? entry.find.test(specifier)
+					: specifier === entry.find || specifier.startsWith(`${entry.find}/`);
+			if (matches) return { kind: 'unproven' };
+			continue;
+		}
+		if (entry.find instanceof RegExp) {
+			const flags = entry.find.flags.includes('g')
+				? entry.find.flags.replace('g', '')
+				: entry.find.flags;
+			const find = new RegExp(entry.find.source, flags);
+			if (!find.test(specifier)) continue;
+			try {
+				return { kind: 'path', path: specifier.replace(find, entry.replacement) };
+			} catch {
+				return { kind: 'unproven' };
+			}
+		}
+		if (specifier === entry.find) return { kind: 'path', path: entry.replacement };
+		if (specifier.startsWith(`${entry.find}/`))
+			return {
+				kind: 'path',
+				path: `${entry.replacement}${specifier.slice(entry.find.length)}`,
+			};
+	}
+	return null;
 }

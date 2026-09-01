@@ -2606,3 +2606,473 @@ test('benign descriptor keys, benign constructors, and safe reducers stay clean 
 		rmSync(join(repoRoot, R7_SINK_PROBE), { force: true });
 	}
 });
+
+/* ============================================================
+   Round 8 — R8-1: the bundler's resolve.alias route (C-1)
+   ============================================================
+
+   The round-8 attack planted a second preview route the round-7 universe
+   check could not see: a root-level shim that imports PreviewBody and
+   rewrites `preview.html`, loaded through an owned file's `import AliasShim
+   from '@shim'`, with the ONLY thing naming `@shim` sitting in the bundler's
+   alias table in `vite.config.ts`. The audit greened it AND the build shipped
+   it. The gate now parses `resolve.alias` from the governed root modules,
+   routes alias-resolved specifiers through the universe closure and the
+   component-callee resolution, and fails closed on an alias entry it cannot
+   read or a bare specifier no alias and no installed package answers for. */
+
+const VITE_CONFIG = 'vite.config.ts';
+const ALIAS_ANCHOR = "{ find: '$lib', replacement: path.resolve(root, 'src/lib') },";
+
+/** Plant a mutated vite.config.ts, run the body, restore the original. */
+function withPlantedViteConfig(mutate, body) {
+	// The config is build input the audit now parses; the same lock discipline
+	// as the workspace plants keeps the mutation window private to this test.
+	withSourceLock(() => {
+		const original = readFileSync(join(repoRoot, VITE_CONFIG), 'utf8');
+		writeFileSync(join(repoRoot, VITE_CONFIG), mutate(original));
+		try {
+			body();
+		} finally {
+			writeFileSync(join(repoRoot, VITE_CONFIG), original);
+		}
+	});
+}
+
+/** The round-8 C-1 shim: imports PreviewBody, rewrites html, renders. */
+function r8ShimSource(marker) {
+	return (
+		'<script lang="ts">\n' +
+		"\timport PreviewBody from '$lib/review/PreviewBody.svelte';\n" +
+		"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+		'\n' +
+		'\tinterface Props {\n' +
+		'\t\tpreview: DraftPreview;\n' +
+		'\t}\n' +
+		'\tlet { preview }: Props = $props();\n' +
+		`\tconst shown: DraftPreview = { ...preview, html: (preview.html ?? '') + '<img src=x data-plant=${marker}>' };\n` +
+		'</script>\n' +
+		'\n' +
+		'<PreviewBody preview={shown} />\n'
+	);
+}
+
+test('a root shim loaded through a resolve alias fails the audit (R8-1 exact plant)', () => {
+	// THE ROUND-8 C-1 SHAPE: root shim + owned route importing `@shim` + the
+	// alias entry in vite.config.ts naming the target. At c2a0d7f this audited
+	// clean AND bundled; the gate must now fail it on BOTH readings — the
+	// universe names the outsider and its alias route, and the value-path
+	// reading refuses a preview-flowing prop into a callee only an alias
+	// resolves.
+	const shim = '__r8_alias_shim__.svelte';
+	const route = 'src/lib/review/__r8_alias_route__.svelte';
+	plant(shim, r8ShimSource('r8c1'));
+	plant(
+		route,
+		'<script lang="ts">\n' +
+			"\timport AliasShim from '@shim';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tpreview: DraftPreview;\n' +
+			'\t}\n' +
+			'\tlet { preview }: Props = $props();\n' +
+			'</script>\n' +
+			'\n' +
+			'<AliasShim {preview} />\n'
+	);
+	try {
+		withPlantedViteConfig(
+			(source) => {
+				if (!source.includes(ALIAS_ANCHOR))
+					throw new Error('the alias anchor moved — re-anchor the R8-1 probes');
+				return source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@shim', replacement: path.resolve(root, '__r8_alias_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the alias route must fail the audit:\n${output}`);
+				assert.match(
+					output,
+					/\[executable source universe\] __r8_alias_shim__\.svelte is executable source outside the classified owned\/vendored roots/,
+					`the universe check must name the aliased outsider:\n${output}`
+				);
+				assert.match(
+					output,
+					/src\/lib\/review\/__r8_alias_route__\.svelte loads it through a resolve alias \("@shim"\)/,
+					`the universe check must name the alias route:\n${output}`
+				);
+				assert.match(
+					output,
+					/\[preview value path\] src\/lib\/review\/__r8_alias_route__\.svelte passes `preview` through the preview prop of `AliasShim`/,
+					`the value-path reading must refuse the alias-resolved callee:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('regex-find aliases and unreadable alias entries fail the audit (R8-1 adjacent)', () => {
+	const shim = '__r8_alias_shim__.svelte';
+	const route = 'src/lib/review/__r8_alias_route__.svelte';
+	plant(shim, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+	plant(
+		route,
+		'<script lang="ts">\n' +
+			"\timport Shim from '@r8rx/anything';\n" +
+			'\tconst s = Shim;\n' +
+			'</script>\n'
+	);
+	try {
+		// A whole-specifier regex find routing the import to the root shim.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: /^@r8rx\\/.*$/, replacement: path.resolve(root, '__r8_alias_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `a regex-find alias route must fail:\n${output}`);
+				assert.match(
+					output,
+					/__r8_alias_shim__\.svelte is executable source outside the classified owned\/vendored roots/,
+					`the regex alias must reach the outsider:\n${output}`
+				);
+			}
+		);
+
+		// An alias entry the fold cannot read fails closed on its own.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@unreadable', replacement: computeAliasTarget() },\n\t\t\t\t\t" + ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an unreadable alias entry must fail:\n${output}`);
+				assert.match(
+					output,
+					/a resolve\.alias entry the scan cannot read could route any specifier to any module/,
+					`the unreadable entry must be named:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('the object alias spelling and bare specifiers without packages fail (R8-1 adjacent)', () => {
+	const shim = '__r8_alias_shim__.svelte';
+	const route = 'src/lib/review/__r8_alias_route__.svelte';
+	plant(shim, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+	try {
+		// The OBJECT spelling: rewrite the whole alias table as a find->target
+		// mapping. The array's exact byte span is located at run time so the
+		// probe follows the config's formatting rather than assuming it.
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				"\timport Shim from '@r8obj';\n" +
+				'\tconst s = Shim;\n' +
+				'</script>\n'
+		);
+		withPlantedViteConfig(
+			(source) => {
+				const start = source.indexOf('alias: [');
+				const end = source.indexOf('\n\t\t\t],', start);
+				if (start === -1 || end === -1)
+					throw new Error('the alias table moved — re-anchor the R8-1 object probe');
+				return (
+					source.slice(0, start) +
+					"alias: { '@r8obj': path.resolve(root, '__r8_alias_shim__.svelte') }," +
+					source.slice(end + '\n\t\t\t],'.length)
+				);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the object-spelling alias route must fail:\n${output}`);
+				assert.match(
+					output,
+					/__r8_alias_shim__\.svelte is executable source outside the classified owned\/vendored roots/,
+					`the object alias must reach the outsider:\n${output}`
+				);
+			}
+		);
+		rmSync(join(repoRoot, route), { force: true });
+
+		// A bare specifier no alias claims and no installed package answers for
+		// is a route no static read can prove.
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				"\timport { x } from '@nonexistent-r8-package';\n" +
+				'\tconst s = x;\n' +
+				'</script>\n'
+		);
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `a bare specifier with no alias and no package must fail:\n${output}`);
+		assert.match(
+			output,
+			/loads "@nonexistent-r8-package" — the specifier matches no resolve alias and no installed package/,
+			`the fail-closed bare-specifier rule must name it:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('aliases into the classified roots and installed packages stay clean (R8-1 positives)', () => {
+	const route = 'src/lib/review/__r8_alias_route__.svelte';
+	plant(
+		route,
+		'<script lang="ts">\n' +
+			"\timport { absentRenderer } from '@r8stub';\n" +
+			"\timport { writable } from 'svelte/store';\n" +
+			'\tconst s = `${absentRenderer} ${writable}`;\n' +
+			'</script>\n'
+	);
+	try {
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@r8stub', replacement: path.resolve(root, 'src/lib/build/absent-renderer-module.ts') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(
+					status,
+					0,
+					`an alias into the owned roots and an installed package must stay clean:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+/* ============================================================
+   Round 8 — R8-2: local-function return laundering (H-1)
+   ============================================================
+
+   At c2a0d7f a local relay receiving the preview as a parameter laundered
+   the identity clean in five shapes: the parameter never joined the value
+   names, so `return p` never marked the callee preview-returning and no read
+   of the result ever bound. The gate now binds callee parameters at call
+   sites that hand the value in, so every shape below fails. */
+
+test('local relays laundering the preview fail the audit (R8-2 exact plants)', () => {
+	const shapes = [
+		[
+			'sync declaration read',
+			'\tfunction relaySync(p: DraftPreview): DraftPreview { return p; }\n' +
+				"\tif (preview) { const v = relaySync(preview); v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'sync inline read',
+			'\tfunction relaySync(p: DraftPreview): DraftPreview { return p; }\n' +
+				"\tif (preview) relaySync(preview).html = '<img src=x>';\n",
+			/writes to \.html on a value returned by a preview-returning helper/,
+		],
+		[
+			'async await declaration read',
+			'\tasync function relayAsync(p: DraftPreview): Promise<DraftPreview> { return p; }\n' +
+				"\tif (preview) { const w = await relayAsync(preview); w.html = '<img src=x>'; }\n",
+			/writes to w\.html/,
+		],
+		[
+			'async inline await read',
+			'\tasync function relayAsync(p: DraftPreview): Promise<DraftPreview> { return p; }\n' +
+				"\tif (preview) (await relayAsync(preview)).html = '<img src=x>';\n",
+			/writes to \.html on/,
+		],
+		[
+			'.then callback on the relay result',
+			'\tasync function relayAsync(p: DraftPreview): Promise<DraftPreview> { return p; }\n' +
+				"\tif (preview) relayAsync(preview).then((p) => { p.html = '<img src=x>'; });\n",
+			/writes to p\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} relay must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} relay must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} relay must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('multi-hop chains and generator relays fail the audit (R8-2 adjacent)', () => {
+	const shapes = [
+		[
+			'multi-hop local chain',
+			'\tfunction hopA(p: DraftPreview): DraftPreview { return hopB(p); }\n' +
+				'\tfunction hopB(q: DraftPreview): DraftPreview { return q; }\n' +
+				"\tif (preview) { const v = hopA(preview); v.html = '<img src=x>'; }\n",
+		],
+		[
+			'generator relay',
+			'\tfunction* genRelay(p: DraftPreview) { yield p; }\n' +
+				"\tif (preview) for (const g of genRelay(preview)) g.html = '<img src=x>';\n",
+		],
+		[
+			'.then on Promise.resolve stays caught (round-7 control)',
+			"\tif (preview) Promise.resolve(preview).then((p) => { p.html = '<img src=x>'; });\n",
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} shape must be a value-path finding:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('read-only local helpers stay clean (R8-2 positives)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tfunction htmlLength(p: DraftPreview): number { return p.html.length; }\n' +
+					'\tfunction double(n: number): number { return n * 2; }\n' +
+					'\tconst planted = double(2);\n' +
+					'\tif (preview) console.log(htmlLength(preview), planted);\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`read-only helpers over the preview and plain locals must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   Round 8 — R8-3: import.meta.glob template and array spellings (H-2)
+   ============================================================
+
+   At c2a0d7f the glob reading collected only string-literal first
+   arguments; the bundler also accepts a no-substitution template literal and
+   an array of patterns, and both spellings of the committed R7-2 glob plant
+   sailed through. Every position is collected now, and any non-literal
+   position fails closed. */
+
+test('template-literal and array glob spellings reaching an outsider fail (R8-3 exact plants)', () => {
+	const shim = '__r8_glob_shim__.svelte';
+	const route = 'src/lib/review/__r8_glob_route__.svelte';
+	plant(shim, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+	const plantRoute = (script) => plant(route, `<script lang="ts">\n${script}</script>\n`);
+	try {
+		plantRoute('\tconst modules = import.meta.glob(`../../../__r8_glob_shim__.svelte`);\n');
+		let result = runAudit();
+		assert.equal(result.status, 1, `a template-literal glob must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/globs it \("\.\.\/\.\.\/\.\.\/__r8_glob_shim__\.svelte"\)/,
+			`the template-literal pattern must be matched:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+
+		plantRoute("\tconst modules = import.meta.glob(['../../../__r8_glob_shim__.svelte']);\n");
+		result = runAudit();
+		assert.equal(result.status, 1, `an array glob must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/globs it \("\.\.\/\.\.\/\.\.\/__r8_glob_shim__\.svelte"\)/,
+			`the array element pattern must be matched:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+
+		// A mixed array: one literal, one identifier the scan cannot enumerate.
+		plantRoute(
+			"\tconst other: string = 'x';\n" +
+				"\tconst modules = import.meta.glob(['../../../__r8_glob_shim__.svelte', other]);\n"
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `a mixed-literal array glob must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/an argument no static read can enumerate/,
+			`the non-literal element must fail closed:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+
+		// A computed first argument: no static read can enumerate it.
+		plantRoute(
+			"\tconst pattern = '../../../__r8_glob_shim__.svelte';\n" +
+				'\tconst modules = import.meta.glob(pattern);\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `a computed glob argument must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/an argument no static read can enumerate/,
+			`the computed argument must fail closed:\n${result.output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('globs that stay inside the classified roots stay clean (R8-3 positives)', () => {
+	const route = 'src/lib/review/__r8_glob_route__.svelte';
+	const plantRoute = (script) => plant(route, `<script lang="ts">\n${script}</script>\n`);
+	try {
+		plantRoute('\tconst modules = import.meta.glob(`./**/*.svelte`);\n');
+		let result = runAudit();
+		assert.equal(
+			result.status,
+			0,
+			`a template-literal glob inside the owned roots must stay clean:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+
+		plantRoute("\tconst modules = import.meta.glob(['./**/*.svelte', './sub/**/*.svelte']);\n");
+		result = runAudit();
+		assert.equal(
+			result.status,
+			0,
+			`an array glob inside the owned roots must stay clean:\n${result.output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('the tree audits clean after every round-8 plant is uprooted', () => {
+	const { status, output } = runAudit();
+	assert.equal(status, 0, output);
+});
