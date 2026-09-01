@@ -211,6 +211,12 @@
         "reason": "Runs the system `git` binary to list the tracked files under src/, NUL-separated and rooted with `-C`, which is what makes the swept set what the repository CARRIES rather than what is on the disk beside a concurrent probe planting fixtures in src/lib/compose. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system's, outside any repo-local hash boundary."
       },
       {
+        "file": "scripts/audit-renderer-authority.mjs",
+        "line": 145,
+        "expression": "import { builtinModules } from 'node:module';",
+        "reason": "Imports ONLY `builtinModules`, the read-only list of Node's own module names, which the round-8 executable-source-universe scan uses to exempt Node builtins from the fail-closed bare-specifier rule — a Node builtin is never an executable outsider. `node:module` is disclosed because it CAN hand out loaders (`createRequire`, `registerHooks`); this site uses none of them, only the name list, and the file itself carries a pinned SHA-256 in this closure."
+      },
+      {
         "file": "scripts/audit-seam-graph.mjs",
         "line": 856,
         "expression": "execFileSync",
