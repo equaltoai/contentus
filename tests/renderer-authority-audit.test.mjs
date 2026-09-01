@@ -986,3 +986,482 @@ test('round-4 alternate sink laundering forms fail the production audit (F2)', (
 		}
 	}
 });
+
+/* ============================================================
+   R5-1 — the authorized VALUE, bound across aliases, helpers,
+   wrappers, and dynamic routes
+   ============================================================ */
+
+/**
+ * The round-5 review planted six shapes that left the R2-1 reading green
+ * while lesser's bytes were still replaced before the sink: a declaration
+ * alias writing `p1.html`, a cross-file helper (`manglePreview(preview)`), a
+ * local helper whose parameter is written, parenthesized/non-null receivers,
+ * an assignment alias laundered into `Object.assign`, and a compile-valid
+ * DYNAMIC route with no static import at all. Each is planted over the real
+ * canonical file and must fail the real audit; the attack shapes — closures,
+ * helper returns, arrays/maps, runes, destructuring via a holder — are
+ * planted beside them; and the paired positives (a read-only helper, an
+ * optional-chained read) must stay clean.
+ */
+const PREVIEW_IMPORT = "import PreviewBody from '$lib/review/PreviewBody.svelte';\n";
+
+test('a declaration alias writing p1.html fails the audit (R5-1 #1)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR + "\tconst p1 = preview; if (p1) p1.html = '<img src=x onerror=1>';\n"
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the declaration-alias write must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('writes to p1.html'),
+				`check 8 must follow the alias to the write:\n${output}`
+			);
+		}
+	);
+});
+
+test('a call of the value into an imported helper fails the audit (R5-1 #2)', () => {
+	// The helper module is PLANTED on disk beside the workspace mutation, so the
+	// probe stays build-valid while it is live — an import from a module that
+	// does not exist would break any build running concurrently with this test.
+	const helper = `${OWNED_DIR}/__r5_mangle_helper__.ts`;
+	plant(
+		helper,
+		'export function manglePreview(p: { html: string } | null) {\n' +
+			"\tif (p) p.html = '<img onerror=1>';\n" +
+			'}\n'
+	);
+	try {
+		withPlantedWorkspace(
+			(source) =>
+				source.replace(
+					PREVIEW_STATE_ANCHOR,
+					PREVIEW_STATE_ANCHOR +
+						`\timport { manglePreview } from '$lib/compose/__r5_mangle_helper__';\n` +
+						'\tmanglePreview(preview);\n'
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the cross-file helper call must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('passes the preview value to manglePreview(…)'),
+					`check 8 must fail closed on the imported callee:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, helper), { force: true });
+	}
+});
+
+test('a local helper whose parameter is written fails the audit (R5-1 #3)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tfunction applyPreviewPatch(p: DraftPreview) {\n' +
+					"\t\tif (p) p.html = '<img onerror=1>';\n" +
+					'\t}\n' +
+					'\tapplyPreviewPatch(preview);\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the local helper call must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('whose parameter is written'),
+				`check 8 must analyze the helper's own parameter writes:\n${output}`
+			);
+		}
+	);
+});
+
+test('wrapper-node receivers on the preview write fail the audit (R5-1 #4)', () => {
+	for (const write of [
+		"(preview).html = '<img onerror=1>';",
+		"preview!.html = '<img onerror=1>';",
+		"(preview as DraftPreview).html = '<img onerror=1>';",
+	]) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + `\t${write}\n`),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `${write} must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('writes to preview.html'),
+					`check 8 must unwrap the wrapper node:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('an assignment alias laundered into Object.assign fails the audit (R5-1 #5)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tlet forwarded; forwarded = preview;\n' +
+					"\tObject.assign(forwarded, { html: '<img onerror=1>' });\n"
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the assignment-alias mutation must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('mutates forwarded through Object.assign'),
+				`check 8 must follow the assignment form of the alias:\n${output}`
+			);
+		}
+	);
+});
+
+test('a dynamic import plus svelte:component route fails the audit with no static import (R5-1 #6)', () => {
+	// The plant: drop the canonical static import, load the sink module with a
+	// dynamic import, and invoke it through <svelte:component> — a route no
+	// static reading could previously prove, and one that left the check silent.
+	// The `.then` spelling (rather than a top-level `await import(…)`) keeps the
+	// plant BUILD-valid, so this probe cannot break a concurrent build the way
+	// the finding's literal `await` spelling would (Svelte rejects top-level
+	// await in a component); the audit's reading catches the dynamic specifier
+	// and the dynamic component route either way.
+	withPlantedWorkspace(
+		(source) =>
+			source
+				.replace(PREVIEW_IMPORT, '')
+				.replace(
+					PREVIEW_STATE_ANCHOR,
+					"const previewSink = import('$lib/review/PreviewBody.svelte').then((m) => m.default);\n" +
+						PREVIEW_STATE_ANCHOR
+				)
+				.replace(PREVIEW_INVOCATION, '<svelte:component this={previewSink} {preview} />'),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the dynamic route must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('dynamically imports the PreviewBody module'),
+				`check 8 must not go silent without a static import:\n${output}`
+			);
+			assert.ok(
+				output.includes('svelte:component'),
+				`check 8 must reject the dynamic component route:\n${output}`
+			);
+		}
+	);
+});
+
+test('a closure returning the preview and a write through the returned value fail (R5-1 helper returns)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst getP = () => preview;\n' +
+					"\tconst p2 = getP();\n\tp2.html = '<img onerror=1>';\n"
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the helper-return write must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('writes to p2.html'),
+				`check 8 must bind a preview-returning helper's result:\n${output}`
+			);
+		}
+	);
+});
+
+test('a holder-object destructure laundering the preview fails (R5-1 destructuring)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst holder = { preview };\n' +
+					"\tconst p3 = holder.preview;\n\tp3.html = '<img onerror=1>';\n"
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the holder destructure must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('writes to p3.html'),
+				`check 8 must follow the value through the container property:\n${output}`
+			);
+		}
+	);
+});
+
+test('an array-mediated write fails (R5-1 arrays) and a Map-set write fails (R5-1 maps)', () => {
+	const shapes = [
+		{
+			name: 'array',
+			plant: '\tconst arr = [preview];\n\tarr[0].html = \'<img onerror=1>\';\n',
+			match: /entered a local container/,
+		},
+		{
+			name: 'map',
+			plant:
+				"\tconst m = new Map<string, DraftPreview>();\n" +
+				"\tm.set('p', preview);\n" +
+				"\tm.get('p')!.html = '<img onerror=1>';\n",
+			match: /entered a local container/,
+		},
+	];
+	for (const shape of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + shape.plant),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${shape.name}-mediated write must fail the audit:\n${output}`);
+				assert.match(output, shape.match);
+			}
+		);
+	}
+});
+
+test('a $state wrapper of the preview is a same-reference alias (R5-1 runes)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR + '\tconst pv = $state(preview);\n\tpv.html = \'<img onerror=1>\';\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the rune-wrapped write must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('writes to pv.html'),
+				`check 8 must treat $state(preview) as the same reference:\n${output}`
+			);
+		}
+	);
+});
+
+test('multiple PreviewBody invocations fail the canonical-route count (R5-1 multiple invocations)', () => {
+	withPlantedWorkspace(
+		(source) => source.replace(PREVIEW_INVOCATION, `${PREVIEW_INVOCATION}\n${PREVIEW_INVOCATION}`),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `two invocations must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes('2 static PreviewBody invocations'),
+				`check 8 must count every invocation:\n${output}`
+			);
+		}
+	);
+});
+
+test('a read-only helper and an optional-chained read stay clean (R5-1 positives)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst titleOf = (p: DraftPreview) => p.title;\n' +
+					'\tconst t = titleOf(preview);\n' +
+					'\tconst firstError = preview?.errors?.[0];\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 0, `read-only shapes must stay clean:\n${output}`);
+		}
+	);
+});
+
+/* ============================================================
+   R5-4 — alternate sink laundering
+   ============================================================ */
+
+/**
+ * The round-5 review planted four laundering shapes the round-4 gate stayed
+ * green for: a destructured, RENAMED dangerous method off a DOM receiver; an
+ * identifier-laundered Object.assign source; case-insensitive srcdoc
+ * attributes in Svelte; and `document.execCommand('insertHTML', …)`. Each is
+ * planted as owned source and must fail the real audit; the adjacent shapes
+ * (document aliases, benign destructures, execCommand('copy')) must behave
+ * exactly as planted.
+ */
+test('a destructured renamed insertAdjacentHTML on a DOM receiver fails (R5-4)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_destructure__.ts`;
+	plant(
+		relativePath,
+		"export const a = (html: string) => {\n" +
+			"\tconst { insertAdjacentHTML: inject } = document.body;\n" +
+			"\tinject('afterbegin', html);\n" +
+			'};\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `the renamed destructure must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`[alternate raw-HTML sinks] ${relativePath} destructures .insertAdjacentHTML`),
+			`check 7 must name the destructured method:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('a destructured dangerous method off an UNKNOWN receiver fails closed (R5-4)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_destructure_unknown__.ts`;
+	plant(
+		relativePath,
+		"export const a = (el: any, html: string) => {\n" +
+			"\tconst { insertAdjacentHTML } = el;\n" +
+			"\tinsertAdjacentHTML('beforeend', html);\n" +
+			'};\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `an unproven-receiver destructure must fail closed:\n${output}`);
+		assert.ok(
+			output.includes('cannot prove is not a DOM object'),
+			`check 7 must fail closed on the unproven receiver:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('an identifier-laundered Object.assign source carrying srcdoc fails (R5-4)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_assign_launder__.ts`;
+	plant(
+		relativePath,
+		"export const a = (frame: any, html: string) => {\n" +
+			'\tconst payload = { srcdoc: html };\n' +
+			'\tObject.assign(frame, payload);\n' +
+			'};\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `the laundered source must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes("carried by payload"),
+			`check 7 must see the dangerous key through the name:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('case-insensitive srcdoc attributes in Svelte markup fail (R5-4)', () => {
+	for (const [index, attribute] of ['SRCDOC={html}', 'srcDoc={html}'].entries()) {
+		const relativePath = `${OWNED_DIR}/__r5_srcdoc_case_${index}__.svelte`;
+		plant(relativePath, `<iframe ${attribute}></iframe>\n`);
+		try {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `<iframe ${attribute}> must fail the audit:\n${output}`);
+			assert.ok(
+				output.includes(`<iframe srcdoc=…> renders raw HTML`),
+				`check 7 must match the attribute case-insensitively:\n${output}`
+			);
+		} finally {
+			rmSync(join(repoRoot, relativePath), { force: true });
+		}
+	}
+});
+
+test('document.execCommand("insertHTML") fails; execCommand("copy") stays clean (R5-4)', () => {
+	const sink = `${OWNED_DIR}/__r5_exec_insert__.ts`;
+	plant(sink, "export const a = (html: string) => { document.execCommand('insertHTML', false, html); };\n");
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `execCommand('insertHTML') must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`calls .execCommand('insertHTML'`),
+			`check 7 must name the legacy insertion primitive:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, sink), { force: true });
+	}
+
+	const copy = `${OWNED_DIR}/__r5_exec_copy__.ts`;
+	plant(copy, "export const a = () => { document.execCommand('copy'); };\n");
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 0, `execCommand('copy') is not an HTML insertion:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, copy), { force: true });
+	}
+});
+
+test('setAttribute with a case-shifted srcdoc name fails (R5-4 adjacent)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_setattr_case__.ts`;
+	plant(
+		relativePath,
+		"export const a = (frame: any, html: string) => { frame.setAttribute('SRCDOC', html); };\n"
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `setAttribute('SRCDOC') must fail the audit:\n${output}`);
+		assert.ok(
+			output.includes(`calls .setAttribute(…) with 'SRCDOC'`),
+			`check 7 must lowercase the attribute name:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('legitimate destructures and object sources stay clean (R5-4 negatives)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_launder_neg__.ts`;
+	plant(
+		relativePath,
+		"export const a = (state: any, partial: any, html: string) => {\n" +
+			"\tconst { insertAdjacentHTML } = { insertAdjacentHTML: html };\n" +
+			'\tconst payload = { text: html };\n' +
+			'\tObject.assign(state, payload);\n' +
+			'};\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 0, `benign destructures and sources must stay clean:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+/* ============================================================
+   R5-5 — $state.raw container recognition
+   ============================================================ */
+
+test('$state.raw(<object/array literal>) is a legitimate container (R5-5 positive)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_stateraw_pos__.ts`;
+	plant(
+		relativePath,
+		"export const a = (k: string, v: string) => {\n" +
+			'\tconst s = $state.raw({ a: 1 });\n' +
+			'\ts[k] = v;\n' +
+			'};\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 0, `$state.raw of a provable container must stay clean:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+
+test('$state.raw(<unprovable receiver>) fails closed on a computed write (R5-5 negative)', () => {
+	const relativePath = `${OWNED_DIR}/__r5_stateraw_neg__.ts`;
+	plant(
+		relativePath,
+		"export const a = (k: string, v: string, seed: unknown) => {\n" +
+			'\tconst s = $state.raw(seed);\n' +
+			'\ts[k] = v;\n' +
+			'};\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `$state.raw of an unprovable receiver must fail closed:\n${output}`);
+		assert.ok(
+			output.includes('writes through a computed key'),
+			`check 7 must fail closed on the unproven receiver:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});

@@ -86,7 +86,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-import { liveScript, moduleSpecifiers, computedImports } from './lib/module-imports.mjs';
+import { liveScript, modulePath, moduleSpecifiers, computedImports } from './lib/module-imports.mjs';
 import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,
@@ -654,7 +654,8 @@ function checkOwnedSourceCoverage() {
 }
 
 /**
- * Check 8 — the preview VALUE PATH, bound at the caller (round-2).
+ * Check 8 — the preview VALUE PATH, bound at the caller (round-2, widened
+ * round-5).
  *
  * Check 6 binds the sink file; this check binds every `PreviewBody`
  * invocation in owned source. The round-2 attack planted a parent transform
@@ -665,15 +666,36 @@ function checkOwnedSourceCoverage() {
  * bytes. The scan lives in `./lib/source-scan.mjs` (the one copy of the
  * reading): every invocation must pass the preview value itself, verbatim,
  * and that value must be bound only from the `loadDraftPreview` result.
+ *
+ * ROUND 5 WIDENS THE WALK to every owned executable file, not only `.svelte`
+ * components. A `.ts` module cannot instantiate PreviewBody, but it can
+ * `import('$lib/review/PreviewBody.svelte')` — a dynamic route to the sink
+ * module that the component-only walk never saw — so the non-Svelte files
+ * are scanned for exactly that shape while the Svelte files run the full
+ * invocation binding.
  */
 function checkPreviewValuePath() {
 	const problems = [];
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
-			if (!file.toLowerCase().endsWith('.svelte')) continue;
 			const path = relative(repoRoot, file);
 			try {
-				problems.push(...previewInvocationFindings(path, readFileSync(file, 'utf8')));
+				if (path.toLowerCase().endsWith('.svelte')) {
+					problems.push(...previewInvocationFindings(path, readFileSync(file, 'utf8')));
+				} else {
+					// A dynamic import of the sink module — the same parser reading
+					// covers script and markup positions, so a `$lib` module reaching
+					// PreviewBody without the canonical static import is a finding
+					// wherever it hides.
+					const script = liveScript(path, readFileSync(file, 'utf8'));
+					for (const specifier of moduleSpecifiers(script)) {
+						if (/(?:^|\/)PreviewBody\.svelte$/.test(modulePath(specifier)))
+							problems.push(
+								`${path} loads the PreviewBody module dynamically (${specifier}) — the display ` +
+									'route must be the canonical static import, never a dynamic one'
+							);
+					}
+				}
 			} catch (error) {
 				problems.push(`${path} could not be scanned for PreviewBody invocations: ${error.message}`);
 			}

@@ -73,7 +73,11 @@ export function svelteHtmlTags(file, source) {
 
 /**
  * Every element carrying a `srcdoc` attribute — an alternate raw-HTML sink
- * (bypass C's `srcdoc` half) that `{@html}` scanning never sees.
+ * (bypass C's `srcdoc` half) that `{@html}` scanning never sees. Matched
+ * case-insensitively: HTML attribute names are case-insensitive, so
+ * `<iframe SRCDOC=…>` and `<iframe srcDoc=…>` are the same sink as
+ * `<iframe srcdoc=…>` (round-5), and the compiler preserves the written
+ * case in `attribute.name`.
  */
 export function svelteSrcdoc(file, source) {
 	const ast = parseSvelte(file, source);
@@ -82,7 +86,7 @@ export function svelteSrcdoc(file, source) {
 		if (!node || typeof node !== 'object') return;
 		if (node.type === 'RegularElement' || node.type === 'SvelteElement') {
 			for (const attribute of node.attributes ?? []) {
-				if (attribute.type === 'Attribute' && attribute.name === 'srcdoc') {
+				if (attribute.type === 'Attribute' && attribute.name.toLowerCase() === 'srcdoc') {
 					findings.push(`<${node.name} srcdoc=…> renders raw HTML`);
 				}
 			}
@@ -330,6 +334,22 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 				ts.isArrayLiteralExpression(node.arguments[0]))
 		)
 			return true;
+		// R5-5: `$state.raw(<object/array literal>)` is the same legitimate
+		// container — a plain, non-reactive object whose computed writes are
+		// ordinary object writes. The round-5 review found it false-failing
+		// because the rune's `raw` form names the property access `$state.raw`,
+		// which the identifier-only spelling above does not see.
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			ts.isIdentifier(node.expression.expression) &&
+			node.expression.expression.text === '$state' &&
+			node.expression.name.text === 'raw' &&
+			node.arguments.length === 1 &&
+			(ts.isObjectLiteralExpression(node.arguments[0]) ||
+				ts.isArrayLiteralExpression(node.arguments[0]))
+		)
+			return true;
 		if (
 			ts.isCallExpression(node) &&
 			ts.isPropertyAccessExpression(node.expression) &&
@@ -399,14 +419,52 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 				const method = dangerousMethodName(node.initializer);
 				if (method) dangerousMethodAliases.set(node.name.text, method);
 			}
-			if (ts.isObjectBindingPattern(node.name) && isDocumentObject(node.initializer)) {
+			if (ts.isObjectBindingPattern(node.name)) {
+				// R5-4: a destructured, RENAMED dangerous method — `const {
+				// insertAdjacentHTML: inject } = document.body` — binds a local that
+				// can be called with raw HTML, and the round-5 review planted it
+				// because the write/writeln-only destructure reading did not see the
+				// other dangerous methods. The receiver decides the verdict:
+				//   - a document object (or a local alias of one) — the method IS
+				//     the document's own, so the destructure is a finding;
+				//   - a provable container — the object holds data, not DOM, so the
+				//     binding is legitimate;
+				//   - anything else — a DOM element, a parameter, a call result —
+				//     cannot be proven non-DOM, so the position fails closed.
+				const initializer = node.initializer;
+				const receiverIsDocument = isDocumentObject(initializer);
+				const receiverIsContainer =
+					receiverCleared(initializer) || isContainerExpression(initializer);
+				const receiverIsDocumentAlias =
+					ts.isIdentifier(initializer) && documentAliases.has(initializer.text);
+				const known = receiverIsDocument || receiverIsDocumentAlias;
+				const unknown = !known && !receiverIsContainer;
 				for (const element of node.name.elements) {
 					const property = element.propertyName ?? element.name;
 					const method = ts.isIdentifier(property) ? property.text : foldPropertyKey(property);
-					if (method === 'write' || method === 'writeln') {
-						if (ts.isIdentifier(element.name))
-							dangerousMethodAliases.set(element.name.text, method);
+					if (method === null) {
+						// A computed key (`const { [k]: inject } = document.body`)
+						// could name any dangerous method, and the destructure is a
+						// binding of whatever it is. Fail closed unless the receiver
+						// is a provable container.
+						if (!receiverIsContainer)
+							findings.push(
+								`${file} destructures a computed key off a receiver this reading cannot prove is not a DOM object — the key could name a raw-HTML method`
+							);
+						continue;
 					}
+					if (!['write', 'writeln', 'insertAdjacentHTML', 'createContextualFragment', 'parseFromString'].includes(method))
+						continue;
+					if (ts.isIdentifier(element.name))
+						dangerousMethodAliases.set(element.name.text, method);
+					if (known)
+						findings.push(
+							`${file} destructures .${method} off a document object — the method can be called with raw HTML`
+						);
+					else if (unknown)
+						findings.push(
+							`${file} destructures .${method} off a receiver this reading cannot prove is not a DOM object — the local can be called with raw HTML`
+						);
 				}
 			}
 		}
@@ -415,6 +473,79 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		ts.isIdentifier(node) && constantStrings.has(node.text)
 			? constantStrings.get(node.text)
 			: foldPropertyKey(node);
+
+	// R5-4: identifier-laundered OBJECT SOURCES. The Object.assign walk reads
+	// dangerous keys out of object literals written at the call; `const payload
+	// = { srcdoc: html }; Object.assign(frame, payload)` hides the key in a
+	// name. This pre-pass records the folded keys of every object literal a
+	// local name is bound to — through plain aliases and spreads, to a fixed
+	// point — so the walk can see the dangerous key through the name.
+	const objectLiteralKeys = new Map();
+	{
+		let grew = true;
+		const adoptKeys = (name, keys) => {
+			if (!objectLiteralKeys.has(name)) {
+				objectLiteralKeys.set(name, new Set(keys));
+				grew = true;
+				return;
+			}
+			for (const key of keys) {
+				if (!objectLiteralKeys.get(name).has(key)) {
+					objectLiteralKeys.get(name).add(key);
+					grew = true;
+				}
+			}
+		};
+		while (grew) {
+			grew = false;
+			eachNode(sourceFile, (node) => {
+				let bound = null;
+				let rhs = null;
+				if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+					bound = node.name.text;
+					rhs = node.initializer;
+				} else if (
+					ts.isBinaryExpression(node) &&
+					node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+					ts.isIdentifier(node.left)
+				) {
+					bound = node.left.text;
+					rhs = node.right;
+				}
+				if (bound === null || !rhs) return;
+				const inner = unwrapValueNode(rhs);
+				if (ts.isIdentifier(inner) && objectLiteralKeys.has(inner.text)) {
+					adoptKeys(bound, objectLiteralKeys.get(inner.text));
+					return;
+				}
+				if (!ts.isObjectLiteralExpression(inner)) return;
+				const keys = new Set();
+				for (const property of inner.properties) {
+					if (ts.isSpreadAssignment(property)) {
+						const spread = unwrapValueNode(property.expression);
+						if (ts.isIdentifier(spread) && objectLiteralKeys.has(spread.text)) {
+							for (const key of objectLiteralKeys.get(spread.text)) keys.add(key);
+						}
+						continue;
+					}
+					let key = null;
+					if (ts.isPropertyAssignment(property)) {
+						key = ts.isComputedPropertyName(property.name)
+							? foldPropertyKey(property.name.expression)
+							: ts.isIdentifier(property.name)
+								? property.name.text
+								: ts.isStringLiteral(property.name)
+									? property.name.text
+									: null;
+					} else if (ts.isShorthandPropertyAssignment(property)) {
+						key = property.name.text;
+					}
+					if (key !== null) keys.add(key);
+				}
+				adoptKeys(bound, keys);
+			});
+		}
+	}
 
 	eachNode(sourceFile, (node) => {
 		if (ts.isBinaryExpression(node)) {
@@ -492,9 +623,29 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 				if (callee.name === 'setAttribute' || callee.name === 'setAttributeNS') {
 					const keyArgument = node.arguments[callee.name === 'setAttributeNS' ? 1 : 0];
 					const key = foldLocalKey(keyArgument);
-					if (key === 'srcdoc' || key === null)
+					// HTML attribute names are case-insensitive — `setAttribute(
+					// 'SRCDOC', …)` sets srcdoc (round-5), so the comparison is
+					// lowercased, while a computed key still fails closed.
+					if (key === null || key.toLowerCase() === 'srcdoc')
 						findings.push(
-							`${file} calls .${callee.name}(…) with ${key === null ? 'a computed key that could be srcdoc' : "'srcdoc'"} — an alternate raw-HTML sink`
+							`${file} calls .${callee.name}(…) with ${key === null ? 'a computed key that could be srcdoc' : `'${key}'`} — an alternate raw-HTML sink`
+						);
+					return;
+				}
+				if (callee.name === 'execCommand') {
+					// R5-4: the legacy document.execCommand family — `insertHTML` is
+					// the raw-HTML insertion the round-5 review planted, and command
+					// IDs are case-insensitive per the spec, so the folded command is
+					// compared lowercased; a computed command fails closed. Other
+					// commands (copy, bold, …) do not insert HTML.
+					const command = foldLocalKey(node.arguments[0]);
+					if (command === null)
+						findings.push(
+							`${file} calls .execCommand with a computed command — the command could be 'insertHTML', a legacy raw-HTML insertion`
+						);
+					else if (command.toLowerCase() === 'inserthtml')
+						findings.push(
+							`${file} calls .execCommand('insertHTML', …) — a legacy raw-HTML insertion primitive that bypasses {@html} scanning`
 						);
 					return;
 				}
@@ -592,18 +743,38 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 						return;
 					}
 					for (const arg of node.arguments.slice(1)) {
-						if (!ts.isObjectLiteralExpression(arg)) continue;
-						for (const property of arg.properties) {
-							if (ts.isSpreadAssignment(property)) continue;
-							const key = ts.isShorthandPropertyAssignment(property)
-								? property.name
-								: ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)
-									? property.name.expression
-									: property.name;
-							const folded = key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
-							if (folded !== null && RAW_HTML_PROPERTY.has(folded)) {
+						if (ts.isObjectLiteralExpression(arg)) {
+							for (const property of arg.properties) {
+								if (ts.isSpreadAssignment(property)) continue;
+								const key = ts.isShorthandPropertyAssignment(property)
+									? property.name
+									: ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)
+										? property.name.expression
+										: property.name;
+								const folded = key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
+								if (folded !== null && RAW_HTML_PROPERTY.has(folded)) {
+									findings.push(
+										`${file} calls Object.assign with '${folded}' in a source object — it can write a raw-HTML property`
+									);
+									break;
+								}
+							}
+							continue;
+						}
+						// R5-4: an IDENTIFIER-laundered source — `const payload =
+						// { srcdoc: html }; Object.assign(frame, payload)` carries the
+						// dangerous key in a name this reading bound to an object
+						// literal (through plain aliases and spreads), so the key is
+						// seen through the name rather than only when written at the
+						// call. A source this reading never saw is left to the
+						// receiver-side and computed-key rules; it is not guessed at.
+						if (ts.isIdentifier(arg) && objectLiteralKeys.has(arg.text)) {
+							const laundered = [...objectLiteralKeys.get(arg.text)].find((key) =>
+								RAW_HTML_PROPERTY.has(key)
+							);
+							if (laundered) {
 								findings.push(
-									`${file} calls Object.assign with '${folded}' in a source object — it can write a raw-HTML property`
+									`${file} calls Object.assign with '${laundered}' carried by ${arg.text} — a laundered source object can write a raw-HTML property`
 								);
 								break;
 							}
@@ -615,7 +786,9 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 			}
 		}
 		if (ts.isJsxAttribute(node)) {
-			if (node.name.text === 'srcdoc') {
+			// HTML/JSX attribute names are case-insensitive — `<iframe srcDoc=…>`
+			// and `<iframe SRCDOC=…>` both set srcdoc (round-5).
+			if (node.name.text.toLowerCase() === 'srcdoc') {
 				findings.push(
 					`${file} carries a srcdoc attribute — an alternate raw-HTML sink that bypasses {@html} scanning`
 				);
@@ -827,7 +1000,7 @@ export function previewDisplayScriptFindings(file, scripts) {
 }
 
 /* -------------------------------------------------------------------------
- * R2-1 — the preview VALUE PATH, from `toDraftPreview` to the sink.
+ * R2-1 + R5-1 — the preview VALUE PATH, from `toDraftPreview` to the sink.
  *
  * Check 6 binds the sink file itself; the round-2 attack proved that was
  * not the whole path. A parent transform — a `$derived` that spreads
@@ -837,6 +1010,46 @@ export function previewDisplayScriptFindings(file, scripts) {
  * closes the path: every `PreviewBody` invocation in owned source must pass
  * the preview value itself, verbatim, and that value must be bound only
  * from the `loadDraftPreview` result — never derived, spread, or written.
+ *
+ * THE ROUND-5 WIDENING. The round-5 adversarial review planted six shapes
+ * that left the R2-1 reading green while lesser's bytes were still replaced
+ * before the sink:
+ *
+ *   1. a declaration alias — `const p1 = preview; if (p1) p1.html = '…'` —
+ *      because the write scan recognised only the identifier `preview`;
+ *   2. a CROSS-FILE helper — `manglePreview(preview)` writing `p.html` in
+ *      another module — because the scan read only the invoking file;
+ *   3. a LOCAL helper — `function applyPreviewPatch(p) { p.html = '…' }`
+ *      called with `preview` — because the scan never looked inside a
+ *      function it was called with the value;
+ *   4. wrapper receivers — `(preview).html = '…'`, `preview!.html = '…'`,
+ *      `(preview as DraftPreview).html = '…'` — because the write scan
+ *      matched the receiver node literally;
+ *   5. an ASSIGNMENT alias — `let forwarded; forwarded = preview;
+ *      Object.assign(forwarded, { html: '…' })` — because the alias closure
+ *      followed only declarations, never assignments;
+ *   6. a COMPILE-VALID DYNAMIC route — `previewSink = (await import(
+ *      '$lib/review/PreviewBody.svelte')).default` plus
+ *      `<svelte:component this={previewSink} {preview} />` with no static
+ *      import at all — because every binding check was gated on a static
+ *      import or invocation existing, and silence over the route read as a
+ *      clean scan.
+ *
+ * The reading below binds the AUTHORIZED VALUE, not the identifier. The
+ * value's identity is followed through declaration and assignment aliases,
+ * TypeScript wrapper nodes (parentheses, `!`, `as`), the same-reference
+ * runes `$state`/`$state.raw`, object-literal containers and their property
+ * reads, array/map containers that receive the value, local functions that
+ * return it, and every function a call hands it to — a local helper whose
+ * parameter is written, or a helper that cannot be proven to leave its
+ * parameter untouched, makes the call a finding. A call of the value into
+ * anything this reading cannot statically prove direct — an imported
+ * function, a method, an unbound name — FAILS CLOSED. Dynamic invocation
+ * forms fail closed too: a `svelte:component` in a file that reaches
+ * PreviewBody, or any dynamic `import('…PreviewBody.svelte')` in owned
+ * source, is a route that cannot be statically proven direct. There is no
+ * token blacklist anywhere in this reading: every rule is about the parsed
+ * shape of an expression, and prose naming a sink is never a finding.
  * ---------------------------------------------------------------------- */
 
 /** An assignment token — `=` through `**=`. */
@@ -973,19 +1186,606 @@ function isAuthorizedPreviewBinding(node, identifier, previewResults) {
  * lesser's bytes or reconstruct the `DraftPreview` between `toDraftPreview`
  * and the sink.
  */
+/**
+ * R5-1: the file-wide AUTHORIZED-VALUE binding that replaces the narrow
+ * per-identifier write scan.
+ *
+ * `valueNames` is the set of identifiers this reading can prove carry the
+ * preview reference. It grows by same-reference means only: declarations and
+ * assignments whose right side IS a value name (in any TypeScript wrapper
+ * spelling), the same-reference runes `$state`/`$state.raw` wrapping one, a
+ * property read of a local object literal that was built holding the value,
+ * an element read of an array that received the value, a `Map#get` on a map
+ * that received it, and the result of a local function that returns the
+ * value. Every `.html` write on a value name — parenthesized, non-null, or
+ * cast — every property write on one, every computed write through one,
+ * every mutation API (`Object.assign`, `Reflect.set`, `defineProperty`,
+ * `defineProperties`) receiving one, every spread of one, and every call
+ * handed one is a finding; a call handed one is a finding unless the callee
+ * is a LOCAL function this reading proves never writes to its parameters.
+ */
+
+/**
+ * Unwrap the TypeScript wrapper nodes an expression can be dressed in —
+ * parentheses, the non-null assertion, `as`/`<T>` casts, and `satisfies`.
+ * `(preview).html = …`, `preview!.html = …` and `(preview as
+ * DraftPreview).html = …` all write through a node the literal spelling
+ * does not have, so every receiver comparison unwraps before it compares.
+ */
+function unwrapValueNode(node) {
+	let current = node;
+	while (current) {
+		if (
+			ts.isParenthesizedExpression(current) ||
+			ts.isNonNullExpression(current) ||
+			ts.isAsExpression(current) ||
+			ts.isTypeAssertionExpression(current) ||
+			ts.isSatisfiesExpression(current)
+		) {
+			current = current.expression;
+			continue;
+		}
+		return current;
+	}
+	return current;
+}
+
+function previewValuePathFindings(file, sourceFile) {
+	const findings = [];
+
+	// --- the growing facts ----------------------------------------------------
+	const valueNames = new Set(['preview']);
+	const containerPaths = new Map(); // identifier -> Set<property | '*'>
+	const arrayContainers = new Set();
+	const mapContainers = new Set();
+	const previewReturning = new Set(); // callee names that return the value
+	const importedNames = new Set();
+	const functions = new Map(); // callee name -> [{ node, paramNames }]
+
+	const addValueName = (name) => {
+		if (!valueNames.has(name)) {
+			valueNames.add(name);
+			return true;
+		}
+		return false;
+	};
+
+	eachNode(sourceFile, (node) => {
+		if (ts.isFunctionDeclaration(node) && node.name) {
+			functions.set(node.name.text, [
+				...(functions.get(node.name.text) ?? []),
+				{ node, paramNames: node.parameters.map((p) => p.name) },
+			]);
+		}
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+			const init = unwrapValueNode(node.initializer);
+			if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+				functions.set(node.name.text, [
+					...(functions.get(node.name.text) ?? []),
+					{ node: init, paramNames: init.parameters.map((p) => p.name) },
+				]);
+			}
+		}
+		if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) {
+			const clause = node.importClause;
+			if (clause?.name) importedNames.add(clause.name.text);
+			if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+				for (const element of clause.namedBindings.elements)
+					if (!element.isTypeOnly) importedNames.add(element.name.text);
+			}
+			if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings))
+				importedNames.add(clause.namedBindings.name.text);
+		}
+	});
+
+	/** `$state(<value>)` / `$state.raw(<value>)` — same-reference rune wrappers. */
+	const runeAliasArgument = (call) => {
+		if (call.arguments.length !== 1) return null;
+		if (ts.isIdentifier(call.expression) && call.expression.text === '$state')
+			return call.arguments[0];
+		if (
+			ts.isPropertyAccessExpression(call.expression) &&
+			ts.isIdentifier(call.expression.expression) &&
+			call.expression.expression.text === '$state' &&
+			call.expression.name.text === 'raw'
+		)
+			return call.arguments[0];
+		return null;
+	};
+
+	/** Whether an expression provably holds the preview reference. */
+	const holdsValue = (expr) => {
+		if (!expr) return false;
+		const inner = unwrapValueNode(expr);
+		if (ts.isIdentifier(inner)) return valueNames.has(inner.text);
+		if (ts.isPropertyAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
+			const props = containerPaths.get(inner.expression.text);
+			return Boolean(props && (props.has(inner.name.text) || props.has('*')));
+		}
+		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
+			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
+		}
+		if (ts.isCallExpression(inner)) {
+			const rune = runeAliasArgument(inner);
+			if (rune) return holdsValue(rune);
+			if (ts.isIdentifier(inner.expression) && previewReturning.has(inner.expression.text))
+				return true;
+			if (
+				ts.isPropertyAccessExpression(inner.expression) &&
+				ts.isIdentifier(inner.expression.expression) &&
+				mapContainers.has(inner.expression.expression.text) &&
+				inner.expression.name.text === 'get'
+			)
+				return true;
+		}
+		return false;
+	};
+
+	// --- fixed point: value names, containers, and returning functions -------
+	let changed = true;
+	while (changed) {
+		changed = false;
+
+		// Bindings and container records.
+		eachNode(sourceFile, (node) => {
+			let bound = null;
+			let rhs = null;
+			if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+				bound = node.name.text;
+				rhs = node.initializer;
+			} else if (
+				ts.isBinaryExpression(node) &&
+				(node.operatorToken.kind === ts.SyntaxKind.EqualsToken ||
+					node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionEqualsToken) &&
+				ts.isIdentifier(node.left)
+			) {
+				bound = node.left.text;
+				rhs = node.right;
+			}
+			if (bound === null || valueNames.has(bound)) return;
+
+			if (rhs && holdsValue(rhs)) {
+				if (addValueName(bound)) changed = true;
+				return;
+			}
+			const inner = unwrapValueNode(rhs);
+			if (!inner) return;
+			if (ts.isObjectLiteralExpression(inner)) {
+				const props = new Set();
+				let holds = false;
+				for (const property of inner.properties) {
+					if (ts.isSpreadAssignment(property)) continue;
+					let key = null;
+					let valueExpr = null;
+					if (ts.isPropertyAssignment(property)) {
+						key = ts.isComputedPropertyName(property.name)
+							? foldPropertyKey(property.name.expression)
+							: ts.isIdentifier(property.name)
+								? property.name.text
+								: ts.isStringLiteral(property.name)
+									? property.name.text
+									: null;
+						valueExpr = property.initializer;
+					} else if (ts.isShorthandPropertyAssignment(property)) {
+						key = property.name.text;
+						valueExpr = property.name;
+					}
+					if (valueExpr && holdsValue(valueExpr)) {
+						holds = true;
+						props.add(key ?? '*');
+					}
+				}
+				if (holds && !containerPaths.has(bound)) {
+					containerPaths.set(bound, props);
+					changed = true;
+				}
+			} else if (ts.isArrayLiteralExpression(inner)) {
+				if (
+					inner.elements.some(
+						(element) => !ts.isSpreadElement(element) && holdsValue(element)
+					) &&
+					!arrayContainers.has(bound)
+				) {
+					arrayContainers.add(bound);
+					changed = true;
+				}
+			}
+		});
+
+		// Containers receiving the value through a mutation method.
+		eachNode(sourceFile, (node) => {
+			if (
+				ts.isCallExpression(node) &&
+				ts.isPropertyAccessExpression(node.expression) &&
+				ts.isIdentifier(node.expression.expression) &&
+				['set', 'push', 'add', 'unshift', 'splice'].includes(node.expression.name.text) &&
+				node.arguments.some((argument) => holdsValue(argument)) &&
+				!mapContainers.has(node.expression.expression.text)
+			) {
+				mapContainers.add(node.expression.expression.text);
+				changed = true;
+			}
+		});
+
+		// Local functions that return the value — walked to the function's own
+		// boundary so a nested arrow's return is not credited to its parent. A
+		// concise arrow's body IS the returned expression.
+		for (const [name, infos] of functions) {
+			if (previewReturning.has(name)) continue;
+			for (const { node } of infos) {
+				let returns = false;
+				const body = node.body;
+				if (ts.isArrowFunction(node) && body && !ts.isBlock(body) && holdsValue(body)) {
+					returns = true;
+				} else {
+					eachNodeOwn(body ?? node, (n) => {
+						if (returns) return;
+						if (ts.isReturnStatement(n) && n.expression && holdsValue(n.expression))
+							returns = true;
+					});
+				}
+				if (returns) {
+					previewReturning.add(name);
+					changed = true;
+					break;
+				}
+			}
+		}
+	}
+
+	// --- mutating-function fixed point ---------------------------------------
+	// A function mutates a parameter-derived reference when it writes a
+	// property of one (in any wrapper spelling), writes through a computed key
+	// on one, hands one to `Object.assign`/`Reflect.set`/`defineProperty`/
+	// `defineProperties`, spreads one, stores one into anything else, or hands
+	// one to a callee that is itself mutating — or to any callee this reading
+	// cannot prove leaves its argument untouched.
+	const paramDerivedNames = (fnNode, paramNames) => {
+		const derived = new Set();
+		for (const param of paramNames) {
+			const names = bindingNames(param);
+			for (const name of names) derived.add(name);
+		}
+		let grew = true;
+		while (grew) {
+			grew = false;
+			eachNode(fnNode.body ?? fnNode, (node) => {
+				if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+					const inner = unwrapValueNode(node.initializer);
+					if (ts.isIdentifier(inner) && derived.has(inner.text) && !derived.has(node.name.text)) {
+						derived.add(node.name.text);
+						grew = true;
+					}
+				}
+				if (
+					ts.isBinaryExpression(node) &&
+					node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+					ts.isIdentifier(node.left) &&
+					node.right
+				) {
+					const inner = unwrapValueNode(node.right);
+					if (ts.isIdentifier(inner) && derived.has(inner.text) && !derived.has(node.left.text)) {
+						derived.add(node.left.text);
+						grew = true;
+					}
+				}
+			});
+		}
+		return derived;
+	};
+	const directlyMutates = (fnNode, derived) => {
+		let found = false;
+		eachNode(fnNode.body ?? fnNode, (node) => {
+			if (found) return;
+			if (ts.isBinaryExpression(node) && isAssignmentToken(node.operatorToken.kind)) {
+				const access = propertyName(node.left);
+				if (access) {
+					const receiver = unwrapValueNode(access.object);
+					if (ts.isIdentifier(receiver) && derived.has(receiver.text)) {
+						found = true;
+						return;
+					}
+				}
+				// `saved = p` — the value escapes the function's own frame into a
+				// name or property this reading cannot prove is write-protected.
+				const right = unwrapValueNode(node.right);
+				if (ts.isIdentifier(right) && derived.has(right.text)) {
+					found = true;
+					return;
+				}
+				return;
+			}
+			if (
+				node.kind === ts.SyntaxKind.PrefixUnaryExpression ||
+				node.kind === ts.SyntaxKind.PostfixUnaryExpression
+			) {
+				const access = propertyName(node.operand);
+				const receiver = access && unwrapValueNode(access.object);
+				if (ts.isIdentifier(receiver) && derived.has(receiver.text)) found = true;
+				return;
+			}
+			if (ts.isSpreadAssignment(node)) {
+				const expr = unwrapValueNode(node.expression);
+				if (ts.isIdentifier(expr) && derived.has(expr.text)) found = true;
+				return;
+			}
+			if (ts.isCallExpression(node)) {
+				const callee = propertyName(node.expression);
+				if (callee && ts.isIdentifier(callee.object)) {
+					const receiver = node.arguments[0];
+					const object = receiver && unwrapValueNode(receiver);
+					if (
+						ts.isIdentifier(object) &&
+						derived.has(object.text) &&
+						((callee.object.text === 'Object' &&
+							['assign', 'defineProperty', 'defineProperties'].includes(callee.name)) ||
+							(callee.object.text === 'Reflect' && callee.name === 'set'))
+					) {
+						found = true;
+						return;
+					}
+				}
+			}
+		});
+		return found;
+	};
+	const handsToUnprovenOrMutating = (fnNode, derived) => {
+		let found = false;
+		eachNode(fnNode.body ?? fnNode, (node) => {
+			if (found) return;
+			if (!ts.isCallExpression(node)) return;
+			if (!node.arguments.some((argument) => holdsParamReference(argument, derived))) return;
+			const calleeExpr = unwrapValueNode(node.expression);
+			if (ts.isIdentifier(calleeExpr)) {
+				const infos = functions.get(calleeExpr.text);
+				if (infos && infos.length) {
+					// Same-file: mutating only when a binding is itself mutating.
+					if (mutatingFunctions.has(calleeExpr.text)) found = true;
+					return;
+				}
+				found = true; // imported or unbound — cannot be proven clean
+				return;
+			}
+			found = true; // a method or other computed callee — cannot be proven clean
+		});
+		return found;
+	};
+	const holdsParamReference = (argument, derived) => {
+		const inner = unwrapValueNode(argument);
+		return ts.isIdentifier(inner) && derived.has(inner.text);
+	};
+	const mutatingFunctions = new Set();
+	let grew = true;
+	while (grew) {
+		grew = false;
+		for (const [name, infos] of functions) {
+			if (mutatingFunctions.has(name)) continue;
+			for (const { node, paramNames } of infos) {
+				const derived = paramDerivedNames(node, paramNames);
+				if (
+					derived.size > 0 &&
+					(directlyMutates(node, derived) || handsToUnprovenOrMutating(node, derived))
+				) {
+					mutatingFunctions.add(name);
+					grew = true;
+					break;
+				}
+			}
+		}
+	}
+
+	// --- the write / mutation / call scan ------------------------------------
+	const containerRooted = (node) => {
+		const inner = unwrapValueNode(node);
+		if (ts.isIdentifier(inner)) return arrayContainers.has(inner.text) || mapContainers.has(inner.text);
+		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression))
+			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
+		if (ts.isCallExpression(inner)) {
+			const callee = propertyName(inner.expression);
+			return Boolean(
+				callee &&
+					ts.isIdentifier(callee.object) &&
+					mapContainers.has(callee.object.text) &&
+					(callee.name === 'get' || callee.name === 'values')
+			);
+		}
+		return false;
+	};
+	const callResultRooted = (node) => {
+		const inner = unwrapValueNode(node);
+		return (
+			ts.isCallExpression(inner) &&
+			ts.isIdentifier(inner.expression) &&
+			previewReturning.has(inner.expression.text)
+		);
+	};
+
+	eachNode(sourceFile, (node) => {
+		if (ts.isBinaryExpression(node) && isAssignmentToken(node.operatorToken.kind)) {
+			const access = propertyName(node.left);
+			if (access) {
+				const receiver = unwrapValueNode(access.object);
+				if (ts.isIdentifier(receiver) && valueNames.has(receiver.text)) {
+					if (access.computed)
+						findings.push(
+							`${file} writes through a computed key on ${receiver.text} — the key could be 'html' and lesser's bytes would be transformed before the sink`
+						);
+					else
+						findings.push(
+							`${file} writes to ${receiver.text}.${access.name} — a mutation can transform lesser's bytes before the sink`
+						);
+					return;
+				}
+				if (!access.computed && access.name === 'html') {
+					if (containerRooted(receiver))
+						findings.push(
+							`${file} writes to .html on a value that entered a local container — lesser's preview bytes can be transformed before the sink`
+						);
+					else if (callResultRooted(receiver))
+						findings.push(
+							`${file} writes to .html on a value returned by a preview-returning helper — lesser's preview bytes can be transformed before the sink`
+						);
+					else if (holdsValue(receiver))
+						findings.push(
+							`${file} writes to .html on ${receiver
+								.getText(sourceFile)
+								.slice(0, 40)}… — a value bound to the preview reference can be transformed before the sink`
+						);
+				}
+			}
+			return;
+		}
+		if (
+			node.kind === ts.SyntaxKind.PrefixUnaryExpression ||
+			node.kind === ts.SyntaxKind.PostfixUnaryExpression
+		) {
+			const access = propertyName(node.operand);
+			if (access) {
+				const receiver = unwrapValueNode(access.object);
+				if (ts.isIdentifier(receiver) && valueNames.has(receiver.text))
+					findings.push(
+						`${file} mutates ${receiver.text}.${access.computed ? '[key]' : access.name} — a mutation can transform lesser's bytes before the sink`
+					);
+			}
+			return;
+		}
+		if (ts.isSpreadAssignment(node)) {
+			const expr = unwrapValueNode(node.expression);
+			if (ts.isIdentifier(expr) && valueNames.has(expr.text))
+				findings.push(
+					`${file} spreads ${expr.text} into a new object — reconstructing the DraftPreview between loadDraftPreview and the sink`
+				);
+			return;
+		}
+		if (ts.isCallExpression(node)) {
+			const callee = propertyName(node.expression);
+			if (callee && ts.isIdentifier(callee.object)) {
+				const receiver = node.arguments[0];
+				const object = receiver && unwrapValueNode(receiver);
+				if (
+					ts.isIdentifier(object) &&
+					valueNames.has(object.text) &&
+					((callee.object.text === 'Object' &&
+						['assign', 'defineProperty', 'defineProperties'].includes(callee.name)) ||
+						(callee.object.text === 'Reflect' && callee.name === 'set'))
+				) {
+					findings.push(
+						`${file} mutates ${object.text} through ${callee.object.text}.${callee.name}(…) — lesser's preview value must remain verbatim`
+					);
+					return;
+				}
+			}
+			if (!node.arguments.some((argument) => holdsValue(argument))) return;
+			// `$state(<value>)` / `$state.raw(<value>)` are same-reference rune
+			// wrappers, not function hops — the value stays the preview object
+			// and its mutations are caught by the write scan above.
+			if (runeAliasArgument(node)) return;
+			const calleeExpr = unwrapValueNode(node.expression);
+			if (ts.isIdentifier(calleeExpr)) {
+				const infos = functions.get(calleeExpr.text);
+				if (infos && infos.length) {
+					if (mutatingFunctions.has(calleeExpr.text))
+						findings.push(
+							`${file} passes the preview value to ${calleeExpr.text}(…), whose parameter is written — a helper hop transforms lesser's bytes before the sink`
+						);
+				} else {
+					findings.push(
+						`${file} passes the preview value to ${calleeExpr.text}(…) — a function hop between loadDraftPreview and the sink cannot be statically proven direct`
+					);
+				}
+				return;
+			}
+			findings.push(
+				`${file} passes the preview value to ${node.expression
+					.getText(sourceFile)
+					.slice(0, 60)}… — a route between loadDraftPreview and the sink cannot be statically proven direct`
+			);
+		}
+	});
+
+	return findings;
+}
+
+/**
+ * Every name a binding pattern binds, at any depth — a destructured parameter
+ * is a reference INTO its object, so a write through one of its members is a
+ * write to the object the parameter carries.
+ */
+function bindingNames(name) {
+	const names = [];
+	const visit = (node) => {
+		if (!node) return;
+		if (ts.isIdentifier(node)) {
+			names.push(node.text);
+			return;
+		}
+		if (ts.isBindingElement(node)) {
+			visit(node.name);
+			return;
+		}
+		if (ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+			for (const element of node.elements) visit(element);
+		}
+	};
+	visit(name);
+	return names;
+}
+
+/**
+ * Depth-first over a function's OWN body, stopping at nested function
+ * boundaries — a nested arrow's `return preview` is the nested function's
+ * return, never its parent's. `top` admits the node the walk starts on even
+ * when it is itself a function.
+ */
+function eachNodeOwn(node, visit, top = true) {
+	if (!node || typeof node !== 'object') return;
+	if (
+		!top &&
+		(ts.isFunctionDeclaration(node) ||
+			ts.isArrowFunction(node) ||
+			ts.isFunctionExpression(node) ||
+			ts.isMethodDeclaration(node))
+	)
+		return;
+	visit(node);
+	ts.forEachChild(node, (child) => eachNodeOwn(child, visit, false));
+}
+
+/**
+ * R2-1 + R5-1 — every `PreviewBody` invocation, bound at the caller.
+ *
+ * The compiler's own reading finds every `Component` named `PreviewBody`.
+ * For each, the `preview` attribute must be the identifier itself — a
+ * member access, a call, a conditional, or an object can only be a computed
+ * or reconstructed value. That identifier's bindings must all be
+ * `isAuthorizedPreviewBinding`, and the file may neither write to its
+ * `.html` field nor spread it into a new object — both would transform
+ * lesser's bytes or reconstruct the `DraftPreview` between `toDraftPreview`
+ * and the sink.
+ *
+ * R5-1 adds the fail-closed route and the authorized-value binding:
+ *
+ *   - a dynamic `import('…PreviewBody.svelte')` anywhere in owned source is
+ *     a finding — the module can be reached without the canonical static
+ *     import the binding is keyed on;
+ *   - a `svelte:component` in a file that reaches PreviewBody is a finding —
+ *     a dynamic component route cannot be statically proven direct;
+ *   - the canonical file must carry exactly the one static import and one
+ *     static invocation — a file whose route is missing or dynamic fails
+ *     instead of scanning clean;
+ *   - the value's identity is then bound file-wide (`previewValuePathFindings`)
+ *     across aliases, wrappers, containers, returning helpers, and function
+ *     hops, so every transform of lesser's bytes before the sink is a
+ *     finding even when the identifier `preview` never appears in it.
+ */
 export function previewInvocationFindings(file, source) {
 	const ast = parseSvelte(file, source);
 	const invocations = [];
-	const dynamicInvocations = [];
+	const svelteComponents = [];
 	const visit = (node) => {
 		if (!node || typeof node !== 'object') return;
 		if (node.type === 'Component' && node.name === 'PreviewBody') invocations.push(node);
-		if (
-			node.type === 'SvelteComponent' &&
-			node.expression?.type === 'Identifier' &&
-			node.expression.name === 'PreviewBody'
-		)
-			dynamicInvocations.push(node);
+		if (node.type === 'SvelteComponent') svelteComponents.push(node);
 		for (const key of Object.keys(node)) {
 			if (key === 'parent') continue;
 			visit(node[key]);
@@ -1005,6 +1805,7 @@ export function previewInvocationFindings(file, source) {
 		];
 	}
 	const previewResults = loadDraftPreviewResultIdentifiers(sourceFile);
+
 	const previewImports = [];
 	eachNode(sourceFile, (node) => {
 		if (
@@ -1014,35 +1815,89 @@ export function previewInvocationFindings(file, source) {
 		)
 			previewImports.push(node);
 	});
-	const canonicalFile = 'src/lib/routes/ReviewWorkspace.svelte';
-	if (previewImports.length || invocations.length || dynamicInvocations.length) {
-		if (file !== canonicalFile)
-			findings.push(
-				`${file} reaches PreviewBody outside ${canonicalFile} — wrappers and cross-file forwarding are not an authorized direct path`
-			);
-		if (previewImports.length !== 1)
-			findings.push(
-				`${file} imports PreviewBody ${previewImports.length} times — the authorized route has exactly one canonical import`
-			);
-		for (const declaration of previewImports) {
-			const local = declaration.importClause?.name?.text;
-			if (
-				declaration.moduleSpecifier.text !== '$lib/review/PreviewBody.svelte' ||
-				local !== 'PreviewBody'
-			)
-				findings.push(
-					`${file} aliases or reroutes the PreviewBody import — the authorized route uses the canonical default binding`
-				);
+	// Markup `import(…)` — the modern AST exposes `ImportExpression` nodes the
+	// script text never contains. (The modern AST ALSO surfaces script-side
+	// imports as `ImportExpression` nodes in the tree, so the two collections
+	// are merged into one set — a script import must not read as two.)
+	const dynamicSpecifiers = new Set();
+	eachNode(sourceFile, (node) => {
+		if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+			const specifier = foldPropertyKey(node.arguments[0]);
+			if (specifier !== null && /(?:^|\/)PreviewBody\.svelte$/.test(specifier))
+				dynamicSpecifiers.add(specifier);
 		}
-		if (dynamicInvocations.length)
+	});
+	const visitMarkup = (node) => {
+		if (!node || typeof node !== 'object') return;
+		if (
+			node.type === 'ImportExpression' &&
+			node.source &&
+			typeof node.source.value === 'string' &&
+			/(?:^|\/)PreviewBody\.svelte$/.test(node.source.value)
+		)
+			dynamicSpecifiers.add(node.source.value);
+		for (const key of Object.keys(node)) {
+			if (key === 'parent') continue;
+			visitMarkup(node[key]);
+		}
+	};
+	visitMarkup(ast);
+
+	const canonicalFile = 'src/lib/routes/ReviewWorkspace.svelte';
+	const previewReach =
+		previewImports.length > 0 ||
+		invocations.length > 0 ||
+		dynamicSpecifiers.size > 0;
+
+	// --- dynamic invocation forms fail closed ---------------------------------
+	for (const specifier of dynamicSpecifiers)
+		findings.push(
+			`${file} dynamically imports the PreviewBody module (${specifier}) — a dynamic component route cannot be statically proven direct`
+		);
+	for (const component of svelteComponents) {
+		const thisExpression = component.expression;
+		if (thisExpression?.type === 'Identifier' && thisExpression.name === 'PreviewBody') {
 			findings.push(
 				`${file} dynamically invokes PreviewBody — a dynamic component route cannot be statically proven direct`
 			);
-		if (invocations.length !== 1)
+			continue;
+		}
+		if (previewReach)
 			findings.push(
-				`${file} has ${invocations.length} static PreviewBody invocations — the authorized route has exactly one`
+				`${file} invokes a component through <svelte:component this={…}> — a dynamic route cannot be statically proven direct`
 			);
 	}
+
+	if (!previewReach) {
+		if (file === canonicalFile)
+			findings.push(
+				`${file} carries no PreviewBody import, invocation, or dynamic route — the authorized display route is missing`
+			);
+		return findings;
+	}
+
+	if (file !== canonicalFile)
+		findings.push(
+			`${file} reaches PreviewBody outside ${canonicalFile} — wrappers and cross-file forwarding are not an authorized direct path`
+		);
+	if (previewImports.length !== 1)
+		findings.push(
+			`${file} imports PreviewBody ${previewImports.length} times — the authorized route has exactly one canonical import`
+		);
+	for (const declaration of previewImports) {
+		const local = declaration.importClause?.name?.text;
+		if (
+			declaration.moduleSpecifier.text !== '$lib/review/PreviewBody.svelte' ||
+			local !== 'PreviewBody'
+		)
+			findings.push(
+				`${file} aliases or reroutes the PreviewBody import — the authorized route uses the canonical default binding`
+			);
+	}
+	if (invocations.length !== 1)
+		findings.push(
+			`${file} has ${invocations.length} static PreviewBody invocations — the authorized route has exactly one`
+		);
 	if (invocations.length === 0) return findings;
 
 	for (const component of invocations) {
@@ -1079,25 +1934,10 @@ export function previewInvocationFindings(file, source) {
 			findings.push(
 				`${file} forwards ${identifier} to PreviewBody — the canonical invocation must pass the load result binding named preview directly`
 			);
-		const aliases = new Set([identifier]);
-		let aliasesChanged = true;
-		while (aliasesChanged) {
-			aliasesChanged = false;
-			eachNode(sourceFile, (node) => {
-				if (
-					ts.isVariableDeclaration(node) &&
-					ts.isIdentifier(node.name) &&
-					node.initializer &&
-					ts.isIdentifier(node.initializer) &&
-					aliases.has(node.initializer.text) &&
-					!aliases.has(node.name.text)
-				) {
-					aliases.add(node.name.text);
-					aliasesChanged = true;
-				}
-			});
-		}
 
+		// The identifier's OWN bindings stay bound (R2-1): every declaration and
+		// assignment of the invocation's attribute identifier must be one of the
+		// authorized shapes — never derived, spread, or reconstructed.
 		eachNode(sourceFile, (node) => {
 			if (ts.isVariableDeclaration(node)) {
 				if (!ts.isIdentifier(node.name) || node.name.text !== identifier) return;
@@ -1127,42 +1967,11 @@ export function previewInvocationFindings(file, source) {
 					}
 					return;
 				}
-				const access = propertyName(node.left);
-				if (
-					access &&
-					!access.computed &&
-					access.name === 'html' &&
-					ts.isIdentifier(access.object) &&
-					access.object.text === identifier
-				) {
-					findings.push(
-						`${file} writes to ${identifier}.html — a mutation can transform lesser's bytes before the sink`
-					);
-				}
-				return;
-			}
-			if (ts.isSpreadAssignment(node)) {
-				if (ts.isIdentifier(node.expression) && node.expression.text === identifier) {
-					findings.push(
-						`${file} spreads ${identifier} into a new object — reconstructing the DraftPreview between loadDraftPreview and the sink`
-					);
-				}
-			}
-			if (ts.isCallExpression(node)) {
-				const callee = propertyName(node.expression);
-				if (!callee || !ts.isIdentifier(callee.object)) return;
-				const receiver = node.arguments[0];
-				if (!receiver || !ts.isIdentifier(receiver) || !aliases.has(receiver.text)) return;
-				if (
-					(callee.object.text === 'Object' &&
-						['assign', 'defineProperty', 'defineProperties'].includes(callee.name)) ||
-					(callee.object.text === 'Reflect' && callee.name === 'set')
-				)
-					findings.push(
-						`${file} mutates ${receiver.text} through ${callee.object.text}.${callee.name}(…) — lesser's preview value must remain verbatim`
-					);
 			}
 		});
 	}
+
+	if (file === canonicalFile) findings.push(...previewValuePathFindings(file, sourceFile));
+
 	return findings;
 }
