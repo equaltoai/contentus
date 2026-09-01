@@ -27,7 +27,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-f1nlQjth.js                726.24 kB │ gzip: 219.82 kB
 
-✓ built in 1.17s
+✓ built in 1.21s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
