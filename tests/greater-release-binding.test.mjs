@@ -295,3 +295,145 @@ test('the probes leave the tree exactly as they found it (R2-4)', () => {
 	const { status, output } = runVerifier();
 	assert.equal(status, 0, output);
 });
+
+/* ============================================================
+   R5-3 — the loose $lib universe and the committed release tree
+   ============================================================ */
+
+/**
+ * The round-5 review planted `src/lib/evil-loose.ts` — a sink file sitting
+ * DIRECTLY at the `src/lib` alias root, under no vendored root — plus one
+ * `VENDORED_SOURCE_FILES` line in the renderer audit, and BOTH gates passed:
+ * the audit treated the file as declared-vendored (so its sink was not
+ * scanned), and CON-4's direction-B walk excluded the alias root itself. The
+ * composed probe below replants exactly that: the audit alone is green over
+ * the declared file, and the release binding must fail it.
+ */
+const R5_LOOSE_FILE = 'src/lib/evil-loose.ts';
+
+test('a loose $lib sink cannot pass both controls, even declared vendored (R5-3)', () => {
+	const auditPath = join(repoRoot, 'scripts/audit-renderer-authority.mjs');
+	const auditBackup = readFileSync(auditPath, 'utf8');
+	const loose = join(repoRoot, R5_LOOSE_FILE);
+	writeFileSync(
+		loose,
+		'export const evil = (el: HTMLElement, html: string) => {\n\tel.innerHTML = html;\n};\n'
+	);
+	const declared = auditBackup.replace(
+		'const VENDORED_SOURCE_FILES = [',
+		"const VENDORED_SOURCE_FILES = [\n\t'" + R5_LOOSE_FILE + "',",
+		1
+	);
+	writeFileSync(auditPath, declared);
+	try {
+		// The renderer audit accepts the declared-vendored file — this is the
+		// point: the composed gate must not rest on the audit's classification.
+		// (The assertion is about the FILE, not a globally green audit: other
+		// probe tests plant their own fixtures concurrently, so the audit's
+		// exit code over the whole tree is not this test's subject.)
+		const audit = spawnSync(process.execPath, ['scripts/audit-renderer-authority.mjs'], {
+			cwd: fileURLToPath(new URL('..', import.meta.url)),
+			encoding: 'utf8',
+		});
+		const auditOutput = `${audit.stdout ?? ''}${audit.stderr ?? ''}`;
+		assert.ok(
+			!auditOutput.includes(R5_LOOSE_FILE),
+			`the audit must classify the declared file as vendored, not name it:\n${auditOutput}`
+		);
+
+		// CON-4 must reject the loose file whatever the audit declared.
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `the loose $lib sink must fail the release binding:\n${output}`);
+		assert.ok(
+			output.includes(R5_LOOSE_FILE) && output.includes('no manifest entry lists'),
+			`the release binding must name the loose file:\n${output}`
+		);
+	} finally {
+		writeFileSync(auditPath, auditBackup, 'utf8');
+		rmSync(loose, { force: true });
+	}
+});
+
+test('a committed release-source byte that disagrees with the manifest is a hard failure (R5-3)', () => {
+	// The record walk reads source bytes only for paths records reach; a
+	// hand-edited committed file whose manifest entry no record maps to was
+	// silently skipped. The total walk must fail it.
+	const sourceFile = join(repoRoot, 'gov-infra/release/source/packages/primitives/src/index.d.ts');
+	const original = readFileSync(sourceFile, 'utf8');
+	writeFileSync(sourceFile, `${original}// R5-3 hand-edit probe\n`, 'utf8');
+	try {
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `a mismatched committed release byte must fail the verifier:\n${output}`);
+		assert.ok(
+			output.includes('does not match the release manifest') ||
+				output.includes('does not match the pinned registry-index digest'),
+			output
+		);
+	} finally {
+		writeFileSync(sourceFile, original, 'utf8');
+	}
+});
+
+test('an unlisted committed release-source file is a finding (R5-3)', () => {
+	const added = join(repoRoot, 'gov-infra/release/source/packages/__r5_unlisted_probe__.txt');
+	writeFileSync(added, 'not a release byte\n', 'utf8');
+	try {
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `an unlisted committed release byte must fail the verifier:\n${output}`);
+		assert.ok(
+			output.includes('__r5_unlisted_probe__.txt') && output.includes('does not name'),
+			output
+		);
+	} finally {
+		rmSync(added, { force: true });
+	}
+});
+
+test('a direct src/lib symlink is rejected at the alias root (R5-3 adjacent)', () => {
+	const link = join(repoRoot, 'src/lib/__r5_root_symlink__.ts');
+	symlinkSync('blog-types.ts', link);
+	try {
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `a src/lib root symlink must fail the verifier:\n${output}`);
+		assert.ok(
+			output.includes('__r5_root_symlink__.ts') && output.includes('symlinks are forbidden'),
+			output
+		);
+	} finally {
+		rmSync(link, { force: true });
+	}
+});
+
+/* ============================================================
+   R5-2 — the CLI asset trust root is not child-contract bytes
+   ============================================================ */
+
+/**
+ * The coordinated counterfeit changed ONLY the child contract's
+ * `cli_asset.url` (and digest) while the tarball stayed patched; the offline
+ * release binding consumed the contract URL as if it were a trust coordinate.
+ * Now the URL is a comparison subject — a repointed contract fails the real
+ * verifier before any tarball byte is read.
+ */
+test('a repointed cli_asset.url fails the real verifier before any CLI code runs (R5-2)', () => {
+	const contractPath = join(repoRoot, 'gov-infra/planning/contentus-pinned-repo-contract.json');
+	const contractBackup = readFileSync(contractPath, 'utf8');
+	const contract = JSON.parse(contractBackup);
+	contract.greater.cli_asset.url = 'https://evil.example.com/greater-components-cli.tgz';
+	writeFileSync(contractPath, JSON.stringify(contract, null, 2) + '\n', 'utf8');
+	try {
+		const { status, output } = runVerifier();
+		assert.equal(status, 1, `the repointed asset URL must fail the real verifier:\n${output}`);
+		assert.ok(
+			output.includes('cannot repoint the CLI trust root'),
+			`the verifier must name the URL binding:\n${output}`
+		);
+	} finally {
+		writeFileSync(contractPath, contractBackup, 'utf8');
+	}
+});
+
+test('the probes leave the tree exactly as they found it (round 5)', () => {
+	const { status, output } = runVerifier();
+	assert.equal(status, 0, output);
+});

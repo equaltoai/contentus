@@ -76,10 +76,11 @@ import {
 	rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { digestOf, extractEntries, readTarEntries } from './verified-tarball.mjs';
+import { cliAssetUrl } from './authenticate-release-index.mjs';
 
 export const sriOf = (bytes) => `sha256-${createHash('sha256').update(bytes).digest('base64')}`;
 
@@ -145,6 +146,16 @@ async function loadCliDerivation({ repoRoot, pin }) {
 		);
 	}
 	const asset = pin.greater?.cli_asset;
+	// R5-2: the pinned asset URL is a comparison subject, never a trust
+	// coordinate — the canonical URL is derived from the fixed release facts,
+	// so a coordinated counterfeit that repoints the contract URL fails here
+	// before any tarball byte is read.
+	if (asset?.url !== cliAssetUrl())
+		throw new Error(
+			`${CLI_TARBALL(repoRoot)}'s pinned asset URL (${asset?.url ?? 'absent'}) differs from the ` +
+				`canonical release asset URL (${cliAssetUrl()}) — the child contract cannot repoint the ` +
+				'CLI trust root; re-derive it from the authenticated release'
+		);
 	const archive = readFileSync(tarballPath);
 	const actual = digestOf(archive);
 	if (typeof asset?.sha256 !== 'string' || actual !== asset.sha256) {
@@ -514,40 +525,33 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 		return found;
 	};
 	const manifestDiskPaths = new Set(records.map((record) => record.diskPath));
+	/** Whether a disk file is inside the authenticated release universe — the
+	 *  release's canonical bytes for a mapped source path, or the greater CLI's
+	 *  documented transform of them. */
+	const inReleaseUniverse = (diskPath, diskSri) => {
+		for (const virtualPath of diskToVirtuals(diskPath)) {
+			for (const repoPath of buildCandidates(virtualPath)) {
+				if (typeof checksums[repoPath] !== 'string') continue;
+				if (checksums[repoPath] === diskSri) return true;
+				const sourcePath = join(SOURCE_ROOT(repoRoot), repoPath);
+				if (!existsSync(sourcePath)) continue;
+				const sourceBytes = readFileSync(sourcePath);
+				if (sriOf(sourceBytes) !== checksums[repoPath]) continue;
+				const transformed = cli.transformImports(sourceBytes.toString('utf8'), components, virtualPath, {
+					consumerRoot: resolve(repoRoot),
+					sourceFilePath: diskPath,
+				});
+				if (transformed && sriOf(Buffer.from(transformed.content)) === diskSri) return true;
+			}
+		}
+		return false;
+	};
 	let unlistedCount = 0;
 	for (const root of [...vendoredRoots].sort()) {
 		for (const diskPath of walkExecutables(root)) {
 			if (manifestDiskPaths.has(diskPath)) continue;
 			const diskSri = sriOf(readFileSync(join(repoRoot, diskPath)));
-			let inReleaseUniverse = false;
-			for (const virtualPath of diskToVirtuals(diskPath)) {
-				for (const repoPath of buildCandidates(virtualPath)) {
-					if (typeof checksums[repoPath] !== 'string') continue;
-					if (checksums[repoPath] === diskSri) {
-						inReleaseUniverse = true;
-						break;
-					}
-					const sourcePath = join(SOURCE_ROOT(repoRoot), repoPath);
-					if (!existsSync(sourcePath)) continue;
-					const sourceBytes = readFileSync(sourcePath);
-					if (sriOf(sourceBytes) !== checksums[repoPath]) continue;
-					const transformed = cli.transformImports(
-						sourceBytes.toString('utf8'),
-						components,
-						virtualPath,
-						{
-							consumerRoot: resolve(repoRoot),
-							sourceFilePath: diskPath,
-						}
-					);
-					if (transformed && sriOf(Buffer.from(transformed.content)) === diskSri) {
-						inReleaseUniverse = true;
-						break;
-					}
-				}
-				if (inReleaseUniverse) break;
-			}
-			if (!inReleaseUniverse) {
+			if (!inReleaseUniverse(diskPath, diskSri)) {
 				unlistedCount += 1;
 				findings.push(
 					`${diskPath}: an executable file under the vendored roots that no manifest entry lists ` +
@@ -556,6 +560,110 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 				);
 			}
 		}
+	}
+
+	// --- R5-3 direction B extension: the `src/lib` alias ROOT itself ---------
+	// The round-5 review planted `src/lib/evil-loose.ts` — a sink file sitting
+	// DIRECTLY at the alias root, under no vendored root, plus one
+	// `VENDORED_SOURCE_FILES` line in the renderer audit — and both gates
+	// passed. The walk above covers the alias TARGETS (`src/lib/components`,
+	// …); the root itself was excluded because the alias-target regex is
+	// `^src/lib/[^/]+$`, which the root does not match. This walk is SHALLOW
+	// on purpose: the subdirectories of `src/lib/` are either contentus-owned
+	// (`src/lib/routes`, …) or already-walked vendored roots, so only DIRECT
+	// executable files are admitted, and each must be inside the release
+	// universe. A symlink or non-regular executable entry there is rejected,
+	// matching the vendored-root rules.
+	const walkDirectExecutables = (dir) => {
+		const found = [];
+		let entries;
+		try {
+			entries = readdirSync(join(repoRoot, dir), { withFileTypes: true });
+		} catch {
+			return found;
+		}
+		for (const entry of entries) {
+			if (entry.isDirectory()) continue;
+			const relativePath = `${dir}/${entry.name}`;
+			const stats = lstatSync(join(repoRoot, relativePath));
+			if (stats.isSymbolicLink()) {
+				findings.push(`${relativePath}: symlinks are forbidden at the src/lib alias root`);
+				continue;
+			}
+			if (!EXECUTABLE_SOURCE.test(entry.name)) continue;
+			if (!stats.isFile())
+				findings.push(
+					`${relativePath}: executable entry at the src/lib alias root is not a regular file`
+				);
+			else found.push(relativePath);
+		}
+		return found;
+	};
+	for (const diskPath of walkDirectExecutables('src/lib')) {
+		if (manifestDiskPaths.has(diskPath)) continue;
+		const diskSri = sriOf(readFileSync(join(repoRoot, diskPath)));
+		if (!inReleaseUniverse(diskPath, diskSri)) {
+			unlistedCount += 1;
+			findings.push(
+				`${diskPath}: a loose executable file directly under the src/lib alias root that no manifest ` +
+					`entry lists and no release file matches (${release_tag}@${vendored_ref}) — an unlisted ` +
+					'$lib file is invisible to every checksum, so it must not exist at the alias root'
+			);
+		}
+	}
+
+	// --- R5-3: the committed release-source tree, TOTAL ----------------------
+	// The record walk reads source bytes only for paths records reach. A
+	// committed file the walk never reaches — an ADDED unlisted file, or a
+	// hand-edited one whose manifest entry no record maps to — was silently
+	// skipped: the round-5 review planted both and the binding stayed green.
+	// Every committed file under `gov-infra/release/source/` must be named by
+	// the release manifest and byte-match its canonical checksum; a symlink or
+	// any other non-regular entry is rejected; a disagreement is a hard
+	// failure, never a skip.
+	const walkSourceTree = (dir) => {
+		const found = [];
+		let entries;
+		try {
+			entries = readdirSync(join(repoRoot, dir), { withFileTypes: true });
+		} catch {
+			return found;
+		}
+		for (const entry of entries) {
+			const absolute = join(repoRoot, dir, entry.name);
+			const stats = lstatSync(absolute);
+			// The manifest key is the repo path BENEATH the source root.
+			const relPath = relative(SOURCE_ROOT(repoRoot), absolute).split(sep).join('/');
+			if (stats.isSymbolicLink()) {
+				findings.push(
+					`gov-infra/release/source/${relPath}: symlinks are forbidden in the committed release tree`
+				);
+				continue;
+			}
+			if (stats.isDirectory()) found.push(...walkSourceTree(relative(repoRoot, absolute)));
+			else if (stats.isFile()) found.push(relPath);
+			else
+				findings.push(
+					`gov-infra/release/source/${relPath}: committed release entry is not a regular file`
+				);
+		}
+		return found;
+	};
+	for (const relPath of walkSourceTree('gov-infra/release/source')) {
+		const canonical = checksums[relPath];
+		if (typeof canonical !== 'string') {
+			findings.push(
+				`gov-infra/release/source/${relPath}: a committed release byte the release manifest does not ` +
+					'name — an unlisted file is invisible to every checksum, so it must not be committed'
+			);
+			continue;
+		}
+		const actual = sriOf(readFileSync(join(SOURCE_ROOT(repoRoot), relPath)));
+		if (actual !== canonical)
+			findings.push(
+				`gov-infra/release/source/${relPath} does not match the release manifest's canonical checksum ` +
+					`(manifest ${canonical}, actual ${actual})`
+			);
 	}
 
 	if (findings.length === 0) {

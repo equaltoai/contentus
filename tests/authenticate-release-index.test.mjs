@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+	CLI_ASSET_NAME,
 	GREATER_RELEASE,
+	allowedAssetContentType,
 	canonicalReleaseUrls,
+	cliAssetUrl,
+	redirectHopAllowed,
 	resolveTagCommit,
+	selectCliAsset,
 	validateReleaseContract,
 } from '../gov-infra/verifiers/authenticate-release-index.mjs';
 
@@ -24,6 +29,14 @@ test('release authentication derives canonical coordinates internally', () => {
 	});
 });
 
+test('the CLI asset URL is derived from the canonical release facts (R5-2)', () => {
+	assert.equal(
+		cliAssetUrl(),
+		'https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz'
+	);
+	assert.equal(CLI_ASSET_NAME, 'greater-components-cli.tgz');
+});
+
 test('coordinated contract repointing cannot select counterfeit release bytes', () => {
 	const canonical = {
 		greater: {
@@ -32,6 +45,10 @@ test('coordinated contract repointing cannot select counterfeit release bytes', 
 			registry_index: {
 				url: canonicalReleaseUrls().raw,
 				sha256: '0'.repeat(64),
+			},
+			cli_asset: {
+				url: cliAssetUrl(),
+				sha256: '1'.repeat(64),
 			},
 		},
 	};
@@ -49,12 +66,56 @@ test('coordinated contract repointing cannot select counterfeit release bytes', 
 				},
 			},
 		},
+		{
+			...canonical,
+			greater: {
+				...canonical.greater,
+				cli_asset: {
+					...canonical.greater.cli_asset,
+					url: 'https://evil.example.com/greater-components-cli.tgz',
+				},
+			},
+		},
+		{
+			...canonical,
+			greater: {
+				...canonical.greater,
+				cli_asset: {
+					...canonical.greater.cli_asset,
+					url: 'https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/renamed.tgz',
+				},
+			},
+		},
+		{
+			...canonical,
+			greater: {
+				...canonical.greater,
+				cli_asset: {
+					...canonical.greater.cli_asset,
+					sha256: 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+				},
+			},
+		},
+		{ ...canonical, greater: { ...canonical.greater, cli_asset: undefined } },
 	]) {
 		assert.throws(
 			() => validateReleaseContract(counterfeit),
-			/canonical release facts|canonical commit\/path/
+			/canonical release facts|canonical commit\/path|canonical release asset URL|64-hex digest/
 		);
 	}
+	// A WELL-FORMED but different digest is a comparison subject, not a
+	// self-consistency claim: the pin is checked against the bytes the
+	// canonical identity serves at fetch time, so contract validation cannot
+	// (and must not) reject a changed 64-hex value — that is the honest,
+	// child-governed position the round-5 remediation records.
+	const changedDigest = {
+		...canonical,
+		greater: {
+			...canonical.greater,
+			cli_asset: { ...canonical.greater.cli_asset, sha256: '9'.repeat(64) },
+		},
+	};
+	assert.equal(validateReleaseContract(changedDigest), canonical.greater.registry_index);
 });
 
 test('the canonical tag must resolve to the exact Greater release commit', async () => {
@@ -79,4 +140,99 @@ test('the canonical tag must resolve to the exact Greater release commit', async
 		}),
 		GREATER_RELEASE.commit
 	);
+});
+
+/* ============================================================
+   R5-2 — the CLI asset identity surface, offline
+   ============================================================ */
+
+const canonicalAsset = {
+	name: CLI_ASSET_NAME,
+	browser_download_url: cliAssetUrl(),
+	size: 236292,
+	content_type: 'application/x-gzip',
+};
+
+test('selectCliAsset picks exactly the canonical asset (R5-2)', () => {
+	const asset = selectCliAsset({ assets: [canonicalAsset] });
+	assert.equal(asset.name, CLI_ASSET_NAME);
+	assert.equal(asset.size, 236292);
+});
+
+test('selectCliAsset rejects missing, duplicate, renamed, wrong-URL, and unbounded assets (R5-2)', () => {
+	for (const [label, release] of [
+		['missing', { assets: [] }],
+		['duplicate', { assets: [canonicalAsset, canonicalAsset] }],
+		[
+			'renamed',
+			{
+				assets: [
+					{
+						...canonicalAsset,
+						name: 'greater-components-cli-evil.tgz',
+						browser_download_url:
+							'https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli-evil.tgz',
+					},
+				],
+			},
+		],
+		[
+			'wrong-host url',
+			{
+				assets: [
+					{ ...canonicalAsset, browser_download_url: 'https://evil.example.com/greater-components-cli.tgz' },
+				],
+			},
+		],
+		[
+			'wrong-owner url',
+			{
+				assets: [
+					{
+						...canonicalAsset,
+						browser_download_url:
+							'https://github.com/other/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz',
+					},
+				],
+			},
+		],
+		[
+			'wrong-tag url',
+			{
+				assets: [
+					{
+						...canonicalAsset,
+						browser_download_url:
+							'https://github.com/equaltoai/greater-components/releases/download/greater-v9.9.9/greater-components-cli.tgz',
+					},
+				],
+			},
+		],
+		['zero size', { assets: [{ ...canonicalAsset, size: 0 }] }],
+		['negative size', { assets: [{ ...canonicalAsset, size: -1 }] }],
+		['oversize', { assets: [{ ...canonicalAsset, size: 60 * 1024 * 1024 }] }],
+	]) {
+		assert.throws(
+			() => selectCliAsset(release),
+			/no asset named|duplicate asset names|not the canonical|outside the bounded/,
+			label
+		);
+	}
+});
+
+test('asset content-type and redirect-hop bounds reject non-GitHub responses (R5-2)', () => {
+	assert.equal(allowedAssetContentType('application/x-gzip'), true);
+	assert.equal(allowedAssetContentType('application/gzip'), true);
+	assert.equal(allowedAssetContentType('application/octet-stream'), true);
+	assert.equal(allowedAssetContentType('APPLICATION/OCTET-STREAM'), true);
+	assert.equal(allowedAssetContentType('text/html'), false);
+	assert.equal(allowedAssetContentType('application/x-www-form-urlencoded'), false);
+	assert.equal(allowedAssetContentType(null), false);
+
+	assert.equal(redirectHopAllowed('https://objects.githubusercontent.com/github-production-release-asset-2e65be/…'), true);
+	assert.equal(redirectHopAllowed('https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz'), true);
+	assert.equal(redirectHopAllowed('https://evil.example.com/greater-components-cli.tgz'), false);
+	assert.equal(redirectHopAllowed('http://objects.githubusercontent.com/x'), false);
+	assert.equal(redirectHopAllowed('/relative/redirect'), false);
+	assert.equal(redirectHopAllowed('https://github.com'), false);
 });

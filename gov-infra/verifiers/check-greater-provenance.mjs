@@ -49,13 +49,18 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { readStrictJson } from './strict-json.mjs';
 import { digestOf, extractEntries, readTarEntries, walkRegularFiles } from './verified-tarball.mjs';
+import { CLI_ASSET_NAME, cliAssetUrl } from './authenticate-release-index.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 const TOOLS = 'gov-infra/.tools';
 const TARBALL = `${TOOLS}/greater-components-cli.tgz`;
+// The doctor-verdict checker, spelled as a literal at BOTH the constant and
+// the spawn site below: CON-5's `binds` is only checkable when the site is
+// written to run the path it names, so the call carries the literal.
 const DOCTOR_CHECKER = 'gov-infra/verifiers/check-greater-doctor.mjs';
 const MEMBER_PREFIX = 'package/';
 const BLOCKED_RC = 3;
@@ -101,6 +106,15 @@ try {
 }
 
 const asset = contract.greater?.cli_asset;
+// R5-2: the asset URL is derived from the canonical release identity, and the
+// contract's copy is held to it — a counterfeit that repoints the URL fails
+// here, and the honest description of the digest is printed below.
+if (asset?.url !== cliAssetUrl()) {
+	console.error(`${CONTRACT}: greater.cli_asset.url differs from the canonical release asset URL`);
+	console.error(`  contract: ${asset?.url ?? 'absent'}`);
+	console.error(`  derived:  ${cliAssetUrl()}`);
+	process.exit(1);
+}
 if (typeof asset?.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(asset.sha256)) {
 	console.error(`${CONTRACT}: greater.cli_asset.sha256 must be a 64-hex digest`);
 	console.error('Without a pinned digest there is no provenance for SEC-7 to verify.');
@@ -126,7 +140,11 @@ if (actual !== asset.sha256)
 	]);
 
 console.log(`greater CLI release asset: ${asset.url}`);
-console.log(`  SHA-256 ${actual} verified against ${CONTRACT} at gate time.`);
+console.log(
+	`  SHA-256 ${actual} verified against ${CONTRACT} at gate time — a CHILD-GOVERNED pin, stated as ` +
+		'such: GitHub exposes no digest for the asset, so the external anchor is the identity surface ' +
+		`(name ${CLI_ASSET_NAME}, canonical URL, bounded size) the release authenticator checks first`
+);
 
 // --- Members ------------------------------------------------------------------
 let entries;
@@ -291,10 +309,17 @@ if (doctor.error) blocked(`the quarantined CLI could not be executed (${doctor.e
 const doctorFile = join(quarantine, 'doctor.json');
 writeFileSync(doctorFile, doctor.stdout ?? '');
 
-const verdict = spawnSync(process.execPath, [DOCTOR_CHECKER, doctorFile], {
-	cwd: process.cwd(),
-	stdio: 'inherit',
-});
+// The path, spelled in this file's own frame (`new URL(…, import.meta.url)`)
+// so no working directory moves it — CON-5's `binds` on the disclosure above
+// is checkable against the word this call is written to run.
+const verdict = spawnSync(
+	process.execPath,
+	[fileURLToPath(new URL('./check-greater-doctor.mjs', import.meta.url)), doctorFile],
+	{
+		cwd: process.cwd(),
+		stdio: 'inherit',
+	}
+);
 if (verdict.error) {
 	console.error(`${DOCTOR_CHECKER} could not run: ${verdict.error.message}`);
 	process.exit(1);
