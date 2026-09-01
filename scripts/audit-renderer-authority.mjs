@@ -43,11 +43,26 @@
  *      shapes `{@html}` scanning cannot see (round-1 bypass C), read for the
  *      round-2 evasion spellings (Reflect.set, Object.assign, aliased
  *      document, iframe attribute spreads) and failing closed on any key the
- *      parsers cannot fold (round-2).
+ *      parsers cannot fold (round-2). Round-5 (R5-4) added destructured
+ *      renamed dangerous methods, identifier-laundered Object.assign sources,
+ *      case-insensitive attribute names, and execCommand('insertHTML');
+ *      round-6 (R6-3) follows aliases of dangerous built-in callees
+ *      (Object.assign / defineProperty / defineProperties / Reflect.set /
+ *      execCommand / setAttribute through identifiers, destructures,
+ *      .call/.apply/.bind), call-result payloads, rest/spread payload arrays,
+ *      and the narrow residual primitives setHTMLUnchecked and JSX
+ *      dangerouslySetInnerHTML.
  *   8. Every `PreviewBody` invocation receives the authorized preview result
  *      verbatim — the sink's caller is bound, not only the sink file, so a
  *      parent `$derived` that spreads `preview` and rewrites `preview.html`
- *      between `toDraftPreview` and the sink is a finding (round-2).
+ *      between `toDraftPreview` and the sink is a finding (round-2). The
+ *      round-5 value binding follows the reference through aliases,
+ *      containers, returning helpers and function hops; the round-6 (R6-1)
+ *      cross-file reading additionally rejects a SECOND route built by
+ *      forwarding the PreviewBody component or the preview value through
+ *      props into a wrapper that invokes them via `<svelte:component>`, and
+ *      R6-2 follows the identity through destructures, accessors, class
+ *      constructors, loop and catch bindings, and iteration callbacks.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -96,6 +111,7 @@ import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,
 	previewDisplayScriptFindings,
+	previewForwardingFindings,
 	previewInvocationFindings,
 	svelteConstTags,
 	svelteHtmlTags,
@@ -681,11 +697,21 @@ function checkOwnedSourceCoverage() {
  */
 function checkPreviewValuePath() {
 	const problems = [];
+	// R6-1: the per-file scan cannot see a SECOND route built by forwarding the
+	// PreviewBody COMPONENT and the preview VALUE through props into a wrapper
+	// that invokes them via <svelte:component> — the wrapper never imports
+	// PreviewBody, so its own file scans clean. The cross-file reading runs
+	// over the owned Svelte modules (the same walk, the same "one copy"
+	// parser-based scanner) and resolves the flow through the owned module
+	// graph, failing closed on any route that is not statically the one
+	// canonical direct invocation.
+	const ownedSvelteFiles = new Map();
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
 			const path = relative(repoRoot, file);
 			try {
 				if (path.toLowerCase().endsWith('.svelte')) {
+					ownedSvelteFiles.set(path, readFileSync(file, 'utf8'));
 					problems.push(...previewInvocationFindings(path, readFileSync(file, 'utf8')));
 				} else {
 					// A dynamic import of the sink module — the same parser reading
@@ -706,6 +732,7 @@ function checkPreviewValuePath() {
 			}
 		}
 	}
+	problems.push(...previewForwardingFindings(ownedSvelteFiles));
 	return problems;
 }
 

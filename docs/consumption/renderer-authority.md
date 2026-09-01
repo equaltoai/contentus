@@ -120,6 +120,47 @@ Nothing local that would paper over it. Specifically:
   `$state.raw(<object/array literal>)` is recognized as a legitimate non-DOM
   container (R5-5), so its computed writes stay clean.
 
+  Round-6 (R6-1/R6-2/R6-3) closed the remaining launderings the round-6
+  adversarial review planted. **R6-1** added a cross-file component/value flow
+  analysis: the canonical file can hand the PreviewBody COMPONENT and the
+  preview VALUE to a wrapper through props, and the wrapper can invoke them via
+  `<svelte:component this={body} preview={value}/>` with no PreviewBody import
+  of its own — a second live route the per-file reading never saw. The
+  cross-file reading (over the owned Svelte module graph, resolved through the
+  `$lib`/relative aliases the toolchain uses) now rejects any route that is not
+  statically the one canonical direct `PreviewBody preview={preview}`
+  invocation: a `svelte:component` carrying a `preview` attribute must resolve
+  `this` to a component provably free of preview flow; a static invocation of a
+  known preview-reaching component must pass provably non-preview values for
+  every preview-flowing prop (renamed/shorthand/spread attributes and
+  `$props()` destructuring followed); and the PreviewBody component itself may
+  appear only in the canonical invocation — handing it through a prop is a
+  finding. **R6-2** widened the value identity to non-identifier bindings:
+  object/array destructuring and assignment patterns (including rest), getters
+  whose return can carry the preview (failing closed on unprovable returns),
+  class constructors and `new` expressions, `for (const x of [preview])` loop
+  bindings, `try { throw preview } catch (e)` bindings, and array-iteration
+  callbacks (`[preview].forEach((p) => …)`); `$state.raw` containers and
+  provably non-preview destructures stay clean. **R6-3** followed aliases of
+  dangerous built-in callees and methods — `const A = Object.assign`,
+  destructured `{ assign } = Object`, `document.execCommand` extractions, and
+  `.call`/`.apply`/`.bind` routes all dispatch through the same argument logic
+  as the direct spelling — plus call-result payloads (`Object.assign(frame,
+payload())`) and rest/spread payload arrays (`Object.assign(frame,
+...spreads)`), failing closed on unresolved payloads into receivers that
+  cannot be proven non-DOM; `execCommand('copy')` and `Object.assign(state,
+defaultState(), initial)` on a provable container stay clean. Two narrow
+  residual rules were added rather than documented away: `setHTMLUnchecked`
+  (Chromium's un-sanitizing setter, always dangerous when called) and JSX
+  `dangerouslySetInnerHTML`. What is deliberately NOT scanned is stated here:
+  `eval`, `new Function`, and string-literal timer primitives are
+  code-execution primitives, not HTML sinks, and contentus's strict CSP
+  (`script-src` without `unsafe-eval`/`unsafe-inline`, enforced by
+  `scripts/audit-csp.mjs` and the FaceTheory route-scoped headers) is the
+  standing control for them; expanding the renderer-authority gate into a
+  generic security scanner would trade a precise, provable claim for a broad
+  one.
+
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
 "Canonical sanitized HTML. Never fall back to rendering content when this
