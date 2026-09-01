@@ -13,7 +13,7 @@
  * quietly become a second canonical renderer. This audit makes the erosion
  * fail the build.
  *
- * Seven checks:
+ * Nine checks:
  *
  *   1. No Markdown-rendering package is a direct contentus dependency.
  *   2. No contentus-owned source imports a Markdown/HTML rendering package —
@@ -51,7 +51,14 @@
  *      execCommand / setAttribute through identifiers, destructures,
  *      .call/.apply/.bind), call-result payloads, rest/spread payload arrays,
  *      and the narrow residual primitives setHTMLUnchecked and JSX
- *      dangerouslySetInnerHTML.
+ *      dangerouslySetInnerHTML. Round-7 (R7-4) added the launderings the
+ *      round-7 review planted: property-descriptor setter extraction
+ *      (`Object.getOwnPropertyDescriptor(…)?.set?.call(…)`), multi-step method
+ *      binding (`const m = host.insertAdjacentHTML; const inj = m.bind(host);
+ *      inj(…)`), computed Object.assign keys folded through constant strings
+ *      with unresolved computed keys failing closed, `Reflect.apply` /
+ *      `Reflect.construct` dispatch, and the Sanitizer-API spellings
+ *      `setHTML`/`setHTMLUnsafe` beside `setHTMLUnchecked`.
  *   8. Every `PreviewBody` invocation receives the authorized preview result
  *      verbatim — the sink's caller is bound, not only the sink file, so a
  *      parent `$derived` that spreads `preview` and rewrites `preview.html`
@@ -63,6 +70,22 @@
  *      props into a wrapper that invokes them via `<svelte:component>`, and
  *      R6-2 follows the identity through destructures, accessors, class
  *      constructors, loop and catch bindings, and iteration callbacks.
+ *      Round-7 (R7-1/R7-3) closes what that reading still skipped: static
+ *      invocations whose callee is a prop, an unbound name, a dotted member,
+ *      or an owned module no resolution proves a component fail closed the
+ *      moment a preview-flowing value can reach them; markup spread objects
+ *      are read (keys, shorthand, aliases, helper returns, computed keys
+ *      folded through constants) instead of flagged blind; dotted callees and
+ *      owned barrels are never trusted owned components; and the value
+ *      identity additionally follows late-populated containers, collection
+ *      transforms, element access through folded keys, setters, inherited
+ *      constructors, and generator yields.
+ *   9. The executable source universe is derived from reachability, not from
+ *      the `src/` walk (round-7 R7-2): an executable module outside the
+ *      classified owned/vendored roots that an owned file or a build entry
+ *      loads — by static or dynamic import, re-export, glob, relative alias,
+ *      root-relative path, query-suffixed specifier, case variant, or
+ *      symlink — is a finding, and the chain is followed hop by hop.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -96,7 +119,7 @@
  * chain.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -110,6 +133,8 @@ import {
 import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,
+	eachNode,
+	parseTypeScript,
 	previewDisplayScriptFindings,
 	previewForwardingFindings,
 	previewInvocationFindings,
@@ -675,6 +700,305 @@ function checkOwnedSourceCoverage() {
 }
 
 /**
+ * The repository roots the executable-source universe walk never descends
+ * into — dependencies, generated output, the governance tree, and non-code
+ * content. Each entry is a reason stated elsewhere in this repository's
+ * controls: `node_modules` is the dependency graph SEC-3 screens; `build` is
+ * generated output COM-1 asserts; `gov-infra` is bound by CON-5's content
+ * pins rather than by renderer authority; the rest carry no executable source
+ * contentus renders. A directory the walk never opens is governed by those
+ * controls, not silently admitted to the app's source.
+ */
+const UNIVERSE_EXCLUDED_ROOTS = [
+	'node_modules',
+	'.git',
+	'.github',
+	'.agents',
+	'.claude',
+	'.codex',
+	'.kimi-code',
+	'.theorymcp',
+	'.pai',
+	'.theory',
+	'build',
+	'dist',
+	'coverage',
+	'gov-infra',
+	'docs',
+	'assets',
+	'contracts',
+];
+
+/**
+ * Executable modules at the repository root that are BUILD CONFIGURATION
+ * rather than application source: `vite build` reads them as its own input.
+ * They are permissions with a shape, named one by one exactly like the
+ * vendored-file list — a new root-level module is unclassified (and, the
+ * moment owned code or a build entry loads it, a finding) rather than
+ * silently governed. They ALSO seed the reachability walk, because a build
+ * entry can load a module nothing under `src/` names.
+ */
+const GOVERNED_ROOT_MODULES = ['vite.config.ts', 'svelte.config.js'];
+
+/**
+ * The extensions the universe resolution tries when a specifier names a
+ * module without one — the suffixes this toolchain resolves, in no particular
+ * preference: a hit on ANY of them is a reach.
+ */
+const UNIVERSE_RESOLVE_EXTENSIONS = [
+	'',
+	'.svelte',
+	'.ts',
+	'.mts',
+	'.cts',
+	'.tsx',
+	'.js',
+	'.mjs',
+	'.cjs',
+	'.jsx',
+];
+
+function walkUniverse(dir) {
+	const absolute = join(repoRoot, dir);
+	const results = [];
+	let entries;
+	try {
+		entries = readdirSync(absolute);
+	} catch {
+		return results;
+	}
+	for (const entry of entries) {
+		if (dir === '' && UNIVERSE_EXCLUDED_ROOTS.includes(entry)) continue;
+		// The owned trees are classified by the walk that feeds checks 2, 3, 7,
+		// and 8; the universe walk only looks OUTSIDE them.
+		if (
+			dir === '' &&
+			OWNED_SOURCE_DIRS.some((owned) => owned === entry || owned.startsWith(`${entry}/`))
+		)
+			continue;
+		const full = join(absolute, entry);
+		if (statSync(full).isDirectory()) {
+			results.push(...walkUniverse(relative(repoRoot, full)));
+		} else if (EXECUTABLE_SOURCE.test(entry)) {
+			results.push(full);
+		}
+	}
+	return results;
+}
+
+/**
+ * A specifier's repository-relative module base, the way the toolchain
+ * resolves it — `$lib/x` is the `src/lib/x` alias, `/x` is Vite's
+ * root-relative spelling, `./x` and `../x` resolve against the importing
+ * file. Query and hash suffixes are already stripped by the caller. A bare
+ * specifier is a package and returns null.
+ */
+function resolveUniverseSpecifier(specifier, fromFile) {
+	let target;
+	if (specifier.startsWith('$lib/')) target = `src/lib/${specifier.slice('$lib/'.length)}`;
+	else if (specifier === '$lib') target = 'src/lib';
+	else if (specifier.startsWith('/')) target = specifier.slice(1);
+	else if (specifier.startsWith('./') || specifier.startsWith('../')) {
+		const parts = fromFile.split('/');
+		const base = parts.slice(0, -1).join('/');
+		const resolved = `${base}/${specifier}`.split('/').reduce((acc, part) => {
+			if (part === '.' || part === '') return acc;
+			if (part === '..') {
+				acc.pop();
+				return acc;
+			}
+			acc.push(part);
+			return acc;
+		}, []);
+		target = resolved.join('/');
+	} else {
+		return null;
+	}
+	return target;
+}
+
+/**
+ * The `import.meta.glob('pattern')` arguments in script text — Vite expands
+ * them into imports of every file the pattern matches, so a glob that reaches
+ * outside the classified roots loads it exactly as a spelled import would.
+ */
+function importMetaGlobPatterns(source, { jsx = false } = {}) {
+	const sourceFile = parseTypeScript(source, { jsx });
+	const patterns = [];
+	eachNode(sourceFile, (node) => {
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			node.expression.name.text === 'glob' &&
+			ts.isMetaProperty(node.expression.expression)
+		) {
+			const argument = node.arguments[0];
+			if (argument && ts.isStringLiteral(argument)) patterns.push(argument.text);
+		}
+	});
+	return patterns;
+}
+
+/** Compile a Vite-style glob pattern into a matcher over repository paths. */
+function globToRegExp(pattern) {
+	let expression = '';
+	for (let index = 0; index < pattern.length; index += 1) {
+		const character = pattern[index];
+		if (character === '*') {
+			if (pattern[index + 1] === '*') {
+				expression += '.*';
+				index += 1;
+				if (pattern[index + 1] === '/') index += 1;
+			} else {
+				expression += '[^/]*';
+			}
+		} else if (character === '?') {
+			expression += '[^/]';
+		} else if ('\\^$.|+()[]{}'.includes(character)) {
+			expression += `\\${character}`;
+		} else {
+			expression += character;
+		}
+	}
+	return new RegExp(`^${expression}$`, 'i');
+}
+
+/**
+ * Check 9 — the EXECUTABLE SOURCE UNIVERSE (round-7 R7-2).
+ *
+ * Checks 2, 3, 7, and 8 classify and scan files beneath `src/` (plus the
+ * owned `scripts/` tree). That left a universe hole: an executable module
+ * OUTSIDE the classified roots — a `RootShim.svelte` at the repository root —
+ * was walked by no check, and an owned file could import it with an
+ * `@ts-ignore` and never be asked about it. The round-7 plant did exactly
+ * that: a root-level Svelte module importing `PreviewBody`, reconstructing
+ * the preview bytes, and rendering them, green through every audit.
+ *
+ * The universe is therefore derived from REACHABILITY rather than from the
+ * `src/` walk: every executable module outside the owned and vendored roots
+ * that an owned file or a build entry loads — by static import, dynamic
+ * import, re-export, glob, relative alias, root-relative path, query-suffixed
+ * specifier, case variant, or symlink — is a finding, and the walk follows
+ * the chain, so a module reached only through another outsider is caught at
+ * both hops. Framework, vendor, and generated trees stay governed by their
+ * existing controls through the explicit exclusion roots; dependencies are
+ * never scanned as owned source.
+ */
+function checkExecutableSourceUniverse() {
+	const problems = [];
+	const isUnder = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
+
+	// --- the candidate set: executable source outside the classified roots ----
+	const candidates = [];
+	for (const file of walkUniverse('')) {
+		const path = relative(repoRoot, file).split(sep).join('/');
+		if (OWNED_SOURCE_DIRS.some((dir) => isUnder(path, dir))) continue;
+		if (VENDORED_SOURCE_ROOTS.some((dir) => isUnder(path, dir))) continue;
+		if (VENDORED_SOURCE_FILES.includes(path)) continue;
+		if (GOVERNED_ROOT_MODULES.includes(path)) continue;
+		candidates.push(path);
+	}
+
+	// Index candidates by their own path, case-insensitively, and by the real
+	// path a symlink resolves to — both spellings reach the same bytes.
+	const candidateIndex = new Map();
+	for (const path of candidates) {
+		candidateIndex.set(path.toLowerCase(), path);
+		try {
+			const real = relative(repoRoot, realpathSync(join(repoRoot, path)))
+				.split(sep)
+				.join('/');
+			if (!candidateIndex.has(real.toLowerCase())) candidateIndex.set(real.toLowerCase(), path);
+		} catch {
+			// A candidate that disappeared between the walk and the read is a
+			// reachability target no more; the walk itself is the evidence.
+		}
+	}
+	const matchCandidate = (base) => {
+		const lower = base.toLowerCase();
+		for (const extension of UNIVERSE_RESOLVE_EXTENSIONS) {
+			const hit = candidateIndex.get(`${lower}${extension}`.toLowerCase());
+			if (hit) return hit;
+		}
+		for (const extension of UNIVERSE_RESOLVE_EXTENSIONS.slice(1)) {
+			const hit = candidateIndex.get(`${lower}/index${extension}`.toLowerCase());
+			if (hit) return hit;
+		}
+		return null;
+	};
+
+	// --- the reachability closure ---------------------------------------------
+	const queue = [];
+	for (const dir of OWNED_SOURCE_DIRS) {
+		for (const file of walkFiles(dir)) queue.push(relative(repoRoot, file).split(sep).join('/'));
+	}
+	for (const rootModule of GOVERNED_ROOT_MODULES) {
+		try {
+			statSync(join(repoRoot, rootModule));
+			queue.push(rootModule);
+		} catch {
+			// A governed root module that does not exist loads nothing.
+		}
+	}
+	const visited = new Set();
+	const reported = new Set();
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (visited.has(current)) continue;
+		visited.add(current);
+		let source;
+		try {
+			source = readFileSync(join(repoRoot, current), 'utf8');
+		} catch {
+			continue;
+		}
+		const jsx = /\.(tsx|jsx)$/i.test(current);
+		let specifiers;
+		let patterns;
+		try {
+			if (current.toLowerCase().endsWith('.svelte')) {
+				const script = liveScript(current, source);
+				specifiers = moduleSpecifiers(script);
+				patterns = importMetaGlobPatterns(script);
+			} else {
+				specifiers = moduleSpecifiers(source, { jsx });
+				patterns = importMetaGlobPatterns(source, { jsx });
+			}
+		} catch (error) {
+			problems.push(
+				`${current} could not be read for the executable-source universe scan: ${error.message}`
+			);
+			continue;
+		}
+		const record = (target, how) => {
+			if (reported.has(target)) return;
+			reported.add(target);
+			problems.push(
+				`${target} is executable source outside the classified owned/vendored roots — ` +
+					`${current} ${how}, and application source must live under the classified roots`
+			);
+			queue.push(target); // the chain continues: an outsider can load an outsider
+		};
+		for (const specifier of specifiers) {
+			const base = resolveUniverseSpecifier(modulePath(specifier), current);
+			if (base === null) continue;
+			const hit = matchCandidate(base);
+			if (hit) record(hit, `loads it ("${specifier}")`);
+		}
+		for (const pattern of patterns) {
+			const base = resolveUniverseSpecifier(pattern, current);
+			if (base === null) continue;
+			const matcher = globToRegExp(base);
+			for (const path of candidates) {
+				if (matcher.test(path)) record(path, `globs it ("${pattern}")`);
+			}
+		}
+	}
+
+	return problems;
+}
+
+/**
  * Check 8 — the preview VALUE PATH, bound at the caller (round-2, widened
  * round-5).
  *
@@ -704,21 +1028,28 @@ function checkPreviewValuePath() {
 	// over the owned Svelte modules (the same walk, the same "one copy"
 	// parser-based scanner) and resolves the flow through the owned module
 	// graph, failing closed on any route that is not statically the one
-	// canonical direct invocation.
+	// canonical direct invocation. R7-1 hands the same reading the FULL owned
+	// executable module map — barrels and re-exports resolve through the
+	// non-Svelte modules too — and the vendored declaration, so a CLI-managed
+	// component stays benign while an owned module nobody can resolve to a
+	// component fails closed instead.
 	const ownedSvelteFiles = new Map();
+	const ownedModuleSources = new Map();
 	for (const dir of OWNED_SOURCE_DIRS) {
 		for (const file of walkFiles(dir)) {
 			const path = relative(repoRoot, file);
+			const source = readFileSync(file, 'utf8');
+			ownedModuleSources.set(path, source);
 			try {
 				if (path.toLowerCase().endsWith('.svelte')) {
-					ownedSvelteFiles.set(path, readFileSync(file, 'utf8'));
-					problems.push(...previewInvocationFindings(path, readFileSync(file, 'utf8')));
+					ownedSvelteFiles.set(path, source);
+					problems.push(...previewInvocationFindings(path, source));
 				} else {
 					// A dynamic import of the sink module — the same parser reading
 					// covers script and markup positions, so a `$lib` module reaching
 					// PreviewBody without the canonical static import is a finding
 					// wherever it hides.
-					const script = liveScript(path, readFileSync(file, 'utf8'));
+					const script = liveScript(path, source);
 					for (const specifier of moduleSpecifiers(script)) {
 						if (/(?:^|\/)PreviewBody\.svelte$/.test(modulePath(specifier)))
 							problems.push(
@@ -732,7 +1063,13 @@ function checkPreviewValuePath() {
 			}
 		}
 	}
-	problems.push(...previewForwardingFindings(ownedSvelteFiles));
+	problems.push(
+		...previewForwardingFindings(ownedSvelteFiles, {
+			modules: ownedModuleSources,
+			vendoredRoots: VENDORED_SOURCE_ROOTS,
+			vendoredFiles: VENDORED_SOURCE_FILES,
+		})
+	);
 	return problems;
 }
 
@@ -743,6 +1080,7 @@ function main() {
 		['owned-source {@html} sinks', checkHtmlSinks()],
 		['vendored blog-face escape fallback', checkVendoredEscapeFallback()],
 		['owned-source coverage', checkOwnedSourceCoverage()],
+		['executable source universe', checkExecutableSourceUniverse()],
 		['preview display sink binding', checkPreviewDisplaySink()],
 		['alternate raw-HTML sinks', checkAlternateHtmlSinks()],
 		['preview value path', checkPreviewValuePath()],

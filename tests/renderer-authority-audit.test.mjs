@@ -1633,10 +1633,14 @@ test('a spread onto a preview-forwarding wrapper fails (R6-1 adjacent spread)', 
 			() => {
 				const { status, output } = runAudit();
 				assert.equal(status, 1, `the spread route must fail the audit:\n${output}`);
+				// Round-7 reads the spread object rather than flagging it blind:
+				// `{ preview }` resolves to its key, and the wrapper's forwarded
+				// `preview` prop is what fails — together with the dynamic
+				// `<svelte:component this={body}>` route the wrapper hosts.
 				assert.match(
 					output,
-					/spreads attributes onto SpreadWrapper/,
-					`the unresolvable spread into a forwarding wrapper must fail closed:\n${output}`
+					/passes `preview` through the preview prop of SpreadWrapper/,
+					`the spread's resolved preview key into a forwarding wrapper must fail closed:\n${output}`
 				);
 			}
 		);
@@ -2056,5 +2060,549 @@ test('legitimate callee aliases and payloads stay clean (R6-3 positives)', () =>
 		assert.equal(status, 0, `benign callees and payloads must stay clean:\n${output}`);
 	} finally {
 		rmSync(join(repoRoot, relativePath), { force: true });
+	}
+});
+/* ============================================================
+   Round 7 — R7-1: prop/unbound component callees and markup-spread
+   forwarding
+   ============================================================ */
+
+/**
+ * The round-7 review planted a type-correct second route that stayed green
+ * through every round-6 control: an owned wrapper whose callee is a PROP
+ * (`<Comp preview={shown}/>`) fed from the canonical file by a markup spread
+ * (`<PreviewSlot {...{ Comp: PreviewBody, value: preview }} />`). The
+ * cross-file flow skipped every callee it could not resolve to an owned
+ * component, and it counted spreads without reading them. These probes keep
+ * the plant and its adjacent forms; each must now fail with a reason.
+ */
+const R7_PREVIEW_SLOT = 'src/lib/review/__r7_preview_slot__.svelte';
+
+test('a prop-named component fed through a markup spread fails the audit (R7-1 exact plant)', () => {
+	plant(
+		R7_PREVIEW_SLOT,
+		'<script lang="ts">\n' +
+			"\timport type { Component } from 'svelte';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tComp: Component<{ preview: DraftPreview }>;\n' +
+			'\t\tvalue: DraftPreview;\n' +
+			'\t}\n' +
+			'\n' +
+			'\tlet { Comp, value }: Props = $props();\n' +
+			"\tconst shown = { ...value, html: (value.html ?? '') + '<img src=x>' };\n" +
+			'</script>\n' +
+			'\n' +
+			'<Comp preview={shown} />\n'
+	);
+	try {
+		withPlantedWorkspace(
+			(source) =>
+				source
+					.replace(
+						PREVIEW_IMPORT,
+						PREVIEW_IMPORT + "\timport PreviewSlot from '$lib/review/__r7_preview_slot__.svelte';\n"
+					)
+					.replace(
+						PREVIEW_INVOCATION,
+						`${PREVIEW_INVOCATION}\n\t\t\t\t\t\t<PreviewSlot {...{ Comp: PreviewBody, value: preview }} />`
+					),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the prop-callee route must fail the audit:\n${output}`);
+				// The wrapper's own invocation: a prop-supplied callee with a
+				// preview-flowing value fails closed.
+				assert.match(
+					output,
+					/prop-supplied component `Comp`/,
+					`the wrapper's prop-named callee must fail closed:\n${output}`
+				);
+				// The canonical spread is READ: both folded keys are findings.
+				assert.match(
+					output,
+					/passes `preview` through the value prop of PreviewSlot/,
+					`the spread's value key must be read and fail:\n${output}`
+				);
+				assert.match(
+					output,
+					/names the PreviewBody component in its markup outside the canonical invocation/,
+					`the spread's component key must be seen in the canonical markup:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, R7_PREVIEW_SLOT), { force: true });
+	}
+});
+
+test('a prop-supplied namespace member callee fails the audit (R7-1 adjacent member)', () => {
+	const wrapper = `${OWNED_DIR}/__r7_member_slot__.svelte`;
+	plant(
+		wrapper,
+		'<script lang="ts">\n' +
+			'\tinterface Props {\n' +
+			'\t\tMod: { default: unknown };\n' +
+			'\t\tvalue: unknown;\n' +
+			'\t}\n' +
+			'\tlet { Mod, value }: Props = $props();\n' +
+			'</script>\n' +
+			'\n' +
+			'<Mod.default preview={value} />\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `the member callee route must fail the audit:\n${output}`);
+		assert.match(
+			output,
+			/member component `Mod\.default`/,
+			`a dotted callee supplied through props is never a trusted owned component:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, wrapper), { force: true });
+	}
+});
+
+test('aliased and computed-key markup spreads fail the audit (R7-1 adjacent spread reading)', () => {
+	const wrapper = `${OWNED_DIR}/__r7_spread_alias_slot__.svelte`;
+	plant(
+		wrapper,
+		'<script lang="ts">\n' +
+			"\timport type { Component } from 'svelte';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tComp: Component<{ preview: DraftPreview }>;\n' +
+			'\t\tvalue: DraftPreview;\n' +
+			'\t}\n' +
+			'\tlet { Comp, value }: Props = $props();\n' +
+			'</script>\n' +
+			'\n' +
+			'<Comp preview={value} />\n'
+	);
+	try {
+		withPlantedWorkspace(
+			(source) =>
+				source
+					.replace(
+						PREVIEW_IMPORT,
+						PREVIEW_IMPORT +
+							"\timport SpreadAliasSlot from '$lib/compose/__r7_spread_alias_slot__.svelte';\n"
+					)
+					.replace(
+						"\tconst isMarkdownSource = $derived(review?.contentFormat === 'MARKDOWN');",
+						"\tconst isMarkdownSource = $derived(review?.contentFormat === 'MARKDOWN');\n" +
+							'\tconst slotProps = { Comp: PreviewBody, value: preview };\n' +
+							"\tconst kk = 'value';\n"
+					)
+					.replace(
+						PREVIEW_INVOCATION,
+						`${PREVIEW_INVOCATION}\n\t\t\t\t\t\t<SpreadAliasSlot {...slotProps} />\n` +
+							"\t\t\t\t\t\t<SpreadAliasSlot {...{ ['Comp']: PreviewBody, [kk]: preview }} />"
+					),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the aliased spread route must fail the audit:\n${output}`);
+				// The alias resolves through the script binding; the computed
+				// keys fold through the constant string.
+				assert.match(
+					output,
+					/passes `PreviewBody` through the Comp prop of SpreadAliasSlot/,
+					`an aliased spread object must be read through its binding:\n${output}`
+				);
+				assert.match(
+					output,
+					/passes `preview` through the value prop of SpreadAliasSlot/,
+					`a computed spread key folding to 'value' must be read:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, wrapper), { force: true });
+	}
+});
+
+test('a prop-named component with provably non-preview props stays green (R7-1 positive)', () => {
+	const wrapper = `${OWNED_DIR}/__r7_icon_slot__.svelte`;
+	plant(
+		wrapper,
+		'<script lang="ts">\n' +
+			"\timport type { Component } from 'svelte';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tIcon: Component<{ name: string }>;\n' +
+			'\t\tlabel: string;\n' +
+			'\t}\n' +
+			'\tlet { Icon, label }: Props = $props();\n' +
+			'</script>\n' +
+			'\n' +
+			'<Icon name={label} />\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 0, `a prop component with non-preview props must stay clean:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, wrapper), { force: true });
+	}
+});
+
+/* ============================================================
+   Round 7 — R7-2: executable source outside the classified roots
+   ============================================================ */
+
+/**
+ * The round-7 review planted a root-level Svelte module importing PreviewBody,
+ * reconstructing the preview bytes, and rendering them, reached from an owned
+ * component through a relative import — green through every control, because
+ * check 5 classifies only what the `src/` walk opens. The universe check
+ * derives coverage from reachability; each plant below must now fail it.
+ */
+
+test('executable source outside the classified roots fails when owned code loads it (R7-2 exact plant)', () => {
+	const shim = '__r7_root_shim__.svelte';
+	const route = 'src/lib/review/__r7_root_route__.svelte';
+	plant(
+		shim,
+		'<script lang="ts">\n' +
+			"\timport PreviewBody from '$lib/review/PreviewBody.svelte';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tpreview: DraftPreview;\n' +
+			'\t}\n' +
+			'\tlet { preview }: Props = $props();\n' +
+			"\tconst shown: DraftPreview = { ...preview, html: (preview.html ?? '') + '<img src=x>' };\n" +
+			'</script>\n' +
+			'\n' +
+			'<PreviewBody preview={shown} />\n'
+	);
+	plant(
+		route,
+		'<script lang="ts">\n' +
+			"\timport RootShim from '../../../__r7_root_shim__.svelte';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tpreview: DraftPreview;\n' +
+			'\t}\n' +
+			'\tlet { preview }: Props = $props();\n' +
+			'</script>\n' +
+			'\n' +
+			'<RootShim {preview} />\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `the root shim route must fail the audit:\n${output}`);
+		assert.match(
+			output,
+			/\[executable source universe\] __r7_root_shim__\.svelte is executable source outside the classified owned\/vendored roots/,
+			`the universe check must name the outsider and its loader:\n${output}`
+		);
+		assert.match(
+			output,
+			/src\/lib\/review\/__r7_root_route__\.svelte loads it/,
+			`the universe check must name the owned file that loads the outsider:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('dynamic, globbed, multi-hop, and extensionless outsider loads fail (R7-2 adjacent)', () => {
+	const shim = '__r7_root_shim__.svelte';
+	const helper = '__r7_root_helper__.svelte';
+	const tsModule = '__r7_root_module__.ts';
+	const route = 'src/lib/review/__r7_root_route__.svelte';
+	const plantRoute = (script) => plant(route, `<script lang="ts">\n${script}</script>\n`);
+	try {
+		// dynamic import with a query suffix
+		plant(shim, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+		plantRoute("\tconst loaded = await import('../../../__r7_root_shim__.svelte?svelte');\n");
+		let result = runAudit();
+		assert.equal(result.status, 1, `a query-suffixed outsider load must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/loads it \("\.\.\/\.\.\/\.\.\/__r7_root_shim__\.svelte\?svelte"\)/,
+			`the query suffix must not hide the load:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+
+		// Vite glob import
+		plantRoute("\tconst modules = import.meta.glob('../../../__r7_root_*.svelte');\n");
+		result = runAudit();
+		assert.equal(result.status, 1, `a glob reaching an outsider must fail:\n${result.output}`);
+		assert.match(result.output, /globs it/, `the glob pattern must be matched:\n${result.output}`);
+		rmSync(join(repoRoot, route), { force: true });
+
+		// multi-hop outsider chain: owned -> shim -> helper
+		plant(helper, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+		plant(
+			shim,
+			'<script lang="ts">\n' +
+				"\timport Helper from './__r7_root_helper__.svelte';\n" +
+				'\texport const planted = Helper;\n' +
+				'</script>\n' +
+				'<p>x</p>\n'
+		);
+		plantRoute("\timport Shim from '../../../__r7_root_shim__.svelte';\n");
+		result = runAudit();
+		assert.equal(result.status, 1, `a multi-hop outsider chain must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/__r7_root_helper__\.svelte is executable source outside the classified owned\/vendored roots/,
+			`the second hop must be named too:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, helper), { force: true });
+
+		// extensionless .ts module at the root
+		plant(tsModule, 'export const planted = true;\n');
+		plantRoute("\timport { planted } from '../../../__r7_root_module__';\n");
+		result = runAudit();
+		assert.equal(result.status, 1, `an extensionless outsider load must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/__r7_root_module__\.ts is executable source outside the classified owned\/vendored roots/,
+			`extensionless resolution must still reach the outsider:\n${result.output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, helper), { force: true });
+		rmSync(join(repoRoot, tsModule), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('an outsider module nothing loads stays clean (R7-2 positive)', () => {
+	const tsModule = '__r7_root_module__.ts';
+	plant(tsModule, 'export const planted = true;\n');
+	try {
+		const { status, output } = runAudit();
+		assert.equal(
+			status,
+			0,
+			`an unreachable outsider module is not part of the executable universe:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, tsModule), { force: true });
+	}
+});
+
+/* ============================================================
+   Round 7 — R7-3: late-populated and derived preview containers
+   ============================================================ */
+
+test('late-populated containers and derived carriers fail the audit (R7-3 exact plants)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst stash = $state<{ body: DraftPreview | null }>({ body: null });\n' +
+					'\tstash.body = preview;\n' +
+					'\tif (stash.body) stash.body.html = "<img src=x>";\n' +
+					'\tconst arr = [preview];\n' +
+					'\tconst ys = arr.map((p) => p);\n' +
+					'\tys[0].html = "<img src=x>";\n' +
+					'\tconst holder = { body: preview };\n' +
+					"\tholder['body'].html = '<img src=x>';\n" +
+					'\tfor (const k in holder) holder[k].html = "<img src=x>";\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the late-container plants must fail the audit:\n${output}`);
+			assert.match(output, /writes to \.html on stash\.body/, `late $state population:\n${output}`);
+			assert.match(
+				output,
+				/writes to \.html on a value that entered a local container/,
+				`an identity-preserving map result:\n${output}`
+			);
+			assert.match(
+				output,
+				/writes to \.html on holder\['body'\]/,
+				`folded element access:\n${output}`
+			);
+			assert.match(output, /writes to \.html on holder\[k\]/, `for-in element route:\n${output}`);
+		}
+	);
+});
+
+test('setters, inherited constructors, generators, and scalar finds fail (R7-3 adjacent)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst box: { body: DraftPreview | null } = {\n' +
+					'\t\tset body(v: DraftPreview | null) { (v as DraftPreview).html = "x"; },\n' +
+					'\t};\n' +
+					'\tbox.body = preview;\n' +
+					'\tclass Base { constructor(p: DraftPreview | null) { if (p) p.html = "x"; } }\n' +
+					'\tclass Wrap extends Base {}\n' +
+					'\tnew Wrap(preview);\n' +
+					'\tfunction* stream() { yield preview; }\n' +
+					'\tfor (const g of stream()) { if (g) g.html = "x"; }\n' +
+					'\tconst holder2 = { body: preview };\n' +
+					'\tfor (const v of Object.values(holder2)) { if (v) v.html = "x"; }\n' +
+					'\tconst found = [preview].find((x) => Boolean(x));\n' +
+					'\tif (found) found.html = "x";\n' +
+					'\tconst holder3 = { body: preview };\n' +
+					"\tconst kk = 'html';\n" +
+					'\tholder3.body[kk] = "x";\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the adjacent container plants must fail the audit:\n${output}`);
+			assert.match(
+				output,
+				/writes to v\.html/,
+				`the setter parameter / Object.values binding:\n${output}`
+			);
+			assert.match(
+				output,
+				/passes the preview value to new Wrap\(…\) — its inherited constructor/,
+				`an inherited constructor cannot be proven clean:\n${output}`
+			);
+			assert.match(output, /writes to g\.html/, `a generator yield binding:\n${output}`);
+			assert.match(output, /writes to found\.html/, `a scalar find result:\n${output}`);
+			assert.match(
+				output,
+				/writes to \.html on holder3\.body/,
+				`a constant-folded computed key is a .html write:\n${output}`
+			);
+		}
+	);
+});
+
+test('$state.raw data containers and reductions stay clean (R7-3 positives)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst rawBox = $state.raw<{ note: string | null }>({ note: null });\n' +
+					"\trawBox.note = 'hello';\n" +
+					'\tconst sizes = [preview].map((p) => p?.renderedBytes ?? 0);\n' +
+					'\tconst total = sizes.reduce((a, b) => a + b, 0);\n' +
+					"\tconst meta = { title: 'x', at: 'y' };\n" +
+					'\tconst { title, at } = meta;\n' +
+					"\tconst plain = { a: 'one', b: 'two' };\n" +
+					'\tfor (const v of Object.values(plain)) v.toUpperCase();\n' +
+					'\tvoid total; void title; void at;\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`non-preview containers and provably-fresh transforms must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   Round 7 — R7-4: alternate sink laundering
+   ============================================================ */
+
+const R7_SINK_PROBE = `${OWNED_DIR}/__r7_sink_probe__.ts`;
+
+test('descriptor setters, bound copies, folded keys, Reflect dispatch, and setHTML fail (R7-4 exact plants)', () => {
+	plant(
+		R7_SINK_PROBE,
+		'export function launder(host: HTMLElement, html: string): void {\n' +
+			"\tObject.getOwnPropertyDescriptor(Element.prototype, 'innerHTML')?.set?.call(host, html);\n" +
+			'\tconst m = host.insertAdjacentHTML;\n' +
+			'\tconst inj = m.bind(host);\n' +
+			"\tinj('afterbegin', html);\n" +
+			"\tconst key = 'innerHTML';\n" +
+			'\tObject.assign(host, { [key]: html });\n' +
+			'\tReflect.apply(Object.assign, null, [host, { innerHTML: html }]);\n' +
+			'\thost.setHTML?.(html);\n' +
+			'}\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `the laundering plants must fail the audit:\n${output}`);
+		assert.match(
+			output,
+			/invokes a property-descriptor setter for 'innerHTML' through \.call\(…\)/,
+			`descriptor setter extraction:\n${output}`
+		);
+		assert.match(output, /insertAdjacentHTML/, `the two-step method bind:\n${output}`);
+		assert.match(
+			output,
+			/calls Object\.assign with 'innerHTML' in a source object/,
+			`the computed assign key folds through the constant string:\n${output}`
+		);
+		assert.match(output, /calls \.setHTML\(…\)/, `the Sanitizer-API setter:\n${output}`);
+	} finally {
+		rmSync(join(repoRoot, R7_SINK_PROBE), { force: true });
+	}
+});
+
+test('prototype aliases, extracted setters, and Reflect dispatch variants fail (R7-4 adjacent)', () => {
+	plant(
+		R7_SINK_PROBE,
+		'export function launder(host: HTMLElement, html: string): void {\n' +
+			'\tconst S = Element.prototype.setHTML;\n' +
+			'\tS.call(host, html);\n' +
+			"\tconst d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');\n" +
+			'\tconst s = d?.set;\n' +
+			'\ts?.call(host, html);\n' +
+			'\tReflect.construct(class { constructor(p: string) { void p; } }, [html]);\n' +
+			'\tconst args = [host, { innerHTML: html }];\n' +
+			'\tReflect.apply(Object.assign, null, args);\n' +
+			'}\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(status, 1, `the adjacent laundering plants must fail the audit:\n${output}`);
+		assert.match(
+			output,
+			/invokes \.setHTML through \.call\(…\)/,
+			`a prototype-namespace alias through .call:\n${output}`
+		);
+		assert.match(
+			output,
+			/'innerHTML' descriptor setter/,
+			`an extracted descriptor setter bound to a local:\n${output}`
+		);
+		assert.match(
+			output,
+			/Reflect\.construct with a constructor this reading cannot prove benign/,
+			`Reflect.construct fails closed on an unproven constructor:\n${output}`
+		);
+		assert.match(
+			output,
+			/Reflect\.apply with an argument array this reading cannot expand/,
+			`Reflect.apply fails closed on a non-literal argument array:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, R7_SINK_PROBE), { force: true });
+	}
+});
+
+test('benign descriptor keys, benign constructors, and safe reducers stay clean (R7-4 positives)', () => {
+	plant(
+		R7_SINK_PROBE,
+		'export function legitimate(host: HTMLElement): string {\n' +
+			"\tconst title = Object.getOwnPropertyDescriptor(host, 'title')?.get?.call(host);\n" +
+			"\tconst err = Reflect.construct(Error, ['message']);\n" +
+			"\tconst copy = Object.assign({}, { id: 'x' });\n" +
+			'\treturn `${title ?? ""} ${err.message} ${copy.id}`;\n' +
+			'}\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(
+			status,
+			0,
+			`benign descriptor keys, constructors, and payloads must stay clean:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, R7_SINK_PROBE), { force: true });
 	}
 });

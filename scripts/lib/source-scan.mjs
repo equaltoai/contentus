@@ -44,6 +44,21 @@
  *
  * THE ONE COPY. The audit imports this module, and the probes drive the audit;
  * a second definition of any scan here would be free to drift from the gate.
+ *
+ * ROUND 7 STATED PLAINLY, because the round-6 prose outran the round-6 code
+ * and the round-7 review proved it. What round 6 shipped did NOT fail closed
+ * on a static invocation whose callee was a prop, an unbound name, a dotted
+ * member, or an owned barrel — those callees were skipped; it did not read a
+ * markup spread's keys; it did not follow the preview identity into
+ * containers populated after declaration, through collection transforms, or
+ * through computed element access; and it did not model descriptor setters,
+ * bound method copies, `Reflect.apply`, or the `setHTML` family. Round 7
+ * added exactly those closures, each fail-closed at the point its flow cannot
+ * be proven the one canonical direct route, and each probed by
+ * `tests/renderer-authority-audit.test.mjs`. What the reading still does not
+ * claim is also stated: it is a static analysis over the owned module graph —
+ * it proves the shapes it models and fails closed on the shapes it cannot
+ * resolve, and it says nothing about a shape it has not yet met.
  */
 
 import { parse } from 'svelte/compiler';
@@ -431,22 +446,29 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		names.has('document') || [...names].some((name) => documentAliases.has(name));
 	const dangerousMethodAliases = new Map();
 	const constantStrings = new Map();
+	// R7-4: the Sanitizer-API family is treated as raw/rewriting sinks wherever
+	// a browser supports them. `setHTML` rewrites an element's content through a
+	// sanitizer contentus does not control — a second opinion over lesser's
+	// bytes — and `setHTMLUnsafe`/`setHTMLUnchecked` skip sanitizing entirely.
+	// The exact names are the rule: an unrelated method that merely contains one
+	// of them as a substring is not matched.
+	const DANGEROUS_METHOD_NAMES = [
+		'write',
+		'writeln',
+		'insertAdjacentHTML',
+		'createContextualFragment',
+		'parseFromString',
+		// R6-3 residual: `setHTMLUnchecked` is Chromium's un-sanitizing HTML
+		// setter — always dangerous when called, so an alias or destructure
+		// of it is treated like the other always-dangerous method names.
+		'setHTML',
+		'setHTMLUnsafe',
+		'setHTMLUnchecked',
+	];
 	const dangerousMethodName = (node) => {
 		const access = propertyName(node);
 		if (!access || access.computed) return null;
-		return [
-			'write',
-			'writeln',
-			'insertAdjacentHTML',
-			'createContextualFragment',
-			'parseFromString',
-			// R6-3 residual: `setHTMLUnchecked` is Chromium's un-sanitizing HTML
-			// setter — always dangerous when called, so an alias or destructure
-			// of it is treated like the other always-dangerous method names.
-			'setHTMLUnchecked',
-		].includes(access.name)
-			? access.name
-			: null;
+		return DANGEROUS_METHOD_NAMES.includes(access.name) ? access.name : null;
 	};
 	eachNode(sourceFile, (node) => {
 		if (ts.isVariableDeclaration(node) && node.initializer) {
@@ -492,16 +514,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 							);
 						continue;
 					}
-					if (
-						![
-							'write',
-							'writeln',
-							'insertAdjacentHTML',
-							'createContextualFragment',
-							'parseFromString',
-						].includes(method)
-					)
-						continue;
+					if (!DANGEROUS_METHOD_NAMES.includes(method)) continue;
 					if (ts.isIdentifier(element.name)) dangerousMethodAliases.set(element.name.text, method);
 					if (known)
 						findings.push(
@@ -519,6 +532,186 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		ts.isIdentifier(node) && constantStrings.has(node.text)
 			? constantStrings.get(node.text)
 			: foldPropertyKey(node);
+
+	/** Strip parentheses — `(expr)` is the same expression for every reading. */
+	const unwrapParen = (node) => {
+		let current = node;
+		while (current && ts.isParenthesizedExpression(current)) current = current.expression;
+		return current;
+	};
+
+	/**
+	 * The key an Object.assign SOURCE-OBJECT property writes, folded through
+	 * constant strings (R7-4): `const key = 'innerHTML'; Object.assign(host, {
+	 * [key]: html })` writes the key the constant names, and a computed key no
+	 * static read can fold returns null — the caller decides what an unfolded
+	 * computed key means (the assign walk fails closed on one into a receiver
+	 * it cannot prove a container).
+	 */
+	const sourcePropertyKey = (property) => {
+		if (ts.isShorthandPropertyAssignment(property)) return property.name.text;
+		if (!ts.isPropertyAssignment(property)) return null;
+		if (ts.isComputedPropertyName(property.name)) return foldLocalKey(property.name.expression);
+		if (ts.isIdentifier(property.name)) return property.name.text;
+		if (ts.isStringLiteral(property.name)) return property.name.text;
+		return null;
+	};
+	const sourceKeyComputed = (property) =>
+		ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name);
+
+	// R7-4: DESCRIPTOR SETTER EXTRACTION. `Object.getOwnPropertyDescriptor(
+	// Element.prototype, 'innerHTML')?.set?.call(host, html)` launders the write
+	// through the property descriptor: the sink is no longer a member write on
+	// the element, it is a call of the extracted setter. The reading records
+	// every local bound to a descriptor lookup and recognizes the inline
+	// spelling too; the verdict belongs to the descriptor's KEY — a folded
+	// dangerous write property, or a key no static read can fold, fails closed,
+	// and a folded non-dangerous key (`'title'`) stays clean. `set` is also the
+	// Map/WeakMap mutator, so the rule never fires on the bare name — only on a
+	// `.set` read OFF a descriptor source.
+	const DESCRIPTOR_LOOKUPS = new Set(['getOwnPropertyDescriptor', 'getOwnPropertyDescriptors']);
+	const descriptorNames = new Map(); // name -> { key: string | null, all: boolean }
+	const isDescriptorLookupCall = (node) => {
+		const inner = unwrapParen(node);
+		if (!inner || !ts.isCallExpression(inner)) return null;
+		const callee = propertyName(inner.expression);
+		if (!callee || callee.computed || !DESCRIPTOR_LOOKUPS.has(callee.name)) return null;
+		const objectNamesOfCallee = ts.isIdentifier(callee.object) ? callee.object.text : null;
+		if (objectNamesOfCallee !== 'Object' && objectNamesOfCallee !== 'Reflect') return null;
+		const all = callee.name === 'getOwnPropertyDescriptors';
+		// The described property key: the second argument for the single lookup.
+		const key = all ? null : foldLocalKey(inner.arguments[1]);
+		return { key, all };
+	};
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+			const lookup = isDescriptorLookupCall(node.initializer);
+			if (lookup) descriptorNames.set(node.name.text, lookup);
+		}
+	});
+	/**
+	 * An EXTRACTED descriptor setter bound to a local — `const s = desc?.set`
+	 * — is the descriptor's setter under another name, and a later `s.call(…)`
+	 * or `s(…)` must fire exactly as the inline spelling does. The extraction
+	 * joins the dangerous-method aliases, labelled by the descriptor's key, so
+	 * the existing alias and `.call/.apply/.bind` machinery carries it. A
+	 * descriptor whose key folds to a non-dangerous property is not a sink and
+	 * binds nothing.
+	 */
+	const descriptorSetterExtractions = () => {
+		eachNode(sourceFile, (node) => {
+			let bound = null;
+			let rhs = null;
+			if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+				bound = node.name.text;
+				rhs = node.initializer;
+			} else if (
+				ts.isBinaryExpression(node) &&
+				node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+				ts.isIdentifier(node.left)
+			) {
+				bound = node.left.text;
+				rhs = node.right;
+			}
+			if (bound === null || !rhs || dangerousMethodAliases.has(bound)) return;
+			const source = descriptorSetSource(rhs);
+			if (!source) return;
+			if (source.all || source.key === null) {
+				dangerousMethodAliases.set(bound, 'an unresolved descriptor setter');
+				return;
+			}
+			if (RAW_HTML_WRITE_PROPERTY.has(source.key) || DANGEROUS_METHOD_NAMES.includes(source.key))
+				dangerousMethodAliases.set(bound, `'${source.key}' descriptor setter`);
+		});
+	};
+
+	/**
+	 * The descriptor-source an expression reads `.set` off, when the shape is
+	 * readable: `{ key, all }` or null. Walks optional chains (`desc?.set`,
+	 * `Object.getOwnPropertyDescriptor(…)?.set`) and parenthesization.
+	 */
+	const descriptorSetSource = (node) => {
+		let current = unwrapParen(node);
+		// Peel one `.set` access — with or without the optional-chain token.
+		const access = propertyName(current);
+		if (!access || access.computed || access.name !== 'set') return null;
+		const base = unwrapParen(access.object);
+		if (ts.isIdentifier(base) && descriptorNames.has(base.text))
+			return descriptorNames.get(base.text);
+		return isDescriptorLookupCall(base);
+	};
+	const descriptorSetFindings = (source, invocationText) => {
+		if (source.all || source.key === null)
+			return [
+				`${file} invokes a property-descriptor setter ${invocationText} whose property this reading cannot fold — the descriptor could be the innerHTML/srcdoc setter, an alternate raw-HTML sink`,
+			];
+		if (RAW_HTML_WRITE_PROPERTY.has(source.key) || DANGEROUS_METHOD_NAMES.includes(source.key))
+			return [
+				`${file} invokes a property-descriptor setter for '${source.key}' ${invocationText} — an alternate raw-HTML sink that bypasses {@html} scanning`,
+			];
+		return [];
+	};
+
+	descriptorSetterExtractions();
+
+	// R7-4: MULTI-STEP METHOD BINDING. `const m = host.insertAdjacentHTML;
+	// const inj = m.bind(host); inj('afterbegin', html)` launders the method
+	// through a bound copy two declarations away. Alias resolution is a fixed
+	// point over identifier references and `.bind` results, so any number of
+	// intermediate names resolve to the extracted method.
+	const methodAliasSeeds = new Map(); // name -> initializer node
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && node.initializer) {
+			if (ts.isIdentifier(node.name) && !methodAliasSeeds.has(node.name.text))
+				methodAliasSeeds.set(node.name.text, node.initializer);
+			return;
+		}
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+			ts.isIdentifier(node.left) &&
+			!methodAliasSeeds.has(node.left.text)
+		)
+			methodAliasSeeds.set(node.left.text, node.right);
+	});
+	const resolveMethodAliasFrom = (node, seen) => {
+		const inner = unwrapParen(node);
+		if (!inner) return null;
+		const direct = dangerousMethodName(inner);
+		if (direct) return direct;
+		if (ts.isIdentifier(inner)) {
+			if (seen.has(inner.text)) return null;
+			seen.add(inner.text);
+			if (dangerousMethodAliases.has(inner.text)) return dangerousMethodAliases.get(inner.text);
+			const seed = methodAliasSeeds.get(inner.text);
+			if (seed) return resolveMethodAliasFrom(seed, seen);
+			return null;
+		}
+		// `X.bind(thisArg, …)` — the bound copy IS the method; the bound
+		// arguments are re-prepended at the call site, so the alias carries the
+		// method name only, exactly like the direct extraction.
+		if (
+			ts.isCallExpression(inner) &&
+			ts.isPropertyAccessExpression(inner.expression) &&
+			inner.expression.name.text === 'bind'
+		)
+			return resolveMethodAliasFrom(inner.expression.expression, seen);
+		return null;
+	};
+	{
+		let grew = true;
+		while (grew) {
+			grew = false;
+			for (const [name, seed] of methodAliasSeeds) {
+				if (dangerousMethodAliases.has(name)) continue;
+				const method = resolveMethodAliasFrom(seed, new Set());
+				if (method) {
+					dangerousMethodAliases.set(name, method);
+					grew = true;
+				}
+			}
+		}
+	}
 
 	// R5-4: identifier-laundered OBJECT SOURCES. The Object.assign walk reads
 	// dangerous keys out of object literals written at the call; `const payload
@@ -574,18 +767,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 						}
 						continue;
 					}
-					let key = null;
-					if (ts.isPropertyAssignment(property)) {
-						key = ts.isComputedPropertyName(property.name)
-							? foldPropertyKey(property.name.expression)
-							: ts.isIdentifier(property.name)
-								? property.name.text
-								: ts.isStringLiteral(property.name)
-									? property.name.text
-									: null;
-					} else if (ts.isShorthandPropertyAssignment(property)) {
-						key = property.name.text;
-					}
+					const key = sourcePropertyKey(property);
 					if (key !== null) keys.add(key);
 				}
 				adoptKeys(bound, keys);
@@ -601,11 +783,6 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 	// the destructure or extraction alone is inert, and only a call with an
 	// insertHTML command (or an unfoldable one) is a finding — `ex('copy')`
 	// stays clean.
-	const unwrapParen = (node) => {
-		let current = node;
-		while (current && ts.isParenthesizedExpression(current)) current = current.expression;
-		return current;
-	};
 	const dangerousBuiltinAliases = new Map();
 	const builtinKind = (node) => {
 		const access = propertyName(node);
@@ -618,6 +795,23 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 			return access.name;
 		if (ts.isIdentifier(access.object) && access.object.text === 'Reflect' && access.name === 'set')
 			return 'reflectSet';
+		// R7-4: `Reflect.apply(Object.assign, null, [host, { innerHTML: html }])`
+		// and `Reflect.construct(…)` dispatch into a callee the receiver-first
+		// reading never sees — the callee is an ARGUMENT. Both are modeled as
+		// builtin kinds so aliases, `.call/.apply` routes, and payload arrays
+		// run through the same dispatch logic.
+		if (
+			ts.isIdentifier(access.object) &&
+			access.object.text === 'Reflect' &&
+			access.name === 'apply'
+		)
+			return 'reflectApply';
+		if (
+			ts.isIdentifier(access.object) &&
+			access.object.text === 'Reflect' &&
+			access.name === 'construct'
+		)
+			return 'reflectConstruct';
 		if (access.name === 'execCommand') return 'execCommand';
 		if (access.name === 'setAttribute' || access.name === 'setAttributeNS') return access.name;
 		return null;
@@ -704,18 +898,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 							} else uncertain = true;
 							continue;
 						}
-						let key = null;
-						if (ts.isPropertyAssignment(property)) {
-							key = ts.isComputedPropertyName(property.name)
-								? foldPropertyKey(property.name.expression)
-								: ts.isIdentifier(property.name)
-									? property.name.text
-									: ts.isStringLiteral(property.name)
-										? property.name.text
-										: null;
-						} else if (ts.isShorthandPropertyAssignment(property)) {
-							key = property.name.text;
-						}
+						const key = sourcePropertyKey(property);
 						if (key === null) uncertain = true;
 						else keys.add(key);
 					}
@@ -851,12 +1034,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 								elementResolvable = false;
 								break;
 							}
-							const key = ts.isShorthandPropertyAssignment(property)
-								? property.name
-								: ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)
-									? property.name.expression
-									: property.name;
-							const folded = key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
+							const folded = sourcePropertyKey(property);
 							if (folded === null) {
 								elementResolvable = false;
 								break;
@@ -910,12 +1088,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 				if (ts.isObjectLiteralExpression(el)) {
 					for (const property of el.properties) {
 						if (ts.isSpreadAssignment(property)) return null;
-						const key = ts.isShorthandPropertyAssignment(property)
-							? property.name
-							: ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)
-								? property.name.expression
-								: property.name;
-						const folded = key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
+						const folded = sourcePropertyKey(property);
 						if (folded === null) return null;
 						keys.add(folded);
 					}
@@ -969,15 +1142,20 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 							);
 						continue;
 					}
-					const key = ts.isShorthandPropertyAssignment(property)
-						? property.name
-						: ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)
-							? property.name.expression
-							: property.name;
-					const folded = key && ts.isIdentifier(key) ? key.text : foldPropertyKey(key);
+					const folded = sourcePropertyKey(property);
 					if (folded !== null && RAW_HTML_PROPERTY.has(folded)) {
 						out.push(
 							`${file} calls Object.assign with '${folded}' in a source object — it can write a raw-HTML property`
+						);
+						break;
+					}
+					// R7-4: a computed key no static read can fold could be
+					// 'innerHTML' itself. Into a receiver this reading cannot
+					// prove a container, the position fails closed — the
+					// constant-folded spelling above is the one cleared route.
+					if (folded === null && sourceKeyComputed(property) && !receiverIsContainer) {
+						out.push(
+							`${file} calls Object.assign with a computed source key this reading cannot fold — it could write a raw-HTML property`
 						);
 						break;
 					}
@@ -1032,7 +1210,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		if (kind === 'defineProperty') {
 			const key = args[shift + 1];
 			if (key === undefined) return out;
-			const folded = foldPropertyKey(key);
+			const folded = foldLocalKey(key);
 			if (folded === null || RAW_HTML_PROPERTY.has(folded))
 				out.push(
 					`${file} calls Object.defineProperty with ${
@@ -1069,7 +1247,7 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		if (kind === 'reflectSet') {
 			const key = args[shift + 1];
 			if (key === undefined) return out;
-			const folded = foldPropertyKey(key);
+			const folded = foldLocalKey(key);
 			if (folded !== null) {
 				if (RAW_HTML_PROPERTY.has(folded))
 					out.push(
@@ -1080,6 +1258,81 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 					`${file} calls Reflect.set with a computed property key — it could set a raw-HTML property`
 				);
 			}
+			return out;
+		}
+		if (kind === 'reflectApply') {
+			// R7-4: `Reflect.apply(target, thisArg, argsArray)`. The callee is an
+			// argument, so the reading resolves it — a dangerous builtin alias, a
+			// dangerous method alias, or a builtin access — and dispatches the
+			// payload array through that callee's own logic. A target or payload
+			// the reading cannot resolve fails closed.
+			const target = args[shift];
+			const payload = args[shift + 2];
+			const payloadElements =
+				payload && ts.isArrayLiteralExpression(payload) ? payload.elements : null;
+			if (!payload || payloadElements === null) {
+				out.push(
+					`${file} calls Reflect.apply with an argument array this reading cannot expand — the dispatched call could be a raw-HTML primitive`
+				);
+				return out;
+			}
+			const targetInner = unwrapParen(target);
+			const targetAlias = ts.isIdentifier(targetInner)
+				? (dangerousBuiltinAliases.get(targetInner.text) ??
+					(dangerousMethodAliases.has(targetInner.text)
+						? `method:${dangerousMethodAliases.get(targetInner.text)}`
+						: undefined))
+				: undefined;
+			const targetKind = targetAlias ?? builtinKind(targetInner);
+			if (targetKind === undefined || targetKind === null) {
+				out.push(
+					`${file} calls Reflect.apply with a callee this reading cannot resolve — it could dispatch into a raw-HTML primitive`
+				);
+				return out;
+			}
+			if (typeof targetKind === 'string' && targetKind.startsWith('method:')) {
+				out.push(
+					`${file} dispatches .${targetKind.slice('method:'.length)} through Reflect.apply — an alternate raw-HTML primitive`
+				);
+				return out;
+			}
+			out.push(...dispatchBuiltinCall(targetKind, payloadElements, 0));
+			return out;
+		}
+		if (kind === 'reflectConstruct') {
+			// R7-4: `Reflect.construct(Ctor, payload)`. The constructor is an
+			// argument, and a constructor receives the payload as its arguments.
+			// Constructors this reading can prove hold data rather than write DOM
+			// stay clean; anything else fails closed.
+			const BENIGN_CONSTRUCTORS = new Set([
+				'Object',
+				'Array',
+				'Map',
+				'Set',
+				'WeakMap',
+				'WeakSet',
+				'Headers',
+				'URLSearchParams',
+				'FormData',
+				'URL',
+				'Blob',
+				'File',
+				'AbortController',
+				'AbortSignal',
+				'Error',
+				'TypeError',
+				'RangeError',
+				'SyntaxError',
+				'ReferenceError',
+				'Date',
+				'RegExp',
+				'Promise',
+			]);
+			const target = unwrapParen(args[shift]);
+			if (ts.isIdentifier(target) && BENIGN_CONSTRUCTORS.has(target.text)) return out;
+			out.push(
+				`${file} calls Reflect.construct with a constructor this reading cannot prove benign — the payload array could feed a DOM writer`
+			);
 			return out;
 		}
 		if (kind === 'execCommand') {
@@ -1112,7 +1365,15 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 		if (ts.isBinaryExpression(node)) {
 			const operator = node.operatorToken.kind;
 			if (!isAssignmentToken(operator)) return;
-			const access = propertyName(node.left);
+			let access = propertyName(node.left);
+			// R7-4: an element-access key bound to a constant string names the
+			// same property the literal spelling does — `const k = 'innerHTML';
+			// host[k] = html` — so it is folded before the computed position
+			// fails closed.
+			if (access && access.computed && ts.isElementAccessExpression(node.left)) {
+				const folded = foldLocalKey(node.left.argumentExpression);
+				if (folded !== null) access = { name: folded, object: access.object, computed: false };
+			}
 			if (access && access.computed) {
 				if (!receiverCleared(access.object)) {
 					findings.push(
@@ -1138,7 +1399,11 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 			) {
 				return;
 			}
-			const access = propertyName(node.operand);
+			let access = propertyName(node.operand);
+			if (access && access.computed && ts.isElementAccessExpression(node.operand)) {
+				const folded = foldLocalKey(node.operand.argumentExpression);
+				if (folded !== null) access = { name: folded, object: access.object, computed: false };
+			}
 			if (access && access.computed) {
 				if (!receiverCleared(access.object)) {
 					findings.push(
@@ -1153,7 +1418,11 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 			return;
 		}
 		if (ts.isCallExpression(node)) {
-			const callee = propertyName(node.expression);
+			let callee = propertyName(node.expression);
+			if (callee && callee.computed && ts.isElementAccessExpression(node.expression)) {
+				const folded = foldLocalKey(node.expression.argumentExpression);
+				if (folded !== null) callee = { name: folded, object: callee.object, computed: false };
+			}
 			if (ts.isIdentifier(node.expression) && dangerousMethodAliases.has(node.expression.text)) {
 				findings.push(
 					`${file} calls an alias of .${dangerousMethodAliases.get(node.expression.text)}(…) — an alternate raw-HTML primitive`
@@ -1194,6 +1463,21 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 					);
 					return;
 				}
+				// R7-4: the result of `.bind` on a dangerous METHOD alias —
+				// `const m = host.insertAdjacentHTML; m.bind(host)('afterbegin', html)`
+				// — and on an extracted descriptor setter.
+				const method = resolveMethodAliasFrom(inner, new Set());
+				if (method) {
+					findings.push(
+						`${file} invokes .${method} through a bound copy — an alternate raw-HTML primitive`
+					);
+					return;
+				}
+				const desc = descriptorSetSource(inner);
+				if (desc) {
+					findings.push(...descriptorSetFindings(desc, 'through .bind'));
+					return;
+				}
 			}
 			if (callee && callee.computed) {
 				if (!receiverCleared(callee.object)) {
@@ -1206,10 +1490,18 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 				return;
 			}
 			if (callee) {
+				if (callee.name === 'set' && descriptorSetSource(callee.object)) {
+					// R7-4: a direct invocation of an extracted descriptor setter —
+					// `desc.set(host, html)` / `Object.getOwnPropertyDescriptor(…)?.set?.(…)`.
+					findings.push(...descriptorSetFindings(descriptorSetSource(callee.object), ''));
+					return;
+				}
 				if (
 					callee.name === 'insertAdjacentHTML' ||
 					callee.name === 'createContextualFragment' ||
 					callee.name === 'parseFromString' ||
+					callee.name === 'setHTML' ||
+					callee.name === 'setHTMLUnsafe' ||
 					callee.name === 'setHTMLUnchecked'
 				) {
 					findings.push(
@@ -1246,12 +1538,49 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 					findings.push(...dispatchBuiltinCall('defineProperties', node.arguments, 0));
 					return;
 				}
+				if (
+					callee.name === 'construct' &&
+					ts.isIdentifier(callee.object) &&
+					callee.object.text === 'Reflect'
+				) {
+					// R7-4: `Reflect.construct(Ctor, payload)` — the constructor is
+					// an argument the receiver-first reading never sees.
+					findings.push(...dispatchBuiltinCall('reflectConstruct', node.arguments, 0));
+					return;
+				}
 				if (callee.name === 'call' || callee.name === 'apply' || callee.name === 'bind') {
+					// R7-4: `Reflect.apply(target, thisArg, args)` is NOT a
+					// Function.prototype route — the callee is its FIRST ARGUMENT,
+					// so it dispatches through its own logic instead of the
+					// thisArg-shifted builtin logic below.
+					if (ts.isIdentifier(callee.object) && callee.object.text === 'Reflect') {
+						if (callee.name === 'apply') {
+							findings.push(...dispatchBuiltinCall('reflectApply', node.arguments, 0));
+						}
+						return;
+					}
 					const method = dangerousMethodName(callee.object);
 					if (method) {
 						findings.push(
 							`${file} invokes .${method} through .${callee.name}(…) — an alternate raw-HTML primitive`
 						);
+						return;
+					}
+					// R7-4: `.call/.apply/.bind` through a LAUNDERED method alias —
+					// `const S = Element.prototype.setHTML; S.call(host, html)` — and
+					// through an extracted descriptor setter, `Object
+					// .getOwnPropertyDescriptor(Element.prototype, 'innerHTML')?.set
+					// ?.call(host, html)`.
+					const aliased = resolveMethodAliasFrom(callee.object, new Set());
+					if (aliased) {
+						findings.push(
+							`${file} invokes .${aliased} through .${callee.name}(…) — an alternate raw-HTML primitive`
+						);
+						return;
+					}
+					const desc = descriptorSetSource(callee.object);
+					if (desc) {
+						findings.push(...descriptorSetFindings(desc, `through .${callee.name}(…)`));
 						return;
 					}
 					// R6-3: a dangerous builtin routed through .call/.apply — the
@@ -1776,6 +2105,28 @@ function previewValuePathFindings(file, sourceFile) {
 	const previewReturning = new Set(); // callee names that return the value
 	const importedNames = new Set();
 	const functions = new Map(); // callee name -> [{ node, paramNames }]
+	// R7-3: SETTERS a value-carrying container offers — `const box = { set
+	// body(v) { … } }` plus `box.body = preview` hands the reference to the
+	// setter's parameter, which then needs the same write analysis as any other
+	// binding of the value. identifier -> Map<property | '*', paramName>.
+	const containerSetters = new Map();
+	// R7-3: local GENERATORS that yield the reference — `function* stream() {
+	// yield preview; }` then `for (const p of stream())` binds p to the value
+	// exactly as an array iteration would.
+	const yieldCarrying = new Set();
+	// R7-3: constant-string folding for COMPUTED keys — `const k = 'body';
+	// holder[k].html = …` names the same property the literal spelling does.
+	const constantStrings = new Map();
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+			const literal = foldPropertyKey(node.initializer);
+			if (literal !== null) constantStrings.set(node.name.text, literal);
+		}
+	});
+	const foldLocalKey = (node) =>
+		node && ts.isIdentifier(node) && constantStrings.has(node.text)
+			? constantStrings.get(node.text)
+			: foldPropertyKey(node);
 
 	const addValueName = (name) => {
 		if (!valueNames.has(name)) {
@@ -1805,14 +2156,23 @@ function previewValuePathFindings(file, sourceFile) {
 		// analysis — `class Mangler { constructor(p) { p.html = … } }; new
 		// Mangler(preview)` hands the value to a constructor whose parameter is
 		// written. A constructor-less class declares no parameters and can never
-		// be mutating, so `new Empty(preview)` stays green.
+		// be mutating, so `new Empty(preview)` stays green. R7-3 exception: a
+		// constructor-less class WITH A HERITAGE CLAUSE runs the INHERITED
+		// constructor — `class Wrap extends Mangler {}` hands the value to a
+		// constructor this file never declares, which no local reading can prove
+		// clean; those classes record `paramNames: null` (unproven) instead of
+		// the empty list.
 		if (ts.isClassDeclaration(node) && node.name) {
 			const ctor = node.members.find((member) => ts.isConstructorDeclaration(member)) ?? null;
 			functions.set(node.name.text, [
 				...(functions.get(node.name.text) ?? []),
 				{
 					node: ctor ?? node,
-					paramNames: ctor ? ctor.parameters.map((p) => p.name) : [],
+					paramNames: ctor
+						? ctor.parameters.map((p) => p.name)
+						: node.heritageClauses && node.heritageClauses.length > 0
+							? null
+							: [],
 				},
 			]);
 		}
@@ -1824,7 +2184,11 @@ function previewValuePathFindings(file, sourceFile) {
 					...(functions.get(node.name.text) ?? []),
 					{
 						node: ctor ?? init,
-						paramNames: ctor ? ctor.parameters.map((p) => p.name) : [],
+						paramNames: ctor
+							? ctor.parameters.map((p) => p.name)
+							: init.heritageClauses && init.heritageClauses.length > 0
+								? null
+								: [],
 					},
 				]);
 			}
@@ -1919,6 +2283,7 @@ function previewValuePathFindings(file, sourceFile) {
 	 */
 	const objectLiteralCarriedProps = (inner) => {
 		const props = new Set();
+		const setters = new Map(); // property | '*' -> setter parameter name
 		let holds = false;
 		for (const property of inner.properties) {
 			if (ts.isSpreadAssignment(property)) continue;
@@ -1926,7 +2291,7 @@ function previewValuePathFindings(file, sourceFile) {
 			let valueExpr = null;
 			if (ts.isPropertyAssignment(property)) {
 				key = ts.isComputedPropertyName(property.name)
-					? foldPropertyKey(property.name.expression)
+					? foldLocalKey(property.name.expression)
 					: ts.isIdentifier(property.name)
 						? property.name.text
 						: ts.isStringLiteral(property.name)
@@ -1940,11 +2305,24 @@ function previewValuePathFindings(file, sourceFile) {
 				if (ts.isIdentifier(property.name)) key = property.name.text;
 				else if (ts.isStringLiteral(property.name)) key = property.name.text;
 				else if (ts.isComputedPropertyName(property.name))
-					key = foldPropertyKey(property.name.expression);
+					key = foldLocalKey(property.name.expression);
 				if (getterCanCarry(property)) {
 					holds = true;
 					props.add(key ?? '*');
 				}
+				continue;
+			} else if (ts.isSetAccessorDeclaration(property)) {
+				// R7-3: a SETTER receives whatever is assigned to its property —
+				// `box.body = preview` hands the reference to the parameter, which
+				// can then write `.html` on it. The parameter is bound as a value
+				// name when a value-carrying assignment targets the property.
+				if (ts.isIdentifier(property.name)) key = property.name.text;
+				else if (ts.isStringLiteral(property.name)) key = property.name.text;
+				else if (ts.isComputedPropertyName(property.name))
+					key = foldLocalKey(property.name.expression);
+				const param = property.parameters[0];
+				const paramName = param && ts.isIdentifier(param.name) ? param.name.text : null;
+				if (paramName) setters.set(key ?? '*', paramName);
 				continue;
 			}
 			if (valueExpr && holdsValue(valueExpr)) {
@@ -1952,7 +2330,7 @@ function previewValuePathFindings(file, sourceFile) {
 				props.add(key ?? '*');
 			}
 		}
-		return { props, holds };
+		return { props, holds, setters };
 	};
 
 	/** The property key a destructure element reads, or null when computed. */
@@ -2086,7 +2464,20 @@ function previewValuePathFindings(file, sourceFile) {
 			return Boolean(props && (props.has(inner.name.text) || props.has('*')));
 		}
 		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
-			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
+			if (arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text))
+				return true;
+			// R7-3: element access on an OBJECT container — `holder['body']` with
+			// the key folded through constant strings, and `holder[key]` with a
+			// key no static read can fold: an unknown element of a container that
+			// carries the reference could BE the reference, so the position fails
+			// closed whenever the container carries at all.
+			const props = containerPaths.get(inner.expression.text);
+			if (props) {
+				const folded = foldLocalKey(inner.argumentExpression);
+				if (folded === null) return props.size > 0;
+				return props.has(folded) || props.has('*');
+			}
+			return false;
 		}
 		if (ts.isCallExpression(inner)) {
 			const rune = runeAliasArgument(inner);
@@ -2190,6 +2581,25 @@ function previewValuePathFindings(file, sourceFile) {
 	};
 
 	/** Whether an expression is an array-like that holds the value. */
+	/**
+	 * R7-3: collection methods whose result CANNOT carry the reference —
+	 * reductions to a scalar or to indices. Any OTHER method on a value-carrying
+	 * array is a transform this reading cannot resolve, and an unresolved
+	 * transform that could carry the reference fails closed.
+	 */
+	const ARRAY_REDUCE_METHODS = new Set([
+		'join',
+		'toString',
+		'indexOf',
+		'lastIndexOf',
+		'includes',
+		'some',
+		'every',
+		'findIndex',
+		'findLastIndex',
+		'forEach',
+		'keys',
+	]);
 	const arrayRooted = (expr) => {
 		const inner = unwrapValueNode(expr);
 		if (ts.isIdentifier(inner))
@@ -2199,12 +2609,37 @@ function previewValuePathFindings(file, sourceFile) {
 			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
 		if (ts.isCallExpression(inner)) {
 			const callee = propertyName(inner.expression);
-			return Boolean(
-				callee &&
-				ts.isIdentifier(callee.object) &&
-				mapContainers.has(callee.object.text) &&
-				(callee.name === 'values' || callee.name === 'get')
-			);
+			if (callee && ts.isIdentifier(callee.object)) {
+				if (
+					mapContainers.has(callee.object.text) &&
+					(callee.name === 'values' || callee.name === 'get')
+				)
+					return true;
+				// R7-3: `Object.values(holder)` / `Object.entries(holder)` over a
+				// value-carrying container iterate the reference itself.
+				if (
+					callee.object.text === 'Object' &&
+					(callee.name === 'values' || callee.name === 'entries') &&
+					inner.arguments[0]
+				) {
+					const target = unwrapValueNode(inner.arguments[0]);
+					if (ts.isIdentifier(target)) {
+						if (arrayContainers.has(target.text) || mapContainers.has(target.text)) return true;
+						const props = containerPaths.get(target.text);
+						if (props && props.size > 0) return true;
+					}
+					return false;
+				}
+			}
+			if (callee && !callee.computed && arrayRooted(callee.object)) {
+				if (!ARRAY_REDUCE_METHODS.has(callee.name)) return true;
+				return false;
+			}
+			// R7-3: a local generator that yields the reference — `for (const p
+			// of stream())` iterates it exactly as an array would.
+			if (ts.isIdentifier(inner.expression) && yieldCarrying.has(inner.expression.text))
+				return true;
+			return false;
 		}
 		return false;
 	};
@@ -2236,13 +2671,20 @@ function previewValuePathFindings(file, sourceFile) {
 				return;
 			}
 			// R6-2: a for-of binding over a value-carrying array — `for (const
-			// alias of [preview])` binds alias to the reference itself.
+			// alias of [preview])` binds alias to the reference itself. R7-3
+			// widens the iterable to everything `arrayRooted` reads as carrying:
+			// transform results (`arr.map((p) => p)`), generator calls that yield
+			// the reference, and `Object.values`/`Object.entries` over a carrying
+			// container. An `Object.entries` element is a `[key, value]` pair, so
+			// a binding pattern's leaf names all receive the reference — the
+			// conservative spelling of "one of these is the value".
 			if (ts.isForOfStatement(node) && ts.isVariableDeclarationList(node.initializer)) {
 				const iterable = unwrapValueNode(node.expression);
-				if (arrayHoldsValue(iterable)) {
+				if (arrayHoldsValue(iterable) || arrayRooted(iterable)) {
 					for (const declaration of node.initializer.declarations) {
-						if (ts.isIdentifier(declaration.name) && addValueName(declaration.name.text))
-							changed = true;
+						for (const name of bindingNames(declaration.name)) {
+							if (addValueName(name)) changed = true;
+						}
 					}
 				}
 				return;
@@ -2301,8 +2743,13 @@ function previewValuePathFindings(file, sourceFile) {
 			if (!inner) return;
 			if (ts.isObjectLiteralExpression(inner)) {
 				const carried = objectLiteralCarriedProps(inner);
-				if (carried.holds && !containerPaths.has(bound)) {
+				// R7-3: a literal with SETTERS is a container even before it holds
+				// the value — `set body(v)` receives whatever a later `box.body =
+				// preview` assigns. Recording it lets the late-population reading
+				// bind the setter parameter when that write happens.
+				if ((carried.holds || carried.setters.size > 0) && !containerPaths.has(bound)) {
 					containerPaths.set(bound, carried.props);
+					if (carried.setters.size > 0) containerSetters.set(bound, carried.setters);
 					changed = true;
 				}
 			} else if (ts.isArrayLiteralExpression(inner)) {
@@ -2349,6 +2796,292 @@ function previewValuePathFindings(file, sourceFile) {
 			}
 		});
 
+		// R7-3: LATE POPULATION — writes that place the reference into a container
+		// AFTER its declaration, in every spelling: `stash.body = preview`,
+		// `stash['body'] = preview`, `holder[k] = preview` (a key no static read
+		// can fold places the value at an unknown property — recorded as '*'),
+		// `arr[1] = preview`, and the `Object.assign`/`Reflect.set` spellings of
+		// the same placement. A write onto a SETTER property additionally binds
+		// the setter's parameter, which can then write `.html` on the reference.
+		eachNode(sourceFile, (node) => {
+			let target = null;
+			let rhs = null;
+			if (ts.isBinaryExpression(node) && isAssignmentToken(node.operatorToken.kind)) {
+				target = node.left;
+				rhs = node.right;
+			} else if (
+				ts.isCallExpression(node) &&
+				ts.isPropertyAccessExpression(node.expression) &&
+				ts.isIdentifier(node.expression.expression)
+			) {
+				// Object.assign(receiver, { body: preview }) / Reflect.set(receiver, key, preview)
+				const object = node.expression.expression.text;
+				const method = node.expression.name.text;
+				if (object === 'Object' && method === 'assign' && ts.isIdentifier(node.arguments[0])) {
+					const receiver = node.arguments[0].text;
+					for (const source of node.arguments.slice(1)) {
+						const src = unwrapValueNode(source);
+						if (!ts.isObjectLiteralExpression(src)) {
+							// A source this reading cannot read could set any
+							// property — a placement at an unknown key. Provably
+							// non-object literals (a string, a number) set nothing.
+							if (
+								ts.isStringLiteral(src) ||
+								ts.isNumericLiteral(src) ||
+								src.kind === ts.SyntaxKind.TrueKeyword ||
+								src.kind === ts.SyntaxKind.FalseKeyword ||
+								src.kind === ts.SyntaxKind.NullKeyword ||
+								src.kind === ts.SyntaxKind.UndefinedKeyword
+							)
+								continue;
+							const props = containerPaths.get(receiver) ?? new Set();
+							if (!props.has('*')) {
+								props.add('*');
+								containerPaths.set(receiver, props);
+								changed = true;
+							}
+							continue;
+						}
+						for (const property of src.properties) {
+							if (ts.isSpreadAssignment(property)) {
+								const props = containerPaths.get(receiver) ?? new Set();
+								if (!props.has('*')) {
+									props.add('*');
+									containerPaths.set(receiver, props);
+									changed = true;
+								}
+								continue;
+							}
+							const key = ts.isComputedPropertyName(property.name)
+								? foldLocalKey(property.name.expression)
+								: ts.isIdentifier(property.name)
+									? property.name.text
+									: ts.isStringLiteral(property.name)
+										? property.name.text
+										: null;
+							const valueExpr = ts.isPropertyAssignment(property)
+								? property.initializer
+								: ts.isShorthandPropertyAssignment(property)
+									? property.name
+									: null;
+							if (!valueExpr || !holdsValue(valueExpr)) continue;
+							const props = containerPaths.get(receiver) ?? new Set();
+							const record = key ?? '*';
+							if (!props.has(record)) {
+								props.add(record);
+								containerPaths.set(receiver, props);
+								changed = true;
+							}
+						}
+					}
+				}
+				if (object === 'Reflect' && method === 'set' && ts.isIdentifier(node.arguments[0])) {
+					const receiver = node.arguments[0].text;
+					const key = foldLocalKey(node.arguments[1]);
+					if (node.arguments[2] && holdsValue(node.arguments[2])) {
+						const props = containerPaths.get(receiver) ?? new Set();
+						const record = key ?? '*';
+						if (!props.has(record)) {
+							props.add(record);
+							containerPaths.set(receiver, props);
+							changed = true;
+						}
+					}
+				}
+				return;
+			}
+			if (!target || !rhs || !holdsValue(rhs)) return;
+			const access = propertyName(target);
+			if (!access) return;
+			const receiver = unwrapValueNode(access.object);
+			if (!ts.isIdentifier(receiver)) return;
+			// A write THROUGH a value name is the write scan's finding, never a
+			// container placement.
+			if (valueNames.has(receiver.text)) return;
+			let key;
+			if (access.computed) {
+				key = foldLocalKey(target.argumentExpression);
+			} else {
+				key = access.name;
+			}
+			const setters = containerSetters.get(receiver.text);
+			if (setters) {
+				const param = (key !== null && setters.get(key)) || setters.get('*');
+				if (param && addValueName(param)) changed = true;
+			}
+			const numeric =
+				key !== null && /^(0|[1-9][0-9]*)$/.test(key) && !containerPaths.has(receiver.text);
+			if (numeric || arrayContainers.has(receiver.text)) {
+				// An array placement — the value sits at the folded index, or
+				// anywhere an unfolded key can reach.
+				const wasArray = arrayContainers.has(receiver.text);
+				if (!wasArray) {
+					arrayContainers.add(receiver.text);
+					changed = true;
+				}
+				const existing = arrayValueIndex.get(receiver.text);
+				if (existing !== 'any') {
+					if (key === null) {
+						arrayValueIndex.set(receiver.text, 'any');
+						changed = true;
+					} else {
+						const indices = existing instanceof Set ? existing : new Set();
+						if (!indices.has(Number(key))) {
+							indices.add(Number(key));
+							arrayValueIndex.set(receiver.text, indices);
+							changed = true;
+						}
+					}
+				}
+				return;
+			}
+			const props = containerPaths.get(receiver.text) ?? new Set();
+			const record = key ?? '*';
+			if (!props.has(record)) {
+				props.add(record);
+				containerPaths.set(receiver.text, props);
+				changed = true;
+			}
+		});
+
+		// R7-3: COLLECTION TRANSFORMS. `const ys = arr.map((p) => p)` carries the
+		// reference into the result; `filter`/`flatMap` can too, and a transform
+		// this reading cannot resolve is treated as carrying — an unresolved
+		// transform over a value-carrying array fails closed. Reductions to a
+		// scalar or to indices (ARRAY_REDUCE_METHODS) never carry.
+		eachNode(sourceFile, (node) => {
+			if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer)
+				return;
+			const bound = node.name.text;
+			const init = unwrapValueNode(node.initializer);
+			if (!ts.isCallExpression(init)) return;
+			const callee = propertyName(init.expression);
+			if (!callee || callee.computed) return;
+			if (!arrayRooted(callee.object)) return;
+
+			const callbackCarries = (callback) => {
+				if (!callback) return true; // no inline callback to read — fail closed
+				if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return true;
+				const elementParam = callback.parameters[0];
+				const paramName =
+					elementParam && ts.isIdentifier(elementParam.name) ? elementParam.name.text : null;
+				if (!paramName) return true;
+				const returns = [];
+				const body = callback.body;
+				if (ts.isArrowFunction(callback) && body && !ts.isBlock(body)) {
+					returns.push(body);
+				} else if (body && ts.isBlock(body)) {
+					eachNodeOwn(body, (n) => {
+						if (ts.isReturnStatement(n)) returns.push(n.expression ?? null);
+					});
+				}
+				if (returns.length === 0) return false; // returns nothing — undefined
+				let carries = false;
+				for (const returned of returns) {
+					if (returned === null) continue; // bare return — undefined
+					const expr = unwrapValueNode(returned);
+					if (ts.isIdentifier(expr) && expr.text === paramName) {
+						carries = true; // identity — the element itself
+						continue;
+					}
+					if (
+						ts.isStringLiteral(expr) ||
+						ts.isNumericLiteral(expr) ||
+						ts.isNoSubstitutionTemplateLiteral(expr) ||
+						expr.kind === ts.SyntaxKind.TrueKeyword ||
+						expr.kind === ts.SyntaxKind.FalseKeyword ||
+						expr.kind === ts.SyntaxKind.NullKeyword ||
+						expr.kind === ts.SyntaxKind.UndefinedKeyword ||
+						ts.isObjectLiteralExpression(expr) ||
+						ts.isArrayLiteralExpression(expr)
+					)
+						continue; // provably a fresh value
+					carries = true; // a member read, a call, anything unproven — fail closed
+				}
+				return carries;
+			};
+
+			const method = callee.name;
+			if (ARRAY_REDUCE_METHODS.has(method)) return;
+			if (method === 'map' || method === 'flatMap' || method === 'filter') {
+				if (!callbackCarries(init.arguments[0])) return;
+				if (!arrayContainers.has(bound)) {
+					arrayContainers.add(bound);
+					arrayValueIndex.set(bound, 'any');
+					changed = true;
+				}
+				return;
+			}
+			if (method === 'find' || method === 'findLast' || method === 'at' || method === 'reduce') {
+				// The result can BE the element — a scalar binding of the reference.
+				if (addValueName(bound)) changed = true;
+				return;
+			}
+			// slice, concat, toSorted, toReversed, toSpliced, sort, reverse, with,
+			// values, entries — and any method this reading does not name: the
+			// result is treated as an array that carries the reference.
+			if (!arrayContainers.has(bound)) {
+				arrayContainers.add(bound);
+				arrayValueIndex.set(bound, 'any');
+				changed = true;
+			}
+		});
+
+		// R7-3: GENERATORS that yield the reference — `function* stream() {
+		// yield preview; }` makes `for (const p of stream())` a value binding.
+		for (const [name, infos] of functions) {
+			if (yieldCarrying.has(name)) continue;
+			for (const { node } of infos) {
+				const fnNode = node;
+				if (!fnNode.asteriskToken) continue;
+				let yields = false;
+				eachNodeOwn(fnNode.body ?? fnNode, (n) => {
+					if (yields) return;
+					if (ts.isYieldExpression(n)) {
+						if (n.asteriskToken && n.expression && arrayRooted(n.expression)) yields = true;
+						else if (n.expression && holdsValue(n.expression)) yields = true;
+					}
+				});
+				if (yields) {
+					yieldCarrying.add(name);
+					changed = true;
+					break;
+				}
+			}
+		}
+
+		// R7-3: container CONSTRUCTORS seeded with the reference — `new Set(
+		// [preview])`, `new Map([[k, preview]])` — carry it exactly like a
+		// container that received it through `.add`/`.set`.
+		eachNode(sourceFile, (node) => {
+			if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer)
+				return;
+			const init = unwrapValueNode(node.initializer);
+			if (
+				!ts.isNewExpression(init) ||
+				!ts.isIdentifier(init.expression) ||
+				!['Set', 'Map', 'WeakSet', 'WeakMap'].includes(init.expression.text)
+			)
+				return;
+			const seeded = (init.arguments ?? []).some((argument) => {
+				if (holdsValue(argument)) return true;
+				const inner = unwrapValueNode(argument);
+				if (ts.isArrayLiteralExpression(inner))
+					return inner.elements.some((element) => {
+						if (holdsValue(element)) return true;
+						const el = unwrapValueNode(element);
+						return (
+							ts.isArrayLiteralExpression(el) && el.elements.some((entry) => holdsValue(entry))
+						);
+					});
+				return false;
+			});
+			if (seeded && !mapContainers.has(node.name.text)) {
+				mapContainers.add(node.name.text);
+				changed = true;
+			}
+		});
+
 		// Local functions that return the value — walked to the function's own
 		// boundary so a nested arrow's return is not credited to its parent. A
 		// concise arrow's body IS the returned expression.
@@ -2383,7 +3116,10 @@ function previewValuePathFindings(file, sourceFile) {
 	// cannot prove leaves its argument untouched.
 	const paramDerivedNames = (fnNode, paramNames) => {
 		const derived = new Set();
-		for (const param of paramNames) {
+		// R7-3: `paramNames === null` is an UNPROVEN constructor (a heritage
+		// clause with no declared constructor); it derives no local names — the
+		// call sites treat the entry itself as unprovable.
+		for (const param of paramNames ?? []) {
 			const names = bindingNames(param);
 			for (const name of names) derived.add(name);
 		}
@@ -2544,7 +3280,14 @@ function previewValuePathFindings(file, sourceFile) {
 
 	eachNode(sourceFile, (node) => {
 		if (ts.isBinaryExpression(node) && isAssignmentToken(node.operatorToken.kind)) {
-			const access = propertyName(node.left);
+			let access = propertyName(node.left);
+			// R7-3: an element-access key bound to a constant string names the
+			// property the literal spelling does — `const kk = 'html';
+			// holder.body[kk] = …` is a `.html` write, not an unresolved key.
+			if (access && access.computed && ts.isElementAccessExpression(node.left)) {
+				const folded = foldLocalKey(node.left.argumentExpression);
+				if (folded !== null) access = { name: folded, object: access.object, computed: false };
+			}
 			if (access) {
 				const receiver = unwrapValueNode(access.object);
 				if (ts.isIdentifier(receiver) && valueNames.has(receiver.text)) {
@@ -2576,6 +3319,13 @@ function previewValuePathFindings(file, sourceFile) {
 									40
 								)}… — a value bound to the preview reference can be transformed before the sink`
 						);
+				} else if (access.computed && holdsValue(receiver)) {
+					// R7-3: a COMPUTED write on any read this reading binds to the
+					// reference — `stash.body[key] = …`, `arr.map((p) => p)[0][k] = …`
+					// — fails closed: the key no static read can fold could be 'html'.
+					findings.push(
+						`${file} writes through a computed key on a value bound to the preview reference — the key could be 'html' and lesser's bytes would be transformed before the sink`
+					);
 				}
 			}
 			return;
@@ -2584,7 +3334,11 @@ function previewValuePathFindings(file, sourceFile) {
 			node.kind === ts.SyntaxKind.PrefixUnaryExpression ||
 			node.kind === ts.SyntaxKind.PostfixUnaryExpression
 		) {
-			const access = propertyName(node.operand);
+			let access = propertyName(node.operand);
+			if (access && access.computed && ts.isElementAccessExpression(node.operand)) {
+				const folded = foldLocalKey(node.operand.argumentExpression);
+				if (folded !== null) access = { name: folded, object: access.object, computed: false };
+			}
 			if (access) {
 				const receiver = unwrapValueNode(access.object);
 				if (ts.isIdentifier(receiver) && valueNames.has(receiver.text))
@@ -2606,16 +3360,23 @@ function previewValuePathFindings(file, sourceFile) {
 			const callee = propertyName(node.expression);
 			if (callee && ts.isIdentifier(callee.object)) {
 				const receiver = node.arguments[0];
-				const object = receiver && unwrapValueNode(receiver);
+				// R7-3: the mutation APIs are bound at the VALUE, not the
+				// identifier — `Object.assign(stash.body, …)` reaches the
+				// reference through a late-populated container read exactly as
+				// `Object.assign(preview, …)` does.
 				if (
-					ts.isIdentifier(object) &&
-					valueNames.has(object.text) &&
+					receiver &&
+					holdsValue(receiver) &&
 					((callee.object.text === 'Object' &&
 						['assign', 'defineProperty', 'defineProperties'].includes(callee.name)) ||
 						(callee.object.text === 'Reflect' && callee.name === 'set'))
 				) {
+					const inner = unwrapValueNode(receiver);
+					const described = ts.isIdentifier(inner)
+						? inner.text
+						: 'a value bound to the preview reference';
 					findings.push(
-						`${file} mutates ${object.text} through ${callee.object.text}.${callee.name}(…) — lesser's preview value must remain verbatim`
+						`${file} mutates ${described} through ${callee.object.text}.${callee.name}(…) — lesser's preview value must remain verbatim`
 					);
 					return;
 				}
@@ -2632,6 +3393,10 @@ function previewValuePathFindings(file, sourceFile) {
 					if (mutatingFunctions.has(calleeExpr.text))
 						findings.push(
 							`${file} passes the preview value to ${calleeExpr.text}(…), whose parameter is written — a helper hop transforms lesser's bytes before the sink`
+						);
+					else if (infos.some((info) => info.paramNames === null))
+						findings.push(
+							`${file} passes the preview value to ${calleeExpr.text}(…) — its inherited constructor cannot be proven to leave the value untouched`
 						);
 				} else {
 					findings.push(
@@ -2663,6 +3428,10 @@ function previewValuePathFindings(file, sourceFile) {
 					if (mutatingFunctions.has(calleeExpr.text))
 						findings.push(
 							`${file} passes the preview value to new ${calleeExpr.text}(…) — its constructor writes the value, transforming lesser's bytes before the sink`
+						);
+					else if (infos.some((info) => info.paramNames === null))
+						findings.push(
+							`${file} passes the preview value to new ${calleeExpr.text}(…) — its inherited constructor cannot be proven to leave the value untouched`
 						);
 				} else {
 					findings.push(
@@ -3003,7 +3772,7 @@ function resolveOwnedSpecifier(specifier, fromFile) {
 	if (specifier.startsWith('./') || specifier.startsWith('../')) {
 		const parts = fromFile.split('/');
 		const base = parts.slice(0, -1).join('/');
-		return `${base}/${specifier}`.split('/').reduce((acc, part) => {
+		const resolved = `${base}/${specifier}`.split('/').reduce((acc, part) => {
 			if (part === '.' || part === '') return acc;
 			if (part === '..') {
 				acc.pop();
@@ -3012,20 +3781,60 @@ function resolveOwnedSpecifier(specifier, fromFile) {
 			acc.push(part);
 			return acc;
 		}, []);
+		return resolved.join('/');
 	}
 	return null;
 }
 
 /**
- * R6-1 — the cross-file preview route scan over OWNED Svelte modules.
+ * R6-1 + R7-1 — the cross-file preview route scan over OWNED Svelte modules.
  *
  * `files` is a Map of repository-relative path -> source for every owned
  * `.svelte` module (the audit walks OWNED_SOURCE_DIRS and hands the collection
  * here), so module resolution never leaves the owned tree. Returns findings
  * already prefixed with the file path.
+ *
+ * THE ROUND-7 WIDENING. The round-6 reading resolved a static invocation's
+ * callee only when it was an OWNED Svelte module in `files`; a callee that was
+ * a prop, an unbound name, a dotted member, or an owned barrel re-export was
+ * skipped, and a markup spread was a boolean flag with no reading of the keys
+ * it carries. Two plants lived in that gap: an owned wrapper invoking
+ * `<Comp preview={shown}/>` with `Comp` supplied through props, fed from the
+ * canonical file by `<PreviewSlot {...{ Comp: PreviewBody, value: preview }}
+ * />`; and `<Mod.default preview={value}/>` with the namespace itself a prop.
+ * Round-7 closes both:
+ *
+ *   - a static invocation whose callee is a prop, unbound, member, or an owned
+ *     module this reading cannot resolve to a component fails closed whenever
+ *     a preview-flowing value can reach it — a `preview` attribute or a
+ *     spread — because the callee could BE PreviewBody;
+ *   - markup spread expressions are READ, not merely counted: object literals,
+ *     aliases bound to object literals or to local helper returns, shorthand,
+ *     computed keys folded through constant strings, and nested spreads
+ *     resolve into their keys, and a spread the reading cannot resolve fails
+ *     closed;
+ *   - dotted callee names resolve conservatively — a member of a prop, an
+ *     unbound name, or an owned namespace is never a trusted owned component;
+ *   - imports resolve through owned barrels by following `export … from`
+ *     chains; a chain the reading cannot chase to an owned component is
+ *     UNPROVEN rather than benign, while vendored and package modules stay
+ *     benign because none of them can reach an owned PreviewBody module;
+ *   - legacy `export let` props, `$props()` rest/nested/bindable forms, and
+ *     markup `{@const}` component aliases feed the same resolution.
  */
-export function previewForwardingFindings(files) {
+export function previewForwardingFindings(files, options = {}) {
 	const findings = [];
+	// `modules` is the FULL owned executable source map (path -> source) when
+	// the audit supplies it; barrel tracing reads non-Svelte modules through
+	// it. `vendoredRoots`/`vendoredFiles` name the CLI-managed tree, whose
+	// components cannot reach an owned PreviewBody and therefore stay benign.
+	const modules = options.modules ?? files;
+	const vendoredRoots = options.vendoredRoots ?? [];
+	const vendoredFiles = new Set(options.vendoredFiles ?? []);
+	const isVendoredPath = (path) =>
+		vendoredFiles.has(path) ||
+		vendoredRoots.some((root) => path === root || path.startsWith(`${root}/`));
+	const moduleExists = (path) => modules.has(path);
 
 	// --- per-file extraction --------------------------------------------------
 	const flows = new Map(); // path -> facts
@@ -3045,10 +3854,14 @@ export function previewForwardingFindings(files) {
 			continue;
 		}
 
-		const imports = new Map(); // localName -> specifier
+		const imports = new Map(); // localName -> { specifier, importedName }
 		const propBindings = new Map(); // localName -> propName
-		const wholeProps = new Set(); // names bound to the whole $props() object
+		const wholeProps = new Set(); // names bound to the whole $props() object (or a rest/nested slice of it)
 		const componentAliases = new Map(); // localName -> aliased imported name
+		const constantStrings = new Map(); // localName -> folded constant string
+		const scriptInitializers = new Map(); // localName -> TS initializer node
+		const scriptFnNodes = new Map(); // localName -> TS function node
+		const markupConstObjects = new Map(); // name -> estree expression from {@const}
 		eachNode(sourceFile, (node) => {
 			if (
 				ts.isImportDeclaration(node) &&
@@ -3056,21 +3869,51 @@ export function previewForwardingFindings(files) {
 				ts.isStringLiteral(node.moduleSpecifier)
 			) {
 				const clause = node.importClause;
-				if (clause?.name) imports.set(clause.name.text, node.moduleSpecifier.text);
+				if (clause?.name)
+					imports.set(clause.name.text, {
+						specifier: node.moduleSpecifier.text,
+						importedName: 'default',
+					});
 				if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
 					for (const element of clause.namedBindings.elements)
-						if (!element.isTypeOnly) imports.set(element.name.text, node.moduleSpecifier.text);
+						if (!element.isTypeOnly)
+							imports.set(element.name.text, {
+								specifier: node.moduleSpecifier.text,
+								importedName: element.propertyName?.text ?? element.name.text,
+							});
 				}
 				if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings))
-					imports.set(clause.namedBindings.name.text, node.moduleSpecifier.text);
+					imports.set(clause.namedBindings.name.text, {
+						specifier: node.moduleSpecifier.text,
+						importedName: '*',
+					});
 			}
+			if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+				if (ts.isIdentifier(node.initializer))
+					componentAliases.set(node.name.text, node.initializer.text);
+				const literal = foldPropertyKey(node.initializer);
+				if (literal !== null) constantStrings.set(node.name.text, literal);
+				if (!scriptInitializers.has(node.name.text))
+					scriptInitializers.set(node.name.text, node.initializer);
+				if (
+					(ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) &&
+					!scriptFnNodes.has(node.name.text)
+				)
+					scriptFnNodes.set(node.name.text, node.initializer);
+			}
+			if (ts.isFunctionDeclaration(node) && node.name && !scriptFnNodes.has(node.name.text))
+				scriptFnNodes.set(node.name.text, node);
+			// R7-1: legacy `export let` props — the pre-runes spelling declares a
+			// component prop exactly as a `$props()` destructure does.
 			if (
-				ts.isVariableDeclaration(node) &&
-				ts.isIdentifier(node.name) &&
-				node.initializer &&
-				ts.isIdentifier(node.initializer)
+				ts.isVariableStatement(node) &&
+				(node.modifiers ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
 			) {
-				componentAliases.set(node.name.text, node.initializer.text);
+				for (const declaration of node.declarationList.declarations) {
+					if (ts.isIdentifier(declaration.name))
+						propBindings.set(declaration.name.text, declaration.name.text);
+					else for (const leaf of bindingNames(declaration.name)) wholeProps.add(leaf);
+				}
 			}
 			if (
 				ts.isVariableStatement(node) &&
@@ -3082,13 +3925,27 @@ export function previewForwardingFindings(files) {
 				for (const declaration of node.declarationList.declarations) {
 					if (ts.isObjectBindingPattern(declaration.name)) {
 						for (const element of declaration.name.elements) {
-							if (!ts.isBindingElement(element) || element.dotDotDotToken) continue;
-							if (!ts.isIdentifier(element.name)) continue;
-							const propName =
-								element.propertyName && ts.isIdentifier(element.propertyName)
-									? element.propertyName.text
-									: element.name.text;
-							propBindings.set(element.name.text, propName);
+							if (!ts.isBindingElement(element)) continue;
+							// R7-1: a `$props()` REST element carries every prop —
+							// `{...spread}` from it can include `preview` — so its
+							// name joins the whole-prop set.
+							if (element.dotDotDotToken) {
+								for (const leaf of bindingNames(element.name)) wholeProps.add(leaf);
+								continue;
+							}
+							if (ts.isIdentifier(element.name)) {
+								const propName =
+									element.propertyName && ts.isIdentifier(element.propertyName)
+										? element.propertyName.text
+										: element.name.text;
+								propBindings.set(element.name.text, propName);
+							} else {
+								// R7-1: a NESTED pattern destructures a prop's own
+								// properties — which property of the incoming object
+								// each leaf holds cannot be proven from the pattern,
+								// so the leaves join the whole-prop set.
+								for (const leaf of bindingNames(element.name)) wholeProps.add(leaf);
+							}
 						}
 					} else if (ts.isIdentifier(declaration.name)) {
 						wholeProps.add(declaration.name.text);
@@ -3101,27 +3958,49 @@ export function previewForwardingFindings(files) {
 		const invocations = [];
 		const visitMarkup = (node) => {
 			if (!node || typeof node !== 'object') return;
+			// R7-1: markup `{@const}` declarations bind component aliases and
+			// object constants the spread reading must see — `{@const Body = X}`
+			// renames a component exactly as a script `const` would.
+			if (node.type === 'ConstTag' && node.expression?.type === 'AssignmentExpression') {
+				const assignment = node.expression;
+				if (assignment.left?.type === 'Identifier') {
+					markupConstObjects.set(assignment.left.name, assignment.right ?? null);
+					if (assignment.right?.type === 'Identifier')
+						componentAliases.set(assignment.left.name, assignment.right.name);
+				}
+			}
 			if (node.type === 'SvelteComponent') {
 				const attrs = node.attributes ?? [];
 				const preview = attrs.find(
-					(entry) => entry.type === 'Attribute' && entry.name === 'preview'
+					(entry) =>
+						(entry.type === 'Attribute' || entry.type === 'BindDirective') &&
+						entry.name === 'preview'
 				);
 				svelteComponents.push({
 					thisText: componentThisText(node.expression),
 					thisIsIdentifier: node.expression?.type === 'Identifier',
-					previewValue: preview ? attributeValueShape(preview) : null,
+					previewValue: preview
+						? preview.type === 'BindDirective'
+							? expressionShape(preview.expression)
+							: attributeValueShape(preview)
+						: null,
 					hasSpread: attrs.some((entry) => entry.type === 'SpreadAttribute'),
 				});
 			}
 			if (node.type === 'Component') {
 				const attrs = [];
-				let hasSpread = false;
+				const spreads = [];
 				for (const attribute of node.attributes ?? []) {
 					if (attribute.type === 'Attribute')
 						attrs.push({ name: attribute.name, value: attributeValueShape(attribute) });
-					else if (attribute.type === 'SpreadAttribute') hasSpread = true;
+					else if (attribute.type === 'BindDirective' && typeof attribute.name === 'string')
+						// R7-1: `bind:preview={value}` forwards the value exactly as
+						// `preview={value}` does — and bidirectionally, so a bind is
+						// if anything a stronger route.
+						attrs.push({ name: attribute.name, value: expressionShape(attribute.expression) });
+					else if (attribute.type === 'SpreadAttribute') spreads.push(attribute.expression ?? null);
 				}
-				invocations.push({ name: node.name, attrs, hasSpread });
+				invocations.push({ name: node.name, attrs, spreads, spreadAnalysis: null });
 			}
 			for (const key of Object.keys(node)) {
 				if (key === 'parent') continue;
@@ -3131,11 +4010,16 @@ export function previewForwardingFindings(files) {
 		visitMarkup(ast.fragment);
 
 		flows.set(path, {
+			ast,
 			sourceFile,
 			imports,
 			propBindings,
 			wholeProps,
 			componentAliases,
+			constantStrings,
+			scriptInitializers,
+			scriptFnNodes,
+			markupConstObjects,
 			svelteComponents,
 			invocations,
 		});
@@ -3148,19 +4032,23 @@ export function previewForwardingFindings(files) {
 	 * `{kind: 'other'}` for a call, a member read, a conditional — a value this
 	 * reading cannot prove anything about. Null when there is no expression.
 	 */
-	function attributeValueShape(attribute) {
-		const values = Array.isArray(attribute.value)
-			? attribute.value
-			: [attribute.value].filter(Boolean);
-		const tag = values.find((value) => value?.type === 'ExpressionTag');
-		if (!tag?.expression) return null;
-		const expression = tag.expression;
+	function expressionShape(expression) {
+		if (!expression || typeof expression !== 'object') return null;
 		if (expression.type === 'Identifier' && typeof expression.name === 'string')
 			return { kind: 'identifier', name: expression.name };
 		if (expression.type === 'Literal') return { kind: 'literal' };
 		if (expression.type === 'ObjectExpression' || expression.type === 'ArrayExpression')
 			return { kind: 'literal' };
 		return { kind: 'other' };
+	}
+
+	function attributeValueShape(attribute) {
+		const values = Array.isArray(attribute.value)
+			? attribute.value
+			: [attribute.value].filter(Boolean);
+		const tag = values.find((value) => value?.type === 'ExpressionTag');
+		if (!tag?.expression) return null;
+		return expressionShape(tag.expression);
 	}
 
 	function componentThisText(expression) {
@@ -3170,11 +4058,298 @@ export function previewForwardingFindings(files) {
 		return null;
 	}
 
+	// --- R7-1 spread / object construction reading ----------------------------
+	/**
+	 * The value shape a TS expression offers, unwrapped of parentheses,
+	 * non-null assertions and casts.
+	 */
+	const shapeOfTs = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner) return { kind: 'other' };
+		if (ts.isIdentifier(inner)) return { kind: 'identifier', name: inner.text };
+		if (
+			ts.isStringLiteral(inner) ||
+			ts.isNumericLiteral(inner) ||
+			ts.isNoSubstitutionTemplateLiteral(inner) ||
+			inner.kind === ts.SyntaxKind.TrueKeyword ||
+			inner.kind === ts.SyntaxKind.FalseKeyword ||
+			inner.kind === ts.SyntaxKind.NullKeyword ||
+			inner.kind === ts.SyntaxKind.UndefinedKeyword ||
+			ts.isObjectLiteralExpression(inner) ||
+			ts.isArrayLiteralExpression(inner)
+		)
+			return { kind: 'literal' };
+		return { kind: 'other' };
+	};
+	const shapeOfEstree = (expr) => {
+		if (!expr || typeof expr !== 'object') return { kind: 'other' };
+		if (expr.type === 'Identifier' && typeof expr.name === 'string')
+			return { kind: 'identifier', name: expr.name };
+		if (
+			expr.type === 'Literal' ||
+			expr.type === 'ObjectExpression' ||
+			expr.type === 'ArrayExpression' ||
+			expr.type === 'TemplateLiteral'
+		)
+			return { kind: 'literal' };
+		return { kind: 'other' };
+	};
+
+	/**
+	 * The folded keys and value shapes of an object construction, read through
+	 * aliases, helper returns, shorthand, computed keys folded through constant
+	 * strings, and nested spreads. Returns `[{ name, value }]` or null when any
+	 * part cannot be resolved — an unresolved spread fails closed at the call
+	 * site. `seen` guards alias cycles.
+	 */
+	/**
+	 * The object attrs a LOCAL function's returns offer — every return must
+	 * resolve to an object construction, and the attrs merge; a function with
+	 * no readable return is unresolvable.
+	 */
+	const tsFunctionReturnAttrs = (fnNode, flow, seen) => {
+		const attrs = [];
+		let resolved = false;
+		const body = fnNode.body;
+		if (ts.isArrowFunction(fnNode) && body && !ts.isBlock(body)) {
+			return analyzeTsObject(body, flow, seen);
+		}
+		const visitReturns = (n, top = true) => {
+			if (!n || typeof n !== 'object') return;
+			if (
+				!top &&
+				(ts.isFunctionDeclaration(n) ||
+					ts.isArrowFunction(n) ||
+					ts.isFunctionExpression(n) ||
+					ts.isMethodDeclaration(n))
+			)
+				return;
+			if (ts.isReturnStatement(n)) {
+				if (!n.expression) return;
+				const inner = analyzeTsObject(n.expression, flow, seen);
+				if (inner === null) return;
+				resolved = true;
+				attrs.push(...inner);
+				return;
+			}
+			ts.forEachChild(n, (child) => visitReturns(child, false));
+		};
+		if (body) visitReturns(body);
+		return resolved ? attrs : null;
+	};
+
+	const analyzeTsObject = (node, flow, seen) => {
+		if (!node) return null;
+		if (ts.isParenthesizedExpression(node)) return analyzeTsObject(node.expression, flow, seen);
+		if (ts.isIdentifier(node)) {
+			if (seen.has(node.text)) return null;
+			seen.add(node.text);
+			const initializer = flow.scriptInitializers.get(node.text);
+			if (initializer) return analyzeTsObject(initializer, flow, seen);
+			return null;
+		}
+		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+			const fnNode = flow.scriptFnNodes.get(node.expression.text);
+			if (!fnNode) return null;
+			return tsFunctionReturnAttrs(fnNode, flow, seen);
+		}
+		if (!ts.isObjectLiteralExpression(node)) return null;
+		const attrs = [];
+		for (const property of node.properties) {
+			if (ts.isSpreadAssignment(property)) {
+				const inner = analyzeTsObject(property.expression, flow, seen);
+				if (inner === null) return null;
+				attrs.push(...inner);
+				continue;
+			}
+			if (ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property)) {
+				const key = ts.isIdentifier(property.name)
+					? property.name.text
+					: ts.isStringLiteral(property.name)
+						? property.name.text
+						: ts.isComputedPropertyName(property.name)
+							? (foldPropertyKey(property.name.expression) ??
+								(ts.isIdentifier(property.name.expression)
+									? (flow.constantStrings.get(property.name.expression.text) ?? null)
+									: null))
+							: null;
+				if (key === null) return null;
+				attrs.push({ name: key, value: { kind: 'other' } });
+				continue;
+			}
+			let key = null;
+			let value = null;
+			if (ts.isPropertyAssignment(property)) {
+				key = ts.isComputedPropertyName(property.name)
+					? (foldPropertyKey(property.name.expression) ??
+						(ts.isIdentifier(property.name.expression)
+							? (flow.constantStrings.get(property.name.expression.text) ?? null)
+							: null))
+					: ts.isIdentifier(property.name)
+						? property.name.text
+						: ts.isStringLiteral(property.name)
+							? property.name.text
+							: null;
+				value = shapeOfTs(property.initializer);
+			} else if (ts.isShorthandPropertyAssignment(property)) {
+				key = property.name.text;
+				value = { kind: 'identifier', name: property.name.text };
+			} else {
+				return null;
+			}
+			if (key === null) return null;
+			attrs.push({ name: key, value });
+		}
+		return attrs;
+	};
+
+	const foldEstreeKey = (expr, flow) => {
+		if (!expr || typeof expr !== 'object') return null;
+		if (expr.type === 'Literal' && typeof expr.value === 'string') return expr.value;
+		if (expr.type === 'TemplateLiteral' && (expr.expressions ?? []).length === 0)
+			return expr.quasis?.[0]?.value?.cooked ?? null;
+		if (expr.type === 'Identifier' && typeof expr.name === 'string')
+			return flow.constantStrings.get(expr.name) ?? null;
+		return null;
+	};
+
+	const analyzeEstreeObject = (expr, flow, seen) => {
+		if (!expr || typeof expr !== 'object') return null;
+		if (expr.type === 'Identifier' && typeof expr.name === 'string') {
+			if (seen.has(expr.name)) return null;
+			seen.add(expr.name);
+			const markupInit = flow.markupConstObjects.get(expr.name);
+			if (markupInit) return analyzeEstreeObject(markupInit, flow, seen);
+			const scriptInit = flow.scriptInitializers.get(expr.name);
+			if (scriptInit) return analyzeTsObject(scriptInit, flow, seen);
+			return null;
+		}
+		if (expr.type === 'CallExpression' && expr.callee?.type === 'Identifier') {
+			const fnNode = flow.scriptFnNodes.get(expr.callee.name);
+			if (!fnNode) return null;
+			return tsFunctionReturnAttrs(fnNode, flow, seen);
+		}
+		if (expr.type !== 'ObjectExpression') return null;
+		const attrs = [];
+		for (const property of expr.properties ?? []) {
+			if (property.type === 'SpreadElement') {
+				const inner = analyzeEstreeObject(property.argument, flow, seen);
+				if (inner === null) return null;
+				attrs.push(...inner);
+				continue;
+			}
+			if (property.type !== 'Property') return null;
+			let key = null;
+			if (property.computed) key = foldEstreeKey(property.key, flow);
+			else if (property.key?.type === 'Identifier') key = property.key.name;
+			else if (property.key?.type === 'Literal' && typeof property.key.value === 'string')
+				key = property.key.value;
+			if (key === null) return null;
+			attrs.push({ name: key, value: shapeOfEstree(property.value) });
+		}
+		return attrs;
+	};
+
+	/**
+	 * The resolved spread attributes of an invocation: `{ attrs, complete }`.
+	 * Every spread that resolves contributes its folded keys as synthetic
+	 * attributes; any spread the reading cannot resolve drops `complete` and
+	 * fails closed at the verdict sites.
+	 */
+	const invocationSpreadAnalysis = (invocation, flow) => {
+		if (invocation.spreadAnalysis) return invocation.spreadAnalysis;
+		const attrs = [];
+		let complete = true;
+		for (const expr of invocation.spreads) {
+			const resolved = expr ? analyzeEstreeObject(expr, flow, new Set()) : null;
+			if (resolved === null) {
+				complete = false;
+				continue;
+			}
+			attrs.push(...resolved);
+		}
+		invocation.spreadAnalysis = { attrs, complete };
+		return invocation.spreadAnalysis;
+	};
+
 	// --- module resolution ----------------------------------------------------
-	const resolveLocalName = (name, flow) => {
-		const specifier = flow.imports.get(name);
-		if (specifier !== undefined) {
-			const resolved = resolveOwnedSpecifier(specifier, flow.fromPath);
+	const SCRIPT_MODULE_EXTENSIONS = [
+		'.svelte',
+		'.ts',
+		'.mts',
+		'.cts',
+		'.tsx',
+		'.js',
+		'.mjs',
+		'.cjs',
+		'.jsx',
+	];
+	const findModuleFile = (base) => {
+		for (const extension of SCRIPT_MODULE_EXTENSIONS) {
+			if (moduleExists(base + extension)) return base + extension;
+		}
+		for (const extension of SCRIPT_MODULE_EXTENSIONS) {
+			if (moduleExists(`${base}/index${extension}`)) return `${base}/index${extension}`;
+		}
+		return null;
+	};
+
+	/**
+	 * R7-1: chase a re-export chain through OWNED non-Svelte modules — a barrel
+	 * `export { default as Body } from './PreviewBody.svelte'` resolves to the
+	 * component it names; a chain the reading cannot chase all the way to an
+	 * owned Svelte module returns null, and the caller treats that as UNPROVEN,
+	 * never benign.
+	 */
+	const traceBarrel = (base, importedName, visited, depth) => {
+		if (depth > 8) return null;
+		const file = findModuleFile(base);
+		if (!file) return null;
+		if (file.endsWith('.svelte')) return files.has(file) ? file : null;
+		if (visited.has(file)) return null;
+		visited.add(file);
+		const source = modules.get(file);
+		if (source === undefined) return null;
+		let barrelSourceFile;
+		try {
+			barrelSourceFile = parseTypeScript(source, { file, jsx: /\.(tsx|jsx)$/.test(file) });
+		} catch {
+			return null;
+		}
+		for (const statement of barrelSourceFile.statements) {
+			if (!ts.isExportDeclaration(statement) || !statement.moduleSpecifier) continue;
+			if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
+			const nextBase = resolveOwnedSpecifier(statement.moduleSpecifier.text, file);
+			if (nextBase === null) continue;
+			if (statement.exportClause === undefined) {
+				// `export * from '…'` — the name could come through here; an
+				// owned star re-export is chased like any other route.
+				const traced = traceBarrel(nextBase, importedName, visited, depth + 1);
+				if (traced) return traced;
+				continue;
+			}
+			if (!ts.isNamedExports(statement.exportClause)) continue;
+			for (const element of statement.exportClause.elements) {
+				if (element.name.text !== importedName) continue;
+				const localName = element.propertyName?.text ?? element.name.text;
+				const traced = traceBarrel(nextBase, localName, visited, depth + 1);
+				if (traced) return traced;
+			}
+		}
+		return null;
+	};
+
+	const resolveSimpleName = (name, flow) => {
+		const entry = flow.imports.get(name);
+		if (entry !== undefined) {
+			// A NAMESPACE import of an owned module could hold any re-exported
+			// component; its members are judged at the member site as unproven.
+			if (entry.importedName === '*') {
+				const resolved = resolveOwnedSpecifier(entry.specifier, flow.fromPath);
+				if (resolved === null || isVendoredPath(resolved)) return { kind: 'external' };
+				return { kind: 'owned-namespace', specifier: entry.specifier };
+			}
+			const resolved = resolveOwnedSpecifier(entry.specifier, flow.fromPath);
 			if (resolved === null) return { kind: 'external' };
 			const withExt = files.has(resolved)
 				? resolved
@@ -3182,7 +4357,22 @@ export function previewForwardingFindings(files) {
 					? `${resolved}.svelte`
 					: null;
 			if (withExt) return { kind: 'owned', path: withExt };
-			return { kind: 'external' };
+			if (isVendoredPath(resolved)) return { kind: 'external' };
+			if (resolved.startsWith('src/') || resolved.startsWith('scripts/')) {
+				// R7-1: an OWNED module that is not itself a known Svelte
+				// component — a barrel or re-export. Chase the export chain for
+				// the imported name; anything less than an owned component is
+				// UNPROVEN rather than benign.
+				const traced = traceBarrel(resolved, entry.importedName, new Set(), 0);
+				if (traced) return { kind: 'owned', path: traced };
+				return { kind: 'unproven' };
+			}
+			// R7-1: a relative import that ESCAPES the classified roots names an
+			// executable module outside `src/` and `scripts/` — the round-7
+			// universe's territory. It can never be a trusted owned component,
+			// whatever it is; the component scan fails closed on it exactly as it
+			// does on a prop, and the universe check names the file itself.
+			return { kind: 'unproven' };
 		}
 		const alias = flow.componentAliases.get(name);
 		if (alias !== undefined && alias !== name) return resolveLocalName(alias, flow);
@@ -3190,7 +4380,25 @@ export function previewForwardingFindings(files) {
 		if (flow.wholeProps.has(name)) return { kind: 'prop', propName: '*' };
 		return { kind: 'unbound' };
 	};
+	const resolveLocalName = (name, flow) => {
+		// R7-1: a DOTTED callee — `<Mod.default …>` — is a member expression.
+		// Its base decides the verdict: a member of a package or vendored
+		// namespace cannot reach an owned PreviewBody, but a member of a prop,
+		// an unbound name, or an owned namespace is never a trusted owned
+		// component — prop-supplied namespace members are whatever the parent
+		// sent.
+		const dot = name.indexOf('.');
+		if (dot > 0) {
+			const base = name.slice(0, dot);
+			const baseResolved = resolveSimpleName(base, flow);
+			if (baseResolved.kind === 'external') return { kind: 'external' };
+			return { kind: 'member' };
+		}
+		return resolveSimpleName(name, flow);
+	};
 	for (const [path, flow] of flows) flow.fromPath = path;
+
+	const UNPROVEN_KINDS = new Set(['prop', 'unbound', 'member', 'unproven']);
 
 	// --- fixed point: preview reach and forwarding props ----------------------
 	const reachesPreview = new Map(); // path -> boolean
@@ -3222,15 +4430,52 @@ export function previewForwardingFindings(files) {
 			// forwarder for the parent chain.
 			for (const invocation of flow.invocations) {
 				const callee = resolveLocalName(invocation.name, flow);
+				const analysis = invocationSpreadAnalysis(invocation, flow);
+				const allAttrs = [...invocation.attrs, ...analysis.attrs];
+				const spreadUnresolved = invocation.spreads.length > 0 && !analysis.complete;
+
 				if (callee.kind === 'owned' && isPreviewBody(callee.path)) {
 					if (!isCanonical(path)) markReach();
-					const preview = invocation.attrs.find((attr) => attr.name === 'preview');
+					const preview = allAttrs.find((attr) => attr.name === 'preview');
 					if (preview?.value?.kind === 'identifier') {
 						const bound = flow.propBindings.get(preview.value.name);
 						if (bound !== undefined) addForward(bound);
 						else if (flow.wholeProps.has(preview.value.name)) addForward('*');
-					} else if (preview?.value?.kind === 'other') {
+					} else if (preview?.value?.kind === 'other' || spreadUnresolved) {
 						addForward('*');
+					}
+					continue;
+				}
+				// R7-1: a static invocation whose callee is a PROP, an unbound
+				// name, a member expression, or an owned module this reading
+				// cannot resolve to a component — the callee could BE PreviewBody,
+				// so any preview-flowing value reaching it makes the position a
+				// potential route: a `preview` attribute, or a spread that could
+				// carry one.
+				if (UNPROVEN_KINDS.has(callee.kind)) {
+					if (spreadUnresolved) {
+						markReach();
+						addForward('*');
+					}
+					for (const attr of allAttrs) {
+						if (attr.name !== 'preview') continue;
+						if (attr.value?.kind === 'identifier') {
+							const bound = flow.propBindings.get(attr.value.name);
+							if (bound !== undefined) {
+								addForward(bound);
+								markReach();
+							} else if (flow.wholeProps.has(attr.value.name)) {
+								addForward('*');
+								markReach();
+							} else {
+								markReach(); // a local this file does not receive — unprovable
+							}
+						} else if (attr.value?.kind === 'literal') {
+							// provably not the preview — the route is fed nothing
+						} else {
+							markReach();
+							addForward('*');
+						}
 					}
 					continue;
 				}
@@ -3245,15 +4490,18 @@ export function previewForwardingFindings(files) {
 				const calleeReach = reachesPreview.get(callee.path) ?? false;
 				const calleeForward = forwardingProps.get(callee.path);
 				if (!calleeReach && !(calleeForward && calleeForward.size > 0)) continue;
-				if (invocation.hasSpread) {
+				if (spreadUnresolved) {
 					markReach();
 					addForward('*');
 					continue;
 				}
-				for (const attr of invocation.attrs) {
+				for (const attr of allAttrs) {
 					const flowsPreview =
 						(calleeForward && (calleeForward.has(attr.name) || calleeForward.has('*'))) ||
-						(calleeReach && attr.name === 'preview');
+						// R7-1: a callee that REACHES the route but whose feeding
+						// props this reading cannot name is fed through ANY prop
+						// that is not provably a fresh literal.
+						(calleeReach && attr.value?.kind !== 'literal');
 					if (!flowsPreview) continue;
 					if (attr.value?.kind === 'identifier') {
 						const bound = flow.propBindings.get(attr.value.name);
@@ -3294,8 +4542,9 @@ export function previewForwardingFindings(files) {
 					continue;
 				}
 				if (resolved.kind === 'external') continue; // cannot reach an owned PreviewBody
-				// a prop or an unbound name — the component could be PreviewBody
-				// or any wrapper: fail closed
+				// a prop, an unbound name, a member, an owned namespace or an
+				// unproven barrel — the component could be PreviewBody or any
+				// wrapper: fail closed
 				markReach();
 				addForward('*');
 			}
@@ -3303,6 +4552,13 @@ export function previewForwardingFindings(files) {
 	}
 
 	// --- findings -------------------------------------------------------------
+	const describedCallee = (callee, invocation) => {
+		if (callee.kind === 'prop') return `the prop-supplied component \`${invocation.name}\``;
+		if (callee.kind === 'member') return `the member component \`${invocation.name}\``;
+		if (callee.kind === 'unproven')
+			return `\`${invocation.name}\`, an owned module this reading cannot resolve to a component`;
+		return `the unbound component \`${invocation.name}\``;
+	};
 	for (const [path, flow] of flows) {
 		const forward = forwardingProps.get(path) ?? new Set();
 
@@ -3335,24 +4591,53 @@ export function previewForwardingFindings(files) {
 		}
 
 		// 2. Static invocations of preview-reaching components must pass provably
-		// non-preview values for every preview-flowing prop.
+		// non-preview values for every preview-flowing prop — and R7-1 extends
+		// the rule to invocations whose callee is a prop, an unbound name, a
+		// member expression, or an unresolvable owned module: those positions
+		// fail closed on a `preview` attribute or an unreadable spread, because
+		// the callee itself could be the PreviewBody route.
 		for (const invocation of flow.invocations) {
 			const callee = resolveLocalName(invocation.name, flow);
+			const analysis = invocationSpreadAnalysis(invocation, flow);
+			const allAttrs = [...invocation.attrs, ...analysis.attrs];
+			const spreadUnresolved = invocation.spreads.length > 0 && !analysis.complete;
+
+			if (UNPROVEN_KINDS.has(callee.kind)) {
+				if (spreadUnresolved) {
+					findings.push(
+						`${path} spreads a value this reading cannot resolve onto ${describedCallee(callee, invocation)} — the spread could carry the preview value or the PreviewBody component into a route that cannot be statically proven to be the canonical invocation`
+					);
+				}
+				for (const attr of allAttrs) {
+					if (attr.name !== 'preview') continue;
+					if (attr.value?.kind === 'literal') continue;
+					const described =
+						attr.value?.kind === 'identifier'
+							? `\`${attr.value.name}\``
+							: attr.value === null
+								? 'a value'
+								: 'an unreadable value';
+					findings.push(
+						`${path} passes ${described} through the preview prop of ${describedCallee(callee, invocation)} — a static invocation of a component this reading cannot resolve could be the PreviewBody route itself`
+					);
+				}
+				continue;
+			}
 			if (callee.kind !== 'owned' || isPreviewBody(callee.path) || isCanonical(callee.path))
 				continue;
 			const calleeReach = reachesPreview.get(callee.path) ?? false;
 			const calleeForward = forwardingProps.get(callee.path);
 			if (!calleeReach && !(calleeForward && calleeForward.size > 0)) continue;
-			if (invocation.hasSpread) {
+			if (spreadUnresolved) {
 				findings.push(
 					`${path} spreads attributes onto ${invocation.name} (${callee.path}), which forwards to a preview route — the spread could carry the preview value or the PreviewBody component`
 				);
 				continue;
 			}
-			for (const attr of invocation.attrs) {
+			for (const attr of allAttrs) {
 				const flowsPreview =
 					(calleeForward && (calleeForward.has(attr.name) || calleeForward.has('*'))) ||
-					(calleeReach && attr.name === 'preview');
+					(calleeReach && attr.value?.kind !== 'literal');
 				if (!flowsPreview) continue;
 				if (attr.value?.kind === 'literal') continue; // provably not the preview
 				const described =
@@ -3369,7 +4654,7 @@ export function previewForwardingFindings(files) {
 
 		// 3. The PreviewBody component may appear only in the canonical
 		// invocation. Handing it to another component through a prop, or naming
-		// it in the canonical script outside the import, is a finding.
+		// it in the canonical script OR MARKUP outside the import, is a finding.
 		if (isCanonical(path)) {
 			eachNode(flow.sourceFile, (node) => {
 				if (ts.isIdentifier(node) && node.text === 'PreviewBody') {
@@ -3380,9 +4665,32 @@ export function previewForwardingFindings(files) {
 					);
 				}
 			});
+			// R7-1: markup expressions are script's blind spot — a spread object
+			// carrying `Comp: PreviewBody` lives in the template, so the template
+			// gets the same name scan the script gets.
+			const visitMarkupExpressions = (node) => {
+				if (!node || typeof node !== 'object') return;
+				if (node.type === 'Identifier' && node.name === 'PreviewBody') {
+					findings.push(
+						`${path} names the PreviewBody component in its markup outside the canonical invocation — the display route must stay the single direct <PreviewBody preview={preview}/>`
+					);
+				}
+				for (const key of Object.keys(node)) {
+					if (key === 'parent') continue;
+					const child = node[key];
+					if (Array.isArray(child)) {
+						for (const entry of child) visitMarkupExpressions(entry);
+					} else {
+						visitMarkupExpressions(child);
+					}
+				}
+			};
+			visitMarkupExpressions(flow.ast.fragment);
 			for (const invocation of flow.invocations) {
 				if (invocation.name === 'PreviewBody') continue;
-				for (const attr of invocation.attrs) {
+				const analysis = invocationSpreadAnalysis(invocation, flow);
+				const allAttrs = [...invocation.attrs, ...analysis.attrs];
+				for (const attr of allAttrs) {
 					const isComponentRef =
 						attr.value?.kind === 'identifier' &&
 						(attr.value.name === 'PreviewBody' ||

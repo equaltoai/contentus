@@ -120,22 +120,23 @@ Nothing local that would paper over it. Specifically:
   `$state.raw(<object/array literal>)` is recognized as a legitimate non-DOM
   container (R5-5), so its computed writes stay clean.
 
-  Round-6 (R6-1/R6-2/R6-3) closed the remaining launderings the round-6
-  adversarial review planted. **R6-1** added a cross-file component/value flow
+  Round-6 (R6-1/R6-2/R6-3) added the cross-file component/value flow
   analysis: the canonical file can hand the PreviewBody COMPONENT and the
   preview VALUE to a wrapper through props, and the wrapper can invoke them via
   `<svelte:component this={body} preview={value}/>` with no PreviewBody import
   of its own — a second live route the per-file reading never saw. The
   cross-file reading (over the owned Svelte module graph, resolved through the
-  `$lib`/relative aliases the toolchain uses) now rejects any route that is not
-  statically the one canonical direct `PreviewBody preview={preview}`
-  invocation: a `svelte:component` carrying a `preview` attribute must resolve
+  `$lib`/relative aliases the toolchain uses) rejects the routes it can
+  resolve: a `svelte:component` carrying a `preview` attribute must resolve
   `this` to a component provably free of preview flow; a static invocation of a
   known preview-reaching component must pass provably non-preview values for
-  every preview-flowing prop (renamed/shorthand/spread attributes and
-  `$props()` destructuring followed); and the PreviewBody component itself may
-  appear only in the canonical invocation — handing it through a prop is a
-  finding. **R6-2** widened the value identity to non-identifier bindings:
+  every preview-flowing prop (renamed/shorthand attributes and `$props()`
+  destructuring followed); and the PreviewBody component itself may appear only
+  in the canonical invocation — handing it through a prop is a finding. As
+  round-6 shipped, two gaps remained, and the round-7 review planted both:
+  static invocations whose callee resolved to a prop, an unbound name, a dotted
+  member, or an owned barrel were skipped rather than failed closed, and markup
+  spreads were counted but never read. **R6-2** widened the value identity to non-identifier bindings:
   object/array destructuring and assignment patterns (including rest), getters
   whose return can carry the preview (failing closed on unprovable returns),
   class constructors and `new` expressions, `for (const x of [preview])` loop
@@ -160,6 +161,47 @@ defaultState(), initial)` on a provable container stay clean. Two narrow
   standing control for them; expanding the renderer-authority gate into a
   generic security scanner would trade a precise, provable claim for a broad
   one.
+
+Round-7 (R7-1/R7-2/R7-3/R7-4) closed those gaps and the launderings the
+round-7 adversarial review planted beside them, and this note was corrected
+to what the gate proved at each round rather than what it claimed.
+**R7-1** fails closed on static Svelte invocations whose callee is a prop,
+an unbound name, a dotted member, or an owned module no resolution proves a
+component, whenever a preview-flowing value can reach them; markup spread
+objects are READ — keys, shorthand, computed keys folded through constant
+strings, aliases, local helper returns, and nested spreads — and a spread the
+reading cannot resolve fails closed; dotted callees are resolved
+conservatively (a prop-supplied namespace member is never a trusted owned
+component); imports resolve through owned barrels by following `export …
+  from` chains, an unchased chain being unproven rather than benign; legacy
+`export let`, `$props()` rest/nested/bindable forms, and markup `{@const}`
+aliases feed the same resolution; and the canonical file's MARKUP gets the
+same PreviewBody-name scan its script always had. **R7-2** derives the
+executable source universe from reachability instead of the `src/` walk: an
+executable module outside the classified owned/vendored roots that owned
+code or a build entry loads — static or dynamic import, re-export, glob,
+relative alias, root-relative path, query-suffixed specifier, case variant,
+or symlink — is a finding, followed hop by hop, with dependencies, generated
+output, and the governance tree left to their existing controls. **R7-3**
+follows the preview identity into containers populated AFTER declaration
+(`stash.body = preview; stash.body.html = …`), through identity-carrying
+collection transforms (`map`/`filter`/`find`/`reduce` and friends, failing
+closed on unresolved ones), through computed element access folded via
+constant strings (unknown keys on a carrying container failing closed),
+through setters, inherited constructors, generator yields, and
+`Object.values`/`entries` iteration, while `$state.raw` containers and
+provably non-preview destructures stay clean. **R7-4** models
+property-descriptor setter extraction
+(`Object.getOwnPropertyDescriptor(…)?.set?.call(…)`), multi-step method
+binding (`const m = host.insertAdjacentHTML; const inj = m.bind(host);
+  inj(…)`), computed `Object.assign` keys folded through constant strings with
+unresolved computed keys failing closed, `Reflect.apply` and
+`Reflect.construct` dispatch, and the Sanitizer-API spellings `setHTML` and
+`setHTMLUnsafe` beside `setHTMLUnchecked`. What this gate is, stays stated:
+a static analysis over the owned module graph that proves the shapes it
+models and fails closed on the shapes it cannot resolve — it is not a
+dynamic guarantee, and a future shape that defeats it is a probe to add, not
+a prose correction.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
