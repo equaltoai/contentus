@@ -86,7 +86,12 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-import { liveScript, modulePath, moduleSpecifiers, computedImports } from './lib/module-imports.mjs';
+import {
+	liveScript,
+	modulePath,
+	moduleSpecifiers,
+	computedImports,
+} from './lib/module-imports.mjs';
 import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,

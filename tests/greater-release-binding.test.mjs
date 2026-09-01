@@ -363,7 +363,11 @@ test('a committed release-source byte that disagrees with the manifest is a hard
 	writeFileSync(sourceFile, `${original}// R5-3 hand-edit probe\n`, 'utf8');
 	try {
 		const { status, output } = runVerifier();
-		assert.equal(status, 1, `a mismatched committed release byte must fail the verifier:\n${output}`);
+		assert.equal(
+			status,
+			1,
+			`a mismatched committed release byte must fail the verifier:\n${output}`
+		);
 		assert.ok(
 			output.includes('does not match the release manifest') ||
 				output.includes('does not match the pinned registry-index digest'),
@@ -379,7 +383,11 @@ test('an unlisted committed release-source file is a finding (R5-3)', () => {
 	writeFileSync(added, 'not a release byte\n', 'utf8');
 	try {
 		const { status, output } = runVerifier();
-		assert.equal(status, 1, `an unlisted committed release byte must fail the verifier:\n${output}`);
+		assert.equal(
+			status,
+			1,
+			`an unlisted committed release byte must fail the verifier:\n${output}`
+		);
 		assert.ok(
 			output.includes('__r5_unlisted_probe__.txt') && output.includes('does not name'),
 			output

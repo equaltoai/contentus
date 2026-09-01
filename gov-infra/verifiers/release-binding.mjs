@@ -537,10 +537,15 @@ export async function verifyReleaseBinding({ repoRoot = process.cwd(), pin }) {
 				if (!existsSync(sourcePath)) continue;
 				const sourceBytes = readFileSync(sourcePath);
 				if (sriOf(sourceBytes) !== checksums[repoPath]) continue;
-				const transformed = cli.transformImports(sourceBytes.toString('utf8'), components, virtualPath, {
-					consumerRoot: resolve(repoRoot),
-					sourceFilePath: diskPath,
-				});
+				const transformed = cli.transformImports(
+					sourceBytes.toString('utf8'),
+					components,
+					virtualPath,
+					{
+						consumerRoot: resolve(repoRoot),
+						sourceFilePath: diskPath,
+					}
+				);
 				if (transformed && sriOf(Buffer.from(transformed.content)) === diskSri) return true;
 			}
 		}

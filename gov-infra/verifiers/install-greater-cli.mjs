@@ -69,7 +69,10 @@ if (existsSync(TARBALL) && digestOf(TARBALL) === asset.sha256) {
 	const response = await fetch(cliAssetUrl(), {
 		redirect: 'follow',
 		signal: AbortSignal.timeout(30_000),
-		headers: { Accept: 'application/octet-stream', 'User-Agent': 'equaltoai-contentus-release-verifier' },
+		headers: {
+			Accept: 'application/octet-stream',
+			'User-Agent': 'equaltoai-contentus-release-verifier',
+		},
 	});
 	if (!response.ok) {
 		console.error(`download failed: HTTP ${response.status} ${response.statusText}`);

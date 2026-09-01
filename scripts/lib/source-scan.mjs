@@ -453,10 +453,17 @@ export function alternateSinksInScript(file, source, { jsx = false } = {}) {
 							);
 						continue;
 					}
-					if (!['write', 'writeln', 'insertAdjacentHTML', 'createContextualFragment', 'parseFromString'].includes(method))
+					if (
+						![
+							'write',
+							'writeln',
+							'insertAdjacentHTML',
+							'createContextualFragment',
+							'parseFromString',
+						].includes(method)
+					)
 						continue;
-					if (ts.isIdentifier(element.name))
-						dangerousMethodAliases.set(element.name.text, method);
+					if (ts.isIdentifier(element.name)) dangerousMethodAliases.set(element.name.text, method);
 					if (known)
 						findings.push(
 							`${file} destructures .${method} off a document object — the method can be called with raw HTML`
@@ -1381,9 +1388,7 @@ function previewValuePathFindings(file, sourceFile) {
 				}
 			} else if (ts.isArrayLiteralExpression(inner)) {
 				if (
-					inner.elements.some(
-						(element) => !ts.isSpreadElement(element) && holdsValue(element)
-					) &&
+					inner.elements.some((element) => !ts.isSpreadElement(element) && holdsValue(element)) &&
 					!arrayContainers.has(bound)
 				) {
 					arrayContainers.add(bound);
@@ -1420,8 +1425,7 @@ function previewValuePathFindings(file, sourceFile) {
 				} else {
 					eachNodeOwn(body ?? node, (n) => {
 						if (returns) return;
-						if (ts.isReturnStatement(n) && n.expression && holdsValue(n.expression))
-							returns = true;
+						if (ts.isReturnStatement(n) && n.expression && holdsValue(n.expression)) returns = true;
 					});
 				}
 				if (returns) {
@@ -1577,16 +1581,17 @@ function previewValuePathFindings(file, sourceFile) {
 	// --- the write / mutation / call scan ------------------------------------
 	const containerRooted = (node) => {
 		const inner = unwrapValueNode(node);
-		if (ts.isIdentifier(inner)) return arrayContainers.has(inner.text) || mapContainers.has(inner.text);
+		if (ts.isIdentifier(inner))
+			return arrayContainers.has(inner.text) || mapContainers.has(inner.text);
 		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression))
 			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
 		if (ts.isCallExpression(inner)) {
 			const callee = propertyName(inner.expression);
 			return Boolean(
 				callee &&
-					ts.isIdentifier(callee.object) &&
-					mapContainers.has(callee.object.text) &&
-					(callee.name === 'get' || callee.name === 'values')
+				ts.isIdentifier(callee.object) &&
+				mapContainers.has(callee.object.text) &&
+				(callee.name === 'get' || callee.name === 'values')
 			);
 		}
 		return false;
@@ -1629,7 +1634,10 @@ function previewValuePathFindings(file, sourceFile) {
 						findings.push(
 							`${file} writes to .html on ${receiver
 								.getText(sourceFile)
-								.slice(0, 40)}… — a value bound to the preview reference can be transformed before the sink`
+								.slice(
+									0,
+									40
+								)}… — a value bound to the preview reference can be transformed before the sink`
 						);
 				}
 			}
@@ -1698,7 +1706,10 @@ function previewValuePathFindings(file, sourceFile) {
 			findings.push(
 				`${file} passes the preview value to ${node.expression
 					.getText(sourceFile)
-					.slice(0, 60)}… — a route between loadDraftPreview and the sink cannot be statically proven direct`
+					.slice(
+						0,
+						60
+					)}… — a route between loadDraftPreview and the sink cannot be statically proven direct`
 			);
 		}
 	});
@@ -1845,9 +1856,7 @@ export function previewInvocationFindings(file, source) {
 
 	const canonicalFile = 'src/lib/routes/ReviewWorkspace.svelte';
 	const previewReach =
-		previewImports.length > 0 ||
-		invocations.length > 0 ||
-		dynamicSpecifiers.size > 0;
+		previewImports.length > 0 || invocations.length > 0 || dynamicSpecifiers.size > 0;
 
 	// --- dynamic invocation forms fail closed ---------------------------------
 	for (const specifier of dynamicSpecifiers)

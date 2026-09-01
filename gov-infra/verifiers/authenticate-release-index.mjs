@@ -73,7 +73,10 @@ export function cliAssetUrl() {
  * urlencoded` — is a sign the response is not the stored artifact.
  */
 export function allowedAssetContentType(type) {
-	const base = String(type ?? '').split(';')[0].trim().toLowerCase();
+	const base = String(type ?? '')
+		.split(';')[0]
+		.trim()
+		.toLowerCase();
 	return CLI_ASSET_CONTENT_TYPES.has(base);
 }
 

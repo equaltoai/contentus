@@ -1198,13 +1198,13 @@ test('an array-mediated write fails (R5-1 arrays) and a Map-set write fails (R5-
 	const shapes = [
 		{
 			name: 'array',
-			plant: '\tconst arr = [preview];\n\tarr[0].html = \'<img onerror=1>\';\n',
+			plant: "\tconst arr = [preview];\n\tarr[0].html = '<img onerror=1>';\n",
 			match: /entered a local container/,
 		},
 		{
 			name: 'map',
 			plant:
-				"\tconst m = new Map<string, DraftPreview>();\n" +
+				'\tconst m = new Map<string, DraftPreview>();\n' +
 				"\tm.set('p', preview);\n" +
 				"\tm.get('p')!.html = '<img onerror=1>';\n",
 			match: /entered a local container/,
@@ -1227,7 +1227,7 @@ test('a $state wrapper of the preview is a same-reference alias (R5-1 runes)', (
 		(source) =>
 			source.replace(
 				PREVIEW_STATE_ANCHOR,
-				PREVIEW_STATE_ANCHOR + '\tconst pv = $state(preview);\n\tpv.html = \'<img onerror=1>\';\n'
+				PREVIEW_STATE_ANCHOR + "\tconst pv = $state(preview);\n\tpv.html = '<img onerror=1>';\n"
 			),
 		() => {
 			const { status, output } = runAudit();
@@ -1288,8 +1288,8 @@ test('a destructured renamed insertAdjacentHTML on a DOM receiver fails (R5-4)',
 	const relativePath = `${OWNED_DIR}/__r5_destructure__.ts`;
 	plant(
 		relativePath,
-		"export const a = (html: string) => {\n" +
-			"\tconst { insertAdjacentHTML: inject } = document.body;\n" +
+		'export const a = (html: string) => {\n' +
+			'\tconst { insertAdjacentHTML: inject } = document.body;\n' +
 			"\tinject('afterbegin', html);\n" +
 			'};\n'
 	);
@@ -1297,7 +1297,9 @@ test('a destructured renamed insertAdjacentHTML on a DOM receiver fails (R5-4)',
 		const { status, output } = runAudit();
 		assert.equal(status, 1, `the renamed destructure must fail the audit:\n${output}`);
 		assert.ok(
-			output.includes(`[alternate raw-HTML sinks] ${relativePath} destructures .insertAdjacentHTML`),
+			output.includes(
+				`[alternate raw-HTML sinks] ${relativePath} destructures .insertAdjacentHTML`
+			),
 			`check 7 must name the destructured method:\n${output}`
 		);
 	} finally {
@@ -1309,8 +1311,8 @@ test('a destructured dangerous method off an UNKNOWN receiver fails closed (R5-4
 	const relativePath = `${OWNED_DIR}/__r5_destructure_unknown__.ts`;
 	plant(
 		relativePath,
-		"export const a = (el: any, html: string) => {\n" +
-			"\tconst { insertAdjacentHTML } = el;\n" +
+		'export const a = (el: any, html: string) => {\n' +
+			'\tconst { insertAdjacentHTML } = el;\n' +
 			"\tinsertAdjacentHTML('beforeend', html);\n" +
 			'};\n'
 	);
@@ -1330,7 +1332,7 @@ test('an identifier-laundered Object.assign source carrying srcdoc fails (R5-4)'
 	const relativePath = `${OWNED_DIR}/__r5_assign_launder__.ts`;
 	plant(
 		relativePath,
-		"export const a = (frame: any, html: string) => {\n" +
+		'export const a = (frame: any, html: string) => {\n' +
 			'\tconst payload = { srcdoc: html };\n' +
 			'\tObject.assign(frame, payload);\n' +
 			'};\n'
@@ -1339,7 +1341,7 @@ test('an identifier-laundered Object.assign source carrying srcdoc fails (R5-4)'
 		const { status, output } = runAudit();
 		assert.equal(status, 1, `the laundered source must fail the audit:\n${output}`);
 		assert.ok(
-			output.includes("carried by payload"),
+			output.includes('carried by payload'),
 			`check 7 must see the dangerous key through the name:\n${output}`
 		);
 	} finally {
@@ -1366,7 +1368,10 @@ test('case-insensitive srcdoc attributes in Svelte markup fail (R5-4)', () => {
 
 test('document.execCommand("insertHTML") fails; execCommand("copy") stays clean (R5-4)', () => {
 	const sink = `${OWNED_DIR}/__r5_exec_insert__.ts`;
-	plant(sink, "export const a = (html: string) => { document.execCommand('insertHTML', false, html); };\n");
+	plant(
+		sink,
+		"export const a = (html: string) => { document.execCommand('insertHTML', false, html); };\n"
+	);
 	try {
 		const { status, output } = runAudit();
 		assert.equal(status, 1, `execCommand('insertHTML') must fail the audit:\n${output}`);
@@ -1410,8 +1415,8 @@ test('legitimate destructures and object sources stay clean (R5-4 negatives)', (
 	const relativePath = `${OWNED_DIR}/__r5_launder_neg__.ts`;
 	plant(
 		relativePath,
-		"export const a = (state: any, partial: any, html: string) => {\n" +
-			"\tconst { insertAdjacentHTML } = { insertAdjacentHTML: html };\n" +
+		'export const a = (state: any, partial: any, html: string) => {\n' +
+			'\tconst { insertAdjacentHTML } = { insertAdjacentHTML: html };\n' +
 			'\tconst payload = { text: html };\n' +
 			'\tObject.assign(state, payload);\n' +
 			'};\n'
@@ -1432,7 +1437,7 @@ test('$state.raw(<object/array literal>) is a legitimate container (R5-5 positiv
 	const relativePath = `${OWNED_DIR}/__r5_stateraw_pos__.ts`;
 	plant(
 		relativePath,
-		"export const a = (k: string, v: string) => {\n" +
+		'export const a = (k: string, v: string) => {\n' +
 			'\tconst s = $state.raw({ a: 1 });\n' +
 			'\ts[k] = v;\n' +
 			'};\n'
@@ -1449,7 +1454,7 @@ test('$state.raw(<unprovable receiver>) fails closed on a computed write (R5-5 n
 	const relativePath = `${OWNED_DIR}/__r5_stateraw_neg__.ts`;
 	plant(
 		relativePath,
-		"export const a = (k: string, v: string, seed: unknown) => {\n" +
+		'export const a = (k: string, v: string, seed: unknown) => {\n' +
 			'\tconst s = $state.raw(seed);\n' +
 			'\ts[k] = v;\n' +
 			'};\n'

@@ -180,7 +180,10 @@ test('selectCliAsset rejects missing, duplicate, renamed, wrong-URL, and unbound
 			'wrong-host url',
 			{
 				assets: [
-					{ ...canonicalAsset, browser_download_url: 'https://evil.example.com/greater-components-cli.tgz' },
+					{
+						...canonicalAsset,
+						browser_download_url: 'https://evil.example.com/greater-components-cli.tgz',
+					},
 				],
 			},
 		],
@@ -229,8 +232,18 @@ test('asset content-type and redirect-hop bounds reject non-GitHub responses (R5
 	assert.equal(allowedAssetContentType('application/x-www-form-urlencoded'), false);
 	assert.equal(allowedAssetContentType(null), false);
 
-	assert.equal(redirectHopAllowed('https://objects.githubusercontent.com/github-production-release-asset-2e65be/…'), true);
-	assert.equal(redirectHopAllowed('https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz'), true);
+	assert.equal(
+		redirectHopAllowed(
+			'https://objects.githubusercontent.com/github-production-release-asset-2e65be/…'
+		),
+		true
+	);
+	assert.equal(
+		redirectHopAllowed(
+			'https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz'
+		),
+		true
+	);
 	assert.equal(redirectHopAllowed('https://evil.example.com/greater-components-cli.tgz'), false);
 	assert.equal(redirectHopAllowed('http://objects.githubusercontent.com/x'), false);
 	assert.equal(redirectHopAllowed('/relative/redirect'), false);
