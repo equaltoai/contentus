@@ -27,7 +27,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-f1nlQjth.js                726.24 kB │ gzip: 219.82 kB
 
-✓ built in 1.22s
+✓ built in 1.24s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -43,7 +43,7 @@ rendering chunks...
 computing gzip size...
 build/server/handler.mjs  1,159.33 kB │ gzip: 280.50 kB
 
-✓ built in 1.13s
+✓ built in 1.11s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
