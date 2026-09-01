@@ -2427,6 +2427,27 @@ function previewValuePathFindings(file, sourceFile) {
 	};
 
 	/**
+	 * R9-3: the argument node of a readable `Promise.all([…])` /
+	 * `Promise.allSettled([…])` call, or null. The fulfillment array holds the
+	 * preview reference at exactly the positions the argument array holds it,
+	 * so a destructure or an iteration of the result binds the identity the
+	 * same reading over the literal would.
+	 */
+	const promiseCombinatorArgument = (node) => {
+		const inner = unwrapValueNode(node);
+		if (
+			ts.isCallExpression(inner) &&
+			ts.isPropertyAccessExpression(inner.expression) &&
+			(inner.expression.name.text === 'all' || inner.expression.name.text === 'allSettled') &&
+			ts.isIdentifier(inner.expression.expression) &&
+			inner.expression.expression.text === 'Promise' &&
+			inner.arguments.length === 1
+		)
+			return inner.arguments[0];
+		return null;
+	};
+
+	/**
 	 * The array positions that hold the preview reference: a Set of indices for
 	 * an array literal or a literal-bound name, `'any'` when a spread or a
 	 * mutation method could place the value anywhere, or null when the array is
@@ -2434,6 +2455,14 @@ function previewValuePathFindings(file, sourceFile) {
 	 */
 	const arrayHoldingIndices = (expr) => {
 		const inner = unwrapValueNode(expr);
+		// R9-3: `await` fulfills to the awaited array — `const [p] = await
+		// Promise.all([preview])` destructures the fulfillment array itself.
+		if (ts.isAwaitExpression(inner)) return arrayHoldingIndices(inner.expression);
+		// R9-3: `Promise.all([…])` / `Promise.allSettled([…])` fulfill with an
+		// array whose elements sit at the argument array's positions — the
+		// result holds where the argument holds.
+		const combinatorArgument = promiseCombinatorArgument(inner);
+		if (combinatorArgument) return arrayHoldingIndices(combinatorArgument);
 		if (ts.isArrayLiteralExpression(inner)) {
 			const indices = new Set();
 			let any = false;
@@ -2452,6 +2481,95 @@ function previewValuePathFindings(file, sourceFile) {
 			return null;
 		}
 		return null;
+	};
+
+	/**
+	 * R9-3: an expression the reading can prove is a FRESH value — a literal,
+	 * or a literal-shaped container that carries nothing. Returns of this shape
+	 * do not carry the preview reference; anything else fails closed as
+	 * carrying, exactly the posture the getter and transform readings take.
+	 */
+	const provablyFreshReturn = (expr) => {
+		if (
+			ts.isStringLiteral(expr) ||
+			ts.isNumericLiteral(expr) ||
+			ts.isNoSubstitutionTemplateLiteral(expr) ||
+			expr.kind === ts.SyntaxKind.TrueKeyword ||
+			expr.kind === ts.SyntaxKind.FalseKeyword ||
+			expr.kind === ts.SyntaxKind.NullKeyword ||
+			expr.kind === ts.SyntaxKind.UndefinedKeyword
+		)
+			return true;
+		if (ts.isObjectLiteralExpression(expr)) return !objectLiteralCarriedProps(expr).holds;
+		if (ts.isArrayLiteralExpression(expr)) {
+			const indices = arrayHoldingIndices(expr);
+			return !(indices === 'any' || (indices !== null && indices.size > 0));
+		}
+		return false;
+	};
+
+	/**
+	 * R9-3: whether a `.then` callback's return can carry the reference. An
+	 * identity return of the callback's own parameter carries — that is the
+	 * multi-hop `.then((p) => p)` spelling — and so does any return the
+	 * reading already binds to the value; a provably fresh literal does not;
+	 * anything else — a member read, a call, a pattern parameter — fails
+	 * closed as carrying. No callback at all passes the receiver's value
+	 * through, and a callee this reading cannot read as a function is a
+	 * pass-through it cannot prove otherwise.
+	 */
+	const thenCallbackCarries = (callback) => {
+		if (!callback) return true;
+		if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return true;
+		const param = callback.parameters[0];
+		const paramName = param && ts.isIdentifier(param.name) ? param.name.text : null;
+		const returns = [];
+		const body = callback.body;
+		if (ts.isArrowFunction(callback) && body && !ts.isBlock(body)) {
+			returns.push(body);
+		} else if (body && ts.isBlock(body)) {
+			eachNodeOwn(body, (n) => {
+				if (ts.isReturnStatement(n)) returns.push(n.expression ?? null);
+			});
+		}
+		if (returns.length === 0) return false; // returns nothing — undefined
+		for (const returned of returns) {
+			if (returned === null) continue; // bare return — undefined
+			const expr = unwrapValueNode(returned);
+			if (paramName !== null && ts.isIdentifier(expr) && expr.text === paramName) return true;
+			if (holdsValue(expr)) return true;
+			if (provablyFreshReturn(expr)) continue;
+			return true; // a member read, a call, anything unproven — fail closed
+		}
+		return false;
+	};
+
+	/**
+	 * R9-3: whether an inline IIFE's return can carry the reference — the same
+	 * reading as the `.then` callback: a return bound to the value carries, a
+	 * provably fresh literal does not, an unproven return fails closed as
+	 * carrying, and a void body yields undefined. `const v = (() => preview)()`
+	 * is a relay exactly as `const relay = () => preview; const v = relay()` is.
+	 */
+	const iifeReturnsValue = (fnNode) => {
+		const returns = [];
+		const body = fnNode.body;
+		if (ts.isArrowFunction(fnNode) && body && !ts.isBlock(body)) {
+			returns.push(body);
+		} else if (body && ts.isBlock(body)) {
+			eachNodeOwn(body, (n) => {
+				if (ts.isReturnStatement(n)) returns.push(n.expression ?? null);
+			});
+		}
+		if (returns.length === 0) return false; // void IIFE — undefined
+		for (const returned of returns) {
+			if (returned === null) continue;
+			const expr = unwrapValueNode(returned);
+			if (holdsValue(expr)) return true;
+			if (provablyFreshReturn(expr)) continue;
+			return true; // unproven — fail closed
+		}
+		return false;
 	};
 
 	/** Whether an expression provably holds the preview reference. */
@@ -2499,6 +2617,38 @@ function previewValuePathFindings(file, sourceFile) {
 				inner.arguments.length === 1
 			)
 				return holdsValue(inner.arguments[0]);
+			// R9-3: `Promise.all([preview])` / `Promise.allSettled([preview])`
+			// fulfill with an array that holds the reference — the expression
+			// carries, which is what lets a `.then` on it bind the callback's
+			// parameter and a destructure of the awaited result bind its leaves.
+			if (promiseCombinatorArgument(inner)) {
+				const indices = arrayHoldingIndices(inner);
+				return indices === 'any' || (indices !== null && indices.size > 0);
+			}
+			// R9-3: a `.then`/`.catch`/`.finally` result over a value-carrying
+			// receiver carries the reference onward — `relayAsync(preview)
+			// .then((p) => p).then((q) => …)` propagates one hop per fixed-point
+			// pass exactly as a local function chain does. `.finally` passes the
+			// fulfillment through untouched; a `.catch` reason cannot be proven
+			// free of the value (a thrown preview binds it), so both fail closed
+			// as carrying, and a `.then` result carries when its callback can.
+			const thenCallee = propertyName(inner.expression);
+			if (
+				thenCallee &&
+				!thenCallee.computed &&
+				(thenCallee.name === 'then' ||
+					thenCallee.name === 'catch' ||
+					thenCallee.name === 'finally') &&
+				holdsValue(thenCallee.object)
+			) {
+				if (thenCallee.name !== 'then') return true;
+				return thenCallbackCarries(inner.arguments[0]);
+			}
+			// R9-3: an inline IIFE is its own relay — the call yields what the
+			// body returns, so `(() => preview)()` carries exactly as a named
+			// arrow returning the value does.
+			const iife = unwrapValueNode(inner.expression);
+			if (ts.isArrowFunction(iife) || ts.isFunctionExpression(iife)) return iifeReturnsValue(iife);
 			if (
 				ts.isPropertyAccessExpression(inner.expression) &&
 				ts.isIdentifier(inner.expression.expression) &&
@@ -2818,22 +2968,34 @@ function previewValuePathFindings(file, sourceFile) {
 			}
 		});
 
-		// R8-2: CALL-SITE PARAMETER BINDING. When a call or `new` hands a
-		// value-carrying argument to a LOCAL function, the callee's parameter
+		// R8-2 + R9-3: CALL-SITE PARAMETER BINDING. When a call or `new` hands
+		// a value-carrying argument to a LOCAL function, the callee's parameter
 		// at that position holds the reference — it joins the value names, so a
 		// `return p` marks the callee preview-returning, a write to `p.html`
 		// inside the callee is caught by the write scan, and multi-hop chains
-		// propagate one hop per fixed-point pass. A rest parameter receives any
-		// argument from its position on; a destructured parameter's leaves are
-		// references INTO the value and bind conservatively. Callees this
-		// reading cannot resolve stay in the call scan's fail-closed branch.
+		// propagate one hop per fixed-point pass. A destructured parameter's
+		// leaves are references INTO the value and bind conservatively. Callees
+		// this reading cannot resolve stay in the call scan's fail-closed
+		// branch. Round 9 adds the laundering positions the round-9 review
+		// planted:
+		//   - a REST parameter receiving the value is an ARRAY CONTAINER of the
+		//     arguments from its position on — `relay(...rest)` called with the
+		//     value makes `rest[0]` the preview read, so `return rest[0]` marks
+		//     the callee preview-returning (the identifier keeps the value-name
+		//     binding round 8 gave it);
+		//   - a DEFAULT INITIALIZER that reads the value binds the parameter
+		//     whenever the call leaves the position to the default — an absent
+		//     argument or a literal `undefined`, the `relayDef()` spelling;
+		//   - an inline IIFE is its own callee, so its parameters bind exactly
+		//     as a named local function's do.
 		eachNode(sourceFile, (node) => {
 			if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
 			const args = node.arguments ?? [];
-			if (!args.some((argument) => holdsValue(argument))) return;
 			const calleeExpr = unwrapValueNode(node.expression);
-			if (!ts.isIdentifier(calleeExpr)) return;
-			const infos = functions.get(calleeExpr.text);
+			let infos = null;
+			if (ts.isIdentifier(calleeExpr)) infos = functions.get(calleeExpr.text) ?? null;
+			if (!infos && (ts.isArrowFunction(calleeExpr) || ts.isFunctionExpression(calleeExpr)))
+				infos = [{ node: calleeExpr, paramNames: calleeExpr.parameters.map((p) => p.name) }];
 			if (!infos) return;
 			for (const { node: fnNode, paramNames } of infos) {
 				// `paramNames === null` is the unproven inherited constructor;
@@ -2843,10 +3005,46 @@ function previewValuePathFindings(file, sourceFile) {
 				const params = fnNode.parameters ?? [];
 				for (let index = 0; index < params.length; index += 1) {
 					const param = params[index];
-					const carries = param.dotDotDotToken
-						? args.slice(index).some((argument) => holdsValue(argument))
-						: args[index] !== undefined && holdsValue(args[index]);
-					if (!carries) continue;
+					if (param.dotDotDotToken) {
+						const carryingOffsets = [];
+						for (let argIndex = index; argIndex < args.length; argIndex += 1) {
+							if (holdsValue(args[argIndex])) carryingOffsets.push(argIndex - index);
+						}
+						if (carryingOffsets.length === 0) continue;
+						for (const name of bindingNames(param.name)) {
+							if (addValueName(name)) changed = true;
+							if (!ts.isIdentifier(param.name)) continue;
+							if (!arrayContainers.has(name)) {
+								arrayContainers.add(name);
+								arrayValueIndex.set(name, new Set(carryingOffsets));
+								changed = true;
+								continue;
+							}
+							const existing = arrayValueIndex.get(name);
+							if (existing === 'any') continue;
+							for (const offset of carryingOffsets) {
+								if (!existing.has(offset)) {
+									existing.add(offset);
+									changed = true;
+								}
+							}
+						}
+						continue;
+					}
+					const arg = args[index];
+					const argCarries = arg !== undefined && holdsValue(arg);
+					// A default applies when the call leaves the position to it:
+					// no argument at all, or a literal `undefined` — spelled as
+					// the keyword in type positions and as an identifier in
+					// expression positions; both are covered.
+					const defaulted =
+						!argCarries &&
+						(arg === undefined ||
+							arg.kind === ts.SyntaxKind.UndefinedKeyword ||
+							(ts.isIdentifier(arg) && arg.text === 'undefined')) &&
+						param.initializer !== undefined &&
+						holdsValue(param.initializer);
+					if (!argCarries && !defaulted) continue;
 					for (const name of bindingNames(param.name)) {
 						if (addValueName(name)) changed = true;
 					}
@@ -4886,6 +5084,15 @@ function foldResolveArguments(args, fold) {
  * and entries generated by spreading an array-literal `.map`. Anything else
  * — a computed find, an unresolvable replacement, a regex built by a call —
  * lands in `unresolved`, and the consumers fail closed on it.
+ *
+ * R9-2 DISTRUST. The parser is the only guard over a table the bundler obeys,
+ * and the runtime can override what the declaration says, so the reading
+ * fails closed wherever they can diverge: an entry carrying ANY property the
+ * model does not consume (`customResolver`'s return IS the resolution, which
+ * makes the declared replacement advisory) is unreadable; a config declaring
+ * `resolve.alias` more than once is unreadable (the runtime keeps the last
+ * table); a table naming one `find` twice is unreadable (the winner is
+ * runtime semantics the scan cannot faithfully model).
  */
 export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = false } = {}) {
 	const sourceFile = parseTypeScript(source, { file, jsx });
@@ -5009,6 +5216,13 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			else if (ts.isComputedPropertyName(property.name))
 				key = fold(property.name.expression, locals, 0);
 			if (key === null) return null;
+			// R9-2: the runtime honors EVERY property of an entry; the scan
+			// models `find` and `replacement` and nothing else. `customResolver`
+			// is the worst case — @rollup/plugin-alias calls it and its return
+			// IS the resolution, so the declared replacement is advisory and the
+			// entry can lie about its target. Any property the model does not
+			// consume makes the entry unreadable, and the consumers fail closed.
+			if (key !== 'find' && key !== 'replacement') return null;
 			if (key === 'find') findNode = property.initializer;
 			if (key === 'replacement') replacementNode = property.initializer;
 		}
@@ -5032,13 +5246,16 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	};
 
 	/** The elements of the ARRAY spelling, including `.map`-generated runs. */
-	const readAliasArray = (arrayLiteral, locals) => {
+	const readAliasArray = (arrayLiteral, locals, out) => {
 		for (const element of arrayLiteral.elements) {
 			if (ts.isOmittedExpression(element)) continue;
 			if (ts.isObjectLiteralExpression(element)) {
 				const entry = readAliasEntry(element, locals);
-				if (entry) aliases.push(entry);
-				else unresolved.push(element.getText(sourceFile).slice(0, 80));
+				if (entry) out.push(entry);
+				// The snippet runs long enough to show the property that made
+				// the entry unreadable — a `customResolver` folded away past
+				// the cut would hide exactly the lie this failure discloses.
+				else unresolved.push(element.getText(sourceFile).slice(0, 200));
 				continue;
 			}
 			if (ts.isSpreadElement(element) || ts.isSpreadAssignment(element)) {
@@ -5082,8 +5299,10 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 							bodyObject,
 							new Map([...(locals ?? []), [parameterName, folded]])
 						);
-						if (entry) aliases.push(entry);
-						else unresolved.push(bodyObject.getText(sourceFile).slice(0, 80));
+						if (entry) out.push(entry);
+						// Same fold-length reason as the direct-entry snippet
+						// above: the unreadable property must stay visible.
+						else unresolved.push(bodyObject.getText(sourceFile).slice(0, 200));
 					}
 					continue;
 				}
@@ -5095,7 +5314,7 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	};
 
 	/** The entries of the OBJECT spelling: every key is a find. */
-	const readAliasObject = (objectLiteral, locals) => {
+	const readAliasObject = (objectLiteral, locals, out) => {
 		for (const property of objectLiteral.properties) {
 			if (!ts.isPropertyAssignment(property)) {
 				unresolved.push(property.getText(sourceFile).slice(0, 80));
@@ -5111,13 +5330,17 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				unresolved.push(property.getText(sourceFile).slice(0, 80));
 				continue;
 			}
-			aliases.push({ find: key, replacement });
+			out.push({ find: key, replacement });
 		}
 	};
 
-	let found = false;
+	// R9-2: a config that declares `resolve.alias` more than once is ambiguous
+	// in a way no scan can read: the runtime keeps the LAST property of the
+	// object and resolves with it, while a reader meets the FIRST — the table
+	// the scan would judge is not the table that ships. Every declaration is
+	// collected, and more than one turns the whole table unreadable.
+	const aliasInitializers = [];
 	eachNode(sourceFile, (node) => {
-		if (found) return;
 		let initializer = null;
 		if (
 			ts.isPropertyAssignment(node) &&
@@ -5127,21 +5350,51 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			initializer = node.initializer;
 		else if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'alias')
 			initializer = declarations.get('alias') ?? null;
-		if (!initializer) return;
-		found = true;
+		if (initializer) aliasInitializers.push(initializer);
+	});
+	if (aliasInitializers.length > 1) {
+		unresolved.push(
+			`declares resolve.alias ${aliasInitializers.length} times — the runtime keeps the LAST declaration and resolves with it, so the table the scan would read is not the table that ships`
+		);
+		return { aliases, unresolved };
+	}
+	if (aliasInitializers.length === 1) {
+		let initializer = aliasInitializers[0];
 		// An identifier-bound table: chase the declaration one hop.
 		if (ts.isIdentifier(initializer)) {
 			const bound = declarations.get(initializer.text);
 			if (!bound) {
 				unresolved.push(initializer.text);
-				return;
+				return { aliases, unresolved };
 			}
 			initializer = bound;
 		}
-		if (ts.isArrayLiteralExpression(initializer)) readAliasArray(initializer, null);
-		else if (ts.isObjectLiteralExpression(initializer)) readAliasObject(initializer, null);
+		const tableEntries = [];
+		if (ts.isArrayLiteralExpression(initializer)) readAliasArray(initializer, null, tableEntries);
+		else if (ts.isObjectLiteralExpression(initializer))
+			readAliasObject(initializer, null, tableEntries);
 		else unresolved.push(initializer.getText(sourceFile).slice(0, 80));
-	});
+		// R9-2: a DUPLICATE find inside one table is the same ambiguity one
+		// level down — which entry wins is runtime semantics the scan cannot
+		// faithfully model (an object keeps the last value of a key; an array
+		// matches in its own order) — so a duplicated table is unreadable.
+		const seenFinds = new Set();
+		let duplicate = null;
+		for (const entry of tableEntries) {
+			const signature =
+				entry.find instanceof RegExp ? `regex ${entry.find.toString()}` : `"${entry.find}"`;
+			if (seenFinds.has(signature)) {
+				duplicate = signature;
+				break;
+			}
+			seenFinds.add(signature);
+		}
+		if (duplicate !== null)
+			unresolved.push(
+				`declares the alias find ${duplicate} more than once in one table — the scan and the runtime can disagree about which entry wins`
+			);
+		else aliases.push(...tableEntries);
+	}
 
 	return { aliases, unresolved };
 }

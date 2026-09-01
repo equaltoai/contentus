@@ -3076,3 +3076,723 @@ test('the tree audits clean after every round-8 plant is uprooted', () => {
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });
+
+/* ============================================================
+   Round 9 — R9-1: routes into EXCLUDED roots fail closed
+   ============================================================
+
+   The round-9 attack proved silence: every route spelling into an excluded
+   root — an alias to `build/`, to `docs/`, to a planted `node_modules`
+   package, a relative or root-relative import into `build/`, a glob over it
+   with and without `{ eager: true }` — resolved to a base no candidate
+   matched, and the round-8 closure recorded only HITS. The walk never opens
+   the excluded roots, so no candidate existed to match, and the routes
+   dropped without findings. The closure now classifies every base it cannot
+   match: only a provably benign resolution — a classified root, a governed
+   root module, a non-executable path, or a `node_modules` package
+   `package.json` declares and installs — stays clean. */
+
+const R9_ROUTE = 'src/lib/review/__r9_route__.svelte';
+
+/** Plant an executable marker the excluded-root routes resolve into. */
+function plantExcluded(relativePath) {
+	const absolute = join(repoRoot, relativePath);
+	mkdirSync(dirname(absolute), { recursive: true });
+	writeFileSync(absolute, 'export const planted = true;\n');
+	return absolute;
+}
+
+test('routes into excluded roots fail closed in every spelling (R9-1 exact plants)', () => {
+	const route = R9_ROUTE;
+	const uprootAll = () => {
+		rmSync(join(repoRoot, route), { force: true });
+		rmSync(join(repoRoot, 'build/__r9_x__.js'), { force: true });
+		rmSync(join(repoRoot, 'docs/__r9_x__.mjs'), { force: true });
+		rmSync(join(repoRoot, 'node_modules/__r9_pkg__'), { recursive: true, force: true });
+	};
+	try {
+		plantExcluded('build/__r9_x__.js');
+		plantExcluded('docs/__r9_x__.mjs');
+		plantExcluded('node_modules/__r9_pkg__/index.js');
+
+		// 1. alias -> build/ (side-effect import, the round-9 A1 plant).
+		plant(route, '<script lang="ts">\n\timport "@xshim";\n\tconst q = 1;\n</script>\n<p>{q}</p>\n');
+		withPlantedViteConfig(
+			(source) => {
+				if (!source.includes(ALIAS_ANCHOR))
+					throw new Error('the alias anchor moved — re-anchor the R9-1 probes');
+				return source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'build/__r9_x__.js') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an alias route into build/ must fail:\n${output}`);
+				assert.match(
+					output,
+					/routes through a resolve alias "@xshim" — the route resolves into the excluded root "build"/,
+					`the alias route into build/ must be classified:\n${output}`
+				);
+			}
+		);
+
+		// 2. alias -> docs/ (the round-9 A2 plant).
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'docs/__r9_x__.mjs') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an alias route into docs/ must fail:\n${output}`);
+				assert.match(
+					output,
+					/the route resolves into the excluded root "docs"/,
+					`the alias route into docs/ must be classified:\n${output}`
+				);
+			}
+		);
+
+		// 3. alias -> a PLANTED node_modules package no declaration answers for.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'node_modules/__r9_pkg__/index.js') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an alias route into an undeclared package must fail:\n${output}`);
+				assert.match(
+					output,
+					/the route resolves into the node_modules package "__r9_pkg__"/,
+					`the undeclared package route must be classified:\n${output}`
+				);
+				assert.match(
+					output,
+					/no package\.json declaration answers for it/,
+					`the missing declaration must be named:\n${output}`
+				);
+			}
+		);
+
+		// 4. spelled relative import into build/ (the round-9 A8 plant).
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				'\timport { planted } from "../../../build/__r9_x__.js";\n' +
+				'\tconst q = planted;\n' +
+				'</script>\n<p>{q}</p>\n'
+		);
+		let result = runAudit();
+		assert.equal(result.status, 1, `a relative route into build/ must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/routes "\.\.\/\.\.\/\.\.\/build\/__r9_x__\.js" — the route resolves into the excluded root "build"/,
+			`the relative route must be classified:\n${result.output}`
+		);
+
+		// 5. root-relative spelling into build/.
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				'\timport { planted } from "/build/__r9_x__.js";\n' +
+				'\tconst q = planted;\n' +
+				'</script>\n<p>{q}</p>\n'
+		);
+		result = runAudit();
+		assert.equal(
+			result.status,
+			1,
+			`a root-relative route into build/ must fail:\n${result.output}`
+		);
+		assert.match(
+			result.output,
+			/routes "\/build\/__r9_x__\.js" — the route resolves into the excluded root "build"/,
+			`the root-relative route must be classified:\n${result.output}`
+		);
+
+		// 6. glob spellings over build/, with and without options (the C1 plant).
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				'\tconst m = import.meta.glob("../../../build/__r9_x__.js");\n' +
+				'\tconst q = m;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `a glob into build/ must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/globs "\.\.\/\.\.\/\.\.\/build\/__r9_x__\.js" — the route resolves into the excluded root "build"/,
+			`the glob pattern must be classified:\n${result.output}`
+		);
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				'\tconst m = import.meta.glob("../../../build/__r9_x__.js", { eager: true });\n' +
+				'\tconst q = m;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `an eager glob into build/ must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves into the excluded root "build"/,
+			`the eager glob must be classified:\n${result.output}`
+		);
+
+		// 7. dynamic import into docs/.
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				'\tconst m = await import("../../../docs/__r9_x__.mjs");\n' +
+				'\tconst q = m;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `a dynamic import into docs/ must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves into the excluded root "docs"/,
+			`the dynamic import must be classified:\n${result.output}`
+		);
+	} finally {
+		uprootAll();
+	}
+});
+
+test('aliased globs, escape routes, and unplaced patterns fail closed (R9-1 adjacent)', () => {
+	const route = R9_ROUTE;
+	const uprootAll = () => {
+		rmSync(join(repoRoot, route), { force: true });
+		rmSync(join(repoRoot, 'build/__r9_x__.js'), { force: true });
+		rmSync(join(repoRoot, '__r9_shim__.svelte'), { force: true });
+	};
+	try {
+		plantExcluded('build/__r9_x__.js');
+
+		// A glob pattern routed THROUGH the alias table into the excluded root.
+		plant(
+			route,
+			'<script lang="ts">\n\tconst m = import.meta.glob("@xshim/*");\n\tconst q = m;\n</script>\n'
+		);
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'build') },\n\t\t\t\t\t" + ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an aliased glob into build/ must fail:\n${output}`);
+				assert.match(
+					output,
+					/globs "@xshim\/\*" — the route resolves into the excluded root "build"/,
+					`the aliased glob must be classified:\n${output}`
+				);
+			}
+		);
+
+		// An alias CHAIN whose first hop resolves to a specifier, not a path.
+		rmSync(join(repoRoot, route), { force: true });
+		plant(route, '<script lang="ts">\n\timport Shim from "@r9a";\n\tconst s = Shim;\n</script>\n');
+		plant(
+			'__r9_shim__.svelte',
+			'<script lang="ts">export const planted = true;</script>\n<p>x</p>\n'
+		);
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@r9a', replacement: '@r9b' },\n\t\t\t\t\t" +
+						"{ find: '@r9b', replacement: path.resolve(root, '__r9_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an alias chain's first hop must fail closed:\n${output}`);
+				assert.match(
+					output,
+					/routes through a resolve alias "@r9a" — the route resolves to "@r9b", which no candidate, classified root, or declared package answers for/,
+					`the chained alias route must be classified:\n${output}`
+				);
+			}
+		);
+
+		// A relative route that ESCAPES the repository root.
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				'\timport { x } from "../../../../outside-repo.js";\n' +
+				'\tconst q = x;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		let result = runAudit();
+		assert.equal(result.status, 1, `a route escaping the root must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves outside the repository root/,
+			`the escape must be classified:\n${result.output}`
+		);
+
+		// A glob pattern no relative, root-relative, or alias reading can place.
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n\tconst m = import.meta.glob("r9unplaced/**/*.js");\n\tconst q = m;\n</script>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `an unplaced glob pattern must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/no static read can place the pattern/,
+			`the unplaced pattern must be named:\n${result.output}`
+		);
+	} finally {
+		uprootAll();
+	}
+});
+
+test('routes into declared packages stay clean (R9-1 positives)', () => {
+	const route = R9_ROUTE;
+	plant(
+		route,
+		'<script lang="ts">\n' +
+			'\timport { readable } from "@r9declared";\n' +
+			'\tconst q = readable;\n' +
+			'</script>\n<p>x</p>\n'
+	);
+	try {
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					// `svelte` is declared in package.json and installed — a route
+					// INTO it is the provably-benign exclusion, screened by SEC-3,
+					// never contentus-owned source.
+					"{ find: '@r9declared', replacement: path.resolve(root, 'node_modules/svelte/src/runtime/store/shared.js') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(
+					status,
+					0,
+					`an alias route into a declared, installed package must stay clean:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+/* ============================================================
+   Round 9 — R9-2: the alias table is distrusted where the
+   runtime can override the declaration
+   ============================================================
+
+   The round-9 attack shipped three lies the round-8 parser trusted: an
+   entry whose declared replacement was benign while its `customResolver`
+   returned a root shim (the resolver's return IS the resolution), a second
+   `alias` declaration the runtime keeps and a sequential reader never met,
+   and a table naming one find twice where the winner is runtime semantics.
+   All three audited green at 1f48630. The reading now fails closed on any
+   entry property the model does not consume, on more than one `alias`
+   declaration per config, and on any duplicate find in one table. */
+
+/** The round-9 A4 shim: imports PreviewBody, rewrites html, renders. */
+function r9ShimSource(marker) {
+	return (
+		'<script lang="ts">\n' +
+		"\timport PreviewBody from '$lib/review/PreviewBody.svelte';\n" +
+		"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+		'\n' +
+		'\tinterface Props {\n' +
+		'\t\tpreview: DraftPreview;\n' +
+		'\t}\n' +
+		'\tlet { preview }: Props = $props();\n' +
+		`\tconst shown: DraftPreview = { ...preview, html: (preview.html ?? '') + '<img src=x data-plant=${marker}>' };\n` +
+		'</script>\n' +
+		'\n' +
+		'<PreviewBody preview={shown} />\n'
+	);
+}
+
+test('an alias entry with an unconsumed property fails closed (R9-2 exact plant)', () => {
+	const shim = '__r9_shim__.svelte';
+	const route = R9_ROUTE;
+	plant(shim, r9ShimSource('r92'));
+	plant(
+		route,
+		'<script lang="ts">\n' +
+			"\timport Shim from '@xshim';\n" +
+			"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+			'\n' +
+			'\tinterface Props {\n' +
+			'\t\tpreview: DraftPreview;\n' +
+			'\t}\n' +
+			'\tlet { preview }: Props = $props();\n' +
+			'</script>\n' +
+			'\n' +
+			'<Shim {preview} />\n'
+	);
+	try {
+		// THE ROUND-9 A4 SHAPE: the declared replacement names a benign owned
+		// component; the `customResolver` — which the runtime calls and OBEYS —
+		// returns the root shim. The scan must refuse the entry outright.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'src/lib/review/VerdictPanel.svelte'), customResolver: () => path.resolve(root, '__r9_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `a customResolver entry must fail the audit:\n${output}`);
+				assert.match(output, /customResolver/, `the unreadable entry must be shown:\n${output}`);
+				assert.match(
+					output,
+					/a resolve\.alias entry the scan cannot read could route any specifier to any module/,
+					`the unreadable entry must fail closed:\n${output}`
+				);
+			}
+		);
+
+		// A benign-LOOKING extra property is the same class of lie: the model
+		// consumes find and replacement only, so any other key is unreadable.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'src/lib/review/VerdictPanel.svelte'), order: 'pre' },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `an entry with any extra property must fail:\n${output}`);
+				assert.match(
+					output,
+					/a resolve\.alias entry the scan cannot read could route any specifier to any module/,
+					`the extra-property entry must fail closed:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('a second alias declaration fails closed (R9-2 exact plant)', () => {
+	const shim = '__r9_shim__.svelte';
+	const route = R9_ROUTE;
+	plant(shim, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+	plant(route, '<script lang="ts">\n\timport Shim from "@xshim";\n\tconst s = Shim;\n</script>\n');
+	try {
+		// THE DIVERGENT SHAPE: the FIRST table (the one a sequential reader
+		// meets) claims @xshim benignly, so a first-wins scan clears it; the
+		// SECOND `alias` property is the one the runtime keeps, and it routes
+		// to the root shim. The config is ambiguous and unreadable.
+		withPlantedViteConfig(
+			(source) => {
+				if (!source.includes(ALIAS_ANCHOR))
+					throw new Error('the alias anchor moved — re-anchor the R9-2 probes');
+				const benigned = source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'src/lib/review/VerdictPanel.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				);
+				const start = benigned.indexOf('alias: [');
+				const end = benigned.indexOf('\n\t\t\t],', start);
+				if (start === -1 || end === -1)
+					throw new Error('the alias table moved — re-anchor the R9-2 probes');
+				const close = end + '\n\t\t\t],'.length;
+				return (
+					benigned.slice(0, close) +
+					'\n\t\t\talias: [{ find: "@xshim", replacement: path.resolve(root, "__r9_shim__.svelte") }],' +
+					benigned.slice(close)
+				);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `a second alias declaration must fail:\n${output}`);
+				assert.match(
+					output,
+					/declares resolve\.alias 2 times — the runtime keeps the LAST declaration/,
+					`the duplicate declaration must be named:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+test('duplicate finds in one table fail closed (R9-2 adjacent)', () => {
+	const shim = '__r9_shim__.svelte';
+	const route = R9_ROUTE;
+	plant(shim, '<script lang="ts">export const planted = true;</script>\n<p>x</p>\n');
+	plant(route, '<script lang="ts">\n\timport Shim from "@xshim";\n\tconst s = Shim;\n</script>\n');
+	const objectTable =
+		'alias: {\n' +
+		"\t\t\t\t'@xshim': path.resolve(root, 'src/lib/review/VerdictPanel.svelte'),\n" +
+		"\t\t\t\t'@xshim': path.resolve(root, '__r9_shim__.svelte'),\n" +
+		"\t\t\t\t'$lib': path.resolve(root, 'src/lib'),\n" +
+		"\t\t\t\t'$app/environment': path.resolve(root, 'src/facetheory/shims/app-environment.ts'),\n" +
+		"\t\t\t\t'$app/paths': path.resolve(root, 'src/facetheory/shims/app-paths.ts'),\n" +
+		'\t\t\t},';
+	try {
+		// The OBJECT spelling with one key twice — JS keeps the LAST value and
+		// a sequential reader meets the first.
+		withPlantedViteConfig(
+			(source) => {
+				const start = source.indexOf('alias: [');
+				const end = source.indexOf('\n\t\t\t],', start);
+				if (start === -1 || end === -1)
+					throw new Error('the alias table moved — re-anchor the R9-2 probes');
+				return source.slice(0, start) + objectTable + source.slice(end + '\n\t\t\t],'.length);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `a duplicated object key must fail:\n${output}`);
+				assert.match(
+					output,
+					/declares the alias find "@xshim" more than once in one table/,
+					`the duplicate key must be named:\n${output}`
+				);
+			}
+		);
+
+		// The ARRAY spelling with one find twice.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '@xshim', replacement: path.resolve(root, 'src/lib/review/VerdictPanel.svelte') },\n\t\t\t\t\t" +
+						"{ find: '@xshim', replacement: path.resolve(root, '__r9_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `a duplicated array find must fail:\n${output}`);
+				assert.match(
+					output,
+					/declares the alias find "@xshim" more than once in one table/,
+					`the duplicate find must be named:\n${output}`
+				);
+			}
+		);
+
+		// A CONDITIONAL table — the scan cannot tell which branch ships.
+		withPlantedViteConfig(
+			(source) => {
+				const start = source.indexOf('alias: [');
+				const end = source.indexOf('\n\t\t\t],', start);
+				if (start === -1 || end === -1)
+					throw new Error('the alias table moved — re-anchor the R9-2 probes');
+				return (
+					source.slice(0, start) +
+					"alias: (command === 'build' ? [{ find: '@xshim', replacement: './src/lib' }] : [])," +
+					source.slice(end + '\n\t\t\t],'.length)
+				);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `a conditional alias table must fail:\n${output}`);
+				assert.match(
+					output,
+					/a resolve\.alias entry the scan cannot read could route any specifier to any module/,
+					`the conditional table must fail closed:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	}
+});
+
+/* ============================================================
+   Round 9 — R9-3: relay launderings the round-8 binding missed
+   ============================================================
+
+   At 1f48630 six relay spellings laundered the preview identity clean: a
+   default-parameter initializer reading the value (no argument at the call
+   site, so call-site binding never fired); a rest parameter whose ELEMENT
+   READ carried nothing; `await Promise.all([preview])` destructured;
+   `Promise.all([preview]).then(([p]) => …)`; a second `.then` hop whose
+   receiver is the first `.then` CALL; and an inline IIFE returning the
+   value. The reading now binds default initializers, records rest
+   parameters as containers, models `Promise.all`/`Promise.allSettled` and
+   `.then`/`.catch`/`.finally` results as carriers, and reads inline IIFEs
+   as relays. */
+
+test('default-parameter and rest-parameter relays fail the audit (R9-3 exact plants)', () => {
+	const shapes = [
+		[
+			'default-parameter capture',
+			'\tfunction relayDef(p: DraftPreview = preview): DraftPreview { return p; }\n' +
+				"\tif (preview) { const v = relayDef(); v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'default-parameter capture via explicit undefined',
+			'\tfunction relayUndef(p: DraftPreview = preview): DraftPreview { return p; }\n' +
+				"\tif (preview) { const v = relayUndef(undefined); v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'rest-parameter element read',
+			'\tfunction relayRest(...rest: DraftPreview[]): DraftPreview { return rest[0]; }\n' +
+				"\tif (preview) { const v = relayRest(preview); v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} relay must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} relay must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} relay must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('Promise.all spellings laundering the preview fail the audit (R9-3 exact plants)', () => {
+	const shapes = [
+		[
+			'awaited Promise.all destructure',
+			"\tasync function r9All() { if (!preview) return; const [p] = await Promise.all([preview]); p.html = '<img src=x>'; }\n" +
+				'\tif (preview) void r9All();\n',
+			/writes to p\.html/,
+		],
+		[
+			'Promise.all .then destructure',
+			"\tif (preview) Promise.all([preview]).then(([p]) => { p.html = '<img src=x>'; });\n",
+			/writes to p\.html/,
+		],
+		[
+			'Promise.allSettled .then destructure',
+			"\tif (preview) Promise.allSettled([preview]).then(([p]) => { p.html = '<img src=x>'; });\n",
+			/writes to p\.html/,
+		],
+		[
+			'Promise.all over a carrier identifier',
+			'\tconst r9Arr = [preview];\n' +
+				"\tif (preview) Promise.all(r9Arr).then(([p]) => { p.html = '<img src=x>'; });\n",
+			/writes to p\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} shape must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} shape must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('multi-hop .then results and IIFE relays fail the audit (R9-3 exact plants)', () => {
+	const shapes = [
+		[
+			'second-hop .then receiver',
+			'\tasync function relayAsync9(p: DraftPreview): Promise<DraftPreview> { return p; }\n' +
+				"\tif (preview) relayAsync9(preview).then((p) => p).then((q) => { q.html = '<img src=x>'; });\n",
+			/writes to q\.html/,
+		],
+		[
+			'.finally pass-through',
+			'\tasync function relayFin(p: DraftPreview): Promise<DraftPreview> { return p; }\n' +
+				"\tif (preview) relayFin(preview).finally(() => undefined).then((q) => { q.html = '<img src=x>'; });\n",
+			/writes to q\.html/,
+		],
+		[
+			'IIFE over the value',
+			"\tif (preview) { const v = (() => preview)(); v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'awaited async IIFE',
+			"\tasync function r9Iife() { if (!preview) return; const v = await (async () => preview)(); v.html = '<img src=x>'; }\n" +
+				'\tif (preview) void r9Iife();\n',
+			/writes to v\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} shape must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} shape must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('fresh IIFEs, fresh combinators, and read-only relays stay clean (R9-3 positives)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tconst r9Fresh = (() => 42)();\n' +
+					'\tfunction r9ReadRest(...rest: DraftPreview[]): number { return rest.length; }\n' +
+					'\tasync function r9FreshAll() {\n' +
+					'\t\tconst [a] = await Promise.all([Promise.resolve(1)]);\n' +
+					'\t\treturn a;\n' +
+					'\t}\n' +
+					'\tasync function r9Len(p: DraftPreview): Promise<number> { return p.html.length; }\n' +
+					'\tif (preview) {\n' +
+					'\t\tconsole.log(r9Fresh, r9ReadRest(preview));\n' +
+					'\t\tvoid r9FreshAll();\n' +
+					'\t\tr9Len(preview).then((n) => n + 1);\n' +
+					'\t}\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`fresh IIFEs, fresh combinators, and read-only relays must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+test('the tree audits clean after every round-9 plant is uprooted', () => {
+	const { status, output } = runAudit();
+	assert.equal(status, 0, output);
+});

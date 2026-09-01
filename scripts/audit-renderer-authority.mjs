@@ -91,7 +91,18 @@
  *      unresolvable callees receiving the value stay fail-closed, and an
  *      import the bundler resolves only through `resolve.alias` is
  *      classified by its alias target rather than read as a benign package
- *      (R8-1).
+ *      (R8-1). Round-9 (R9-3) closes the relay spellings the round-9 review
+ *      planted over that: a default-parameter initializer that reads the
+ *      value binds the parameter at any call site leaving the position to
+ *      the default; a rest parameter receiving the value is an array
+ *      container, so an element read of it carries the identity;
+ *      `Promise.all`/`Promise.allSettled` fulfill with an array holding the
+ *      reference at the argument positions (awaited destructure and `.then`
+ *      destructure alike); `.then`/`.catch`/`.finally` call results carry
+ *      the reference onward — multi-hop chains, with a `.then` callback's
+ *      return read exactly as a collection transform's is; and an inline
+ *      IIFE returning the value is a relay exactly as a named local arrow
+ *      is, with a provably fresh literal return the one cleared shape.
  *   9. The executable source universe is derived from reachability, not from
  *      the `src/` walk (round-7 R7-2): an executable module outside the
  *      classified owned/vendored roots that an owned file or a build entry
@@ -107,7 +118,20 @@
  *      alias claims and no installed package answers for fails closed, and
  *      `import.meta.glob` collects no-substitution template literals and
  *      arrays of patterns beside plain strings, failing closed on any
- *      non-literal glob argument.
+ *      non-literal glob argument. Round-9 (R9-1/R9-2) closes what that
+ *      closure still dropped: a resolved route base NO CANDIDATE MATCHES is
+ *      classified instead of silently passed — only a provably benign
+ *      resolution (a classified owned/vendored root, a governed root
+ *      module, a non-executable path, or a `node_modules` package
+ *      `package.json` declares and installs) stays clean, while a route
+ *      into any other excluded root, escaping the repository, or answered
+ *      for by nothing is a finding, in every route spelling (alias,
+ *      relative, root-relative, glob — aliased or plain — and dynamic
+ *      import); and the alias table itself is distrusted where the runtime
+ *      can override the declaration: an entry carrying any property the
+ *      model does not consume (`customResolver` first — its return IS the
+ *      resolution), a config declaring `resolve.alias` more than once, and
+ *      a table naming one find twice are all unreadable and fail closed.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -817,6 +841,12 @@ function walkUniverse(dir) {
  * root-relative spelling, `./x` and `../x` resolve against the importing
  * file. Query and hash suffixes are already stripped by the caller. A bare
  * specifier is a package and returns null.
+ *
+ * R9-1: a `..` the importer's directory depth cannot absorb ESCAPES the
+ * repository root, and the resolved base keeps the leading `..` segments
+ * instead of silently dropping them — the route the bundler would refuse or
+ * serve from outside the root is exactly the route the scan must fail closed
+ * on, and it cannot when the escape is folded away to nothing.
  */
 function resolveUniverseSpecifier(specifier, fromFile) {
 	let target;
@@ -825,16 +855,16 @@ function resolveUniverseSpecifier(specifier, fromFile) {
 	else if (specifier.startsWith('/')) target = specifier.slice(1);
 	else if (specifier.startsWith('./') || specifier.startsWith('../')) {
 		const parts = fromFile.split('/');
-		const base = parts.slice(0, -1).join('/');
-		const resolved = `${base}/${specifier}`.split('/').reduce((acc, part) => {
-			if (part === '.' || part === '') return acc;
+		const resolved = parts.slice(0, -1);
+		for (const part of specifier.split('/')) {
+			if (part === '.' || part === '') continue;
 			if (part === '..') {
-				acc.pop();
-				return acc;
+				if (resolved.length === 0 || resolved[0] === '..') resolved.push('..');
+				else resolved.pop();
+				continue;
 			}
-			acc.push(part);
-			return acc;
-		}, []);
+			resolved.push(part);
+		}
 		target = resolved.join('/');
 	} else {
 		return null;
@@ -875,6 +905,12 @@ function bareSpecifierPackage(specifier) {
  * unproven for any specifier it matches. Entries the parser could not read at
  * all land in `unresolved`, reported once by the universe check and turned
  * into fail-closed verdicts by both scans.
+ *
+ * R9-2 widened the unreadable set to everything the runtime can override: an
+ * entry carrying a property the model does not consume (`customResolver` and
+ * any other extra key), a config that declares `resolve.alias` more than once
+ * (the runtime keeps the LAST table), and a table naming one find twice (the
+ * winner is runtime semantics the scan cannot faithfully model).
  */
 function readBuildAliases() {
 	const aliases = [];
@@ -996,6 +1032,23 @@ function globToRegExp(pattern) {
  * both hops. Framework, vendor, and generated trees stay governed by their
  * existing controls through the explicit exclusion roots; dependencies are
  * never scanned as owned source.
+ *
+ * ROUND 9 CLOSES THE DROP. As round 8 shipped, a resolved route base NO
+ * CANDIDATE MATCHED was silent — and the round-9 review proved the silence
+ * by routing every spelling into an excluded root: an alias to `build/`, to
+ * `docs/`, to a planted `node_modules` package, a relative import into
+ * `build/`, a glob over it. The walk never opens those roots, so no candidate
+ * existed to match, and the route left no hit and no finding. The closure now
+ * CLASSIFIES every missed base: only a provably benign resolution — a
+ * classified owned/vendored root, a governed root module, a non-executable
+ * path, or a `node_modules` package `package.json` declares and installs —
+ * stays clean; a route into any other excluded root, escaping the repository,
+ * or answered for by nothing is a finding, for aliases, spelled routes,
+ * aliased and plain globs, and dynamic imports alike. The alias reading itself
+ * fails closed where the runtime can override the declaration (R9-2): an entry
+ * property the model does not consume (`customResolver`'s return IS the
+ * resolution), a second `resolve.alias` declaration in one config, and a
+ * duplicate find in one table are all unreadable.
  */
 function checkExecutableSourceUniverse() {
 	const problems = [];
@@ -1038,6 +1091,119 @@ function checkExecutableSourceUniverse() {
 			if (hit) return hit;
 		}
 		return null;
+	};
+
+	// --- R9-1: classification of resolved routes -----------------------------
+	// The round-8 closure recorded only the HITS of a resolved base and was
+	// silent on everything else — and the round-9 review proved the silence:
+	// every route spelling into an excluded root (`build`, `docs`, a planted
+	// `node_modules` package) resolved to a base no candidate could match and
+	// dropped without a finding, because the walk never opens those roots and
+	// therefore never lists what lives in them. A route the closure cannot
+	// match to a candidate is therefore classified, and only a PROVABLY benign
+	// resolution stays clean — when in doubt, it is a finding.
+	const declaredPackages = (() => {
+		const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+		return new Set([
+			...Object.keys(pkg.dependencies ?? {}),
+			...Object.keys(pkg.devDependencies ?? {}),
+		]);
+	})();
+
+	/**
+	 * Classify a resolved route base no candidate matched. Null is the only
+	 * benign verdict and it demands proof:
+	 *
+	 *   - the classified owned/vendored roots and the governed root modules
+	 *     are scanned by checks 2, 3, 5, 7, and 8 — a route into them is a
+	 *     route into the audit itself;
+	 *   - a path whose final segment carries a non-executable extension is not
+	 *     module code — the universe is executable source;
+	 *   - a route INTO `node_modules` is benign only while `package.json`
+	 *     declares the package and the package is installed — the declared
+	 *     dependency graph is what SEC-3 screens, and it contains no
+	 *     contentus-owned source;
+	 *
+	 * Everything else fails closed: a route escaping the repository, a route
+	 * into any other excluded root (the roots the walk never opens), an
+	 * undeclared package path, and any base nothing answers for.
+	 */
+	const classifyMissedRoute = (base) => {
+		if (base.startsWith('../')) return { kind: 'escape' };
+		if (OWNED_SOURCE_DIRS.some((dir) => isUnder(base, dir))) return null;
+		if (VENDORED_SOURCE_ROOTS.some((dir) => isUnder(base, dir))) return null;
+		// Vendored loose files and governed root modules, with the same
+		// extension resolution the toolchain applies — `$lib/types` routes to
+		// the vendored `src/lib/types.ts` exactly as a spelled path would.
+		for (const extension of UNIVERSE_RESOLVE_EXTENSIONS) {
+			const withExt = `${base}${extension}`;
+			if (VENDORED_SOURCE_FILES.includes(withExt)) return null;
+			if (GOVERNED_ROOT_MODULES.includes(withExt)) return null;
+		}
+		const last = base.split('/').pop();
+		const dot = last.lastIndexOf('.');
+		if (dot > 0 && !EXECUTABLE_SOURCE.test(last)) return null;
+		if (base === 'node_modules' || base.startsWith('node_modules/')) {
+			const rest = base === 'node_modules' ? '' : base.slice('node_modules/'.length);
+			const pkgRoot = rest.startsWith('@')
+				? rest.split('/').slice(0, 2).join('/')
+				: rest.split('/')[0];
+			if (
+				pkgRoot !== '' &&
+				declaredPackages.has(pkgRoot) &&
+				existsSync(join(repoRoot, 'node_modules', ...pkgRoot.split('/'), 'package.json'))
+			)
+				return null;
+			return { kind: 'undeclared-package', pkg: pkgRoot === '' ? base : pkgRoot };
+		}
+		for (const excluded of UNIVERSE_EXCLUDED_ROOTS) {
+			if (isUnder(base, excluded)) return { kind: 'excluded-root', root: excluded };
+		}
+		return { kind: 'unclassified' };
+	};
+
+	/**
+	 * The static prefix of a glob base — everything before the first wildcard,
+	 * cut at the last complete segment. Classification judges that prefix: a
+	 * pattern whose static head sits inside an excluded root can enumerate
+	 * executable source there whatever it matches today.
+	 */
+	const staticGlobPrefix = (base) => {
+		const cut = base.search(/[*?{[]/);
+		if (cut === -1) return base;
+		const head = base.slice(0, cut);
+		const slash = head.lastIndexOf('/');
+		return slash === -1 ? '' : head.slice(0, slash);
+	};
+
+	const reportedRoute = new Set();
+	const routeProblem = (loader, specifier, base, miss, how) => {
+		const key = `${loader}\u0000${specifier}\u0000${base}`;
+		if (reportedRoute.has(key)) return;
+		reportedRoute.add(key);
+		let reason;
+		if (miss.kind === 'escape')
+			reason = `the route resolves outside the repository root ("${base}"), and no static read can follow it`;
+		else if (miss.kind === 'excluded-root')
+			reason =
+				`the route resolves into the excluded root "${miss.root}" ("${base}") — a root the universe ` +
+				'walk never opens, so no static read can prove what the bundler loads there';
+		else if (miss.kind === 'undeclared-package')
+			reason =
+				`the route resolves into the node_modules package "${miss.pkg}" ("${base}"), and no ` +
+				'package.json declaration answers for it';
+		else if (miss.kind === 'unplaced')
+			reason =
+				'no static read can place the pattern — not relative, not root-relative, and no resolve ' +
+				'alias routes it' +
+				(aliasUnresolvedEntries.length > 0
+					? ', and an unreadable resolve.alias entry could capture it'
+					: '');
+		else
+			reason = `the route resolves to "${base}", which no candidate, classified root, or declared package answers for`;
+		problems.push(
+			`${loader} ${how} "${specifier}" — ${reason}; executable application source must live under the classified owned/vendored roots`
+		);
 	};
 
 	// --- the build's alias table (R8-1) ----------------------------------------
@@ -1130,6 +1296,20 @@ function checkExecutableSourceUniverse() {
 					if (aliased.kind === 'path') {
 						const hit = matchCandidate(aliased.path);
 						if (hit) record(hit, `loads it through a resolve alias ("${specifier}")`);
+						else {
+							// R9-1: an alias-resolved base no candidate matches is a
+							// route the walk must classify — a target inside an
+							// excluded root dropped silently at round 8.
+							const miss = classifyMissedRoute(aliased.path);
+							if (miss)
+								routeProblem(
+									current,
+									specifier,
+									aliased.path,
+									miss,
+									'routes through a resolve alias'
+								);
+						}
 					} else {
 						const key = `${current}\u0000${cleaned}`;
 						if (!reportedBare.has(key)) {
@@ -1167,13 +1347,43 @@ function checkExecutableSourceUniverse() {
 			}
 			const hit = matchCandidate(base);
 			if (hit) record(hit, `loads it ("${specifier}")`);
+			else {
+				// R9-1: a spelled route no candidate matches is classified —
+				// bases inside excluded roots, escaping the repository, or
+				// answered for by nothing fail closed instead of dropping.
+				const miss = classifyMissedRoute(base);
+				if (miss) routeProblem(current, specifier, base, miss, 'routes');
+			}
 		}
 		for (const pattern of globbed.patterns) {
-			const base = resolveUniverseSpecifier(pattern, current);
-			if (base === null) continue;
+			let base = resolveUniverseSpecifier(pattern, current);
+			if (base === null) {
+				// R9-1: a pattern spelled neither relative nor root-relative can
+				// still be routed by the bundler's alias table — resolve it the
+				// way a specifier is. Anything the scan cannot place is a route
+				// it cannot prove, and fails closed.
+				const aliasedPattern = resolveAliasedSpecifier(pattern, buildAliasTable);
+				if (aliasedPattern !== null && aliasedPattern.kind === 'path') {
+					base = aliasedPattern.path;
+				} else {
+					routeProblem(current, pattern, '(unplaced)', { kind: 'unplaced' }, 'globs');
+					continue;
+				}
+			}
 			const matcher = globToRegExp(base);
+			let matched = false;
 			for (const path of candidates) {
-				if (matcher.test(path)) record(path, `globs it ("${pattern}")`);
+				if (matcher.test(path)) {
+					matched = true;
+					record(path, `globs it ("${pattern}")`);
+				}
+			}
+			if (!matched) {
+				// R9-1: a glob matching no candidate is classified by its static
+				// prefix — a pattern whose head sits in an excluded root can
+				// enumerate executable source there, whatever matches today.
+				const miss = classifyMissedRoute(staticGlobPrefix(base));
+				if (miss) routeProblem(current, pattern, base, miss, 'globs');
 			}
 		}
 		for (const snippet of globbed.unresolved) {

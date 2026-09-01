@@ -117,6 +117,23 @@ Nothing local that would paper over it. Specifically:
   generator, arrow, and multi-hop local call chains alike. `.then`/`.catch`
   callbacks on a value-carrying expression bind their parameter the same way,
   and `await`/`Promise.resolve(<value>)` are read as same-reference wrappers.
+  As round-8 shipped, that claim was still narrower than it read: the
+  parameter binding fired only when the call site HANDED the value in, so six
+  relay spellings laundered the identity clean — a default-parameter
+  initializer reading the value with no argument at the call site, a rest
+  parameter whose element read carried nothing, `await Promise.all([preview])`
+  destructured, `Promise.all([preview]).then(([p]) => …)`, a second `.then`
+  hop whose receiver is the first `.then` call, and an inline IIFE returning
+  the value. The round-9 review planted all six (R9-3) and the reading now
+  binds default initializers at call sites that leave the position to the
+  default, records rest parameters as array containers so element reads of
+  them carry the identity, models `Promise.all`/`Promise.allSettled`
+  fulfillments as arrays holding the reference at the argument positions
+  (the awaited destructure and the `.then` destructure alike), reads
+  `.then`/`.catch`/`.finally` call results as carriers — multi-hop, with a
+  `.then` callback's return analyzed the way the collection transforms'
+  returns are — and treats an inline IIFE returning the value as a relay,
+  while a provably fresh literal return stays clean.
   A write to `.html` on any of these is a finding, a mutation API
   (`Object.assign`, `Reflect.set`, `defineProperty`, `defineProperties`)
   receiving any of them is a finding, and a CALL handed the value is a finding
@@ -228,22 +245,52 @@ entries, the object spelling, shorthand and identifier-bound tables,
 folded through constant strings, templates, `path.resolve(root, …)`, and the
 config's own root binding. Alias-resolved specifiers join the executable
 source universe and the cross-file component-callee resolution exactly like
-spelled routes, so an alias whose target sits outside the classified roots
-is classified and scanned as the reachability route it is, and an alias into
-the owned or vendored roots stays clean. The fold is bounded and fails
+spelled routes, and an alias into the owned or vendored roots stays clean.
+As round-8 shipped, that was all the universe closure did: it recorded only
+HITS, and the round-9 review proved a route whose resolved base no candidate
+matched dropped without a finding — so every spelling into an excluded root
+(`build`, `docs`, a planted `node_modules` package) dropped silently,
+because the walk never opens those roots and no candidate existed to match
+(R9-1). Round 9 replaced the silence with classification, described below.
+The fold is bounded and fails
 closed: an alias entry it cannot read, a replacement it cannot place inside
 the repository, and a bare specifier that matches no alias and no installed
 package are findings rather than benign, while Node builtins and installed
-packages stay benign. **R8-2** is the value-path closure described in the
+packages stay benign. Round 9 (R9-2) widened the unreadable set to
+everything the runtime can override the declaration with — an entry carrying
+any property the model does not consume (`customResolver` first: its return
+IS the resolution, so the declared replacement is advisory), a config
+declaring `resolve.alias` more than once, and a table naming one find twice. **R8-2** is the value-path closure described in the
 round-5 paragraph above. **R8-3** collects every `import.meta.glob` argument
 shape the bundler accepts — a plain string, a no-substitution template
 literal, and an array whose elements are strings or no-substitution template
 literals — and fails closed on any other argument or array element, since a
-glob the scan cannot enumerate could load any module. What this gate is,
-stays stated: a static analysis over the owned module graph that proves the
-shapes it models and fails closed on the shapes it cannot resolve — it is
-not a dynamic guarantee, and a future shape that defeats it is a probe to
-add, not a prose correction.
+glob the scan cannot enumerate could load any module.
+
+Round-9 (R9-1/R9-2/R9-3) closed the shapes the round-9 adversarial review
+planted against that state, and this note again records only what the gate
+proves. **R9-1** classifies every resolved route base the universe closure
+cannot match to a candidate, in every route spelling — alias, relative,
+root-relative, glob (aliased or plain, with or without options), and dynamic
+import. Only a provably benign resolution stays clean: a classified
+owned/vendored root, a governed root module, a non-executable path, or a
+`node_modules` package `package.json` declares and installs — the declared
+dependency graph SEC-3 screens, carrying no contentus-owned source. A route
+into any other excluded root (the roots the walk never opens — `build`,
+`docs`, `gov-infra`, the steward trees, and their kin), a route escaping the
+repository, a route into a package no declaration answers for, and a base
+nothing answers for are findings; silence is no longer a verdict. **R9-2**
+fails closed on everything the runtime can override in the alias table: an
+entry carrying any property the model does not consume (`customResolver`
+first — its return IS the resolution), a config declaring `resolve.alias`
+more than once (the runtime keeps the LAST table; a sequential reader meets
+the FIRST), and a table naming one find twice (the winner is runtime
+semantics the scan cannot faithfully model). **R9-3** is the value-path
+closure recorded in the round-5 paragraph above. What this gate is, stays
+stated: a static analysis over the owned module graph that proves the shapes
+it models and fails closed on the shapes it cannot resolve — it is not a
+dynamic guarantee, and a future shape that defeats it is a probe to add, not
+a prose correction.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
