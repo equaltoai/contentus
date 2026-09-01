@@ -99,6 +99,26 @@ Nothing local that would paper over it. Specifically:
   `PreviewBody` invocation must pass the preview value itself, verbatim, bound
   only from the `loadDraftPreview` result — a parent `$derived` that spreads
   `preview` and rewrites `preview.html` before the sink fails the build.
+  Round-5 (R5-1) widened the value binding from the identifier to the VALUE:
+  the reading follows the preview reference through declaration and assignment
+  aliases, TypeScript wrapper nodes (`(preview)`, `preview!`, `preview as X`),
+  the same-reference runes `$state`/`$state.raw`, object-literal containers and
+  their property reads, array/map containers that receive the value, and local
+  functions that return it — a write to `.html` on any of them is a finding, a
+  mutation API (`Object.assign`, `Reflect.set`, `defineProperty`,
+  `defineProperties`) receiving any of them is a finding, and a CALL handed the
+  value is a finding unless the callee is a local function this reading proves
+  never writes to its parameters; an imported or unproven callee fails closed.
+  Dynamic routes fail closed too: a `svelte:component` in a file that reaches
+  PreviewBody, or any dynamic `import('…PreviewBody.svelte')` in owned source,
+  cannot be statically proven direct, and the canonical file with no static
+  import/invocation at all is a finding, never a silent scan. Round-5 (R5-4)
+  also closed four alternate-sink launderings: destructured, renamed dangerous
+  methods off DOM or unproven receivers (failing closed), identifier-laundered
+  `Object.assign` source objects, case-insensitive `srcdoc`/`setAttribute`
+  attribute names, and `document.execCommand('insertHTML', …)` — while
+  `$state.raw(<object/array literal>)` is recognized as a legitimate non-DOM
+  container (R5-5), so its computed writes stay clean.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
