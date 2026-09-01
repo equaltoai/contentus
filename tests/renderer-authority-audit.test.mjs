@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
+import { withSourceLock } from './helpers/source-lock.mjs';
+
 /**
  * Probes for the renderer-authority audit itself.
  *
@@ -302,13 +304,18 @@ const DISPLAY_SINK = 'src/lib/review/PreviewBody.svelte';
 
 /** Plant a broken display sink, run the audit, restore the original. */
 function withPlantedSink(contents, body) {
-	const original = readFileSync(join(repoRoot, DISPLAY_SINK), 'utf8');
-	writeFileSync(join(repoRoot, DISPLAY_SINK), contents);
-	try {
-		body();
-	} finally {
-		writeFileSync(join(repoRoot, DISPLAY_SINK), original);
-	}
+	// The whole mutation window — write, probe, restore — runs under the
+	// source-probe lock, so concurrent readers/builders of PreviewBody.svelte
+	// (review.test.mjs, review-preview-render.test.mjs) never see the fixture.
+	withSourceLock(() => {
+		const original = readFileSync(join(repoRoot, DISPLAY_SINK), 'utf8');
+		writeFileSync(join(repoRoot, DISPLAY_SINK), contents);
+		try {
+			body();
+		} finally {
+			writeFileSync(join(repoRoot, DISPLAY_SINK), original);
+		}
+	});
 }
 
 const SINK_SCRIPT_OPEN =
@@ -564,14 +571,19 @@ const PREVIEW_INVOCATION = '<PreviewBody {preview} />';
 
 /** Plant a broken review workspace, run the audit, restore the original. */
 function withPlantedWorkspace(mutate, body) {
-	const original = readFileSync(join(repoRoot, REVIEW_WORKSPACE), 'utf8');
-	const mutated = mutate(original);
-	writeFileSync(join(repoRoot, REVIEW_WORKSPACE), mutated);
-	try {
-		body();
-	} finally {
-		writeFileSync(join(repoRoot, REVIEW_WORKSPACE), original);
-	}
+	// Same mutual exclusion as withPlantedSink: ReviewWorkspace.svelte is read
+	// by review.test.mjs / act-as-banner.test.mjs and built by seam-graph and
+	// the production build, so the fixture must never be visible mid-window.
+	withSourceLock(() => {
+		const original = readFileSync(join(repoRoot, REVIEW_WORKSPACE), 'utf8');
+		const mutated = mutate(original);
+		writeFileSync(join(repoRoot, REVIEW_WORKSPACE), mutated);
+		try {
+			body();
+		} finally {
+			writeFileSync(join(repoRoot, REVIEW_WORKSPACE), original);
+		}
+	});
 }
 
 test('a parent $derived transform between loadDraftPreview and the sink fails the audit (round-2 R2-1)', () => {

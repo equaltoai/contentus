@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
+import { withSourceLock } from './helpers/source-lock.mjs';
+
 import {
 	REVIEW_DOCUMENTS,
 	emptyHalfCopy,
@@ -542,7 +544,10 @@ test('no review source imports a Markdown renderer or holds an {@html} sink', ()
 		// a bare package name, so the one file that discusses remark-parse in a
 		// comment does not trip it. Nothing had to be excluded, which is the
 		// cheapest way to be sure nothing was excluded by mistake.
-		const source = readFileSync(file, 'utf8');
+		// The workspace is one of these files and the renderer-authority probes
+		// MUTATE it concurrently, so the read is locked: a fixture (a removed
+		// import, a second invocation) must never answer for the shipped file.
+		const source = withSourceLock(() => readFileSync(file, 'utf8'));
 
 		assert.doesNotMatch(source, /\{@html\b/, `${file} contains an {@html} sink`);
 		assert.doesNotMatch(
@@ -575,7 +580,10 @@ test('the publish path never decides the gate for itself', () => {
  * ------------------------------------------------------------------------ */
 
 test('the preview display is one sink, bound to lesser preview output, and nothing more', () => {
-	const body = readFileSync('src/lib/review/PreviewBody.svelte', 'utf8');
+	// Locked: the renderer-authority probes plant fixture sinks OVER this file
+	// for the duration of an audit run, and a fixture (two `{@html}` tags, a
+	// value import) must never answer for the shipped sink.
+	const body = withSourceLock(() => readFileSync('src/lib/review/PreviewBody.svelte', 'utf8'));
 
 	// Exactly one sink — the disclosure admits no second.
 	assert.equal(
@@ -600,7 +608,11 @@ test('the preview display is one sink, bound to lesser preview output, and nothi
 });
 
 test('the workspace displays the preview through that sink and that sink alone', () => {
-	const workspace = readFileSync('src/lib/routes/ReviewWorkspace.svelte', 'utf8');
+	// Locked like the sink read above: the probes mutate the workspace while
+	// they audit it, and a fixture must never answer for the shipped file.
+	const workspace = withSourceLock(() =>
+		readFileSync('src/lib/routes/ReviewWorkspace.svelte', 'utf8')
+	);
 
 	assert.match(workspace, /import PreviewBody from '\$lib\/review\/PreviewBody\.svelte'/);
 	assert.match(workspace, /<PreviewBody \{preview\} \/>/);

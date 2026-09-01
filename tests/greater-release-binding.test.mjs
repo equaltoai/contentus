@@ -10,6 +10,7 @@ import {
 	sriOf,
 	verifyRecordAgainstRelease,
 } from '../gov-infra/verifiers/release-binding.mjs';
+import { withSourceLock } from './helpers/source-lock.mjs';
 
 /**
  * F4 (round-1 attack): vendored-tree authenticity rests on self-declared
@@ -312,46 +313,51 @@ test('the probes leave the tree exactly as they found it (R2-4)', () => {
 const R5_LOOSE_FILE = 'src/lib/evil-loose.ts';
 
 test('a loose $lib sink cannot pass both controls, even declared vendored (R5-3)', () => {
-	const auditPath = join(repoRoot, 'scripts/audit-renderer-authority.mjs');
-	const auditBackup = readFileSync(auditPath, 'utf8');
-	const loose = join(repoRoot, R5_LOOSE_FILE);
-	writeFileSync(
-		loose,
-		'export const evil = (el: HTMLElement, html: string) => {\n\tel.innerHTML = html;\n};\n'
-	);
-	const declared = auditBackup.replace(
-		'const VENDORED_SOURCE_FILES = [',
-		"const VENDORED_SOURCE_FILES = [\n\t'" + R5_LOOSE_FILE + "',",
-		1
-	);
-	writeFileSync(auditPath, declared);
-	try {
-		// The renderer audit accepts the declared-vendored file — this is the
-		// point: the composed gate must not rest on the audit's classification.
-		// (The assertion is about the FILE, not a globally green audit: other
-		// probe tests plant their own fixtures concurrently, so the audit's
-		// exit code over the whole tree is not this test's subject.)
-		const audit = spawnSync(process.execPath, ['scripts/audit-renderer-authority.mjs'], {
-			cwd: fileURLToPath(new URL('..', import.meta.url)),
-			encoding: 'utf8',
-		});
-		const auditOutput = `${audit.stdout ?? ''}${audit.stderr ?? ''}`;
-		assert.ok(
-			!auditOutput.includes(R5_LOOSE_FILE),
-			`the audit must classify the declared file as vendored, not name it:\n${auditOutput}`
+	// The whole window — planting the loose file, mutating the audit, probing
+	// both gates, restoring — runs under the source-probe lock, so concurrent
+	// audit spawns and builds never read the planted tree or the mutated audit.
+	withSourceLock(() => {
+		const auditPath = join(repoRoot, 'scripts/audit-renderer-authority.mjs');
+		const auditBackup = readFileSync(auditPath, 'utf8');
+		const loose = join(repoRoot, R5_LOOSE_FILE);
+		writeFileSync(
+			loose,
+			'export const evil = (el: HTMLElement, html: string) => {\n\tel.innerHTML = html;\n};\n'
 		);
+		const declared = auditBackup.replace(
+			'const VENDORED_SOURCE_FILES = [',
+			"const VENDORED_SOURCE_FILES = [\n\t'" + R5_LOOSE_FILE + "',",
+			1
+		);
+		writeFileSync(auditPath, declared);
+		try {
+			// The renderer audit accepts the declared-vendored file — this is the
+			// point: the composed gate must not rest on the audit's classification.
+			// (The assertion is about the FILE, not a globally green audit: other
+			// probe tests plant their own fixtures concurrently, so the audit's
+			// exit code over the whole tree is not this test's subject.)
+			const audit = spawnSync(process.execPath, ['scripts/audit-renderer-authority.mjs'], {
+				cwd: fileURLToPath(new URL('..', import.meta.url)),
+				encoding: 'utf8',
+			});
+			const auditOutput = `${audit.stdout ?? ''}${audit.stderr ?? ''}`;
+			assert.ok(
+				!auditOutput.includes(R5_LOOSE_FILE),
+				`the audit must classify the declared file as vendored, not name it:\n${auditOutput}`
+			);
 
-		// CON-4 must reject the loose file whatever the audit declared.
-		const { status, output } = runVerifier();
-		assert.equal(status, 1, `the loose $lib sink must fail the release binding:\n${output}`);
-		assert.ok(
-			output.includes(R5_LOOSE_FILE) && output.includes('no manifest entry lists'),
-			`the release binding must name the loose file:\n${output}`
-		);
-	} finally {
-		writeFileSync(auditPath, auditBackup, 'utf8');
-		rmSync(loose, { force: true });
-	}
+			// CON-4 must reject the loose file whatever the audit declared.
+			const { status, output } = runVerifier();
+			assert.equal(status, 1, `the loose $lib sink must fail the release binding:\n${output}`);
+			assert.ok(
+				output.includes(R5_LOOSE_FILE) && output.includes('no manifest entry lists'),
+				`the release binding must name the loose file:\n${output}`
+			);
+		} finally {
+			writeFileSync(auditPath, auditBackup, 'utf8');
+			rmSync(loose, { force: true });
+		}
+	});
 });
 
 test('a committed release-source byte that disagrees with the manifest is a hard failure (R5-3)', () => {

@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compile } from 'svelte/compiler';
 import { render } from 'svelte/server';
 
+import { withSourceLock } from './helpers/source-lock.mjs';
+
 import { DRAFT_PREVIEW_QUERY, toDraftPreview } from '../src/lib/cms/review-contract.ts';
 
 /**
@@ -85,9 +87,11 @@ registerHooks({
 });
 
 /** Compile one real component file for server rendering, imports rewritten to
- *  the repository's actual modules, and return its default export. */
+ *  the repository's actual modules, and return its default export. The read is
+ *  locked because the renderer-authority probes mutate PreviewBody.svelte
+ *  while they audit it, and a fixture must never compile for the shipped file. */
 async function compileForServer(componentPath) {
-	const source = readFileSync(componentPath, 'utf8');
+	const source = withSourceLock(() => readFileSync(componentPath, 'utf8'));
 	const { js } = compile(source, {
 		generate: 'server',
 		filename: componentPath,
