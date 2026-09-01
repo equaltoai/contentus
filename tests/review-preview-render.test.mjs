@@ -91,7 +91,7 @@ registerHooks({
  *  locked because the renderer-authority probes mutate PreviewBody.svelte
  *  while they audit it, and a fixture must never compile for the shipped file. */
 async function compileForServer(componentPath) {
-	const source = withSourceLock(() => readFileSync(componentPath, 'utf8'));
+	const source = withSourceLock(() => readFileSync(componentPath, 'utf8'), { shared: true });
 	const { js } = compile(source, {
 		generate: 'server',
 		filename: componentPath,

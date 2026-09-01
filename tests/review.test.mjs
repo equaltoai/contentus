@@ -547,7 +547,7 @@ test('no review source imports a Markdown renderer or holds an {@html} sink', ()
 		// The workspace is one of these files and the renderer-authority probes
 		// MUTATE it concurrently, so the read is locked: a fixture (a removed
 		// import, a second invocation) must never answer for the shipped file.
-		const source = withSourceLock(() => readFileSync(file, 'utf8'));
+		const source = withSourceLock(() => readFileSync(file, 'utf8'), { shared: true });
 
 		assert.doesNotMatch(source, /\{@html\b/, `${file} contains an {@html} sink`);
 		assert.doesNotMatch(
@@ -583,7 +583,9 @@ test('the preview display is one sink, bound to lesser preview output, and nothi
 	// Locked: the renderer-authority probes plant fixture sinks OVER this file
 	// for the duration of an audit run, and a fixture (two `{@html}` tags, a
 	// value import) must never answer for the shipped sink.
-	const body = withSourceLock(() => readFileSync('src/lib/review/PreviewBody.svelte', 'utf8'));
+	const body = withSourceLock(() => readFileSync('src/lib/review/PreviewBody.svelte', 'utf8'), {
+		shared: true,
+	});
 
 	// Exactly one sink — the disclosure admits no second.
 	assert.equal(
@@ -610,8 +612,9 @@ test('the preview display is one sink, bound to lesser preview output, and nothi
 test('the workspace displays the preview through that sink and that sink alone', () => {
 	// Locked like the sink read above: the probes mutate the workspace while
 	// they audit it, and a fixture must never answer for the shipped file.
-	const workspace = withSourceLock(() =>
-		readFileSync('src/lib/routes/ReviewWorkspace.svelte', 'utf8')
+	const workspace = withSourceLock(
+		() => readFileSync('src/lib/routes/ReviewWorkspace.svelte', 'utf8'),
+		{ shared: true }
 	);
 
 	assert.match(workspace, /import PreviewBody from '\$lib\/review\/PreviewBody\.svelte'/);

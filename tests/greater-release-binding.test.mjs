@@ -3,14 +3,14 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test } from 'node:test';
+import { afterEach, beforeEach, test } from 'node:test';
 
 import {
 	resolveDiskPath,
 	sriOf,
 	verifyRecordAgainstRelease,
 } from '../gov-infra/verifiers/release-binding.mjs';
-import { withSourceLock } from './helpers/source-lock.mjs';
+import { acquireSourceLock, releaseSourceLock, withSourceLock } from './helpers/source-lock.mjs';
 
 /**
  * F4 (round-1 attack): vendored-tree authenticity rests on self-declared
@@ -47,6 +47,26 @@ import { withSourceLock } from './helpers/source-lock.mjs';
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const componentsPath = join(repoRoot, 'components.json');
+
+/**
+ * Every test that plants or deletes a REAL tree file runs under the
+ * source-probe lock, and so does every baseline that runs the verifier over
+ * the shipped tree: the renderer-authority probes plant fixtures into
+ * `src/lib` concurrently, the seam audits build the tree, and
+ * review-preview-render compiles the vendored QueueCard — a fixture (or a
+ * half-restored file) must never answer for the shipped one. The lock is
+ * acquired per test and released in `afterEach` even when the test fails; the
+ * R5-3 composed probe nests through the lock's per-process reentrancy. The
+ * synthetic decision-core tests below never touch the tree, so their holds
+ * are microseconds.
+ */
+beforeEach(() => {
+	acquireSourceLock();
+});
+
+afterEach(() => {
+	releaseSourceLock();
+});
 
 function runVerifier() {
 	const result = spawnSync(process.execPath, ['gov-infra/verifiers/check-greater-pins.mjs'], {

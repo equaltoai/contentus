@@ -20,8 +20,10 @@ import { parse } from 'svelte/compiler';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 // Locked: the renderer-authority probes mutate ReviewWorkspace.svelte while
-// they audit it, and a fixture must never answer for the shipped file.
-const source = (path) => withSourceLock(() => readFileSync(join(repoRoot, path), 'utf8'));
+// they audit it, and a fixture must never answer for the shipped file. Shared,
+// so reader holds exclude only the mutation windows, not each other.
+const source = (path) =>
+	withSourceLock(() => readFileSync(join(repoRoot, path), 'utf8'), { shared: true });
 
 /** Every template node with its ancestor chain, from a parsed markup root. */
 function* walkTemplate(node, ancestors = []) {

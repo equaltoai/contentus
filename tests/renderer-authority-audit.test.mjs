@@ -3,9 +3,27 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test } from 'node:test';
+import { afterEach, beforeEach, test } from 'node:test';
 
-import { withSourceLock } from './helpers/source-lock.mjs';
+import { acquireSourceLock, releaseSourceLock, withSourceLock } from './helpers/source-lock.mjs';
+
+/**
+ * Every test in this file walks or plants the real `src/lib` tree: the
+ * baselines run the audit over the shipped tree, and every case below plants a
+ * fixture over it. Each plant would otherwise be visible to a concurrent
+ * reader/build (seam-graph builds, review probes) for the whole audit run, and
+ * the audit's own coverage walk would read a fixture another probe test
+ * planted. So the whole file runs under the source-probe lock — acquired per
+ * test, released in `afterEach` even when the test fails — and the two
+ * helpers below nest through the lock's per-process reentrancy.
+ */
+beforeEach(() => {
+	acquireSourceLock();
+});
+
+afterEach(() => {
+	releaseSourceLock();
+});
 
 /**
  * Probes for the renderer-authority audit itself.

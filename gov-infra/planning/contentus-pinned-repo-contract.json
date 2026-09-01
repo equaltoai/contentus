@@ -161,7 +161,6 @@
         "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, transformModule)).href\n\t)",
         "reason": "Loads the greater CLI's canonical import-transform module (`dist/utils/transform.js`, named by the `transformModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the transform that re-derives the vendored bytes is the CLI's own, not a repository copy. Same quarantine provenance as the source-paths load above; the archive member is verified against the pinned release-asset digest before extraction."
       },
-
       {
         "file": "gov-infra/verifiers/release-binding.mjs",
         "line": 245,
@@ -280,7 +279,7 @@
       },
       {
         "file": "tests/greater-release-binding.test.mjs",
-        "line": 52,
+        "line": 72,
         "expression": "spawnSync",
         "reason": "Runs the CON-4 verifier (`gov-infra/verifiers/check-greater-pins.mjs`) in a child process against the real tree with a planted coordinated vendored-file+checksum edit, which is how this probe asserts the release binding rejects the F4 attack shape. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
         "binds": ["gov-infra/verifiers/check-greater-pins.mjs"]
@@ -299,14 +298,14 @@
       },
       {
         "file": "tests/greater-release-binding.test.mjs",
-        "line": 339,
+        "line": 359,
         "expression": "spawnSync",
         "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how the R5-3 composed probe asserts the renderer audit stays green over a file DECLARED vendored while the release binding rejects it — the two gates cannot both pass for a loose `$lib` sink. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
         "binds": ["scripts/audit-renderer-authority.mjs"]
       },
       {
         "file": "tests/renderer-authority-audit.test.mjs",
-        "line": 50,
+        "line": 68,
         "expression": "spawnSync",
         "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how this probe asserts the audit’s exit code and output rather than its internals. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
         "binds": ["scripts/audit-renderer-authority.mjs"]
@@ -352,6 +351,12 @@
         "line": 40,
         "expression": "import { registerHooks } from 'node:module';",
         "reason": "Installs a resolve hook that points the vendored barrel `../../greater/utils` — a directory Node will not resolve — at the real module owning `sanitizeHtml`, which is the resolution vite supplies and Node does not. It redirects one specifier inside `src/`, a declared unpinned root, and stubs nothing; the loader it hands out is not otherwise used. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
+        "file": "tests/source-lock.test.mjs",
+        "line": 47,
+        "expression": "spawn",
+        "reason": "Runs a worker script the probe just wrote to a temp directory, which is how the lock is exercised across REAL processes — the same shape the parallel suite contends over. The worker code is written inline in this pinned test, and its only repository import is the source-lock helper, named in `binds` so it stays pinned like any import; no other repository file is executed."
       }
     ],
     "sha256": {
@@ -393,7 +398,7 @@
       "scripts/probe-share-flow.mjs": "0dcc58259f912232776aa4c2790255f9264388b3f56a4bfc63deb877fba6847f",
       "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
       "scripts/verify-schema-provenance.mjs": "1cd2a9194bd63948296dede9f4c710af976a9d4a2266d00a56a858a15612f8d3",
-      "tests/act-as-banner.test.mjs": "7f84b4f1c8701446f0596e278f6c09d00e4e98275a9c126973084cd50b5fdcb9",
+      "tests/act-as-banner.test.mjs": "376d801190fbca25716d8ae9c09b4abcdb068d58174ec47755f78ef81e6935ac",
       "tests/agent-act-as.test.mjs": "9698b1cb3ac036b534ea5d153fac77dbcf19e6ebdba0290eee6838163b036327",
       "tests/agent-activity-client.test.mjs": "8b1a7d867906eafd064ea44f4c35dcee551b4582651501b445a1c58b9369e558",
       "tests/agent-activity-view.test.mjs": "f22579101f3f69c8d8ccb169e1716039fd7bad3183cfa0eab2a4a5c3511acec9",
@@ -411,13 +416,13 @@
       "tests/compose.test.mjs": "c13d10a0ef01b38bccbd0b662d04ccf75d0b9add5196a20472736509d4f964bf",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
       "tests/contrast.test.mjs": "e3b270bb502be325d631b61363cd7fc3093dde4fba0e90d0758b9d08fe65136c",
-      "tests/drone-seams.test.mjs": "e3c721943e3deee16182604b1dc0fd76656c8e438e0780854fd99e44a46db4b1",
+      "tests/drone-seams.test.mjs": "4a54df996eb17a204f37eec6e1cfc961c79ab501f461e72a42cda74469181820",
       "tests/drones-mobile.test.mjs": "e6d153c03bf942c04113bcceffdedf84cc8028b95570f10071f02e44425d9fc4",
       "tests/drones-roster.test.mjs": "ba213606df245962697b3f1050828b163f3a4b3d110388452beec242720047a8",
       "tests/graphql-documents.test.mjs": "3fb1ac32868a44fff9c543af506568092d9da7604622df34282210b036d2504a",
-      "tests/greater-release-binding.test.mjs": "dad711bdf4aeed0b6b261f9f0efebace8f3192b356cf480c5efad94153d98430",
+      "tests/greater-release-binding.test.mjs": "b12f0a1ccb7994bfbd54027e08bc36319dd653c63c13d5ca0a5278e7c51e3c4b",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
-      "tests/helpers/source-lock.mjs": "bdfa729cf4c0cf28b61ea5df6e5ee63a3a7e05104e9f22c225c45ec6bdafbc8f",
+      "tests/helpers/source-lock.mjs": "6d91b310f2ae1267e102dab6ddbbc02a7c0284bd56d4209e9673db60afdd46b0",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/instance-info.test.mjs": "cf463d0831e9c38b3c32164a00d296513771fdf18666ab57934932db7934459e",
       "tests/live-probe.test.mjs": "bfb25de29ae381a313b54cba6f71dccff350e563c4dd54d42206651d585c812d",
@@ -428,16 +433,17 @@
       "tests/messaging-session.test.mjs": "4be22b812fc7b35b1ca66676aa73a4f9144e1fabdbe18f95f248ccae92c8d528",
       "tests/mobile-chrome.test.mjs": "6a1ea66c9d4b298c4449a97312ad2a7fe9f6e743a25d039bad1959ef718c55a4",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
-      "tests/renderer-authority-audit.test.mjs": "822d0b0d7c9b3927de12fe79d1e151d53a74d79bc5172b3e01c94233d85acb7e",
+      "tests/renderer-authority-audit.test.mjs": "fe9e8ba9f1d38c1029abf3e342e68e72d732e4373fcc0963bc85274428362138",
       "tests/renderer-authority.test.mjs": "c246f85eb4b59937610b83ba0604a9678c65a8f32deb9f43582c0e02fcd3f1f6",
       "tests/review-adapters.test.mjs": "83771e9b5cadb9e235cc50e11367d18b6bf9c1504457f797d9b5394f89a2e966",
       "tests/review-csp.test.mjs": "a594eb3290ad1d028f5895d8441bda352ab3fa7a5c4f03454299fb9055e746dd",
-      "tests/review-preview-render.test.mjs": "2ad8056badd458891745deeb5adcd3d84bce16f4fe801036eecb7f5b0db5cb91",
+      "tests/review-preview-render.test.mjs": "93b6f24647d6d2b0ee138e20389e7e7d9fa9d5d5e51fbfacf9251f3441a392c4",
       "tests/review-round-trip.test.mjs": "8a3e525affd543cfcc1c5aae314f344e30821369bad86353deaa63bcff556285",
-      "tests/review.test.mjs": "2088a6cd6b6b835432d2586b3532ba83f284f329eee4dac46c39c5ddb3019e41",
+      "tests/review.test.mjs": "6f0f264f6e0629ada5a6212eda5ea550f4ca4552402b87d63ca7f3cb77e01d4a",
       "tests/schema-provenance.test.mjs": "d0a48b24531d18200e94e8d6b466b668f042ed3a8efb216f241b943f78893a14",
-      "tests/seam-graph.test.mjs": "96a1dd7759af907e84bfbf9595c494b3639c272f555d1e58b2fd640c7f8d0b8c",
+      "tests/seam-graph.test.mjs": "d945036d98fd7b86b6ef29d43bbebcede3f645c46ec6daa170108c62f051a3f8",
       "tests/share-flow-probe.test.mjs": "2732956b719316e1a170ed93ca800fc0eabfb46d3e9e28e1cc6aaac17518c78a",
+      "tests/source-lock.test.mjs": "c655d40b86302be4e601e602a23da8ea540440a56221be2cb2004ffbfd00c78c",
       "tests/ssr-messages.test.mjs": "e192d936c27ce5045bcd6bbfb4d258f6dbfe1e4a6b8c3b82e96d28c6c215a683",
       "tests/ssr-review.test.mjs": "5097837e226ab6455e6b23ca9a0d8dca08a1136a5c6fe40e41dc0ded3c2f72e0",
       "tests/ssr-routes.test.mjs": "185043b629e875a2b66d2342468a348ca0cf524663beda637a39614d016acde4",
