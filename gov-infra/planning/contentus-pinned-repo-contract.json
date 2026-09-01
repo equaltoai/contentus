@@ -355,7 +355,7 @@
       }
     ],
     "sha256": {
-      "gov-infra/verifiers/authenticate-release-index.mjs": "7eab8b73094e89986016ce004e7416193440e2d5f3b0263df53fd404cf05890a",
+      "gov-infra/verifiers/authenticate-release-index.mjs": "617cc3b4b9f970181f0db3c424b06564f4d6d91905e1278cd7e01845eae48e18",
       "gov-infra/verifiers/check-disclosed-audit.mjs": "7dc380f0bfe11bfea0c00adbc4cee1b8da932408f93bb716540c38b6408c4d7c",
       "gov-infra/verifiers/check-greater-doctor.mjs": "1c267b2fb87b38b413fa235eda6d42ba120ad944203ab3e5014702d5372c04e5",
       "gov-infra/verifiers/check-greater-pins.mjs": "760e913b695e3160a5c6e6843c32580ef1843621796bb2d9d185d53e582c61e8",
@@ -406,7 +406,7 @@
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
-      "tests/authenticate-release-index.test.mjs": "ce2a577bc9729d7093bb5a2424ad6637084a3e87c58c3f743978c83482c41303",
+      "tests/authenticate-release-index.test.mjs": "826b6854b7343476eb46bbe8e82fb74a7d97979b9c74217045df7c5e8a116577",
       "tests/cms-graphql.test.mjs": "b68fd637f56b28001e226d68a964b2a3cedb8353640218c72a21d52550afdd7a",
       "tests/compose.test.mjs": "c13d10a0ef01b38bccbd0b662d04ccf75d0b9add5196a20472736509d4f964bf",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",

@@ -238,6 +238,14 @@ test('asset content-type and redirect-hop bounds reject non-GitHub responses (R5
 		),
 		true
 	);
+	// The host CI observed for the real greater-components-cli.tgz download
+	// (round-5): GitHub's release-asset object storage, with the signed path.
+	assert.equal(
+		redirectHopAllowed(
+			'https://release-assets.githubusercontent.com/github-production-release-asset/1035528441/eb290b71-88ab-4ac0-af76-a75311a37cc5?sp=r&sv=2018-11-09'
+		),
+		true
+	);
 	assert.equal(
 		redirectHopAllowed(
 			'https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz'
@@ -246,6 +254,7 @@ test('asset content-type and redirect-hop bounds reject non-GitHub responses (R5
 	);
 	assert.equal(redirectHopAllowed('https://evil.example.com/greater-components-cli.tgz'), false);
 	assert.equal(redirectHopAllowed('http://objects.githubusercontent.com/x'), false);
+	assert.equal(redirectHopAllowed('https://release-assets.example.com/x'), false);
 	assert.equal(redirectHopAllowed('/relative/redirect'), false);
 	assert.equal(redirectHopAllowed('https://github.com'), false);
 });

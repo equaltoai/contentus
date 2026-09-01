@@ -82,12 +82,15 @@ export function allowedAssetContentType(type) {
 
 /**
  * Whether a redirect hop's Location may be followed. GitHub's own release
- * download redirects from `github.com/…/releases/download/…` to its object
- * storage; any other host ends the chain as a finding. A `github.com`
- * Location is accepted only when it IS the canonical asset URL (a direct
- * serve); `objects.githubusercontent.com` is GitHub's object storage and
- * accepts the signed object path. A redirect to anything else — an
- * attacker's host, a mirror, a shortened URL, even the bare github.com
+ * download redirects from `github.com/…/releases/download/…` to its release
+ * asset object storage; any other host ends the chain as a finding. A
+ * `github.com` Location is accepted only when it IS the canonical asset URL
+ * (a direct serve); `objects.githubusercontent.com` and
+ * `release-assets.githubusercontent.com` are GitHub's object storage hosts
+ * for release assets and accept the signed object path — the second is the
+ * host CI observed for the `greater-components-cli.tgz` download (round-5,
+ * 2026-08-31), which is why both are admitted. A redirect to anything else
+ * — an attacker's host, a mirror, a shortened URL, even the bare github.com
  * homepage — is rejected.
  */
 export function redirectHopAllowed(location) {
@@ -96,7 +99,8 @@ export function redirectHopAllowed(location) {
 		const url = new URL(location);
 		const host = url.host.toLowerCase();
 		if (host === 'github.com') return location === cliAssetUrl();
-		if (host === 'objects.githubusercontent.com') return true;
+		if (host === 'objects.githubusercontent.com' || host === 'release-assets.githubusercontent.com')
+			return true;
 		return false;
 	} catch {
 		return false;
