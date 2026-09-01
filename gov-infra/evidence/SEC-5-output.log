@@ -9,6 +9,7 @@
 - owned-source {@html} sinks: clean
 - vendored blog-face escape fallback: clean
 - owned-source coverage: clean
+- executable source universe: clean
 - preview display sink binding: clean
 - alternate raw-HTML sinks: clean
 - preview value path: clean
