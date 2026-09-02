@@ -413,8 +413,14 @@ audit. Now: derivation keeps only direct identifier and pattern bindings
 and parameter or binding-element defaults, chased to a fixed point; any
 other position a state read appears in — a return, a yield, a concise-arrow
 body, a wrapped initializer, a member or element assignment target, a
-property or class-property slot, a computed pattern key — fails closed as an
-escape of the table. One stated exception stays clean: the config object
+property or class-property slot, a computed pattern key, or the iterable of
+a `for-of`/`for-in` iteration (`for await` included) — fails closed as an
+escape of the table. Beside the binding positions, a Vite plugin's
+`config()` hook can rewrite the table after the declaration — Vite hands
+the hook the config object and merges its return — so a readable hook that
+returns or mutates `resolve.alias` (or a hook shape the scan cannot read)
+escapes the table, while readable hooks that provably contribute no alias
+state and opaque plugin values stay clean. One stated exception stays clean: the config object
 itself, returned or yielded as the identifier the declaration bound it to
 (the cross-file residual of a returned config object remains the stated
 one). **R12-4** narrows the destructure reading to the keys the config
@@ -429,9 +435,15 @@ a class's prototype (`Object.defineProperty`/`defineProperties`,
 `Reflect.defineProperty`/`set`, `Object.assign`, or a direct
 `A.prototype.m = …` write) — or on the class object itself for statics —
 makes the chain UNPROVEN, because a member installed at runtime is one the
-declaration walk never saw (the round-12 getter plant; its method analogue
-was already caught only because the call scan fails closed when the value is
-handed to an unproven member, and a getter read hands nothing). **R12-3**
+declaration walk never saw. The install taint keys on the value's reach,
+not the spelling: the builtin and the target each resolve through the
+declaration map, so an aliased builtin (`const dp = Object.defineProperty`,
+a namespace `const R = Reflect`), a prototype value held by an intermediate
+binding, an element access with a literal key, or a destructure taints the
+chain exactly as the literal spelling does (the round-13 W1–W5 plants). The
+round-12 plant installed a getter; its method analogue was already caught
+only because the call scan fails closed when the value is handed to an
+unproven member, and a getter read hands nothing. **R12-3**
 unwraps casts and parentheses off member-call receivers everywhere the
 dispatch readings key on them — the carrier, the getter read, the call-site
 parameter binding, and the hand-off resolution — closing `(b as T).m()`
@@ -441,6 +453,32 @@ module that LOADS a specifier, the tracer names the barrel that RE-EXPORTS
 it, and the probe asserts the tracer's own finding, which a regression
 dropping the alias-first consultation would silence while the universe line
 survives.
+
+Round-13 (R12-A…R12-D) closed four shapes the round-12 closure still keyed
+on textual spellings rather than the value's reach. **R12-A**: the
+prototype-install taint matched only literal `Object.defineProperty`-family
+callees with textual `X.prototype` targets — five aliased spellings
+installed the preview getter over green audits (an aliased builtin callee,
+a namespace alias, an intermediate prototype binding, an element-access
+`prototype` key, a destructure); the callee and the target now each resolve
+through the declaration map, destructured extractions included, and the
+direct spellings and the method analogue stay caught. **R12-B**: a
+`for-of`/`for-in` over the alias table — direct, through a derived table
+name, `for await` included — bound the loop variable to entries the
+derivation never modeled and rewrote them over green audits; the iterable
+position fails closed like every other unmodeled position. **R12-C**: the
+audit had no concept of the plugins array, and a Vite plugin's `config()`
+hook — which Vite hands the config object and whose return it merges —
+could rewrite `resolve.alias` in-file; the hook's first parameter is now
+seeded at the config level so the existing mutation/escape/binding-position
+readings judge what flows through it, a return value that could contribute
+a `resolve.alias` is an escape, an unreadable hook shape fails closed, and
+readable hooks that provably contribute no alias state (with opaque plugin
+values like `svelte(...)`) stay clean. **R12-D**: a spread of a
+value-carrying array into call arguments laundered the preview past the
+call gate — the call-side mirror of the round-9 rest-parameter closure; the
+spread holds the value exactly as a direct argument does, at any position,
+and a spread of a fresh literal holding nothing stays clean.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as

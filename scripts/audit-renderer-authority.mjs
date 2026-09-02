@@ -171,23 +171,23 @@
  *      Vite bundles — with a route into `node_modules` staying clean only
  *      as POLICY (the declared and installed dependency graph SEC-3
  *      screens), never as a byte-level proof over what an install contains.
- *      Rounds 11–12 (R11-1/2/3, R12-1/2/3) close what that state still read
- *      or resolved too narrowly: the alias table is UNREADABLE the moment it
- *      escapes the literal's textual reach — identifiers bound from a chain
- *      ending in `resolve`/`alias` only through the modeled channels (direct
- *      identifier or pattern bindings, parameter or binding-element
- *      defaults); the builtin mutation APIs handed the table, its `resolve`
- *      object, or the config object; the state flowing into any call
- *      argument, member-call receiver, or spread; and any unmodeled binding
- *      position — a return or yield, a wrapped initializer, a member or
- *      element assignment target, a property slot, a computed key — so every
- *      consumer fails closed; a member call CHASES THE HERITAGE CLAUSE to
- *      the declaring base — bounded, cycle-guarded, multi-hop,
- *      class-expression, STATIC, and SUPER dispatch included, cast receivers
- *      unwrapped, an in-file prototype or constructor install tainting the
- *      chain — with getters and computed calls reading it; and the barrel
- *      tracer consults the alias table BEFORE owned resolution, catching a
- *      hijacked re-export rather than leaving it to the universe closure.
+ *      Rounds 11–13 (R11-1/2/3, R12-1/2/3, R12-A/B/C/D) close what that
+ *      state still read or resolved too narrowly — tracking the VALUE's
+ *      reach rather than its spellings: the alias table is UNREADABLE the
+ *      moment it escapes the literal's textual reach — identifiers bound
+ *      from a `resolve`/`alias` chain only through the modeled channels
+ *      (direct bindings, parameter or binding-element defaults); a builtin
+ *      mutation API, call argument, member-call receiver, or spread handed
+ *      the state; and any unmodeled position — a return or yield, a
+ *      wrapped initializer, a member or element target, a slot, a computed
+ *      key, an iteration, or a plugin `config()` hook returning or
+ *      mutating the table — so every consumer fails closed; a member call
+ *      CHASES THE HERITAGE CLAUSE to the declaring base — bounded, cycle-
+ *      guarded, multi-hop, class-expression, STATIC, SUPER dispatch, cast
+ *      receivers unwrapped, an install tainting the chain through ANY
+ *      spelling that reaches the prototype or constructor, getters and
+ *      computed calls reading it; and the barrel tracer consults the alias
+ *      table BEFORE owned resolution, catching a hijacked re-export.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -976,6 +976,14 @@ function bareSpecifierPackage(specifier) {
  * or element assignment target, a property or class-property slot, a computed
  * pattern key — fails closed. The one stated exception: the config object
  * itself, returned or yielded as the identifier the declaration bound it to.
+ * Round 13 adds the two positions that reading still keyed on spelling: a
+ * for-of/for-in ITERATION over the state (`for await` included) fails
+ * closed at the iterable — the loop variable binds entries the derivation
+ * never models — and a Vite plugin `config()` hook, which Vite hands the
+ * config object and whose return it merges, escapes the table when it
+ * returns or mutates `resolve.alias` (or its shape is unreadable), while
+ * readable hooks that provably contribute no alias state and opaque plugin
+ * values like `svelte(...)` stay clean.
  */
 function readBuildAliases() {
 	const aliases = [];
@@ -1635,6 +1643,17 @@ function checkExecutableSourceUniverse() {
  * module that the component-only walk never saw — so the non-Svelte files
  * are scanned for exactly that shape while the Svelte files run the full
  * invocation binding.
+ *
+ * ROUND 13 KEYS THE VALUE'S REACH, NOT THE SPELLING, in the two places the
+ * round-12 reading still matched text. The prototype-install taint resolves
+ * its callee and its target through the declaration map — an aliased builtin
+ * (`const dp = Object.defineProperty`, a namespace `const R = Reflect`), a
+ * prototype value held by an intermediate binding, an element access with a
+ * literal key, or a destructure taints the chain exactly as the literal
+ * spelling does. And a SPREAD of a value-carrying array into call arguments
+ * holds the value at the call gate — `f(...args)` over `const args =
+ * [preview]` hands the reference exactly as `f(preview)` does, at any
+ * position the spread lands it.
  */
 function checkPreviewValuePath() {
 	const problems = [];

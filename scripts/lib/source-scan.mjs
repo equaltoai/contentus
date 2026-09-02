@@ -2345,43 +2345,154 @@ function previewValuePathFindings(file, sourceFile) {
 	// member it cannot read when the value is HANDED to it (`a.m(preview)`),
 	// while a getter read hands nothing, so the chase itself must carry the
 	// verdict. Installs on the class object itself taint its STATIC side.
+	//
+	// R13-A: the taint keys on the VALUE's reach, not the textual spelling —
+	// the round-12 reading keyed on literals, and five aliased spellings
+	// installed the getter over green: the builtin bound to an identifier
+	// (`const dp = Object.defineProperty`), a namespace alias (`const R =
+	// Reflect; R.defineProperty(…)`), and the prototype value reached
+	// through an intermediate binding, an element access with a literal
+	// key, or a destructure (`const { prototype: p } = X`). The callee and
+	// the target are each resolved through the declaration map below —
+	// including destructured extractions of the builtin and of the
+	// prototype value — and any install those resolutions name taints
+	// exactly as the literal spelling does.
 	const prototypeTainted = new Set();
 	const staticTainted = new Set();
-	const taintTargetClass = (node) => {
-		const inner = unwrapValueNode(node);
-		if (
-			ts.isPropertyAccessExpression(inner) &&
-			!inner.computed &&
-			inner.name.text === 'prototype' &&
-			ts.isIdentifier(inner.expression) &&
-			localClassNames.has(inner.expression.text)
-		)
-			return { name: inner.expression.text, side: 'prototype' };
-		if (ts.isIdentifier(inner) && localClassNames.has(inner.text))
-			return { name: inner.text, side: 'static' };
-		return null;
-	};
+	const INSTALL_BUILTINS = new Set([
+		'Object.defineProperty',
+		'Object.defineProperties',
+		'Reflect.defineProperty',
+		'Reflect.set',
+		'Object.assign',
+	]);
+	// R13-A: destructured extractions of the install builtins —
+	// `const { defineProperty } = Object` binds the same value the member
+	// chain names.
+	const destructuredInstallBuiltins = new Map(); // bound name -> builtin spelling
 	eachNode(sourceFile, (node) => {
 		if (
-			ts.isCallExpression(node) &&
-			ts.isPropertyAccessExpression(node.expression) &&
-			!node.expression.computed &&
-			ts.isIdentifier(node.expression.expression) &&
-			node.arguments.length > 0
-		) {
-			const builtin = `${node.expression.expression.text}.${node.expression.name.text}`;
-			const target = taintTargetClass(node.arguments[0]);
-			if (!target) return;
+			!ts.isVariableDeclaration(node) ||
+			!ts.isObjectBindingPattern(node.name) ||
+			!node.initializer
+		)
+			return;
+		const source = unwrapValueNode(node.initializer);
+		if (!ts.isIdentifier(source)) return;
+		if (source.text !== 'Object' && source.text !== 'Reflect') return;
+		for (const element of node.name.elements) {
+			if (!ts.isIdentifier(element.name)) continue;
+			const key = element.propertyName ?? element.name;
+			const keyText = ts.isIdentifier(key) ? key.text : ts.isStringLiteral(key) ? key.text : null;
+			if (keyText === null) continue;
 			if (
-				builtin === 'Object.defineProperty' ||
-				builtin === 'Object.defineProperties' ||
-				builtin === 'Reflect.defineProperty' ||
-				builtin === 'Reflect.set'
-			) {
+				source.text === 'Object' &&
+				['assign', 'defineProperty', 'defineProperties'].includes(keyText)
+			)
+				destructuredInstallBuiltins.set(element.name.text, `Object.${keyText}`);
+			if (source.text === 'Reflect' && ['set', 'defineProperty'].includes(keyText))
+				destructuredInstallBuiltins.set(element.name.text, `Reflect.${keyText}`);
+		}
+	});
+	/**
+	 * R13-A: the builtin a callee expression names — bounded, resolving
+	 * identifier aliases (`const dp = Object.defineProperty`), namespace
+	 * aliases (`const R = Reflect; R.defineProperty(…)`), and destructured
+	 * extractions. Null for anything else; the caller judges only the
+	 * install builtins.
+	 */
+	const resolveInstallCallee = (node, depth) => {
+		if (!node || depth > 8) return null;
+		const inner = unwrapValueNode(node);
+		if (ts.isPropertyAccessExpression(inner) && !inner.computed) {
+			const methodName = inner.name.text;
+			const object = unwrapValueNode(inner.expression);
+			if (!ts.isIdentifier(object)) return null;
+			if (object.text === 'Object' || object.text === 'Reflect')
+				return `${object.text}.${methodName}`;
+			const namespaceInit = localDeclarations.get(object.text);
+			if (!namespaceInit) return null;
+			const namespace = unwrapValueNode(namespaceInit);
+			if (
+				ts.isIdentifier(namespace) &&
+				(namespace.text === 'Object' || namespace.text === 'Reflect')
+			)
+				return `${namespace.text}.${methodName}`;
+			return null;
+		}
+		if (ts.isIdentifier(inner)) {
+			const destructured = destructuredInstallBuiltins.get(inner.text);
+			if (destructured) return destructured;
+			return resolveInstallCallee(localDeclarations.get(inner.text), depth + 1);
+		}
+		return null;
+	};
+	/**
+	 * R13-A: the class and side a target expression names — bounded,
+	 * resolving the value's reach: the literal `X.prototype` / `X`
+	 * spellings, an element access with a literal `prototype` key, and any
+	 * identifier binding that holds either value (an intermediate
+	 * `const p = X.prototype`, a destructure `const { prototype: p } = X`).
+	 */
+	const resolveInstallTargetClass = (node, depth) => {
+		if (!node || depth > 8) return null;
+		const inner = unwrapValueNode(node);
+		if (!inner) return null;
+		if (
+			(ts.isPropertyAccessExpression(inner) &&
+				!inner.computed &&
+				inner.name.text === 'prototype') ||
+			(ts.isElementAccessExpression(inner) &&
+				ts.isStringLiteral(inner.argumentExpression) &&
+				inner.argumentExpression.text === 'prototype')
+		) {
+			const base = resolveInstallTargetClass(inner.expression, depth + 1);
+			return base && base.side === 'static' ? { name: base.name, side: 'prototype' } : null;
+		}
+		if (ts.isIdentifier(inner)) {
+			if (localClassNames.has(inner.text)) return { name: inner.text, side: 'static' };
+			const destructured = destructuredPrototypeNames.get(inner.text);
+			if (destructured) return destructured;
+			return resolveInstallTargetClass(localDeclarations.get(inner.text), depth + 1);
+		}
+		return null;
+	};
+	// R13-A: the names a destructure binds OUT OF a class's prototype —
+	// `const { prototype: p } = X` — keyed exactly as an intermediate
+	// binding of the prototype value is.
+	const destructuredPrototypeNames = new Map(); // bound name -> { name, side }
+	eachNode(sourceFile, (node) => {
+		if (
+			!ts.isVariableDeclaration(node) ||
+			!ts.isObjectBindingPattern(node.name) ||
+			!node.initializer
+		)
+			return;
+		const source = resolveInstallTargetClass(node.initializer, 0);
+		if (!source) return;
+		for (const element of node.name.elements) {
+			if (element.dotDotDotToken || !ts.isIdentifier(element.name)) continue;
+			const key = element.propertyName ?? element.name;
+			const keyText = ts.isIdentifier(key) ? key.text : ts.isStringLiteral(key) ? key.text : null;
+			if (keyText === 'prototype')
+				destructuredPrototypeNames.set(element.name.text, {
+					name: source.name,
+					side: 'prototype',
+				});
+		}
+	});
+	eachNode(sourceFile, (node) => {
+		if (ts.isCallExpression(node) && node.arguments.length > 0) {
+			const builtin = resolveInstallCallee(node.expression, 0);
+			if (!builtin || !INSTALL_BUILTINS.has(builtin)) return;
+			const target = resolveInstallTargetClass(node.arguments[0], 0);
+			if (!target) return;
+			if (builtin === 'Object.assign') {
 				if (target.side === 'prototype') prototypeTainted.add(target.name);
-				else staticTainted.add(target.name);
-			} else if (builtin === 'Object.assign' && target.side === 'prototype')
-				prototypeTainted.add(target.name);
+				return;
+			}
+			if (target.side === 'prototype') prototypeTainted.add(target.name);
+			else staticTainted.add(target.name);
 		}
 		if (
 			ts.isBinaryExpression(node) &&
@@ -2390,7 +2501,7 @@ function previewValuePathFindings(file, sourceFile) {
 		) {
 			const lhs = unwrapValueNode(node.left);
 			if (ts.isPropertyAccessExpression(lhs) || ts.isElementAccessExpression(lhs)) {
-				const target = taintTargetClass(lhs.expression);
+				const target = resolveInstallTargetClass(lhs.expression, 0);
 				if (target && target.side === 'prototype') prototypeTainted.add(target.name);
 			}
 		}
@@ -2994,6 +3105,14 @@ function previewValuePathFindings(file, sourceFile) {
 		// `await relayAsync(preview)` IS the reference the relay returns, so the
 		// identity survives the await exactly as it survives the call.
 		if (ts.isAwaitExpression(inner)) return holdsValue(inner.expression);
+		// R13-D: a SPREAD of a value-carrying array into call arguments
+		// distributes the reference onto the callee's parameters —
+		// `f(...args)` over `const args = [preview]` hands the value exactly
+		// as `f(preview)` does, and the direct-argument reading never met the
+		// position. The array reach is the same reading the iteration
+		// bindings judge: an array literal holding the value, a bound array
+		// container, a carrying transform or generator result.
+		if (ts.isSpreadElement(inner)) return arrayRooted(inner.expression);
 		if (ts.isIdentifier(inner)) return valueNames.has(inner.text);
 		// R10-3/R10-5: a `.value` read of a settled/iterator WRAPPER —
 		// `rs[0].value`, a `w.value` where `w` is bound to a wrapper,
@@ -6898,6 +7017,177 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 		// a member or element target derives nothing — the binding-position
 		// reading fails closed on it
 	};
+	// R13-C: a Vite plugin's `config` hook is handed the config object and
+	// RETURNS a partial config Vite MERGES into it — a hook that returns or
+	// mutates `resolve.alias` rewrites the table after this reader has
+	// judged the declaration, breaking the audit's premise that the table it
+	// reads is the table that ships. The reading is therefore:
+	//   - the hook's first parameter is seeded at the config level, so every
+	//     mutation, escape, and binding-position reading above judges what
+	//     flows through it (`(c.resolve!.alias as unknown[]).push(…)`, a
+	//     hand-off `mutate(c)`, a `return c` variant the exception admits);
+	//   - a return value that could contribute a `resolve.alias` — a literal
+	//     carrying the keys, or ANY unreadable shape — is an escape;
+	//   - an unreadable `config` member (a shorthand or a non-function
+	//     binding) is an escape.
+	// Inline plugin objects are only those the scan can READ: elements of a
+	// `plugins:` array literal (nested arrays, logical/conditional branches,
+	// and identifier bindings chased to a fixed bound). A plugin value the
+	// scan cannot read — a call result like `svelte(...)`, an import — keeps
+	// the pre-round-13 posture: the reading proves nothing about what it
+	// cannot see, and the real config's plugin list must stay clean.
+	const pluginConfigHookEscapes = new Set();
+	const pluginArrayInitializers = [];
+	eachNode(sourceFile, (node) => {
+		if (!ts.isPropertyAssignment(node)) return;
+		const key = ts.isIdentifier(node.name)
+			? node.name.text
+			: ts.isStringLiteral(node.name)
+				? node.name.text
+				: null;
+		if (key === 'plugins') pluginArrayInitializers.push(node.initializer);
+	});
+	/** Whether a readable returned object literal could contribute alias state. */
+	const returnContributesAlias = (objectLiteral) => {
+		for (const property of objectLiteral.properties) {
+			if (ts.isSpreadAssignment(property)) return true; // could carry resolve.alias
+			let key = null;
+			if (ts.isIdentifier(property.name)) key = property.name.text;
+			else if (ts.isStringLiteral(property.name)) key = property.name.text;
+			if (key === null) return true; // a computed key — unprovable
+			if (key === 'alias') return true; // fail closed at either level
+			if (key !== 'resolve') continue;
+			if (!ts.isPropertyAssignment(property)) return true; // shorthand — unreadable
+			const resolveValue = unwrapValueNode(property.initializer);
+			if (!ts.isObjectLiteralExpression(resolveValue)) return true; // unreadable
+			for (const resolveProperty of resolveValue.properties) {
+				if (ts.isSpreadAssignment(resolveProperty)) return true;
+				let resolveKey = null;
+				if (ts.isIdentifier(resolveProperty.name)) resolveKey = resolveProperty.name.text;
+				else if (ts.isStringLiteral(resolveProperty.name)) resolveKey = resolveProperty.name.text;
+				if (resolveKey === null) return true; // a computed key — unprovable
+				if (resolveKey === 'alias') return true;
+			}
+		}
+		return false;
+	};
+	/** Judge one readable `config` hook of an inline plugin object. */
+	const judgePluginConfigHook = (hookFn) => {
+		// The config Vite hands the hook IS the config object: seed its
+		// binding so the mutation/escape/binding-position readings judge it,
+		// chased to a fixed point by the derivation below. A destructured
+		// parameter is a binding position the reading cannot model.
+		const param = hookFn.parameters?.[0];
+		if (param) {
+			if (ts.isIdentifier(param.name)) deriveLevel(param.name.text, 'config');
+			else pluginConfigHookEscapes.add(param.getText(sourceFile).slice(0, 200));
+		}
+		// The hook's returns merge into the resolved config.
+		const returns = [];
+		if (hookFn.body && !ts.isBlock(hookFn.body)) returns.push(hookFn.body);
+		else
+			eachNode(hookFn.body ?? hookFn, (node) => {
+				if (ts.isReturnStatement(node) && node.expression) returns.push(node.expression);
+			});
+		for (const returned of returns) {
+			const value = unwrapValueNode(returned);
+			if (!value) continue;
+			if (value.kind === ts.SyntaxKind.NullKeyword || value.kind === ts.SyntaxKind.UndefinedKeyword)
+				continue; // returns nothing — contributes nothing
+			if (!ts.isObjectLiteralExpression(value) || returnContributesAlias(value))
+				pluginConfigHookEscapes.add(returned.getText(sourceFile).slice(0, 200));
+		}
+	};
+	/** Walk one position of a plugins list, bounded and cycle-guarded. */
+	const scanPluginValue = (node, depth) => {
+		if (!node || depth > 8) return;
+		const inner = unwrapValueNode(node);
+		if (!inner) return;
+		if (ts.isArrayLiteralExpression(inner)) {
+			for (const element of inner.elements) {
+				if (ts.isOmittedExpression(element)) continue;
+				scanPluginValue(element, depth + 1);
+			}
+			return;
+		}
+		if (ts.isSpreadElement(inner) || ts.isSpreadAssignment(inner)) {
+			// A spread list the scan can enumerate reads as its elements; one
+			// it cannot enumerate could hold a plugin with a config hook.
+			const spread = unwrapValueNode(inner.expression);
+			if (ts.isArrayLiteralExpression(spread)) {
+				scanPluginValue(spread, depth + 1);
+				return;
+			}
+			if (ts.isIdentifier(spread) && declarations.has(spread.text)) {
+				scanPluginValue(declarations.get(spread.text), depth + 1);
+				return;
+			}
+			pluginConfigHookEscapes.add(inner.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		if (ts.isConditionalExpression(inner)) {
+			scanPluginValue(inner.whenTrue, depth + 1);
+			scanPluginValue(inner.whenFalse, depth + 1);
+			return;
+		}
+		if (
+			ts.isBinaryExpression(inner) &&
+			(inner.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+				inner.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+				inner.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+		) {
+			scanPluginValue(inner.left, depth + 1);
+			scanPluginValue(inner.right, depth + 1);
+			return;
+		}
+		if (
+			inner.kind === ts.SyntaxKind.FalseKeyword ||
+			inner.kind === ts.SyntaxKind.NullKeyword ||
+			inner.kind === ts.SyntaxKind.UndefinedKeyword ||
+			ts.isVoidExpression(inner)
+		)
+			return;
+		if (ts.isIdentifier(inner)) {
+			// Chase a bound plugin (or plugin list); an import or an unbound
+			// name stays opaque, exactly as a call result does.
+			const initializer = declarations.get(inner.text);
+			if (initializer && initializer !== inner) scanPluginValue(initializer, depth + 1);
+			return;
+		}
+		if (!ts.isObjectLiteralExpression(inner)) return; // svelte(…) and kin — opaque
+		for (const property of inner.properties) {
+			let key = null;
+			if (ts.isMethodDeclaration(property) || ts.isPropertyAssignment(property)) {
+				if (ts.isIdentifier(property.name)) key = property.name.text;
+				else if (ts.isStringLiteral(property.name)) key = property.name.text;
+			} else if (ts.isShorthandPropertyAssignment(property)) key = property.name.text;
+			if (key !== 'config') continue;
+			if (ts.isMethodDeclaration(property)) {
+				judgePluginConfigHook(property);
+				continue;
+			}
+			if (ts.isPropertyAssignment(property)) {
+				const value = unwrapValueNode(property.initializer);
+				if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+					judgePluginConfigHook(value);
+					continue;
+				}
+				// A bound hook the scan can chase reads as its declaration.
+				if (ts.isIdentifier(value) && declarations.has(value.text)) {
+					const bound = unwrapValueNode(declarations.get(value.text));
+					if (ts.isArrowFunction(bound) || ts.isFunctionExpression(bound)) {
+						judgePluginConfigHook(bound);
+						continue;
+					}
+				}
+				pluginConfigHookEscapes.add(property.getText(sourceFile).slice(0, 200));
+				continue;
+			}
+			// a shorthand `config` binding — the function is elsewhere
+			pluginConfigHookEscapes.add(property.getText(sourceFile).slice(0, 200));
+		}
+	};
+	for (const initializer of pluginArrayInitializers) scanPluginValue(initializer, 0);
 	{
 		let changed = true;
 		while (changed) {
@@ -7171,6 +7461,21 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			classifyTransport(node.expression);
 			return;
 		}
+		// R13-B: a for-of or for-in ITERATION over the state — `for await`
+		// included, for-of being the same statement node with an await
+		// modifier — binds the loop variable to the table's entries (or its
+		// keys), and a write through the loop variable rewrites an entry the
+		// runtime resolves with. The derivation models no iteration binding,
+		// so the iterable position fails closed like every other position
+		// the reading cannot model.
+		if (
+			(ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
+			!inAliasDeclaration(node.expression) &&
+			containsAliasStateRead(node.expression)
+		) {
+			recordPositionEscape(node.expression);
+			return;
+		}
 		// a concise arrow body IS its return
 		if (ts.isArrowFunction(node) && node.body && !ts.isBlock(node.body)) {
 			classifyTransport(node.body);
@@ -7219,10 +7524,16 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				`binds the resolve.alias state through a position the scan cannot track (${snippet}) — a binding the reading cannot model is an escape it cannot rule out, so the table is unreadable`
 			);
 	}
+	for (const snippet of pluginConfigHookEscapes) {
+		unresolved.push(
+			`leaves resolve.alias open to a plugin config() hook (${snippet}) — Vite merges what the hook returns or mutates into the config the runtime resolves with, so the table the scan reads is not the table that ships`
+		);
+	}
 	if (
 		aliasMutationSnippets.size > 0 ||
 		aliasEscapeSnippets.size > 0 ||
-		aliasPositionEscapeSnippets.size > 0
+		aliasPositionEscapeSnippets.size > 0 ||
+		pluginConfigHookEscapes.size > 0
 	) {
 		for (const snippet of aliasMutationSnippets)
 			unresolved.push(

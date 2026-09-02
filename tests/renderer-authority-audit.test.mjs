@@ -5365,7 +5365,380 @@ test('a barrel re-export through an alias is named by the tracer (R12-5 isolatio
 	);
 });
 
-test('the tree audits clean after every round-10, round-11, and round-12 plant is uprooted', () => {
+/* ============================================================
+   Round 13 — R12-A…D: the value's reach beyond the spelling
+   ============================================================
+
+   The round-12 closure keyed three readings on TEXTUAL spellings, and the
+   round-13 attack reached the same state through spellings those readings
+   never met. All four closures follow the lesson the round-11 escape
+   closure taught: track the VALUE's reach, not the spelling.
+
+   R12-A planted five prototype installs the taint reading keyed out — the
+   builtin bound to an identifier, a namespace alias, the prototype value
+   held by an intermediate binding, an element access with a literal key,
+   and a destructure — each installing a preview getter over a green
+   audit. The callee and the target now each resolve through the
+   declaration map, and the install taints exactly as the literal spelling
+   does.
+
+   R12-B planted a for-of over the alias table — direct, through a derived
+   table name, and `for await` — and the loop variable rewrote entries
+   over a green audit. An iteration position fails closed like every other
+   position the derivation does not model.
+
+   R12-C planted Vite plugin `config()` hooks — the audit had no concept
+   of the plugins array — returning or mutating `resolve.alias`. The
+   round-12 head caught the two quoted plants only INCIDENTALLY: the
+   returned hook's own `alias:` literal tripped the duplicate-declaration
+   rule and the mutation hook tripped the textual chain rule, while a hook
+   that injects the table through neither shape sailed through. The hook's
+   first parameter is now seeded at the config level so the existing
+   mutation/escape/binding-position readings judge what flows through it,
+   a return value that could contribute a `resolve.alias` is an escape,
+   and an unreadable hook shape fails closed — while opaque plugin values
+   (a call like `svelte(...)`) and readable hooks that provably contribute
+   no alias state stay clean.
+
+   R12-D laundered the preview value past the call scan with a spread
+   argument — `r12f9(...args)` over `const args = [preview]` — the
+   call-side mirror of the round-9 rest-parameter closure. A spread of a
+   value-carrying array now holds the value at the call gate, judged
+   exactly as a direct argument is. */
+
+const R13_GETTER_TAIL = (cls, inst) =>
+	`\tconst ${inst} = new ${cls}();\n` +
+	`\tif (preview) { const v = ${inst}.g; if (v) v.html = '<img src=x>'; }\n`;
+
+test('prototype installs through aliased spellings fail closed (R13-A exact plants)', () => {
+	const shapes = [
+		[
+			'W1 builtin alias callee',
+			'\tconst r12dp = Object.defineProperty;\n' +
+				'\tclass R12TA {}\n' +
+				"\tr12dp(R12TA.prototype, 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TA', 'r12ta'),
+		],
+		[
+			'W2 intermediate prototype binding',
+			'\tclass R12TB {}\n' +
+				'\tconst r12pb = R12TB.prototype;\n' +
+				"\tObject.defineProperty(r12pb, 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TB', 'r12tb'),
+		],
+		[
+			'W3 namespace alias callee',
+			'\tconst R12R = Reflect;\n' +
+				'\tclass R12TC {}\n' +
+				"\tR12R.defineProperty(R12TC.prototype, 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TC', 'r12tc'),
+		],
+		[
+			'W4 element-access prototype target',
+			'\tclass R12TD {}\n' +
+				"\tObject.defineProperty(R12TD['prototype'], 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TD', 'r12td'),
+		],
+		[
+			'W5 destructured prototype binding',
+			'\tclass R12TE {}\n' +
+				'\tconst { prototype: r12pe } = R12TE;\n' +
+				"\tObject.defineProperty(r12pe, 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TE', 'r12te'),
+		],
+		[
+			'destructured builtin extraction',
+			'\tconst { defineProperty: r12dp2 } = Object;\n' +
+				'\tclass R12TF {}\n' +
+				"\tr12dp2(R12TF.prototype, 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TF', 'r12tf'),
+		],
+		[
+			'two-hop callee alias',
+			'\tconst r12da = Object.defineProperty;\n' +
+				'\tconst r12db = r12da;\n' +
+				'\tclass R12TG {}\n' +
+				"\tr12db(R12TG.prototype, 'g', { get() { return preview; } });\n" +
+				R13_GETTER_TAIL('R12TG', 'r12tg'),
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} install must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} install must be a value-path finding:\n${output}`
+				);
+				assert.match(
+					output,
+					/writes to v\.html/,
+					`the ${label} install must taint the getter read:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('aliased installs on non-class targets stay clean (R13-A positives)', () => {
+	const shapes = [
+		[
+			'an aliased builtin install on a plain object',
+			"\tconst r12dp3 = Object.defineProperty;\n\tconst r12obj2: { g?: unknown } = {};\n\tr12dp3(r12obj2, 'g', { value: 1 });\n\tif (preview) console.log(r12obj2.g);\n",
+		],
+		[
+			'an aliased builtin install on an unbound name',
+			"\tconst r12dp4 = Object.defineProperty;\n\tdeclare const r12foreign: { g?: unknown };\n\tr12dp4(r12foreign, 'g', { value: 1 });\n\tif (preview) console.log(r12foreign.g);\n",
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+test('iteration over the alias table fails closed (R13-B exact plants)', () => {
+	const shapes = [
+		[
+			'for-of over the table',
+			"for (const r12e of r10cfg.resolve.alias) { (r12e as { find?: unknown }).find = '@r12evil2'; }",
+		],
+		[
+			'for-of over a derived table name',
+			"const r12tab = r10cfg.resolve.alias;\n\tfor (const r12e of r12tab) { (r12e as { find?: unknown }).find = '@r12evil2'; }",
+		],
+		[
+			'for await over the table',
+			"void (async () => { for await (const r12e of r10cfg.resolve.alias) { (r12e as { find?: unknown }).find = '@r12evil2'; } })();",
+		],
+		['for-in over the table', 'for (const r12k in r10cfg.resolve.alias) { void r12k; }'],
+	];
+	for (const [label, mutation] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail:\n${output}`);
+				assert.match(
+					output,
+					/(?:mutates resolve\.alias after the declaration|binds the resolve\.alias state through a position the scan cannot track)/,
+					`the ${label} shape must be named as an escape of the table:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('plugin config() hooks injecting the alias table fail closed (R13-C exact plants)', () => {
+	const R13C_EVIL = "{ find: 'svelte', replacement: path.resolve(root, 'build/__r12x__.js') }";
+	const plugin = (body) => `plugins: [\n\t\t\t{\n${body}\n\t\t\t},`;
+	const shapes = [
+		[
+			'config() hook returning resolve.alias',
+			plugin(
+				"\t\t\t\tname: 'r12-evil-plugin',\n" +
+					'\t\t\t\tconfig() {\n' +
+					`\t\t\t\t\treturn { resolve: { alias: [${R13C_EVIL}] } };\n` +
+					'\t\t\t\t},'
+			),
+			/leaves resolve\.alias open to a plugin config\(\) hook/,
+		],
+		[
+			'config() hook mutating the passed table',
+			plugin(
+				"\t\t\t\tname: 'r12-evil-plugin2',\n" +
+					'\t\t\t\tconfig(c: { resolve?: { alias?: unknown[] } }) {\n' +
+					`\t\t\t\t\t(c.resolve!.alias as unknown[]).push(${R13C_EVIL});\n` +
+					'\t\t\t\t},'
+			),
+			/(?:mutates resolve\.alias after the declaration|leaves resolve\.alias open to a plugin config\(\) hook)/,
+		],
+		[
+			'config() hook handing its parameter to unreadable code',
+			plugin(
+				"\t\t\t\tname: 'r12-evil-plugin3',\n" +
+					'\t\t\t\tconfig(c) {\n' +
+					'\t\t\t\t\t(globalThis as { r12m?: (c: unknown) => void }).r12m?.(c);\n' +
+					'\t\t\t\t},'
+			),
+			/(?:hands the resolve\.alias state to code the scan cannot read|leaves resolve\.alias open to a plugin config\(\) hook)/,
+		],
+		[
+			'config() hook returning an unreadable resolve object',
+			plugin(
+				"\t\t\t\tname: 'r12-evil-plugin4',\n" +
+					'\t\t\t\tconfig() {\n' +
+					'\t\t\t\t\tconst r12inj: { alias?: unknown[] } = {};\n' +
+					`\t\t\t\t\tReflect.set(r12inj, 'alias', [${R13C_EVIL}]);\n` +
+					'\t\t\t\t\treturn { resolve: r12inj };\n' +
+					'\t\t\t\t},'
+			),
+			/leaves resolve\.alias open to a plugin config\(\) hook/,
+		],
+	];
+	for (const [label, anchor, message] of shapes) {
+		withPlantedViteConfig(
+			(source) => source.replace('plugins: [', anchor),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} must fail:\n${output}`);
+				assert.match(output, message, `the ${label} must name the hook:\n${output}`);
+			}
+		);
+	}
+	// The bound-identifier spelling: the plugin object is chased out of a
+	// declaration, so the reading must follow the plugins list one hop.
+	withPlantedViteConfig(
+		(source) =>
+			source
+				.replace(
+					'const root =',
+					"const r12plugin = {\n\tname: 'r12-evil-plugin5',\n\tconfig() {\n\t\treturn { resolve: (globalThis as { r12r?: unknown }).r12r };\n\t},\n};\n\nconst root ="
+				)
+				.replace('plugins: [', 'plugins: [r12plugin,\n'),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a bound plugin with an alias hook must fail:\n${output}`);
+			assert.match(
+				output,
+				/leaves resolve\.alias open to a plugin config\(\) hook/,
+				`the bound plugin must name the hook:\n${output}`
+			);
+		}
+	);
+});
+
+test('readable plugins that contribute no alias state stay clean (R13-C positives)', () => {
+	const plugin = (body) => `plugins: [\n\t\t\t{\n${body}\n\t\t\t},`;
+	const shapes = [
+		[
+			'an inline plugin with no config hook',
+			plugin(
+				"\t\t\t\tname: 'r12-benign',\n\t\t\t\ttransform() {\n\t\t\t\t\treturn null;\n\t\t\t\t},"
+			),
+		],
+		[
+			'a config hook returning a clean partial',
+			plugin(
+				"\t\t\t\tname: 'r12-benign2',\n\t\t\t\tconfig() {\n\t\t\t\t\treturn { define: {} };\n\t\t\t\t},"
+			),
+		],
+		[
+			'a config hook returning resolve without alias',
+			plugin(
+				"\t\t\t\tname: 'r12-benign3',\n\t\t\t\tconfig() {\n\t\t\t\t\treturn { resolve: { extensions: ['.mjs'] } };\n\t\t\t\t},"
+			),
+		],
+		[
+			'an empty config hook',
+			plugin(
+				"\t\t\t\tname: 'r12-benign4',\n\t\t\t\tconfig() {\n\t\t\t\t\t// reads nothing, returns nothing\n\t\t\t\t},"
+			),
+		],
+	];
+	for (const [label, anchor] of shapes) {
+		withPlantedViteConfig(
+			(source) => source.replace('plugins: [', anchor),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+test('a spread-call argument handing the preview value fails the audit (R13-D exact plants)', () => {
+	const helper =
+		"\tfunction r12f9(p: DraftPreview | null) { if (p) p.html = '<img src=x>'; return p; }\n";
+	const shapes = [
+		[
+			'spread of a bound carrying array',
+			helper + '\tif (preview) { const r12args = [preview]; const v = r12f9(...r12args); }\n',
+		],
+		[
+			'spread of a literal carrying array',
+			helper + '\tif (preview) { const v = r12f9(...[preview]); }\n',
+		],
+		[
+			'spread at an offset position',
+			"\tfunction r12g9(a: number, p: DraftPreview | null) { if (p) p.html = '<img src=x>'; }\n" +
+				'\tif (preview) { const r12args = [preview]; r12g9(1, ...r12args); }\n',
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} hand-off must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} hand-off must be a value-path finding:\n${output}`
+				);
+				assert.match(
+					output,
+					/passes the preview value to r12[fg]9/,
+					`the ${label} hand-off must name the callee:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('direct hand-offs stay caught and read-only spreads stay clean (R13-D controls and positives)', () => {
+	const helper =
+		"\tfunction r12f9(p: DraftPreview | null) { if (p) p.html = '<img src=x>'; return p; }\n";
+	const caught = [
+		['a direct argument', helper + '\tif (preview) { const v = r12f9(preview); }\n'],
+		[
+			'an element-read argument',
+			helper + '\tif (preview) { const r12args = [preview]; const v = r12f9(r12args[0]); }\n',
+		],
+	];
+	for (const [label, plantText] of caught) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} hand-off must stay caught:\n${output}`);
+				assert.match(
+					output,
+					/passes the preview value to r12f9/,
+					`the ${label} hand-off must name the callee:\n${output}`
+				);
+			}
+		);
+	}
+	const clean = [
+		[
+			'a spread into a read-only helper',
+			"\tfunction r12ro(p: DraftPreview | null): number { return (p?.html ?? '').length; }\n" +
+				'\tif (preview) { const r12args = [preview]; console.log(r12ro(...r12args)); }\n',
+		],
+		[
+			'a spread of a fresh literal holding nothing',
+			'\tif (preview) console.log(Math.max(...[1, 2]));\n',
+		],
+	];
+	for (const [label, plantText] of clean) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+test('the tree audits clean after every round-10, round-11, round-12, and round-13 plant is uprooted', () => {
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });
