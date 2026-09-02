@@ -4595,7 +4595,313 @@ test('new URL anchors, owned targets, and non-executables stay clean (R10-7 posi
 	}
 });
 
-test('the tree audits clean after every round-10 plant is uprooted', () => {
+/* ============================================================
+   Round 11 — R11-1: alias-table escapes fail closed
+   ============================================================
+
+   The round-10 mutation reading matched the table's NAME textually, so the
+   round-11 attack mutated it wherever the literal's textual reach ended —
+   `Reflect.set(cfg.resolve, 'alias', …)`, `Object.defineProperty` on the
+   resolve object, a `push` through the identifier a destructure binds, and
+   an element write inside a helper the table is handed to. All four spellings
+   audited green at 34683b1, and under two of them `vite build` resolved the
+   `svelte` import to the planted shim — a runtime-hijacked bundle over a
+   green audit. Any write, mutation, or escape of the alias state — the
+   table, its `resolve` object, an identifier derived from either, or the
+   config object — makes the table unreadable and fails the audit. */
+
+const R11_EVIL_ENTRY = "{ find: 'svelte', replacement: path.resolve(root, 'build/__r11_x__.js') }";
+
+test('alias-table escapes fail closed (R11-1 exact plants)', () => {
+	const shapes = [
+		[
+			'Reflect.set naming the resolve object',
+			`Reflect.set(r10cfg.resolve, 'alias', [${R11_EVIL_ENTRY}]);`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'Object.defineProperty naming the resolve object',
+			`Object.defineProperty(r10cfg.resolve, 'alias', { value: [${R11_EVIL_ENTRY}] });`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'push through a destructured alias identifier',
+			`const { alias } = r10cfg.resolve;\n\t(alias as unknown[]).push(${R11_EVIL_ENTRY});`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'element write inside a helper handed the table',
+			`function r11w(t: unknown[]) { t[0] = ${R11_EVIL_ENTRY}; }\n\tr11w(r10cfg.resolve.alias as unknown[]);`,
+			/hands the resolve\.alias state to code the scan cannot read/,
+		],
+	];
+	for (const [label, mutation, message] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} escape must fail:\n${output}`);
+				assert.match(output, message, `the ${label} escape must be named:\n${output}`);
+			}
+		);
+	}
+});
+
+test('alias-table escape adjacents fail closed (R11-1 adjacent)', () => {
+	const shapes = [
+		[
+			'computed-key element write through a derived identifier',
+			`const { alias: r11alias } = r10cfg.resolve;\n\tconst r11k = 0;\n\t(r11alias as unknown[])[r11k] = ${R11_EVIL_ENTRY};`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'splice through a derived identifier',
+			`const { alias: r11a2 } = r10cfg.resolve;\n\t(r11a2 as unknown[]).splice(0, 0, ${R11_EVIL_ENTRY});`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'push inside a nested helper',
+			`function r11w2(t: unknown[]) { (t as unknown[]).push(${R11_EVIL_ENTRY}); }\n\tr11w2(r10cfg.resolve.alias as unknown[]);`,
+			/hands the resolve\.alias state to code the scan cannot read/,
+		],
+		[
+			'Function.prototype.call handed the table',
+			`Array.prototype.push.call(r10cfg.resolve.alias, ${R11_EVIL_ENTRY});`,
+			/hands the resolve\.alias state to code the scan cannot read/,
+		],
+		[
+			'Reflect.defineProperty naming the resolve object',
+			`Reflect.defineProperty(r10cfg.resolve, 'alias', { value: [${R11_EVIL_ENTRY}] });`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'Object.defineProperty naming the config object itself',
+			`Object.defineProperty(r10cfg, 'resolve', { value: (globalThis as { __r11?: unknown }).__r11 });`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'write to the resolve property of the config object',
+			`r10cfg.resolve = (globalThis as { __r11?: unknown }).__r11;`,
+			/mutates resolve\.alias after the declaration/,
+		],
+		[
+			'spread of the resolve object',
+			`const r11r = { ...r10cfg.resolve };`,
+			/hands the resolve\.alias state to code the scan cannot read/,
+		],
+		[
+			'spread of the config object',
+			`const r11c = { ...r10cfg };`,
+			/hands the resolve\.alias state to code the scan cannot read/,
+		],
+	];
+	for (const [label, mutation, message] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} escape must fail:\n${output}`);
+				assert.match(output, message, `the ${label} escape must be named:\n${output}`);
+			}
+		);
+	}
+});
+
+test('the wrapped config shape without a mutation stays clean (R11-1 positive)', () => {
+	// The escape readings judge the declaration's textual reach, not the
+	// wrapped shape itself: a config bound to a variable and returned stays
+	// clean while the real table reads exactly as it does unwrapped.
+	withPlantedViteConfig(
+		() => r10ConfigWithMutation(''),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 0, `the wrapped config without mutation must stay clean:\n${output}`);
+		}
+	);
+});
+
+/* ============================================================
+   Round 11 — R11-2: the heritage chase for member calls
+   ============================================================
+
+   The round-10 method readings keyed `owner.method` by the DECLARING owner,
+   so an instance whose class merely EXTENDS the declarer never matched —
+   `class A { m(p = preview) { return p } } class B extends A {}` then
+   `b.m()` audited green at 34683b1 with a live `v.html` write. Member
+   resolution now chases the extends clause to the declaring base, and a
+   method that cannot be proven after the chase fails closed. */
+
+test('inherited method relays fail closed (R11-2 exact plants)', () => {
+	const shapes = [
+		[
+			'single-hop heritage relay',
+			'\tclass R11A { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R11B extends R11A {}\n' +
+				'\tconst r11b = new R11B();\n' +
+				"\tif (preview) { const v = r11b.m(); if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'two-hop heritage relay',
+			'\tclass R11A2 { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R11M2 extends R11A2 {}\n' +
+				'\tclass R11B2 extends R11M2 {}\n' +
+				'\tconst r11b2 = new R11B2();\n' +
+				"\tif (preview) { const v = r11b2.m(); if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'class-expression base relay',
+			'\tconst R11A3 = class {\n' +
+				'\t\tm(p: DraftPreview | null = preview): DraftPreview | null { return p; }\n' +
+				'\t};\n' +
+				'\tclass R11B3 extends R11A3 {}\n' +
+				'\tconst r11b3 = new R11B3();\n' +
+				"\tif (preview) { const v = r11b3.m(); if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'class expression WITH heritage relay',
+			'\tclass R11A3b { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tconst R11B3b = class extends R11A3b {};\n' +
+				'\tconst r11b3b = new R11B3b();\n' +
+				"\tif (preview) { const v = r11b3b.m(); if (v) v.html = '<img src=x>'; }\n",
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} must be a value-path finding:\n${output}`
+				);
+				assert.match(output, /writes to v\.html/, `the ${label} must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('inherited relay adjacents fail closed (R11-2 adjacent)', () => {
+	const shapes = [
+		[
+			'inherited getter relay',
+			'\tclass R11GA {\n' +
+				'\t\tget g(): DraftPreview | null { return preview; }\n' +
+				'\t}\n' +
+				'\tclass R11GB extends R11GA {}\n' +
+				'\tconst r11gb = new R11GB();\n' +
+				"\tif (preview) { const v = r11gb.g; if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'inherited async method relay',
+			'\tclass R11AA {\n' +
+				'\t\tasync am(p: DraftPreview | null = preview): Promise<DraftPreview | null> { return p; }\n' +
+				'\t}\n' +
+				'\tclass R11BA extends R11AA {}\n' +
+				'\tconst r11ba = new R11BA();\n' +
+				"\tif (preview) { const v = r11ba.am(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'inherited generator method relay',
+			'\tclass R11GMA {\n' +
+				'\t\t*gm(p: DraftPreview | null = preview): Generator<never, DraftPreview | null, unknown> { return p; }\n' +
+				'\t}\n' +
+				'\tclass R11GMB extends R11GMA {}\n' +
+				'\tconst r11gmb = new R11GMB();\n' +
+				"\tif (preview) { const v = r11gmb.gm(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'interface-only heritage fails closed',
+			'\tinterface R11I { m(p?: DraftPreview | null): DraftPreview | null; }\n' +
+				'\tclass R11B4 implements R11I {}\n' +
+				'\tconst r11b4 = new R11B4();\n' +
+				"\tif (preview) { const v = r11b4.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'inherited .call dispatch relay',
+			'\tclass R11CCA { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R11CCB extends R11CCA {}\n' +
+				'\tconst r11ccb = new R11CCB();\n' +
+				"\tif (preview) { const v = r11ccb.m.call(r11ccb); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'inherited mutating method receiving the value',
+			"\tclass R11MA { wm(p: DraftPreview | null): void { if (p) p.html = '<img src=x>'; } }\n" +
+				'\tclass R11MB extends R11MA {}\n' +
+				'\tconst r11mb = new R11MB();\n' +
+				'\tif (preview) r11mb.wm(preview);\n',
+			/writes to p\.html/,
+		],
+		[
+			'computed call over inherited value-default methods',
+			'\tclass R11KA { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R11KB extends R11KA {}\n' +
+				'\tconst r11kb = new R11KB();\n' +
+				"\tconst r11key = 'm';\n" +
+				'\tif (preview) r11kb[r11key]();\n',
+			/a computed member call on an object whose method defaults read the preview value/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} must be named:\n${output}`);
+			}
+		);
+	}
+});
+
+test('inherited read-only members stay clean (R11-2 positives)', () => {
+	const shapes = [
+		[
+			'an inherited read-only method receiving the value',
+			"\tclass R11PA { len(p: DraftPreview | null): number { return (p?.html ?? '').length; } }\n" +
+				'\tclass R11PB extends R11PA {}\n' +
+				'\tconst r11pb = new R11PB();\n' +
+				'\tif (preview) console.log(r11pb.len(preview));\n',
+		],
+		[
+			'an inherited getter returning a fresh literal',
+			"\tclass R11GA2 { get g(): string { return 'x'; } }\n" +
+				'\tclass R11GB2 extends R11GA2 {}\n' +
+				'\tconst r11gb2 = new R11GB2();\n' +
+				'\tif (preview) console.log(r11gb2.g.length);\n',
+		],
+		[
+			'a member call on a non-local instance',
+			'\tconst r11d = new Date();\n' +
+				'\tif (preview) console.log(r11d.getTime(), r11d.toISOString());\n',
+		],
+		[
+			'a static method call on the class name',
+			'\tclass R11S { static make(): number { return 1; } }\n' +
+				'\tif (preview) console.log(R11S.make());\n',
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+test('the tree audits clean after every round-10 and round-11 plant is uprooted', () => {
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });

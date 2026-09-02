@@ -355,6 +355,49 @@ bundles the worker/asset spelling — with directory anchors, owned targets,
 and non-executable paths staying clean, and states the `node_modules` benign
 rule as policy rather than proof (R9-1 paragraph above).
 
+Round-11 (R11-1…R11-3) closed the shapes the round-11 standing attack
+planted against that state, and this note again records only what the gate
+proves. **R11-1** treats the alias table as UNREADABLE the moment it
+escapes its literal's textual reach. The round-10 mutation reading matched
+the table's name textually; the round-11 attack executed four spellings it
+did not reach — `Reflect.set(cfg.resolve, 'alias', …)`,
+`Object.defineProperty(cfg.resolve, 'alias', …)`, a `push` through the
+identifier a destructure binds (`const { alias } = cfg.resolve`), and an
+element write inside a helper handed the table (`w(cfg.resolve.alias)`) —
+each shipping a hijacked `svelte` resolution at runtime over a green audit.
+Now: every identifier the table, its `resolve` parent, or the config object
+is assigned or destructured into is DERIVED, chased to a fixed point with
+casts and parentheses unwrapped; the builtin mutation APIs (`Object.assign`,
+`Object.defineProperty`, `Object.defineProperties`, `Reflect.set`,
+`Reflect.defineProperty`) judge by their target, which is the table, its
+`resolve` object, any derived name, or the config object; and the table, its
+`resolve` object, a derived name, or the config object flowing into ANY call
+argument, member-call receiver, or spread is an escape. A write, a mutation,
+or an escape makes the table unreadable, and the universe closure, the
+component-callee resolution, and the barrel tracer all fail closed on the
+unreadable table. **R11-2** chases the heritage clause for member calls: an
+instance whose own class lacks the callee member resolves to the base that
+declares it — bounded, cycle-guarded, multi-hop and class-expression
+heritage included, exactly as the prototype walk runs — and fails closed
+when the member cannot be proven after the chase: a base the file never
+declares, a heritage expression no identifier names (a mixin call), the
+depth bound, or a provably-absent member (`implements` clauses are
+type-level and declare nothing at runtime). Method defaults bind, a
+`return p` marks preview-returning, the mutation reading judges, and
+`.call`/`.apply` dispatch resolves through the same chase; class GETTERS
+receive the same reading at property-read positions, direct and inherited
+alike; and the computed-member fail-closed reading walks the whole chain
+for value-default methods. **R11-3** makes the barrel tracer consult the
+alias table BEFORE owned resolution — exactly as an import does, and exactly
+as the runtime does: the bundler matches every raw specifier against the
+table first — so a hijacked barrel re-export is caught there rather than
+left to the universe closure alone, and corrects two comments to the
+mechanism the code actually runs: a non-literal `new URL(…, import.meta.url)`
+first argument is DROPPED (Vite's asset/worker handling is a static rewrite
+that fires only on literal targets, so a computed target bundles nothing),
+while a computed dynamic import fails closed (the runtime loader reaches
+it).
+
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
 "Canonical sanitized HTML. Never fall back to rendering content when this

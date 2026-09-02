@@ -171,6 +171,23 @@
  *      Vite bundles — with a route into `node_modules` staying clean only
  *      as POLICY (the declared and installed dependency graph SEC-3
  *      screens), never as a byte-level proof over what an install contains.
+ *      Round-11 (R11-1/R11-2/R11-3) closes what that state still read or
+ *      resolved too narrowly: the alias table is treated as UNREADABLE the
+ *      moment it escapes the literal's textual reach — identifiers assigned
+ *      or destructured from any chain ending in `resolve`/`alias` (chased to
+ *      a fixed point), the builtin mutation APIs (`Object.assign`,
+ *      `Object.defineProperty`, `Object.defineProperties`, `Reflect.set`,
+ *      `Reflect.defineProperty`) handed the table, its `resolve` object, or
+ *      the config object, and the state flowing into any call argument,
+ *      member-call receiver, or spread — making every consumer fail closed;
+ *      a member call on an instance whose own class lacks the member CHASES
+ *      THE HERITAGE CLAUSE to the declaring base — bounded, cycle-guarded,
+ *      multi-hop and class-expression heritage included — failing closed when
+ *      the member cannot be proven, with class getters and computed member
+ *      calls reading the same chain; and the barrel tracer consults the alias
+ *      table BEFORE owned resolution, exactly as an import and the runtime
+ *      do, catching a hijacked re-export rather than leaving it to the
+ *      universe closure alone.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -944,6 +961,12 @@ function bareSpecifierPackage(specifier) {
  * element write, a mutating method call (`push`/`splice` and kin),
  * `Object.assign`, or a mutated identifier- or shorthand-bound table — which
  * the runtime honors while a sequential reader meets only the declaration.
+ * R11-1 adds the ESCAPE closure: identifiers the table, its `resolve` parent,
+ * or the config object is bound into (chased to a fixed point), any builtin
+ * mutation API handed one of those targets, and the state flowing into any
+ * call argument, member-call receiver, or spread — once the reference leaves
+ * the declaration's textual reach, the table is unreadable and every
+ * consumer fails closed.
  */
 function readBuildAliases() {
 	const aliases = [];
@@ -1034,9 +1057,16 @@ function importMetaGlobPatterns(source, { jsx = false } = {}) {
  *
  * R10-7: the round-10 review proved worker/asset routes into excluded roots
  * dropped silently while Vite bundled both patterns. Literal targets — the
- * shape Vite rewrites — are collected and judged as routes; a target no
- * static read can name is left to the same posture the dynamic-import reading
- * takes over its own unreadable positions elsewhere in this audit.
+ * shape Vite rewrites — are collected and judged as routes.
+ *
+ * R11-3: a target that is not a literal is DROPPED, not failed closed, and
+ * that asymmetry with the dynamic-import reading — which fails closed on its
+ * unreadable positions — is deliberate: Vite's `new URL(…, import.meta.url)`
+ * asset/worker handling is a build-time static rewrite that only ever fires
+ * on a literal target, so a computed first argument is never rewritten and
+ * never bundles a module — it stays the runtime's concern. A computed
+ * `import(…)` is the opposite case — the runtime loader reaches it — which
+ * is why that reading fails closed where this one can safely look away.
  */
 function metaUrlLiterals(source, { jsx = false } = {}) {
 	const sourceFile = parseTypeScript(source, { jsx });

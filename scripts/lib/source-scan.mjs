@@ -2133,6 +2133,17 @@ function previewValuePathFindings(file, sourceFile) {
 	const methodInfos = new Map();
 	const instanceClass = new Map();
 	const previewReturningMethods = new Set();
+	// R11-2: class HERITAGE — the names locally declared classes (declarations
+	// and variable-bound class expressions), the expression each `extends`
+	// clause names (`implements` clauses are type-level and declare nothing at
+	// runtime, so only `extends` feeds the chase), and the GETTERS a class
+	// declares, keyed `owner.getter`. A member call on an instance whose own
+	// class lacks the member chases the heritage clause to the base, bounded
+	// and cycle-guarded, and fails closed when the member cannot be proven.
+	const localClassNames = new Set();
+	const classHeritage = new Map();
+	const classGetterInfos = new Map();
+	const HERITAGE_DEPTH_BOUND = 8;
 	// R10-4: local functions whose RETURNS are literal containers holding the
 	// value — `function box(v) { return [v]; }` — so a destructure or an
 	// element/property read of the call result binds the identity. `array` is
@@ -2162,6 +2173,25 @@ function previewValuePathFindings(file, sourceFile) {
 			return true;
 		}
 		return false;
+	};
+
+	/**
+	 * R11-2: the expression a class's `extends` clause names, unwrapped — an
+	 * `implements` clause is type-level and declares nothing at runtime, so
+	 * only the extends clause feeds the heritage chase.
+	 */
+	const heritageExpression = (classNode) => {
+		const clause = (classNode.heritageClauses ?? []).find(
+			(c) => c.token === ts.SyntaxKind.ExtendsKeyword
+		);
+		const type = clause?.types?.[0];
+		return type ? unwrapValueNode(type.expression) : null;
+	};
+	/** Record a locally declared class — its name, and its extends base. */
+	const recordLocalClass = (name, classNode) => {
+		localClassNames.add(name);
+		const base = heritageExpression(classNode);
+		if (base) classHeritage.set(name, base);
 	};
 
 	eachNode(sourceFile, (node) => {
@@ -2203,6 +2233,7 @@ function previewValuePathFindings(file, sourceFile) {
 							: [],
 				},
 			]);
+			recordLocalClass(node.name.text, node);
 		}
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
 			const init = unwrapValueNode(node.initializer);
@@ -2219,6 +2250,7 @@ function previewValuePathFindings(file, sourceFile) {
 								: [],
 					},
 				]);
+				recordLocalClass(node.name.text, init);
 			}
 		}
 		if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) {
@@ -2269,23 +2301,105 @@ function previewValuePathFindings(file, sourceFile) {
 				}
 			}
 			if (ts.isClassExpression(init)) {
-				for (const member of init.members)
+				for (const member of init.members) {
 					if (ts.isMethodDeclaration(member) && ts.isIdentifier(member.name))
 						methodInfos.set(`${node.name.text}.${member.name.text}`, [
 							{ node: member, paramNames: member.parameters.map((p) => p.name) },
 						]);
+					// R11-2: class GETTERS — the inherited-getter relay is the
+					// member spelling of the object-literal getter reading.
+					if (ts.isGetAccessorDeclaration(member) && ts.isIdentifier(member.name))
+						classGetterInfos.set(`${node.name.text}.${member.name.text}`, [
+							...(classGetterInfos.get(`${node.name.text}.${member.name.text}`) ?? []),
+							member,
+						]);
+				}
 			}
 			if (ts.isNewExpression(init) && ts.isIdentifier(init.expression))
 				instanceClass.set(node.name.text, init.expression.text);
 		}
 		if (ts.isClassDeclaration(node) && node.name) {
-			for (const member of node.members)
+			for (const member of node.members) {
 				if (ts.isMethodDeclaration(member) && ts.isIdentifier(member.name))
 					methodInfos.set(`${node.name.text}.${member.name.text}`, [
 						{ node: member, paramNames: member.parameters.map((p) => p.name) },
 					]);
+				if (ts.isGetAccessorDeclaration(member) && ts.isIdentifier(member.name))
+					classGetterInfos.set(`${node.name.text}.${member.name.text}`, [
+						...(classGetterInfos.get(`${node.name.text}.${member.name.text}`) ?? []),
+						member,
+					]);
+			}
 		}
 	});
+
+	/**
+	 * R11-2: chase a locally declared class's heritage clause for a member its
+	 * own body does not declare — `class B extends A {}` then `b.m()` resolves
+	 * to `A`'s method exactly as the runtime's prototype walk does. Bounded,
+	 * cycle-guarded, and honest about what it cannot see: a chain that reaches
+	 * an imported or otherwise undeclared base, a heritage expression no
+	 * identifier names (a mixin call), or the depth bound returns
+	 * `proven: false`; a chain exhausted through locally declared classes with
+	 * the member nowhere returns `proven: true` with no infos — the member is
+	 * provably absent. Callers fail closed on both unproven shapes.
+	 */
+	const chaseClassMember = (className, memberName, memberMap) => {
+		const visited = new Set();
+		let current = className;
+		for (let depth = 0; depth < HERITAGE_DEPTH_BOUND; depth += 1) {
+			if (!localClassNames.has(current) || visited.has(current))
+				return { infos: null, declaringName: null, proven: false };
+			visited.add(current);
+			const infos = memberMap.get(`${current}.${memberName}`);
+			if (infos) return { infos, declaringName: current, proven: true };
+			if (!classHeritage.has(current)) return { infos: null, declaringName: null, proven: true };
+			const base = unwrapValueNode(classHeritage.get(current));
+			if (!ts.isIdentifier(base)) return { infos: null, declaringName: null, proven: false };
+			current = base.text;
+		}
+		return { infos: null, declaringName: null, proven: false };
+	};
+	/**
+	 * R11-2: the locally declared classes an instance's heritage chain visits,
+	 * starting at the instance's own class — the computed-member reading walks
+	 * these for value-default methods the instance selects by an unknowable
+	 * key. Stops at the first base the chase cannot prove local.
+	 */
+	const classChain = (className) => {
+		const chain = [];
+		const visited = new Set();
+		let current = className;
+		for (let depth = 0; depth < HERITAGE_DEPTH_BOUND; depth += 1) {
+			if (!localClassNames.has(current) || visited.has(current)) break;
+			visited.add(current);
+			chain.push(current);
+			if (!classHeritage.has(current)) break;
+			const base = unwrapValueNode(classHeritage.get(current));
+			if (!ts.isIdentifier(base)) break;
+			current = base.text;
+		}
+		return chain;
+	};
+	/**
+	 * R11-2: the method infos a member callee resolves to — the owner's own
+	 * key first (an object literal or a static call), then the instance's
+	 * class, then the heritage chase when the class itself lacks the member.
+	 * Null when nothing the scan can see declares the method; how null is
+	 * judged belongs to each consumer (the carrier and the call scan fail
+	 * closed for instances of locally declared classes, the binding pass has
+	 * nothing to bind).
+	 */
+	const resolveMemberMethodInfos = (owner, memberName) => {
+		const direct = methodInfos.get(`${owner}.${memberName}`);
+		if (direct) return direct;
+		if (!instanceClass.has(owner)) return null;
+		const cls = instanceClass.get(owner);
+		const onClass = methodInfos.get(`${cls}.${memberName}`);
+		if (onClass) return onClass;
+		if (!localClassNames.has(cls)) return null;
+		return chaseClassMember(cls, memberName, methodInfos).infos;
+	};
 
 	/** `$state(<value>)` / `$state.raw(<value>)` — same-reference rune wrappers. */
 	const runeAliasArgument = (call) => {
@@ -2723,6 +2837,27 @@ function previewValuePathFindings(file, sourceFile) {
 		return false;
 	};
 
+	/**
+	 * R11-2: whether a MEMBER call's result carries the reference — the R10-3
+	 * reading (a method proven preview-returning) extended down the heritage
+	 * clause: an instance whose own class lacks the member resolves to the
+	 * base that declares it, multi-hop and class-expression heritage included.
+	 * An instance of a LOCALLY declared class whose member cannot be proven
+	 * after the chase — provably absent, or the chain reaches a base the scan
+	 * cannot see — fails closed: the method could return the reference.
+	 * Instances of classes the file never declares keep the R10-3 posture.
+	 */
+	const memberCallCarries = (owner, methodName) => {
+		if (previewReturningMethods.has(`${owner}.${methodName}`)) return true;
+		if (!instanceClass.has(owner)) return false;
+		const cls = instanceClass.get(owner);
+		if (previewReturningMethods.has(`${cls}.${methodName}`)) return true;
+		if (!localClassNames.has(cls)) return false;
+		const chase = chaseClassMember(cls, methodName, methodInfos);
+		if (!chase.proven || !chase.infos) return true; // unproven — fail closed
+		return previewReturningMethods.has(`${chase.declaringName}.${methodName}`);
+	};
+
 	/** Whether an expression provably holds the preview reference. */
 	const holdsValue = (expr) => {
 		if (!expr) return false;
@@ -2773,7 +2908,26 @@ function previewValuePathFindings(file, sourceFile) {
 		}
 		if (ts.isPropertyAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
 			const props = containerPaths.get(inner.expression.text);
-			return Boolean(props && (props.has(inner.name.text) || props.has('*')));
+			if (props && (props.has(inner.name.text) || props.has('*'))) return true;
+			// R11-2: a GETTER read on a class instance — the object-literal
+			// getter reading extended down the heritage clause, so
+			// `class B extends A {}` then `b.g` resolves the getter `A`
+			// declares. A getter the chase cannot prove fails closed exactly as
+			// an unproven method does; a getter proven to return a fresh value
+			// stays clean, and instances of classes the file never declares
+			// keep the pre-round-11 posture.
+			if (!inner.computed && instanceClass.has(inner.expression.text)) {
+				const cls = instanceClass.get(inner.expression.text);
+				let accessors = classGetterInfos.get(`${cls}.${inner.name.text}`) ?? null;
+				if (!accessors && localClassNames.has(cls)) {
+					const chase = chaseClassMember(cls, inner.name.text, classGetterInfos);
+					if (!chase.proven) return true; // unproven — fail closed
+					accessors = chase.infos;
+				}
+				if (accessors && accessors.length > 0)
+					return accessors.some((accessor) => getterCanCarry(accessor));
+			}
+			return false;
 		}
 		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
 			if (arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text))
@@ -2846,13 +3000,7 @@ function previewValuePathFindings(file, sourceFile) {
 			// carries the same way.
 			const memberCallee = propertyName(inner.expression);
 			if (memberCallee && !memberCallee.computed && ts.isIdentifier(memberCallee.object)) {
-				const owner = memberCallee.object.text;
-				if (
-					previewReturningMethods.has(`${owner}.${memberCallee.name}`) ||
-					(instanceClass.has(owner) &&
-						previewReturningMethods.has(`${instanceClass.get(owner)}.${memberCallee.name}`))
-				)
-					return true;
+				if (memberCallCarries(memberCallee.object.text, memberCallee.name)) return true;
 			}
 			if (
 				memberCallee &&
@@ -2861,13 +3009,7 @@ function previewValuePathFindings(file, sourceFile) {
 				ts.isPropertyAccessExpression(memberCallee.object) &&
 				ts.isIdentifier(memberCallee.object.expression)
 			) {
-				const owner = memberCallee.object.expression.text;
-				const methodName = memberCallee.object.name.text;
-				if (
-					previewReturningMethods.has(`${owner}.${methodName}`) ||
-					(instanceClass.has(owner) &&
-						previewReturningMethods.has(`${instanceClass.get(owner)}.${methodName}`))
-				)
+				if (memberCallCarries(memberCallee.object.expression.text, memberCallee.object.name.text))
 					return true;
 			}
 			if (
@@ -3497,18 +3639,15 @@ function previewValuePathFindings(file, sourceFile) {
 			// R10-3: a MEMBER callee — `o.m(…)` on an object literal, class, or
 			// `new`-instance declared in this file — resolves to the method's
 			// parameters, so a method default binds exactly as a standalone
-			// function's does.
+			// function's does. R11-2: the resolution chases the heritage clause
+			// when the instance's own class lacks the member, so an inherited
+			// default binds exactly as a declared one does.
 			if (
 				!infos &&
 				ts.isPropertyAccessExpression(calleeExpr) &&
 				ts.isIdentifier(calleeExpr.expression)
 			) {
-				const owner = calleeExpr.expression.text;
-				infos = methodInfos.get(`${owner}.${calleeExpr.name.text}`) ?? null;
-				if (!infos) {
-					const cls = instanceClass.get(owner);
-					if (cls) infos = methodInfos.get(`${cls}.${calleeExpr.name.text}`) ?? null;
-				}
+				infos = resolveMemberMethodInfos(calleeExpr.expression.text, calleeExpr.name.text);
 			}
 			// R10-3 adjacent: `.call`/`.apply` dispatch of a resolvable member
 			// callee — `o.m.call(o)` / `o.m.apply(o, [v])` — invokes the method
@@ -3522,13 +3661,10 @@ function previewValuePathFindings(file, sourceFile) {
 				ts.isPropertyAccessExpression(calleeExpr.expression) &&
 				ts.isIdentifier(calleeExpr.expression.expression)
 			) {
-				const owner = calleeExpr.expression.expression.text;
-				const methodName = calleeExpr.expression.name.text;
-				infos = methodInfos.get(`${owner}.${methodName}`) ?? null;
-				if (!infos) {
-					const cls = instanceClass.get(owner);
-					if (cls) infos = methodInfos.get(`${cls}.${methodName}`) ?? null;
-				}
+				infos = resolveMemberMethodInfos(
+					calleeExpr.expression.expression.text,
+					calleeExpr.expression.name.text
+				);
 				if (infos) {
 					if (calleeExpr.name.text === 'call') callArgs = args.slice(1);
 					else {
@@ -4190,7 +4326,13 @@ function previewValuePathFindings(file, sourceFile) {
 		}
 		return methodMutating.get(fnNode);
 	};
-	/** The method infos a callee expression resolves to, stripping `.call`/`.apply`. */
+	/**
+	 * The method infos a callee expression resolves to, stripping
+	 * `.call`/`.apply`. R11-2: resolution chases the heritage clause, so an
+	 * inherited method receiving the value is judged by the declaring base's
+	 * own mutation reading — read-only bases keep the call clean, mutating
+	 * bases are findings.
+	 */
 	const resolveMemberCalleeInfos = (calleeExpr) => {
 		let target = calleeExpr;
 		if (
@@ -4200,11 +4342,7 @@ function previewValuePathFindings(file, sourceFile) {
 		)
 			target = target.expression;
 		if (!ts.isPropertyAccessExpression(target) || !ts.isIdentifier(target.expression)) return null;
-		const owner = target.expression.text;
-		const infos = methodInfos.get(`${owner}.${target.name.text}`);
-		if (infos) return infos;
-		const cls = instanceClass.get(owner);
-		return cls ? (methodInfos.get(`${cls}.${target.name.text}`) ?? null) : null;
+		return resolveMemberMethodInfos(target.expression.text, target.name.text);
 	};
 
 	// --- the write / mutation / call scan ------------------------------------
@@ -4510,6 +4648,45 @@ function previewValuePathFindings(file, sourceFile) {
 				}
 			}
 			if (dangerous) break;
+		}
+		// R11-2: an instance selects among INHERITED methods by the same
+		// unknowable key — every declared class in the heritage chain joins the
+		// scan, and a chain the chase cannot complete names bases whose methods
+		// no static read can see, which fails closed here as elsewhere.
+		// Instances of classes the file never declares keep the R10-3 posture.
+		if (
+			!dangerous &&
+			instanceClass.has(owner.text) &&
+			localClassNames.has(instanceClass.get(owner.text))
+		) {
+			const visited = new Set();
+			let current = instanceClass.get(owner.text);
+			let complete = false;
+			for (let depth = 0; depth < HERITAGE_DEPTH_BOUND; depth += 1) {
+				if (!localClassNames.has(current) || visited.has(current)) break;
+				visited.add(current);
+				for (const [key, infos] of methodInfos) {
+					if (!key.startsWith(`${current}.`)) continue;
+					for (const { node: fnNode } of infos) {
+						if (!fnValueDefaults.has(fnNode))
+							fnValueDefaults.set(fnNode, functionHasValueDefaults(fnNode));
+						if (fnValueDefaults.get(fnNode)) {
+							dangerous = true;
+							break;
+						}
+					}
+					if (dangerous) break;
+				}
+				if (dangerous) break;
+				if (!classHeritage.has(current)) {
+					complete = true;
+					break;
+				}
+				const base = unwrapValueNode(classHeritage.get(current));
+				if (!ts.isIdentifier(base)) break;
+				current = base.text;
+			}
+			if (!dangerous && !complete) dangerous = true; // unproven chain — fail closed
 		}
 		if (dangerous)
 			findings.push(
@@ -5418,16 +5595,35 @@ export function previewForwardingFindings(files, options = {}) {
 		for (const statement of barrelSourceFile.statements) {
 			if (!ts.isExportDeclaration(statement) || !statement.moduleSpecifier) continue;
 			if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
-			// R10-2: a re-export specifier consults the alias table exactly as an
-			// import does — the runtime matches every raw specifier against it.
-			let nextBase = resolveOwnedSpecifier(statement.moduleSpecifier.text, file);
-			if (nextBase === null) {
-				const aliasedReexport = resolveAliasedSpecifier(
-					statement.moduleSpecifier.text,
-					resolveAliases
-				);
-				if (aliasedReexport !== null && aliasedReexport.kind === 'path')
-					nextBase = aliasedReexport.path;
+			// R10-2 / R11-3: a re-export specifier consults the alias table
+			// FIRST — exactly as an import does, and exactly as the runtime
+			// does: the bundler matches every raw specifier against the table
+			// before any other resolution, so owned resolution answers only
+			// what the alias declines. An alias match redirecting a module the
+			// scan judges somewhere else is the round-10 hijack, caught here
+			// too rather than left to the universe closure alone.
+			const reexportSpecifier = statement.moduleSpecifier.text;
+			let nextBase = null;
+			const aliasedReexport = resolveAliasedSpecifier(reexportSpecifier, resolveAliases);
+			if (aliasedReexport !== null) {
+				if (aliasedReexport.kind === 'unproven') return null;
+				const plain = resolveOwnedSpecifier(reexportSpecifier, file);
+				if (plain !== null && aliasedReexport.path !== plain) {
+					const plainModule = findModuleFile(plain);
+					if ((plainModule !== null && modules.has(plainModule)) || isVendoredPath(plain)) {
+						findings.push(
+							`${file} re-exports "${reexportSpecifier}" through a resolve alias redirecting ${plain} to "${aliasedReexport.path}" — the runtime loads the alias target while the scan judges the spelled module`
+						);
+						return null;
+					}
+				}
+				nextBase = aliasedReexport.path;
+			} else if (aliasUnresolved) {
+				// An unreadable alias entry could capture this re-export
+				// specifier and redirect it — the chain cannot be proven.
+				return null;
+			} else {
+				nextBase = resolveOwnedSpecifier(reexportSpecifier, file);
 			}
 			if (nextBase === null) continue;
 			if (statement.exportClause === undefined) {
@@ -6208,6 +6404,10 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	// the scan would judge is not the table that ships. Every declaration is
 	// collected, and more than one turns the whole table unreadable.
 	const aliasInitializers = [];
+	// The PROPERTY nodes that declare `alias` — the ancestor walk needs them,
+	// because a shorthand's initializer is the declaration it shorthands, whose
+	// parents sit at that declaration rather than at the config literal.
+	const aliasPropertyNodes = [];
 	let shorthandAliasDeclared = false;
 	eachNode(sourceFile, (node) => {
 		let initializer = null;
@@ -6221,7 +6421,10 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			initializer = declarations.get('alias') ?? null;
 			shorthandAliasDeclared = true;
 		}
-		if (initializer) aliasInitializers.push(initializer);
+		if (initializer) {
+			aliasInitializers.push(initializer);
+			aliasPropertyNodes.push(node);
+		}
 	});
 
 	// R10-6: the runtime honors POST-LITERAL mutations of the table —
@@ -6232,6 +6435,28 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	// identifier a shorthand or identifier-bound table binds — makes the table
 	// unreadable: the scan would judge the dead literal while the runtime
 	// resolves with the mutation.
+	//
+	// R11-1: the table is a value, and values ESCAPE. The round-11 attack
+	// mutated it wherever the literal's textual reach ended: a `Reflect.set`
+	// or `Object.defineProperty` naming the `resolve` object, a `push` through
+	// the identifier a destructure binds (`const { alias } = cfg.resolve`),
+	// and an element write inside a helper the table is handed to
+	// (`w(cfg.resolve.alias)`). Three readings close the escape:
+	//   - DERIVED NAMES — every identifier the table, its `resolve` parent, or
+	//     the config object is bound into (assignment or destructure, chased
+	//     to a fixed point), so a write or escape through the name is one
+	//     through the table;
+	//   - MUTATIONS — any write, mutating method, or builtin mutation API
+	//     (`Object.assign`, `Object.defineProperty`, `Object.defineProperties`,
+	//     `Reflect.set`, `Reflect.defineProperty`) whose target names the
+	//     table, its `resolve` object, a derived name, or the config object;
+	//   - ESCAPES — the table, its `resolve` object, a derived name, or the
+	//     config object flowing into ANY call argument, being the receiver of
+	//     ANY member call, or being spread: once the reference travels into
+	//     code the scan cannot read, a mutation the runtime honors can happen
+	//     anywhere it travels.
+	// Casts and parentheses are unwrapped throughout. Any hit makes the table
+	// unreadable and every consumer fails closed.
 	const aliasTableNames = new Set();
 	if (aliasInitializers.length === 1 && ts.isIdentifier(aliasInitializers[0]))
 		aliasTableNames.add(aliasInitializers[0].text);
@@ -6249,11 +6474,129 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	]);
 	const accessName = (node) => {
 		const inner = unwrapValueNode(node);
+		if (!inner) return null;
 		if (ts.isPropertyAccessExpression(inner)) return inner.name.text;
 		if (ts.isElementAccessExpression(inner) && ts.isStringLiteral(inner.argumentExpression))
 			return inner.argumentExpression.text;
 		return null;
 	};
+	// R11-1: the LAST access name of a member/element chain — `cfg.resolve`
+	// ends in `resolve`, `cfg['resolve'].alias` in `alias`. A chain is any
+	// depth; only its end matters, because a write to any object reached by a
+	// chain named `resolve` or `alias` reaches the state by that name.
+	const chainEndName = (node) => {
+		const name = accessName(node);
+		return name === 'resolve' || name === 'alias' ? name : null;
+	};
+	// R11-1: the object literals the alias declaration is BUILT IN — the
+	// literal holding `alias`, then the literal holding the property that
+	// holds it (`resolve`), and so on — plus the identifiers bound to those
+	// literals (the "config object" and its parents). A builtin mutation API
+	// or a spread handed one of these shares the table by reference.
+	const aliasAncestorObjects = new Set();
+	for (const property of aliasPropertyNodes) {
+		let cursor = property;
+		while (cursor) {
+			if (
+				(ts.isPropertyAssignment(cursor) || ts.isShorthandPropertyAssignment(cursor)) &&
+				cursor.parent &&
+				ts.isObjectLiteralExpression(cursor.parent)
+			) {
+				const container = cursor.parent;
+				aliasAncestorObjects.add(container);
+				cursor = container.parent;
+				continue;
+			}
+			break;
+		}
+	}
+	const configObjectNames = new Set();
+	if (aliasAncestorObjects.size > 0)
+		eachNode(sourceFile, (node) => {
+			if (
+				ts.isVariableDeclaration(node) &&
+				ts.isIdentifier(node.name) &&
+				node.initializer &&
+				aliasAncestorObjects.has(unwrapValueNode(node.initializer))
+			)
+				configObjectNames.add(node.name.text);
+		});
+	// R11-1: identifiers the table, its `resolve` parent, or the config object
+	// is BOUND INTO — an assignment or destructure whose source is a chain
+	// ending in `resolve`/`alias`, a table-bound identifier, another derived
+	// identifier, or the config object. `const { alias } = cfg.resolve` binds
+	// the table itself; `const r = cfg.resolve` binds its parent. Chased to a
+	// fixed point so `const u = t` over a derived `t` is derived too.
+	const aliasDerivedNames = new Set(aliasTableNames);
+	{
+		const isAliasSource = (node) => {
+			const inner = unwrapValueNode(node);
+			if (!inner) return false;
+			if (chainEndName(inner)) return true;
+			return (
+				ts.isIdentifier(inner) &&
+				(aliasDerivedNames.has(inner.text) || configObjectNames.has(inner.text))
+			);
+		};
+		// The names an expression-side destructure target binds — `({ a } = s)`,
+		// `({ a: x } = s)`, `[a = d] = s`, nested patterns and spreads alike.
+		const destructuredNames = (node, names) => {
+			const inner = unwrapValueNode(node);
+			if (!inner) return;
+			if (ts.isIdentifier(inner)) {
+				names.push(inner.text);
+				return;
+			}
+			if (ts.isBinaryExpression(inner) && inner.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+				destructuredNames(inner.left, names); // a default: the name is on the left
+				return;
+			}
+			if (ts.isShorthandPropertyAssignment(inner)) {
+				names.push(inner.name.text);
+				return;
+			}
+			if (ts.isPropertyAssignment(inner)) {
+				destructuredNames(inner.initializer, names);
+				return;
+			}
+			if (ts.isSpreadAssignment(inner) || ts.isSpreadElement(inner)) {
+				destructuredNames(inner.expression, names);
+				return;
+			}
+			if (ts.isObjectLiteralExpression(inner))
+				for (const property of inner.properties) destructuredNames(property, names);
+			if (ts.isArrayLiteralExpression(inner))
+				for (const element of inner.elements) destructuredNames(element, names);
+		};
+		let changed = true;
+		while (changed) {
+			const before = aliasDerivedNames.size;
+			eachNode(sourceFile, (node) => {
+				if (ts.isVariableDeclaration(node) && node.initializer && isAliasSource(node.initializer))
+					for (const name of bindingNames(node.name)) aliasDerivedNames.add(name);
+				if (
+					ts.isBinaryExpression(node) &&
+					node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+					node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+					isAliasSource(node.right)
+				) {
+					const lhs = unwrapValueNode(node.left);
+					if (lhs && (ts.isObjectLiteralExpression(lhs) || ts.isArrayLiteralExpression(lhs))) {
+						const names = [];
+						destructuredNames(lhs, names);
+						for (const name of names) aliasDerivedNames.add(name);
+					} else if (lhs && ts.isIdentifier(lhs)) {
+						aliasDerivedNames.add(lhs.text);
+					} else if (lhs) {
+						// A target the destructure reading does not model binds a
+						// name the scan cannot see; the binding itself is the escape.
+						aliasDerivedNames.add(`\u0000destructure@${lhs.pos}`);
+					}
+				}
+			});
+			changed = aliasDerivedNames.size !== before;
+		}
+	}
 	const isAliasTableAccess = (node) => {
 		const inner = unwrapValueNode(node);
 		if (!inner || accessName(inner) !== 'alias') return false;
@@ -6277,41 +6620,117 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 		if (isAliasTableAccess(inner.expression)) return true; // alias.length = …
 		return ts.isIdentifier(inner.expression) && aliasTableNames.has(inner.expression.text);
 	};
-	const aliasMutationSnippets = [];
+	// R11-1: the FULL alias state a write or escape can name — the table
+	// itself (the R10-6 reading), ANY chain ending in `resolve` or `alias`
+	// (member or element spelling, any depth, casts unwrapped), the derived
+	// identifiers, the config object, and any member/element position reached
+	// THROUGH one of those identifiers (`t[0] = …` where `t` holds the table).
+	const chainBaseIdentifier = (node) => {
+		let current = unwrapValueNode(node);
+		while (
+			current &&
+			(ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current))
+		)
+			current = unwrapValueNode(current.expression);
+		return current && ts.isIdentifier(current) ? current.text : null;
+	};
+	const targetsAliasState = (node) => {
+		if (targetsAliasTable(node)) return true;
+		const inner = unwrapValueNode(node);
+		if (!inner) return false;
+		if (chainEndName(inner)) return true;
+		if (ts.isIdentifier(inner))
+			return aliasDerivedNames.has(inner.text) || configObjectNames.has(inner.text);
+		const base = chainBaseIdentifier(inner);
+		return base !== null && (aliasDerivedNames.has(base) || configObjectNames.has(base));
+	};
+	const ALIAS_MUTATING_BUILTINS = new Set([
+		'Object.assign',
+		'Object.defineProperty',
+		'Object.defineProperties',
+		'Reflect.set',
+		'Reflect.defineProperty',
+	]);
+	const aliasMutationSnippets = new Set();
+	const aliasEscapeSnippets = new Set();
 	eachNode(sourceFile, (node) => {
 		if (
 			ts.isBinaryExpression(node) &&
 			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
 			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
-			targetsAliasTable(node.left)
+			targetsAliasState(node.left)
 		) {
-			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+			aliasMutationSnippets.add(node.getText(sourceFile).slice(0, 200));
 			return;
 		}
 		if (
 			(node.kind === ts.SyntaxKind.PrefixUnaryExpression ||
 				node.kind === ts.SyntaxKind.PostfixUnaryExpression) &&
-			targetsAliasTable(node.operand)
+			targetsAliasState(node.operand)
 		) {
-			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+			aliasMutationSnippets.add(node.getText(sourceFile).slice(0, 200));
 			return;
 		}
-		if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return;
-		const callee = node.expression;
-		if (targetsAliasTable(callee.expression) && ALIAS_MUTATING_METHODS.has(callee.name.text)) {
-			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
-			return;
-		}
+		// R11-1: a SPREAD of the table, its resolve object, a derived name, or
+		// the config object shares the table by reference — `{ ...cfg.resolve }`
+		// copies the array itself, and a mutation through the copy is a
+		// mutation of the table.
 		if (
-			ts.isIdentifier(callee.expression) &&
-			node.arguments[0] &&
-			targetsAliasTable(node.arguments[0]) &&
-			((callee.expression.text === 'Object' && callee.name.text === 'assign') ||
-				(callee.expression.text === 'Reflect' && callee.name.text === 'set'))
-		)
-			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+			(ts.isSpreadElement(node) || ts.isSpreadAssignment(node)) &&
+			targetsAliasState(node.expression)
+		) {
+			aliasEscapeSnippets.add(node.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
+		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+			const callee = node.expression;
+			// R11-1: the builtin mutation APIs judge by their TARGET argument —
+			// `Reflect.set(cfg.resolve, 'alias', …)` and
+			// `Object.defineProperty(cfg, 'resolve', …)` are writes to the state,
+			// named as mutations rather than escapes.
+			if (
+				ts.isIdentifier(callee.expression) &&
+				node.arguments[0] &&
+				targetsAliasState(node.arguments[0]) &&
+				ALIAS_MUTATING_BUILTINS.has(`${callee.expression.text}.${callee.name.text}`)
+			) {
+				aliasMutationSnippets.add(node.getText(sourceFile).slice(0, 200));
+				return;
+			}
+			// A mutating method on the state — `alias.push(…)`, and the R11-1
+			// spellings through a derived identifier or a cast.
+			if (targetsAliasState(callee.expression) && ALIAS_MUTATING_METHODS.has(callee.name.text)) {
+				aliasMutationSnippets.add(node.getText(sourceFile).slice(0, 200));
+				return;
+			}
+			// R11-1: ANY member call with the state as its receiver hands the
+			// reference to the callee — `alias.forEach(…)` can mutate entries,
+			// and no reading of an unknown callee proves it does not.
+			if (targetsAliasState(callee.expression)) {
+				aliasEscapeSnippets.add(node.getText(sourceFile).slice(0, 200));
+				return;
+			}
+		}
+		// R11-1: the state flowing into ANY call or `new` argument — the
+		// round-11 `w(cfg.resolve.alias)` helper shape, but also
+		// `Array.prototype.push.call(cfg.resolve.alias, …)` and every other
+		// position a reference can travel through.
+		for (const argument of node.arguments ?? []) {
+			if (targetsAliasState(argument)) {
+				aliasEscapeSnippets.add(node.getText(sourceFile).slice(0, 200));
+				break;
+			}
+		}
 	});
-	if (aliasMutationSnippets.length > 0) {
+	for (const snippet of aliasEscapeSnippets) {
+		// A snippet already named as a mutation keeps the mutation wording.
+		if (!aliasMutationSnippets.has(snippet))
+			unresolved.push(
+				`hands the resolve.alias state to code the scan cannot read (${snippet}) — once the table or its resolve object escapes the declaration's textual reach, the runtime can resolve with a mutation the scan never meets, so the table is unreadable`
+			);
+	}
+	if (aliasMutationSnippets.size > 0 || aliasEscapeSnippets.size > 0) {
 		for (const snippet of aliasMutationSnippets)
 			unresolved.push(
 				`mutates resolve.alias after the declaration (${snippet}) — the runtime resolves with the mutation, so the table the scan reads is not the table that ships`
