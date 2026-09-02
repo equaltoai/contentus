@@ -2114,6 +2114,32 @@ function previewValuePathFindings(file, sourceFile) {
 	// yield preview; }` then `for (const p of stream())` binds p to the value
 	// exactly as an array iteration would.
 	const yieldCarrying = new Set();
+	// R10-3 (round-10 review): `Promise.allSettled([…])` fulfills with
+	// `{ status, value }` WRAPPERS and a generator's `.next()` result is a
+	// `{ value, done }` wrapper — the reference sits behind a `.value` member
+	// read the round-9 model never carried. `settledArrays` names identifiers
+	// bound to allSettled result arrays (their element reads are wrappers),
+	// `generatorIterators` names identifiers bound to a local generator's
+	// iterator object, and `wrapperNames` names identifiers bound to a wrapper
+	// itself — a `.value` read of any of them carries the identity.
+	const settledArrays = new Set();
+	const generatorIterators = new Set();
+	const wrapperNames = new Set();
+	// R10-3: object-literal and class METHODS, keyed `owner.method` — the
+	// call-site binding resolves a member callee (`o.m(…)`, `instance.m(…)`)
+	// through them, so a method parameter and its default bind exactly as a
+	// standalone function's do, and a `return p` marks the method
+	// preview-returning for the member-call spelling.
+	const methodInfos = new Map();
+	const instanceClass = new Map();
+	const previewReturningMethods = new Set();
+	// R10-4: local functions whose RETURNS are literal containers holding the
+	// value — `function box(v) { return [v]; }` — so a destructure or an
+	// element/property read of the call result binds the identity. `array` is
+	// an index Set or `'any'`; `object` is a property Set (possibly `'*'`).
+	const containerReturns = new Map();
+	// One-hop declaration chase for return classification.
+	const localDeclarations = new Map();
 	// R7-3: constant-string folding for COMPUTED keys — `const k = 'body';
 	// holder[k].html = …` names the same property the literal spelling does.
 	const constantStrings = new Map();
@@ -2121,6 +2147,8 @@ function previewValuePathFindings(file, sourceFile) {
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
 			const literal = foldPropertyKey(node.initializer);
 			if (literal !== null) constantStrings.set(node.name.text, literal);
+			if (!localDeclarations.has(node.name.text))
+				localDeclarations.set(node.name.text, node.initializer);
 		}
 	});
 	const foldLocalKey = (node) =>
@@ -2202,6 +2230,60 @@ function previewValuePathFindings(file, sourceFile) {
 			}
 			if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings))
 				importedNames.add(clause.namedBindings.name.text);
+		}
+	});
+
+	// R10-3: METHODS — object-literal members (method, shorthand, and
+	// function-expression properties) and class members, keyed `owner.method`,
+	// plus class instances declared by `new` — a member callee resolves
+	// through these to the method's parameters, so `o.m()` with a
+	// default-reading parameter binds exactly as `f()` does. Collected AFTER
+	// the pass above so shorthand members can chase `functions`.
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+			const init = unwrapValueNode(node.initializer);
+			if (ts.isObjectLiteralExpression(init)) {
+				const owner = node.name.text;
+				for (const property of init.properties) {
+					if (ts.isMethodDeclaration(property) && ts.isIdentifier(property.name)) {
+						methodInfos.set(`${owner}.${property.name.text}`, [
+							{ node: property, paramNames: property.parameters.map((p) => p.name) },
+						]);
+						continue;
+					}
+					if (ts.isShorthandPropertyAssignment(property)) {
+						const infos = functions.get(property.name.text);
+						if (infos) methodInfos.set(`${owner}.${property.name.text}`, infos);
+						continue;
+					}
+					if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)) {
+						const memberInit = unwrapValueNode(property.initializer);
+						if (ts.isArrowFunction(memberInit) || ts.isFunctionExpression(memberInit))
+							methodInfos.set(`${owner}.${property.name.text}`, [
+								{
+									node: memberInit,
+									paramNames: memberInit.parameters.map((p) => p.name),
+								},
+							]);
+					}
+				}
+			}
+			if (ts.isClassExpression(init)) {
+				for (const member of init.members)
+					if (ts.isMethodDeclaration(member) && ts.isIdentifier(member.name))
+						methodInfos.set(`${node.name.text}.${member.name.text}`, [
+							{ node: member, paramNames: member.parameters.map((p) => p.name) },
+						]);
+			}
+			if (ts.isNewExpression(init) && ts.isIdentifier(init.expression))
+				instanceClass.set(node.name.text, init.expression.text);
+		}
+		if (ts.isClassDeclaration(node) && node.name) {
+			for (const member of node.members)
+				if (ts.isMethodDeclaration(member) && ts.isIdentifier(member.name))
+					methodInfos.set(`${node.name.text}.${member.name.text}`, [
+						{ node: member, paramNames: member.parameters.map((p) => p.name) },
+					]);
 		}
 	});
 
@@ -2419,6 +2501,13 @@ function previewValuePathFindings(file, sourceFile) {
 	const containerPropsOf = (expr) => {
 		const inner = unwrapValueNode(expr);
 		if (ts.isIdentifier(inner)) return containerPaths.get(inner.text) ?? null;
+		// R10-4: a call of a helper proven to return an object literal holding
+		// the value — `const { body } = boxO(preview)` — destructures the
+		// returned container's carried props.
+		if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression)) {
+			const shape = containerReturns.get(inner.expression.text);
+			if (shape && shape.object !== null) return shape.object;
+		}
 		if (ts.isObjectLiteralExpression(inner)) {
 			const carried = objectLiteralCarriedProps(inner);
 			return carried.holds ? carried.props : null;
@@ -2448,6 +2537,61 @@ function previewValuePathFindings(file, sourceFile) {
 	};
 
 	/**
+	 * R10-3: a `Promise.allSettled(…)` call — unlike `Promise.all`, its
+	 * fulfillment elements are `{ status, value }` wrappers, so the reference
+	 * additionally sits BEHIND each element's `.value` read.
+	 */
+	const isAllSettledCall = (node) => {
+		const inner = unwrapValueNode(node && ts.isAwaitExpression(node) ? node.expression : node);
+		return (
+			ts.isCallExpression(inner) &&
+			ts.isPropertyAccessExpression(inner.expression) &&
+			inner.expression.name.text === 'allSettled' &&
+			ts.isIdentifier(inner.expression.expression) &&
+			inner.expression.expression.text === 'Promise' &&
+			inner.arguments.length === 1
+		);
+	};
+
+	/**
+	 * R10-5: an `iter.next()` call whose iterator is a LOCAL generator's —
+	 * `gen().next()` or `it.next()` with `it` bound to `gen()` and `gen`
+	 * yielding the reference. Its result is a `{ value, done }` wrapper.
+	 */
+	const isIteratorNextCall = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!ts.isCallExpression(inner)) return false;
+		const callee = propertyName(inner.expression);
+		if (!callee || callee.computed || callee.name !== 'next') return false;
+		const object = unwrapValueNode(callee.object);
+		if (ts.isIdentifier(object)) return generatorIterators.has(object.text);
+		return (
+			ts.isCallExpression(object) &&
+			ts.isIdentifier(object.expression) &&
+			yieldCarrying.has(object.expression.text)
+		);
+	};
+
+	/**
+	 * R10-3/R10-5: an expression that IS a settled/iterator wrapper — an
+	 * element read of a settled result array, a `.next()` result of a local
+	 * generator's iterator, or an identifier bound to either. A `.value` read
+	 * of a wrapper carries the preview reference.
+	 */
+	const isWrapperExpression = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner) return false;
+		if (ts.isIdentifier(inner)) return wrapperNames.has(inner.text);
+		if (
+			ts.isElementAccessExpression(inner) &&
+			ts.isIdentifier(inner.expression) &&
+			settledArrays.has(inner.expression.text)
+		)
+			return true;
+		return isIteratorNextCall(inner);
+	};
+
+	/**
 	 * The array positions that hold the preview reference: a Set of indices for
 	 * an array literal or a literal-bound name, `'any'` when a spread or a
 	 * mutation method could place the value anywhere, or null when the array is
@@ -2463,6 +2607,13 @@ function previewValuePathFindings(file, sourceFile) {
 		// result holds where the argument holds.
 		const combinatorArgument = promiseCombinatorArgument(inner);
 		if (combinatorArgument) return arrayHoldingIndices(combinatorArgument);
+		// R10-4: a call of a local helper proven to return an array literal
+		// holding the value — `const [p] = box(preview)` — holds at the
+		// positions the helper's return places it.
+		if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression)) {
+			const shape = containerReturns.get(inner.expression.text);
+			if (shape && shape.array !== null) return shape.array;
+		}
 		if (ts.isArrayLiteralExpression(inner)) {
 			const indices = new Set();
 			let any = false;
@@ -2581,6 +2732,45 @@ function previewValuePathFindings(file, sourceFile) {
 		// identity survives the await exactly as it survives the call.
 		if (ts.isAwaitExpression(inner)) return holdsValue(inner.expression);
 		if (ts.isIdentifier(inner)) return valueNames.has(inner.text);
+		// R10-3/R10-5: a `.value` read of a settled/iterator WRAPPER —
+		// `rs[0].value`, a `w.value` where `w` is bound to a wrapper,
+		// `gen().next().value`, `it.next().value` — carries the reference the
+		// wrapper wraps. The round-9 model carried allSettled's elements but
+		// never the member read behind which its fulfillment actually holds.
+		if (
+			ts.isPropertyAccessExpression(inner) &&
+			!inner.computed &&
+			inner.name.text === 'value' &&
+			isWrapperExpression(inner.expression)
+		)
+			return true;
+		// R10-4: reads into a container-returning helper's call result — an
+		// element read at a folded position of `box(preview)`, a property read
+		// of a proven object return — carry the identity the container holds.
+		if (ts.isElementAccessExpression(inner)) {
+			const callExpr = unwrapValueNode(inner.expression);
+			if (ts.isCallExpression(callExpr) && ts.isIdentifier(callExpr.expression)) {
+				const shape = containerReturns.get(callExpr.expression.text);
+				if (shape && shape.array !== null) {
+					if (shape.array === 'any') return true;
+					const folded = foldLocalKey(inner.argumentExpression);
+					if (folded === null) return true; // unknown index of a carrying array
+					return /^(0|[1-9][0-9]*)$/.test(folded) && shape.array.has(Number(folded));
+				}
+			}
+		}
+		if (ts.isPropertyAccessExpression(inner) && !inner.computed) {
+			const callExpr = unwrapValueNode(inner.expression);
+			if (ts.isCallExpression(callExpr) && ts.isIdentifier(callExpr.expression)) {
+				const shape = containerReturns.get(callExpr.expression.text);
+				if (
+					shape &&
+					shape.object !== null &&
+					(shape.object.has(inner.name.text) || shape.object.has('*'))
+				)
+					return true;
+			}
+		}
 		if (ts.isPropertyAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
 			const props = containerPaths.get(inner.expression.text);
 			return Boolean(props && (props.has(inner.name.text) || props.has('*')));
@@ -2649,6 +2839,37 @@ function previewValuePathFindings(file, sourceFile) {
 			// arrow returning the value does.
 			const iife = unwrapValueNode(inner.expression);
 			if (ts.isArrowFunction(iife) || ts.isFunctionExpression(iife)) return iifeReturnsValue(iife);
+			// R10-3: a member call whose callee is an object-literal or class
+			// method proven to return the value — `o.m()` is the member spelling
+			// of a preview-returning call, and its result carries exactly as the
+			// identifier call's does. `.call`/`.apply` dispatch of such a method
+			// carries the same way.
+			const memberCallee = propertyName(inner.expression);
+			if (memberCallee && !memberCallee.computed && ts.isIdentifier(memberCallee.object)) {
+				const owner = memberCallee.object.text;
+				if (
+					previewReturningMethods.has(`${owner}.${memberCallee.name}`) ||
+					(instanceClass.has(owner) &&
+						previewReturningMethods.has(`${instanceClass.get(owner)}.${memberCallee.name}`))
+				)
+					return true;
+			}
+			if (
+				memberCallee &&
+				!memberCallee.computed &&
+				(memberCallee.name === 'call' || memberCallee.name === 'apply') &&
+				ts.isPropertyAccessExpression(memberCallee.object) &&
+				ts.isIdentifier(memberCallee.object.expression)
+			) {
+				const owner = memberCallee.object.expression.text;
+				const methodName = memberCallee.object.name.text;
+				if (
+					previewReturningMethods.has(`${owner}.${methodName}`) ||
+					(instanceClass.has(owner) &&
+						previewReturningMethods.has(`${instanceClass.get(owner)}.${methodName}`))
+				)
+					return true;
+			}
 			if (
 				ts.isPropertyAccessExpression(inner.expression) &&
 				ts.isIdentifier(inner.expression.expression) &&
@@ -2657,6 +2878,13 @@ function previewValuePathFindings(file, sourceFile) {
 			)
 				return true;
 		}
+		// R10-5: a tagged template over a preview-returning tag —
+		// `tag`${preview}`` — yields what the tag returns exactly as a call
+		// does; any other tag is not statically proven to carry.
+		if (ts.isTaggedTemplateExpression(inner)) {
+			const tag = unwrapValueNode(inner.tag);
+			return ts.isIdentifier(tag) && previewReturning.has(tag.text);
+		}
 		return false;
 	};
 
@@ -2664,6 +2892,132 @@ function previewValuePathFindings(file, sourceFile) {
 	const arrayHoldsValue = (expr) => {
 		const indices = arrayHoldingIndices(expr);
 		return indices === 'any' || (indices !== null && indices.size > 0);
+	};
+
+	/**
+	 * R10-3: BINDING-ELEMENT DEFAULTS — `{ x = preview } = {}`,
+	 * `[x = preview]`, and nested patterns alike. An element's default applies
+	 * whenever the value destructured at its key/position is left undefined:
+	 * the source handed nothing there, the source is unresolvable, or the
+	 * source is a literal `undefined`. A literal source proving the key or
+	 * position present with a defined value skips the default; anything the
+	 * reading cannot resolve fails closed and binds.
+	 */
+	const bindElementDefaults = (pattern, source) => {
+		if (!ts.isObjectBindingPattern(pattern) && !ts.isArrayBindingPattern(pattern)) return false;
+		const isObject = ts.isObjectBindingPattern(pattern);
+		let grew = false;
+		const sourceInner = source ? unwrapValueNode(source) : null;
+		const sourceLiteral = isObject
+			? sourceInner && ts.isObjectLiteralExpression(sourceInner)
+				? sourceInner.properties
+				: null
+			: sourceInner && ts.isArrayLiteralExpression(sourceInner)
+				? sourceInner.elements
+				: null;
+		const undefinedLiteral = (node) => {
+			const inner = unwrapValueNode(node);
+			return (
+				inner.kind === ts.SyntaxKind.UndefinedKeyword ||
+				(ts.isIdentifier(inner) && inner.text === 'undefined')
+			);
+		};
+		const literalEntryAt = (element, position) => {
+			// `{ resolved, value }` — what a literal source hands at this
+			// position; value null means the key/position is absent.
+			if (!sourceLiteral) return { resolved: false };
+			if (isObject) {
+				const key = destructureKey(element);
+				if (key === null) return { resolved: false };
+				for (const property of sourceLiteral) {
+					let propKey = null;
+					let value = null;
+					if (ts.isPropertyAssignment(property)) {
+						if (ts.isIdentifier(property.name)) propKey = property.name.text;
+						else if (ts.isStringLiteral(property.name)) propKey = property.name.text;
+						value = property.initializer;
+					} else if (ts.isShorthandPropertyAssignment(property)) {
+						propKey = property.name.text;
+						value = property.name;
+					}
+					if (propKey === key) return { resolved: true, value };
+				}
+				return { resolved: true, value: null };
+			}
+			const supplied = sourceLiteral[position];
+			if (!supplied || ts.isOmittedExpression(supplied)) return { resolved: true, value: null };
+			if (ts.isSpreadElement(supplied)) return { resolved: false };
+			return { resolved: true, value: supplied };
+		};
+		const elementProvenPresent = (element, position) => {
+			if (!sourceLiteral) return false;
+			if (isObject) {
+				const key = destructureKey(element);
+				// A computed key cannot prove the element's absence — the
+				// default may apply, so the position binds fail-closed.
+				if (key === null) return false;
+				for (const property of sourceLiteral) {
+					let propKey = null;
+					let value = null;
+					if (ts.isPropertyAssignment(property)) {
+						if (ts.isIdentifier(property.name)) propKey = property.name.text;
+						else if (ts.isStringLiteral(property.name)) propKey = property.name.text;
+						value = property.initializer;
+					} else if (ts.isShorthandPropertyAssignment(property)) {
+						propKey = property.name.text;
+						value = property.name;
+					}
+					if (propKey === key) return value ? !undefinedLiteral(value) : false;
+				}
+				return false;
+			}
+			const supplied = sourceLiteral[position];
+			if (!supplied || ts.isOmittedExpression(supplied)) return false;
+			if (ts.isSpreadElement(supplied)) return true;
+			return !undefinedLiteral(supplied);
+		};
+		pattern.elements.forEach((element, position) => {
+			if (!ts.isBindingElement(element) || element.dotDotDotToken) return;
+			const nested =
+				ts.isObjectBindingPattern(element.name) || ts.isArrayBindingPattern(element.name);
+			if (element.initializer !== undefined && holdsValue(element.initializer)) {
+				if (!elementProvenPresent(element, position)) {
+					for (const name of bindingNames(element.name)) if (addValueName(name)) grew = true;
+					// a nested pattern under a defaulted element destructures the
+					// default itself
+					if (nested && bindElementDefaults(element.name, element.initializer)) grew = true;
+				} else if (nested) {
+					const at = literalEntryAt(element, position);
+					if (at.resolved && at.value) {
+						if (bindElementDefaults(element.name, at.value)) grew = true;
+					} else if (!at.resolved) {
+						if (bindElementDefaults(element.name, null)) grew = true;
+					}
+				}
+				return;
+			}
+			if (!nested) return;
+			// A NON-CARRYING default of its own (`{ a: { x = preview } = {} }`)
+			// still feeds the nested pattern when the position is left to it —
+			// the nested defaults apply to the default value.
+			if (element.initializer !== undefined && !elementProvenPresent(element, position)) {
+				if (bindElementDefaults(element.name, element.initializer)) grew = true;
+				return;
+			}
+			// No carrying default of its own: the nested pattern destructures
+			// whatever the source hands at the position. An absent key
+			// destructures undefined (a runtime throw, no bindings), a literal
+			// value recurses into it, and an unresolvable source fails closed.
+			if (sourceLiteral) {
+				const at = literalEntryAt(element, position);
+				if (at.resolved && at.value) {
+					if (bindElementDefaults(element.name, at.value)) grew = true;
+				}
+				return;
+			}
+			if (bindElementDefaults(element.name, null)) grew = true;
+		});
+		return grew;
 	};
 
 	/**
@@ -2681,65 +3035,91 @@ function previewValuePathFindings(file, sourceFile) {
 			ts.isArrayBindingPattern(pattern) || ts.isArrayLiteralExpression(pattern);
 		if (isObjectPattern) {
 			const props = containerPropsOf(initializer);
-			if (!props) return false;
 			let grew = false;
-			const elements = patternElementsOf(pattern);
-			for (const element of elements) {
-				if (element.omitted) continue;
-				if (element.isRest) {
-					// A rest element is a CONTAINER of the props it carries, not
-					// the preview reference itself — `const { title, ...rest } =
-					// holder` makes `rest.body` the preview read.
-					if (!ts.isIdentifier(element.target)) continue;
-					const explicit = new Set();
-					for (const other of elements)
-						if (!other.isRest && other.key !== null) explicit.add(other.key);
-					const carriedProps = new Set(
-						[...props].filter((key) => key !== '*' && !explicit.has(key))
-					);
-					const carries = props.has('*') || carriedProps.size > 0;
-					if (carries && !containerPaths.has(element.target.text)) {
-						containerPaths.set(element.target.text, props.has('*') ? new Set(['*']) : carriedProps);
-						grew = true;
+			if (props) {
+				const elements = patternElementsOf(pattern);
+				for (const element of elements) {
+					if (element.omitted) continue;
+					if (element.isRest) {
+						// A rest element is a CONTAINER of the props it carries, not
+						// the preview reference itself — `const { title, ...rest } =
+						// holder` makes `rest.body` the preview read.
+						if (!ts.isIdentifier(element.target)) continue;
+						const explicit = new Set();
+						for (const other of elements)
+							if (!other.isRest && other.key !== null) explicit.add(other.key);
+						const carriedProps = new Set(
+							[...props].filter((key) => key !== '*' && !explicit.has(key))
+						);
+						const carries = props.has('*') || carriedProps.size > 0;
+						if (carries && !containerPaths.has(element.target.text)) {
+							containerPaths.set(
+								element.target.text,
+								props.has('*') ? new Set(['*']) : carriedProps
+							);
+							grew = true;
+						}
+						continue;
 					}
-					continue;
-				}
-				const carries =
-					element.key === null ? props.size > 0 : props.has(element.key) || props.has('*');
-				if (!carries) continue;
-				for (const name of bindingNames(element.target)) {
-					if (addValueName(name)) grew = true;
+					const carries =
+						element.key === null ? props.size > 0 : props.has(element.key) || props.has('*');
+					if (!carries) continue;
+					for (const name of bindingNames(element.target)) {
+						if (addValueName(name)) grew = true;
+					}
 				}
 			}
+			// R10-3: element defaults apply to destructures too — `const { x =
+			// preview } = {}` binds x exactly as a call-position default does.
+			if (ts.isObjectBindingPattern(pattern) && bindElementDefaults(pattern, initializer))
+				grew = true;
 			return grew;
 		}
 		if (isArrayPattern) {
 			const indices = arrayHoldingIndices(initializer);
-			if (indices === null) return false;
-			const any = indices === 'any';
 			let grew = false;
-			const elements = patternElementsOf(pattern);
-			elements.forEach((element, index) => {
-				if (element.omitted) return;
-				if (element.isRest) {
-					// A rest element is an ARRAY container of the positions after
-					// it — `const [first, ...rest] = arr` makes `rest[0]` the
-					// preview read, so rest joins the array containers.
-					if (!ts.isIdentifier(element.target)) return;
-					const carriesRest = any || [...indices].some((i) => i >= index);
-					if (carriesRest && !arrayContainers.has(element.target.text)) {
-						arrayContainers.add(element.target.text);
-						arrayValueIndex.set(
-							element.target.text,
-							any ? 'any' : new Set([...indices].filter((i) => i >= index))
-						);
-						grew = true;
+			if (indices !== null) {
+				const any = indices === 'any';
+				const elements = patternElementsOf(pattern);
+				elements.forEach((element, index) => {
+					if (element.omitted) return;
+					if (element.isRest) {
+						// A rest element is an ARRAY container of the positions after
+						// it — `const [first, ...rest] = arr` makes `rest[0]` the
+						// preview read, so rest joins the array containers.
+						if (!ts.isIdentifier(element.target)) return;
+						const carriesRest = any || [...indices].some((i) => i >= index);
+						if (carriesRest && !arrayContainers.has(element.target.text)) {
+							arrayContainers.add(element.target.text);
+							arrayValueIndex.set(
+								element.target.text,
+								any ? 'any' : new Set([...indices].filter((i) => i >= index))
+							);
+							grew = true;
+						}
+						return;
 					}
-					return;
+					if (any || indices.has(index))
+						for (const name of bindingNames(element.target)) if (addValueName(name)) grew = true;
+				});
+			}
+			if (ts.isArrayBindingPattern(pattern)) {
+				// R10-3: `Promise.allSettled([preview])` fulfills with WRAPPERS —
+				// the direct elements carry the value AND are wrappers whose
+				// `.value` reads carry it too.
+				if (isAllSettledCall(initializer)) {
+					for (const element of patternElementsOf(pattern)) {
+						if (element.omitted || element.isRest) continue;
+						if (ts.isIdentifier(element.target) && !wrapperNames.has(element.target.text)) {
+							wrapperNames.add(element.target.text);
+							grew = true;
+						}
+					}
 				}
-				if (any || indices.has(index))
-					for (const name of bindingNames(element.target)) if (addValueName(name)) grew = true;
-			});
+				// R10-3: `[x = preview]` element defaults — `[preview]` and
+				// unresolvable sources alike bind fail-closed.
+				if (bindElementDefaults(pattern, initializer)) grew = true;
+			}
 			return grew;
 		}
 		return false;
@@ -2768,10 +3148,30 @@ function previewValuePathFindings(file, sourceFile) {
 	const arrayRooted = (expr) => {
 		const inner = unwrapValueNode(expr);
 		if (ts.isIdentifier(inner))
-			return arrayContainers.has(inner.text) || mapContainers.has(inner.text);
+			return (
+				arrayContainers.has(inner.text) ||
+				mapContainers.has(inner.text) ||
+				// R10-5: a generator's ITERATOR object is iterable exactly as the
+				// generator call is — `for (const p of it)` with `it = gen()`.
+				generatorIterators.has(inner.text) ||
+				// R10-3: a settled result array is iterable — its elements are
+				// wrappers carrying the value behind `.value`.
+				settledArrays.has(inner.text)
+			);
 		if (ts.isArrayLiteralExpression(inner)) return arrayHoldsValue(inner);
-		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression))
-			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
+		if (ts.isElementAccessExpression(inner)) {
+			if (ts.isIdentifier(inner.expression))
+				return (
+					arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text)
+				);
+			// R10-4: an element read of a container-returning helper's result.
+			const callExpr = unwrapValueNode(inner.expression);
+			if (ts.isCallExpression(callExpr) && ts.isIdentifier(callExpr.expression)) {
+				const shape = containerReturns.get(callExpr.expression.text);
+				if (shape && (shape.array !== null || shape.object !== null)) return true;
+			}
+			return false;
+		}
 		if (ts.isCallExpression(inner)) {
 			const callee = propertyName(inner.expression);
 			if (callee && ts.isIdentifier(callee.object)) {
@@ -2801,9 +3201,13 @@ function previewValuePathFindings(file, sourceFile) {
 				return false;
 			}
 			// R7-3: a local generator that yields the reference — `for (const p
-			// of stream())` iterates it exactly as an array would.
-			if (ts.isIdentifier(inner.expression) && yieldCarrying.has(inner.expression.text))
-				return true;
+			// of stream())` iterates it exactly as an array would. R10-4 adds a
+			// container-returning helper's array result.
+			if (ts.isIdentifier(inner.expression)) {
+				if (yieldCarrying.has(inner.expression.text)) return true;
+				const shape = containerReturns.get(inner.expression.text);
+				if (shape && shape.array !== null) return true;
+			}
 			return false;
 		}
 		return false;
@@ -2845,10 +3249,21 @@ function previewValuePathFindings(file, sourceFile) {
 			// conservative spelling of "one of these is the value".
 			if (ts.isForOfStatement(node) && ts.isVariableDeclarationList(node.initializer)) {
 				const iterable = unwrapValueNode(node.expression);
-				if (arrayHoldsValue(iterable) || arrayRooted(iterable)) {
+				// R10-3: iterating a settled result array binds wrappers — the
+				// loop variable carries as a value name (the over-approximation
+				// round 9 established) AND records as a wrapper, so a `.value`
+				// read of it keeps carrying.
+				const settledIterable =
+					isAllSettledCall(iterable) ||
+					(ts.isIdentifier(iterable) && settledArrays.has(iterable.text));
+				if (arrayHoldsValue(iterable) || arrayRooted(iterable) || settledIterable) {
 					for (const declaration of node.initializer.declarations) {
 						for (const name of bindingNames(declaration.name)) {
 							if (addValueName(name)) changed = true;
+							if (settledIterable && !wrapperNames.has(name)) {
+								wrapperNames.add(name);
+								changed = true;
+							}
 						}
 					}
 				}
@@ -2898,7 +3313,38 @@ function previewValuePathFindings(file, sourceFile) {
 				bound = node.left.text;
 				rhs = node.right;
 			}
-			if (bound === null || valueNames.has(bound)) return;
+			if (bound === null) return;
+
+			// R10-3/R10-5: wrapper and iterator RECORDS — independent of whether
+			// the name also joins the value names, so `.value` reads and
+			// `.next()` chains resolve.
+			const initUnwrapped = rhs ? unwrapAwait(unwrapValueNode(rhs)) : null;
+			if (initUnwrapped) {
+				if (isAllSettledCall(initUnwrapped) && !settledArrays.has(bound)) {
+					settledArrays.add(bound);
+					changed = true;
+				}
+				if (
+					ts.isCallExpression(initUnwrapped) &&
+					ts.isIdentifier(initUnwrapped.expression) &&
+					yieldCarrying.has(initUnwrapped.expression.text) &&
+					!generatorIterators.has(bound)
+				) {
+					generatorIterators.add(bound);
+					changed = true;
+				}
+				if (
+					(isIteratorNextCall(initUnwrapped) ||
+						(ts.isElementAccessExpression(initUnwrapped) &&
+							ts.isIdentifier(initUnwrapped.expression) &&
+							settledArrays.has(initUnwrapped.expression.text))) &&
+					!wrapperNames.has(bound)
+				) {
+					wrapperNames.add(bound);
+					changed = true;
+				}
+			}
+			if (valueNames.has(bound)) return;
 
 			if (rhs && holdsValue(rhs)) {
 				if (addValueName(bound)) changed = true;
@@ -2922,6 +3368,19 @@ function previewValuePathFindings(file, sourceFile) {
 				if (indices !== null && !arrayContainers.has(bound)) {
 					arrayContainers.add(bound);
 					arrayValueIndex.set(bound, indices);
+					changed = true;
+				}
+			} else if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression)) {
+				// R10-4: a call of a container-returning helper IS the container —
+				// `const b = box(preview)` makes element and property reads of `b`
+				// carry exactly as reads of the helper's literal return would.
+				const shape = containerReturns.get(inner.expression.text);
+				if (shape && shape.array !== null && !arrayContainers.has(bound)) {
+					arrayContainers.add(bound);
+					arrayValueIndex.set(bound, shape.array);
+					changed = true;
+				} else if (shape && shape.object !== null && !containerPaths.has(bound)) {
+					containerPaths.set(bound, shape.object);
 					changed = true;
 				}
 			}
@@ -2963,6 +3422,30 @@ function previewValuePathFindings(file, sourceFile) {
 			if (!callback || !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) return;
 			const param = callback.parameters[0];
 			if (!param) return;
+			// R10-3: an allSettled result hands the callback a settled array —
+			// an identifier parameter records as one, and the direct identifier
+			// elements of a pattern parameter record as wrappers, so their
+			// `.value` reads carry the identity.
+			if (isAllSettledCall(callee.object)) {
+				if (ts.isIdentifier(param.name)) {
+					if (!settledArrays.has(param.name.text)) {
+						settledArrays.add(param.name.text);
+						changed = true;
+					}
+				} else if (ts.isArrayBindingPattern(param.name)) {
+					for (const element of param.name.elements) {
+						if (
+							ts.isBindingElement(element) &&
+							!element.dotDotDotToken &&
+							ts.isIdentifier(element.name) &&
+							!wrapperNames.has(element.name.text)
+						) {
+							wrapperNames.add(element.name.text);
+							changed = true;
+						}
+					}
+				}
+			}
 			for (const name of bindingNames(param.name)) {
 				if (addValueName(name)) changed = true;
 			}
@@ -2989,13 +3472,72 @@ function previewValuePathFindings(file, sourceFile) {
 		//   - an inline IIFE is its own callee, so its parameters bind exactly
 		//     as a named local function's do.
 		eachNode(sourceFile, (node) => {
-			if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
-			const args = node.arguments ?? [];
-			const calleeExpr = unwrapValueNode(node.expression);
+			if (
+				!ts.isCallExpression(node) &&
+				!ts.isNewExpression(node) &&
+				!ts.isTaggedTemplateExpression(node)
+			)
+				return;
+			// R10-5: a tagged template hands its interpolations to the tag
+			// exactly as a call hands its arguments — at parameter positions
+			// AFTER the leading template-strings array, which the head node
+			// stands in for (never a value carrier).
+			const args = ts.isTaggedTemplateExpression(node)
+				? ts.isTemplateExpression(node.template)
+					? [node.template.head, ...node.template.templateSpans.map((span) => span.expression)]
+					: []
+				: (node.arguments ?? []);
+			const calleeExpr = unwrapValueNode(
+				ts.isTaggedTemplateExpression(node) ? node.tag : node.expression
+			);
 			let infos = null;
 			if (ts.isIdentifier(calleeExpr)) infos = functions.get(calleeExpr.text) ?? null;
 			if (!infos && (ts.isArrowFunction(calleeExpr) || ts.isFunctionExpression(calleeExpr)))
 				infos = [{ node: calleeExpr, paramNames: calleeExpr.parameters.map((p) => p.name) }];
+			// R10-3: a MEMBER callee — `o.m(…)` on an object literal, class, or
+			// `new`-instance declared in this file — resolves to the method's
+			// parameters, so a method default binds exactly as a standalone
+			// function's does.
+			if (
+				!infos &&
+				ts.isPropertyAccessExpression(calleeExpr) &&
+				ts.isIdentifier(calleeExpr.expression)
+			) {
+				const owner = calleeExpr.expression.text;
+				infos = methodInfos.get(`${owner}.${calleeExpr.name.text}`) ?? null;
+				if (!infos) {
+					const cls = instanceClass.get(owner);
+					if (cls) infos = methodInfos.get(`${cls}.${calleeExpr.name.text}`) ?? null;
+				}
+			}
+			// R10-3 adjacent: `.call`/`.apply` dispatch of a resolvable member
+			// callee — `o.m.call(o)` / `o.m.apply(o, [v])` — invokes the method
+			// itself; the arguments shift past the receiver. An `.apply` whose
+			// array no static read can resolve binds nothing here.
+			let callArgs = args;
+			if (
+				!infos &&
+				ts.isPropertyAccessExpression(calleeExpr) &&
+				(calleeExpr.name.text === 'call' || calleeExpr.name.text === 'apply') &&
+				ts.isPropertyAccessExpression(calleeExpr.expression) &&
+				ts.isIdentifier(calleeExpr.expression.expression)
+			) {
+				const owner = calleeExpr.expression.expression.text;
+				const methodName = calleeExpr.expression.name.text;
+				infos = methodInfos.get(`${owner}.${methodName}`) ?? null;
+				if (!infos) {
+					const cls = instanceClass.get(owner);
+					if (cls) infos = methodInfos.get(`${cls}.${methodName}`) ?? null;
+				}
+				if (infos) {
+					if (calleeExpr.name.text === 'call') callArgs = args.slice(1);
+					else {
+						const arrayArg = args[1] ? unwrapValueNode(args[1]) : null;
+						callArgs =
+							arrayArg && ts.isArrayLiteralExpression(arrayArg) ? [...arrayArg.elements] : [];
+					}
+				}
+			}
 			if (!infos) return;
 			for (const { node: fnNode, paramNames } of infos) {
 				// `paramNames === null` is the unproven inherited constructor;
@@ -3007,8 +3549,8 @@ function previewValuePathFindings(file, sourceFile) {
 					const param = params[index];
 					if (param.dotDotDotToken) {
 						const carryingOffsets = [];
-						for (let argIndex = index; argIndex < args.length; argIndex += 1) {
-							if (holdsValue(args[argIndex])) carryingOffsets.push(argIndex - index);
+						for (let argIndex = index; argIndex < callArgs.length; argIndex += 1) {
+							if (holdsValue(callArgs[argIndex])) carryingOffsets.push(argIndex - index);
 						}
 						if (carryingOffsets.length === 0) continue;
 						for (const name of bindingNames(param.name)) {
@@ -3031,22 +3573,39 @@ function previewValuePathFindings(file, sourceFile) {
 						}
 						continue;
 					}
-					const arg = args[index];
+					const arg = callArgs[index];
 					const argCarries = arg !== undefined && holdsValue(arg);
 					// A default applies when the call leaves the position to it:
 					// no argument at all, or a literal `undefined` — spelled as
 					// the keyword in type positions and as an identifier in
 					// expression positions; both are covered.
-					const defaulted =
+					const argLeavesToDefault =
 						!argCarries &&
 						(arg === undefined ||
 							arg.kind === ts.SyntaxKind.UndefinedKeyword ||
-							(ts.isIdentifier(arg) && arg.text === 'undefined')) &&
-						param.initializer !== undefined &&
-						holdsValue(param.initializer);
-					if (!argCarries && !defaulted) continue;
-					for (const name of bindingNames(param.name)) {
-						if (addValueName(name)) changed = true;
+							(ts.isIdentifier(arg) && arg.text === 'undefined'));
+					const defaulted =
+						argLeavesToDefault && param.initializer !== undefined && holdsValue(param.initializer);
+					if (argCarries || defaulted) {
+						for (const name of bindingNames(param.name)) {
+							if (addValueName(name)) changed = true;
+						}
+					}
+					// R10-3: BINDING-ELEMENT DEFAULTS at call position —
+					// `function f({ x = preview } = {})` binds `x` at any call
+					// that can leave the key to its default: an argument not
+					// proving the key present, an argument carrying the value
+					// while the key stays absent, or no argument at all with the
+					// parameter's own default feeding the pattern. The round-9
+					// reading bound only `param.initializer`, never a binding
+					// element's.
+					const positionFilled = !argLeavesToDefault;
+					if (
+						(ts.isObjectBindingPattern(param.name) || ts.isArrayBindingPattern(param.name)) &&
+						(positionFilled || param.initializer !== undefined)
+					) {
+						const destructureSource = argLeavesToDefault ? param.initializer : arg;
+						if (bindElementDefaults(param.name, destructureSource ?? null)) changed = true;
 					}
 				}
 			}
@@ -3376,6 +3935,99 @@ function previewValuePathFindings(file, sourceFile) {
 				}
 			}
 		}
+
+		// R10-3: object/class METHODS returning the value — the member-call
+		// spelling of previewReturning, keyed `owner.method`.
+		for (const [key, infos] of methodInfos) {
+			if (previewReturningMethods.has(key)) continue;
+			for (const { node } of infos) {
+				let returns = false;
+				const body = node.body;
+				if (ts.isArrowFunction(node) && body && !ts.isBlock(body) && holdsValue(body)) {
+					returns = true;
+				} else {
+					eachNodeOwn(body ?? node, (n) => {
+						if (returns) return;
+						if (ts.isReturnStatement(n) && n.expression && holdsValue(n.expression)) returns = true;
+					});
+				}
+				if (returns) {
+					previewReturningMethods.add(key);
+					changed = true;
+					break;
+				}
+			}
+		}
+
+		// R10-4: CONTAINER-RETURNING helpers — `function box(v) { return [v]; }`
+		// — a literal array/object return holding the value makes a destructure
+		// of the call result, and element/property reads of it, bind the
+		// identity. A return through a one-hop local name follows the name; any
+		// other return shape leaves the container unrecorded, so a scalar
+		// return like `p.html.length` never makes its helper a carrier.
+		for (const [name, infos] of functions) {
+			const existing = containerReturns.get(name);
+			const shape = {
+				array: existing ? existing.array : null,
+				object: existing ? existing.object : null,
+			};
+			let grewShape = false;
+			const visitReturn = (expr, depth) => {
+				if (depth > 2) return;
+				const inner = unwrapValueNode(expr);
+				if (ts.isArrayLiteralExpression(inner)) {
+					const indices = arrayHoldingIndices(inner);
+					if (indices === null || (indices !== 'any' && indices.size === 0)) return;
+					if (indices === 'any') {
+						if (shape.array !== 'any') {
+							shape.array = 'any';
+							grewShape = true;
+						}
+						return;
+					}
+					if (shape.array !== 'any') {
+						const merged = shape.array ?? new Set();
+						for (const index of indices) {
+							if (!merged.has(index)) {
+								merged.add(index);
+								grewShape = true;
+							}
+						}
+						shape.array = merged;
+					}
+					return;
+				}
+				if (ts.isObjectLiteralExpression(inner)) {
+					const carried = objectLiteralCarriedProps(inner);
+					if (!carried.holds) return;
+					const merged = shape.object ?? new Set();
+					for (const property of carried.props) {
+						if (!merged.has(property)) {
+							merged.add(property);
+							grewShape = true;
+						}
+					}
+					shape.object = merged;
+					return;
+				}
+				if (ts.isIdentifier(inner)) {
+					const init = localDeclarations.get(inner.text);
+					if (init) visitReturn(init, depth + 1);
+				}
+			};
+			for (const { node } of infos) {
+				const body = node.body;
+				if (ts.isArrowFunction(node) && body && !ts.isBlock(body)) visitReturn(body, 0);
+				else
+					eachNodeOwn(body ?? node, (n) => {
+						if (ts.isReturnStatement(n) && n.expression) visitReturn(n.expression, 0);
+					});
+			}
+			if (grewShape) {
+				containerReturns.set(name, shape);
+				changed = true;
+			}
+		}
 	}
 
 	// --- mutating-function fixed point ---------------------------------------
@@ -3522,13 +4174,57 @@ function previewValuePathFindings(file, sourceFile) {
 		}
 	}
 
+	// R10-3: method mutability, judged by the SAME reading as identifier
+	// callees — a member call handing the value to a method proven never to
+	// write its parameters is clean; a method that writes is a finding.
+	const methodMutating = new Map();
+	const isMethodMutating = (fnNode, paramNames) => {
+		if (paramNames === null) return false; // unproven constructors judge separately
+		if (!methodMutating.has(fnNode)) {
+			const derived = paramDerivedNames(fnNode, paramNames);
+			methodMutating.set(
+				fnNode,
+				derived.size > 0 &&
+					(directlyMutates(fnNode, derived) || handsToUnprovenOrMutating(fnNode, derived))
+			);
+		}
+		return methodMutating.get(fnNode);
+	};
+	/** The method infos a callee expression resolves to, stripping `.call`/`.apply`. */
+	const resolveMemberCalleeInfos = (calleeExpr) => {
+		let target = calleeExpr;
+		if (
+			ts.isPropertyAccessExpression(target) &&
+			(target.name.text === 'call' || target.name.text === 'apply') &&
+			ts.isPropertyAccessExpression(target.expression)
+		)
+			target = target.expression;
+		if (!ts.isPropertyAccessExpression(target) || !ts.isIdentifier(target.expression)) return null;
+		const owner = target.expression.text;
+		const infos = methodInfos.get(`${owner}.${target.name.text}`);
+		if (infos) return infos;
+		const cls = instanceClass.get(owner);
+		return cls ? (methodInfos.get(`${cls}.${target.name.text}`) ?? null) : null;
+	};
+
 	// --- the write / mutation / call scan ------------------------------------
 	const containerRooted = (node) => {
 		const inner = unwrapValueNode(node);
 		if (ts.isIdentifier(inner))
 			return arrayContainers.has(inner.text) || mapContainers.has(inner.text);
-		if (ts.isElementAccessExpression(inner) && ts.isIdentifier(inner.expression))
-			return arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text);
+		if (ts.isElementAccessExpression(inner)) {
+			if (ts.isIdentifier(inner.expression))
+				return (
+					arrayContainers.has(inner.expression.text) || mapContainers.has(inner.expression.text)
+				);
+			// R10-4: an element read of a container-returning helper's result —
+			// `box(preview)[0].html = …` — reaches the value through the helper.
+			const callExpr = unwrapValueNode(inner.expression);
+			if (ts.isCallExpression(callExpr) && ts.isIdentifier(callExpr.expression)) {
+				const shape = containerReturns.get(callExpr.expression.text);
+				if (shape && shape.array !== null) return true;
+			}
+		}
 		if (ts.isCallExpression(inner)) {
 			const callee = propertyName(inner.expression);
 			return Boolean(
@@ -3627,6 +4323,35 @@ function previewValuePathFindings(file, sourceFile) {
 				);
 			return;
 		}
+		// R10-5: a tagged template carrying the value — `tag`${preview}`` —
+		// hands the reference to the tag exactly as a call does. A local tag is
+		// judged by the same parameter-mutation reading; anything else fails
+		// closed.
+		if (ts.isTaggedTemplateExpression(node)) {
+			const interpolations = ts.isTemplateExpression(node.template)
+				? node.template.templateSpans.map((span) => span.expression)
+				: [];
+			if (!interpolations.some((interpolation) => holdsValue(interpolation))) return;
+			const tagExpr = unwrapValueNode(node.tag);
+			if (ts.isIdentifier(tagExpr)) {
+				const infos = functions.get(tagExpr.text);
+				if (infos && infos.length) {
+					if (mutatingFunctions.has(tagExpr.text))
+						findings.push(
+							`${file} passes the preview value to ${tagExpr.text}\`…\`, whose parameter is written — a helper hop transforms lesser's bytes before the sink`
+						);
+				} else {
+					findings.push(
+						`${file} passes the preview value to a tagged template of ${tagExpr.text} — a function hop between loadDraftPreview and the sink cannot be statically proven direct`
+					);
+				}
+				return;
+			}
+			findings.push(
+				`${file} passes the preview value to a tagged template — a route between loadDraftPreview and the sink cannot be statically proven direct`
+			);
+			return;
+		}
 		if (ts.isCallExpression(node)) {
 			const callee = propertyName(node.expression);
 			if (callee && ts.isIdentifier(callee.object)) {
@@ -3676,6 +4401,34 @@ function previewValuePathFindings(file, sourceFile) {
 				}
 				return;
 			}
+			// R10-3: a MEMBER callee on a local object/class — judged by the
+			// method's own mutation reading exactly as an identifier callee is;
+			// `.call`/`.apply` dispatch resolves the underlying method. A
+			// method proven never to write its parameters keeps the call clean.
+			const memberInfos = resolveMemberCalleeInfos(calleeExpr);
+			if (memberInfos && memberInfos.length) {
+				if (
+					memberInfos.some(({ node: fnNode, paramNames }) => isMethodMutating(fnNode, paramNames))
+				)
+					findings.push(
+						`${file} passes the preview value to ${node.expression
+							.getText(sourceFile)
+							.slice(
+								0,
+								60
+							)}…, whose parameter is written — a helper hop transforms lesser's bytes before the sink`
+					);
+				else if (memberInfos.some((info) => info.paramNames === null))
+					findings.push(
+						`${file} passes the preview value to ${node.expression
+							.getText(sourceFile)
+							.slice(
+								0,
+								60
+							)}… — its inherited constructor cannot be proven to leave the value untouched`
+					);
+				return;
+			}
 			findings.push(
 				`${file} passes the preview value to ${node.expression
 					.getText(sourceFile)
@@ -3720,6 +4473,53 @@ function previewValuePathFindings(file, sourceFile) {
 					)}… — a route between loadDraftPreview and the sink cannot be statically proven direct`
 			);
 		}
+	});
+
+	// R10-3: a COMPUTED member call on an object whose methods carry
+	// value-reading defaults — `o[k]()` — selects among those methods by a key
+	// no static read can fold; the call fails closed. Direct member calls
+	// resolve through `methodInfos` at the call-site binding instead.
+	const fnValueDefaults = new Map();
+	const functionHasValueDefaults = (fnNode) => {
+		for (const param of fnNode.parameters ?? []) {
+			if (param.dotDotDotToken) continue;
+			if (param.initializer && holdsValue(param.initializer)) return true;
+			let nested = false;
+			eachNode(param.name, (n) => {
+				if (nested) return;
+				if (ts.isBindingElement(n) && n.initializer && holdsValue(n.initializer)) nested = true;
+			});
+			if (nested) return true;
+		}
+		return false;
+	};
+	eachNode(sourceFile, (node) => {
+		if (!ts.isCallExpression(node) || !ts.isElementAccessExpression(node.expression)) return;
+		const owner = unwrapValueNode(node.expression.expression);
+		if (!ts.isIdentifier(owner)) return;
+		const prefix = `${owner.text}.`;
+		let dangerous = false;
+		for (const [key, infos] of methodInfos) {
+			if (!key.startsWith(prefix)) continue;
+			for (const { node: fnNode } of infos) {
+				if (!fnValueDefaults.has(fnNode))
+					fnValueDefaults.set(fnNode, functionHasValueDefaults(fnNode));
+				if (fnValueDefaults.get(fnNode)) {
+					dangerous = true;
+					break;
+				}
+			}
+			if (dangerous) break;
+		}
+		if (dangerous)
+			findings.push(
+				`${file} calls ${node.expression
+					.getText(sourceFile)
+					.slice(
+						0,
+						60
+					)} — a computed member call on an object whose method defaults read the preview value cannot be proven to select a clean method`
+			);
 	});
 
 	return findings;
@@ -4032,27 +4832,44 @@ const PREVIEW_BODY_MODULE = 'src/lib/review/PreviewBody.svelte';
 const CANONICAL_PREVIEW_FILE = 'src/lib/routes/ReviewWorkspace.svelte';
 
 /**
+ * R10-1: fold `.` and `..` segments out of a repository-relative route base
+ * the way the runtime folds them — for EVERY spelling, not only the relative
+ * ones. A scan that kept `src/lib/x/../../build/y.js` un-folded classified by
+ * a prefix the runtime never serves: the bundler normalizes alias-replaced and
+ * alias-prefixed paths before it resolves them, so the gate must too. Leading
+ * `..` segments the base cannot absorb stay VISIBLE (`../x`): they are the
+ * route escaping the repository root, and a fold that dropped them would hide
+ * exactly the route the classification fails closed on.
+ */
+export function normalizeRepoPath(path) {
+	const segments = [];
+	for (const segment of path.split('/')) {
+		if (segment === '' || segment === '.') continue;
+		if (segment === '..') {
+			if (segments.length === 0 || segments[0] === '..') segments.push('..');
+			else segments.pop();
+			continue;
+		}
+		segments.push(segment);
+	}
+	return segments.join('/');
+}
+
+/**
  * Resolve an import specifier to a repository-relative module path the way the
  * toolchain resolves it. `$lib/x` is the `src/lib/x` alias; `./x` and `../x`
  * resolve against the importing file's directory. A bare specifier is a
- * package, and a specifier this reading does not model returns null.
+ * package, and a specifier this reading does not model returns null. R10-1:
+ * every resolved base is normalized — an un-normalized `$lib/x/../..` base was
+ * classified by a prefix the runtime never serves.
  */
 function resolveOwnedSpecifier(specifier, fromFile) {
-	if (specifier.startsWith('$lib/')) return `src/lib/${specifier.slice('$lib/'.length)}`;
+	if (specifier.startsWith('$lib/'))
+		return normalizeRepoPath(`src/lib/${specifier.slice('$lib/'.length)}`);
 	if (specifier === '$lib') return 'src/lib';
 	if (specifier.startsWith('./') || specifier.startsWith('../')) {
-		const parts = fromFile.split('/');
-		const base = parts.slice(0, -1).join('/');
-		const resolved = `${base}/${specifier}`.split('/').reduce((acc, part) => {
-			if (part === '.' || part === '') return acc;
-			if (part === '..') {
-				acc.pop();
-				return acc;
-			}
-			acc.push(part);
-			return acc;
-		}, []);
-		return resolved.join('/');
+		const directory = fromFile.split('/').slice(0, -1);
+		return normalizeRepoPath([...directory, ...specifier.split('/')].join('/'));
 	}
 	return null;
 }
@@ -4601,7 +5418,17 @@ export function previewForwardingFindings(files, options = {}) {
 		for (const statement of barrelSourceFile.statements) {
 			if (!ts.isExportDeclaration(statement) || !statement.moduleSpecifier) continue;
 			if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
-			const nextBase = resolveOwnedSpecifier(statement.moduleSpecifier.text, file);
+			// R10-2: a re-export specifier consults the alias table exactly as an
+			// import does — the runtime matches every raw specifier against it.
+			let nextBase = resolveOwnedSpecifier(statement.moduleSpecifier.text, file);
+			if (nextBase === null) {
+				const aliasedReexport = resolveAliasedSpecifier(
+					statement.moduleSpecifier.text,
+					resolveAliases
+				);
+				if (aliasedReexport !== null && aliasedReexport.kind === 'path')
+					nextBase = aliasedReexport.path;
+			}
 			if (nextBase === null) continue;
 			if (statement.exportClause === undefined) {
 				// `export * from '…'` — the name could come through here; an
@@ -4658,11 +5485,52 @@ export function previewForwardingFindings(files, options = {}) {
 	const resolveSimpleName = (name, flow) => {
 		const entry = flow.imports.get(name);
 		if (entry !== undefined) {
+			// R10-2: the runtime matches the alias table against EVERY raw
+			// specifier — first match wins — not only bare ones, so the reading
+			// consults it before any other resolution. An alias match that
+			// redirects a module the scan judges somewhere else is a finding:
+			// the runtime loads the alias target while the gate scans the spelled
+			// module (the round-10 plant aliased `$lib/review/PreviewBody.svelte`
+			// itself to a root shim). An unreadable alias entry could capture any
+			// specifier spelling, so it fails closed here exactly as it does for
+			// bare specifiers.
+			const aliased = resolveAliasedSpecifier(entry.specifier, resolveAliases);
+			if (aliased !== null) {
+				if (aliased.kind === 'unproven') return { kind: 'unproven' };
+				const plain = resolveOwnedSpecifier(entry.specifier, flow.fromPath);
+				if (plain !== null && aliased.path !== plain) {
+					const plainModule = findModuleFile(plain);
+					if ((plainModule !== null && modules.has(plainModule)) || isVendoredPath(plain)) {
+						findings.push(
+							`${flow.fromPath} imports "${entry.specifier}" through a resolve alias redirecting ${plain} to "${aliased.path}" — the runtime loads the alias target while the scan judges the spelled module`
+						);
+						return { kind: 'unproven' };
+					}
+				}
+				const path = aliased.path;
+				const withExt = files.has(path)
+					? path
+					: files.has(`${path}.svelte`)
+						? `${path}.svelte`
+						: null;
+				if (withExt) return { kind: 'owned', path: withExt };
+				if (isVendoredPath(path)) return { kind: 'external' };
+				if (path.startsWith('src/') || path.startsWith('scripts/')) {
+					const traced = traceBarrel(path, entry.importedName, new Set(), 0);
+					if (traced) return { kind: 'owned', path: traced };
+				}
+				return { kind: 'unproven' };
+			}
+			if (aliasUnresolved) return { kind: 'unproven' };
 			// A NAMESPACE import of an owned module could hold any re-exported
 			// component; its members are judged at the member site as unproven.
 			if (entry.importedName === '*') {
 				const resolved = resolveOwnedSpecifier(entry.specifier, flow.fromPath);
 				if (resolved === null) return classifyBareSpecifier(entry.specifier, entry.importedName);
+				// R10-1: normalization keeps an escaping route visible — a
+				// namespace that resolves out of the repository is never a
+				// trusted owned component.
+				if (resolved === '..' || resolved.startsWith('../')) return { kind: 'unproven' };
 				if (isVendoredPath(resolved)) return { kind: 'external' };
 				return { kind: 'owned-namespace', specifier: entry.specifier };
 			}
@@ -5340,6 +6208,7 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	// the scan would judge is not the table that ships. Every declaration is
 	// collected, and more than one turns the whole table unreadable.
 	const aliasInitializers = [];
+	let shorthandAliasDeclared = false;
 	eachNode(sourceFile, (node) => {
 		let initializer = null;
 		if (
@@ -5348,10 +6217,108 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				(ts.isStringLiteral(node.name) && node.name.text === 'alias'))
 		)
 			initializer = node.initializer;
-		else if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'alias')
+		else if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'alias') {
 			initializer = declarations.get('alias') ?? null;
+			shorthandAliasDeclared = true;
+		}
 		if (initializer) aliasInitializers.push(initializer);
 	});
+
+	// R10-6: the runtime honors POST-LITERAL mutations of the table —
+	// `cfg.resolve.alias.push({…})` and `cfg.resolve.alias = […]` both resolve
+	// with the mutated table, while a sequential reader meets only the
+	// declaration. Any write or mutating call whose target names
+	// `resolve.alias` — member chains, element spellings, `length`, and the
+	// identifier a shorthand or identifier-bound table binds — makes the table
+	// unreadable: the scan would judge the dead literal while the runtime
+	// resolves with the mutation.
+	const aliasTableNames = new Set();
+	if (aliasInitializers.length === 1 && ts.isIdentifier(aliasInitializers[0]))
+		aliasTableNames.add(aliasInitializers[0].text);
+	if (shorthandAliasDeclared) aliasTableNames.add('alias');
+	const ALIAS_MUTATING_METHODS = new Set([
+		'push',
+		'pop',
+		'shift',
+		'unshift',
+		'splice',
+		'sort',
+		'reverse',
+		'fill',
+		'copyWithin',
+	]);
+	const accessName = (node) => {
+		const inner = unwrapValueNode(node);
+		if (ts.isPropertyAccessExpression(inner)) return inner.name.text;
+		if (ts.isElementAccessExpression(inner) && ts.isStringLiteral(inner.argumentExpression))
+			return inner.argumentExpression.text;
+		return null;
+	};
+	const isAliasTableAccess = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner || accessName(inner) !== 'alias') return false;
+		const object = inner.expression;
+		if (ts.isIdentifier(object)) return object.text === 'resolve';
+		return accessName(object) === 'resolve';
+	};
+	const targetsAliasTable = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner) return false;
+		if (isAliasTableAccess(inner)) return true;
+		if (ts.isIdentifier(inner)) return aliasTableNames.has(inner.text);
+		// `alias[i] = …` (numeric or folded key) places an entry in the table.
+		if (ts.isElementAccessExpression(inner)) {
+			if (isAliasTableAccess(inner.expression)) return true;
+			if (ts.isIdentifier(inner.expression) && aliasTableNames.has(inner.expression.text))
+				return true;
+		}
+		const name = accessName(inner);
+		if (name === null) return false;
+		if (isAliasTableAccess(inner.expression)) return true; // alias.length = …
+		return ts.isIdentifier(inner.expression) && aliasTableNames.has(inner.expression.text);
+	};
+	const aliasMutationSnippets = [];
+	eachNode(sourceFile, (node) => {
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+			targetsAliasTable(node.left)
+		) {
+			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		if (
+			(node.kind === ts.SyntaxKind.PrefixUnaryExpression ||
+				node.kind === ts.SyntaxKind.PostfixUnaryExpression) &&
+			targetsAliasTable(node.operand)
+		) {
+			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return;
+		const callee = node.expression;
+		if (targetsAliasTable(callee.expression) && ALIAS_MUTATING_METHODS.has(callee.name.text)) {
+			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		if (
+			ts.isIdentifier(callee.expression) &&
+			node.arguments[0] &&
+			targetsAliasTable(node.arguments[0]) &&
+			((callee.expression.text === 'Object' && callee.name.text === 'assign') ||
+				(callee.expression.text === 'Reflect' && callee.name.text === 'set'))
+		)
+			aliasMutationSnippets.push(node.getText(sourceFile).slice(0, 200));
+	});
+	if (aliasMutationSnippets.length > 0) {
+		for (const snippet of aliasMutationSnippets)
+			unresolved.push(
+				`mutates resolve.alias after the declaration (${snippet}) — the runtime resolves with the mutation, so the table the scan reads is not the table that ships`
+			);
+		return { aliases, unresolved };
+	}
+
 	if (aliasInitializers.length > 1) {
 		unresolved.push(
 			`declares resolve.alias ${aliasInitializers.length} times — the runtime keeps the LAST declaration and resolves with it, so the table the scan would read is not the table that ships`
@@ -5407,7 +6374,11 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
  * specifier, `{ kind: 'unproven' }` when a matched entry cannot be followed,
  * and null when no entry matches. String finds follow the bundler's
  * semantics: exact match, or a prefix followed by `/`; regex finds apply
- * the bundler's own `specifier.replace(find, replacement)`.
+ * the bundler's own `specifier.replace(find, replacement)`. R10-1: the
+ * resolved path is NORMALIZED — the runtime folds `.`/`..` after alias
+ * replacement and prefix concatenation, so `src/lib/x/../../../build/y.js`
+ * arriving from a regex or prefix match is folded to the base the runtime
+ * actually serves (an escape's leading `..` segments stay visible).
  */
 export function resolveAliasedSpecifier(specifier, resolveAliasEntries) {
 	for (const entry of resolveAliasEntries ?? []) {
@@ -5429,16 +6400,20 @@ export function resolveAliasedSpecifier(specifier, resolveAliasEntries) {
 			const find = new RegExp(entry.find.source, flags);
 			if (!find.test(specifier)) continue;
 			try {
-				return { kind: 'path', path: specifier.replace(find, entry.replacement) };
+				return {
+					kind: 'path',
+					path: normalizeRepoPath(specifier.replace(find, entry.replacement)),
+				};
 			} catch {
 				return { kind: 'unproven' };
 			}
 		}
-		if (specifier === entry.find) return { kind: 'path', path: entry.replacement };
+		if (specifier === entry.find)
+			return { kind: 'path', path: normalizeRepoPath(entry.replacement) };
 		if (specifier.startsWith(`${entry.find}/`))
 			return {
 				kind: 'path',
-				path: `${entry.replacement}${specifier.slice(entry.find.length)}`,
+				path: normalizeRepoPath(`${entry.replacement}${specifier.slice(entry.find.length)}`),
 			};
 	}
 	return null;

@@ -3796,3 +3796,806 @@ test('the tree audits clean after every round-9 plant is uprooted', () => {
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });
+
+/* ============================================================
+   Round 10 — R10-1: un-normalized route bases fail closed
+   ============================================================
+
+   The round-10 attack proved the round-9 classifier trusted a prefix the
+   runtime never serves: `resolveUniverseSpecifier` folded `..` only for the
+   `./`/`../` spellings, so a `$lib/x/../../build/y.js`, a root-relative
+   `/src/x/../../build/y.js`, or a regex-alias path carrying `..` kept the
+   un-normalized segments, matched nothing, and classified clean under the
+   OWNED prefix it still wore. The bundler normalizes alias-replaced paths
+   before it resolves them — the marker compiled into the client bundle at
+   69587aa — so the gate normalizes EVERY resolved base, in every spelling,
+   before candidate matching and classification. */
+
+const R10_ROUTE = 'src/lib/review/__r10_route__.svelte';
+
+/** Plant an executable marker the round-10 routes resolve into. */
+function plantR10Excluded(relativePath) {
+	const absolute = join(repoRoot, relativePath);
+	mkdirSync(dirname(absolute), { recursive: true });
+	writeFileSync(absolute, 'export const planted = true;\n');
+	return absolute;
+}
+
+const r10RouteImport = (specifier) =>
+	'<script lang="ts">\n' +
+	`\timport { planted } from "${specifier}";\n` +
+	'\tconst q = planted;\n' +
+	'</script>\n<p>{q}</p>\n';
+
+test('un-normalized dotdot routes fail closed in every spelling (R10-1 exact plants)', () => {
+	const uprootAll = () => {
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		rmSync(join(repoRoot, 'build/__r10_x__.js'), { force: true });
+		rmSync(join(repoRoot, 'docs/__r10_x__.mjs'), { force: true });
+	};
+	try {
+		plantR10Excluded('build/__r10_x__.js');
+		plantR10Excluded('docs/__r10_x__.mjs');
+
+		// 1. $lib spelling into build/ — the round-10 CRITICAL plant, audited
+		// green AND bundled at 69587aa.
+		plant(R10_ROUTE, r10RouteImport('$lib/review/../../../build/__r10_x__.js'));
+		let result = runAudit();
+		assert.equal(result.status, 1, `the $lib dotdot route must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/routes through a resolve alias "\$lib\/review\/\.\.\/\.\.\/\.\.\/build\/__r10_x__\.js" — the route resolves into the excluded root "build"/,
+			`the $lib route must classify by its NORMALIZED base:\n${result.output}`
+		);
+
+		// 2. the COMMITTABLE variant into docs/ (docs/ is git-tracked).
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		plant(R10_ROUTE, r10RouteImport('$lib/review/../../../docs/__r10_x__.mjs'));
+		result = runAudit();
+		assert.equal(result.status, 1, `the docs/ variant must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves into the excluded root "docs"/,
+			`the docs/ route must be classified:\n${result.output}`
+		);
+
+		// 3. the bare spelling through the legit `/^src\//` regex alias — the
+		// bundler normalizes alias-replaced paths, the round-9 gate did not.
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		plant(R10_ROUTE, r10RouteImport('src/lib/review/../../../build/__r10_x__.js'));
+		result = runAudit();
+		assert.equal(result.status, 1, `the bare regex-alias route must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves outside the repository root/,
+			`the regex-alias route must normalize to the escape:\n${result.output}`
+		);
+
+		// 4. dynamic-import spelling into build/.
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		plant(
+			R10_ROUTE,
+			'<script lang="ts">\n' +
+				'\tconst m = await import("$lib/review/../../../build/__r10_x__.js");\n' +
+				'\tconst q = m;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `the dynamic-import route must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves into the excluded root "build"/,
+			`the dynamic import must be classified:\n${result.output}`
+		);
+
+		// 5. glob spelling into build/.
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		plant(
+			R10_ROUTE,
+			'<script lang="ts">\n' +
+				'\tconst m = import.meta.glob("$lib/review/../../../build/__r10_x__.js");\n' +
+				'\tconst q = m;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `the glob route must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/globs "\$lib\/review\/\.\.\/\.\.\/\.\.\/build\/__r10_x__\.js" — the route resolves into the excluded root "build"/,
+			`the glob pattern must be classified:\n${result.output}`
+		);
+	} finally {
+		uprootAll();
+	}
+});
+
+test('root-absolute dotdot spellings fail closed as unplaced routes (R10-1 adjacent)', () => {
+	// The round-10 report names these as CLAIM FALSIFICATIONS rather than
+	// shippable loads: rolldown refuses URL-absolute import spellings, so the
+	// bundle proof ran against the $lib/relative/regex forms above. The gate
+	// still fails closed on them — an unclassified base is a base nothing
+	// answers for, whatever the bundler would do with it.
+	const uprootAll = () => {
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		rmSync(join(repoRoot, 'build/__r10_x__.js'), { force: true });
+	};
+	try {
+		plantR10Excluded('build/__r10_x__.js');
+		plant(R10_ROUTE, r10RouteImport('/src/lib/review/../../build/__r10_x__.js'));
+		let result = runAudit();
+		assert.equal(result.status, 1, `the root-absolute route must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/routes "\/src\/lib\/review\/\.\.\/\.\.\/build\/__r10_x__\.js" — the route resolves to "src\/build\/__r10_x__\.js", which no candidate, classified root, or declared package answers for/,
+			`the root-absolute route must classify by its normalized base:\n${result.output}`
+		);
+
+		// The dynamic-import form of the same spelling.
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		plant(
+			R10_ROUTE,
+			'<script lang="ts">\n' +
+				'\tconst m = await import("/src/lib/review/../../build/__r10_x__.js");\n' +
+				'\tconst q = m;\n' +
+				'</script>\n<p>x</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `the root-absolute dynamic import must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/which no candidate, classified root, or declared package answers for/,
+			`the root-absolute dynamic import must be classified:\n${result.output}`
+		);
+	} finally {
+		uprootAll();
+	}
+});
+
+test('dotdot routes that normalize INTO the classified roots stay clean (R10-1 positives)', () => {
+	plant(
+		R10_ROUTE,
+		'<script lang="ts">\n' +
+			"\timport { toDraftPreview } from '$lib/cms/../cms/review';\n" +
+			"\timport type { DraftPreview } from '$lib/review/../cms/review';\n" +
+			"\timport { sanitizeHtml } from '$lib/greater/../greater/utils';\n" +
+			"\timport { sanitizeHtml as viaDotdotDir } from '$lib/../lib/greater/utils';\n" +
+			`\tconst q = \`\${toDraftPreview} \${sanitizeHtml} \${viaDotdotDir}\`;` +
+			'\n\tconst t: DraftPreview | null = null;\n\tvoid t;\n' +
+			'</script>\n<p>{q}</p>\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(
+			status,
+			0,
+			`dotdot routes normalizing into owned/vendored roots must stay clean:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+	}
+});
+
+/* ============================================================
+   Round 10 — R10-2: the alias table is consulted for every
+   specifier spelling, and redirects of scanned modules fail
+   ============================================================
+
+   The round-10 attack aliased `$lib/review/PreviewBody.svelte` ITSELF to a
+   root shim: the runtime's alias matching runs first-match-wins on every raw
+   specifier — not only bare ones — so the shim replaced the sink module in
+   the shipped bundle while the gate scanned the real component, audited
+   green, and built green at 69587aa (marker verified in build/client). The
+   closure now consults the table for every spelling, and an alias match
+   redirecting a module the audit scans somewhere else is a finding. */
+
+/** The round-10 hijack shim: a root-level sink replacement. */
+function r10ShimSource(marker) {
+	return (
+		'<script lang="ts">\n' +
+		"\timport type { DraftPreview } from '$lib/cms/review';\n" +
+		'\tinterface Props { preview: DraftPreview; }\n' +
+		'\tlet { preview }: Props = $props();\n' +
+		`\tconst shown: string = (preview.html ?? '') + '<img src=x data-plant=${marker}>';\n` +
+		'</script>\n\n{@html shown}\n'
+	);
+}
+
+test('an alias of $lib/review/PreviewBody.svelte onto a root shim fails (R10-2 exact plant)', () => {
+	const shim = '__r10_shim__.svelte';
+	plant(shim, r10ShimSource('r102'));
+	try {
+		withPlantedViteConfig(
+			(source) => {
+				if (!source.includes(ALIAS_ANCHOR))
+					throw new Error('the alias anchor moved — re-anchor the R10-2 probes');
+				return source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '$lib/review/PreviewBody.svelte', replacement: path.resolve(root, '__r10_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				);
+			},
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the sink-module hijack must fail the audit:\n${output}`);
+				assert.match(
+					output,
+					/redirecting the scanned module "src\/lib\/review\/PreviewBody\.svelte" to "__r10_shim__\.svelte"/,
+					`the redirect of the scanned module must be named:\n${output}`
+				);
+				assert.match(
+					output,
+					/\[executable source universe\] __r10_shim__\.svelte is executable source outside the classified owned\/vendored roots/,
+					`the shim outsider must be named too:\n${output}`
+				);
+			}
+		);
+	} finally {
+		rmSync(join(repoRoot, shim), { force: true });
+	}
+});
+
+test('hijacks of other owned modules and regex finds fail (R10-2 adjacent)', () => {
+	const shim = '__r10_shim__.svelte';
+	const tsShim = '__r10_alias_ts__.ts';
+	const route = R10_ROUTE;
+	const uprootAll = () => {
+		rmSync(join(repoRoot, shim), { force: true });
+		rmSync(join(repoRoot, tsShim), { force: true });
+		rmSync(join(repoRoot, route), { force: true });
+	};
+	try {
+		plant(shim, r10ShimSource('r102adj'));
+		plant(tsShim, 'export const planted = true;\n');
+
+		// A regex FIND capturing the owned sink specifier — first match wins.
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: /^\\$lib\\/review\\/PreviewBody\\.svelte$/, replacement: path.resolve(root, '__r10_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the regex-find hijack must fail:\n${output}`);
+				assert.match(
+					output,
+					/redirecting the scanned module "src\/lib\/review\/PreviewBody\.svelte"/,
+					`the regex redirect must be named:\n${output}`
+				);
+			}
+		);
+
+		// A hijack of a plain TS module another owned file imports.
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				"\timport { toDraftPreview } from '$lib/cms/review';\n" +
+				'\tconst q = toDraftPreview;\n' +
+				'</script>\n<p>{q}</p>\n'
+		);
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '$lib/cms/review', replacement: path.resolve(root, '__r10_alias_ts__.ts') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the TS-module hijack must fail:\n${output}`);
+				assert.match(
+					output,
+					/redirecting the scanned module "src\/lib\/cms\/review" to "__r10_alias_ts__\.ts"/,
+					`the TS-module redirect must be named:\n${output}`
+				);
+			}
+		);
+		// A hijack of a VENDORED module specifier — the scan judges the
+		// vendored path, the runtime would load the shim.
+		rmSync(join(repoRoot, route), { force: true });
+		plant(
+			route,
+			'<script lang="ts">\n' +
+				"\timport { sanitizeHtml } from '$lib/greater/utils';\n" +
+				'\tconst q = sanitizeHtml;\n' +
+				'</script>\n<p>{q}</p>\n'
+		);
+		withPlantedViteConfig(
+			(source) =>
+				source.replace(
+					ALIAS_ANCHOR,
+					"{ find: '$lib/greater/utils', replacement: path.resolve(root, '__r10_shim__.svelte') },\n\t\t\t\t\t" +
+						ALIAS_ANCHOR
+				),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the vendored-module hijack must fail:\n${output}`);
+				assert.match(
+					output,
+					/redirecting the scanned module "src\/lib\/greater\/utils"/,
+					`the vendored redirect must be named:\n${output}`
+				);
+			}
+		);
+	} finally {
+		uprootAll();
+	}
+});
+
+test('an alias resolving to the same module stays clean (R10-2 positive)', () => {
+	withPlantedViteConfig(
+		(source) =>
+			source.replace(
+				ALIAS_ANCHOR,
+				"{ find: '$lib/review/PreviewBody.svelte', replacement: path.resolve(root, 'src/lib/review/PreviewBody.svelte') },\n\t\t\t\t\t" +
+					ALIAS_ANCHOR
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`an alias resolving to the SAME scanned module is no redirect:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   Round 10 — R10-3: binding-element defaults, method defaults,
+   and allSettled wrapper reads
+   ============================================================
+
+   The round-10 attack laundered the identity through three shapes the
+   round-9 model did not bind: a destructured binding-element default
+   (`function f({ x = preview } = {}) { return x; }; f()`), an object-method
+   default (`const o = { m(p = preview) { return p; } }; o.m()`), and the
+   allSettled wrapper's `.value` member read (`Promise.allSettled([preview])
+   .then((rs) => { rs[0].value.html = … })`). All three audited green at
+   69587aa with live writes. */
+
+test('binding-element and method defaults bind at call positions (R10-3 exact plants)', () => {
+	const shapes = [
+		[
+			'destructured binding-element default',
+			'\tfunction r10de({ x = preview }: { x?: DraftPreview | null } = {}): DraftPreview | null { return x; }\n' +
+				"\tif (preview) { const v = r10de(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'binding-element default with an empty-object argument',
+			'\tfunction r10de2({ x = preview }: { x?: DraftPreview | null } = {}): DraftPreview | null { return x; }\n' +
+				"\tif (preview) { const v = r10de2({}); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'object-method default',
+			'\tconst r10obj = { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } };\n' +
+				"\tif (preview) { const v = r10obj.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'allSettled wrapper .value write',
+			"\tif (preview) void Promise.allSettled([preview]).then((rs) => { (rs[0] as PromiseFulfilledResult<DraftPreview>).value.html = '<img src=x>'; });\n",
+			/writes to \.html on/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} relay must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} relay must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} relay must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('class methods, awaited wrappers, and nested defaults fail (R10-3 adjacent)', () => {
+	const shapes = [
+		[
+			'class-instance method default',
+			'\tclass R10Class { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tconst r10inst = new R10Class();\n' +
+				"\tif (preview) { const v = r10inst.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'awaited allSettled wrapper write',
+			"\tasync function r10settled() { if (!preview) return; const rs = await Promise.allSettled([preview]); (rs[0] as PromiseFulfilledResult<DraftPreview>).value.html = '<img src=x>'; }\n" +
+				'\tif (preview) void r10settled();\n',
+			/writes to \.html on/,
+		],
+		[
+			'allSettled .then destructure wrapper .value write',
+			"\tif (preview) void Promise.allSettled([preview]).then(([w]) => { (w as PromiseFulfilledResult<DraftPreview>).value.html = '<img src=x>'; });\n",
+			/writes to \.html on/,
+		],
+		[
+			'nested binding-element default',
+			'\tfunction r10nested({ a: { x = preview } = {} }: { a?: { x?: DraftPreview | null } } = {}): DraftPreview | null { return x; }\n' +
+				"\tif (preview) { const v = r10nested(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'computed member call on an object with value-default methods',
+			'\tconst r10cm = { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } };\n' +
+				"\tconst r10key = 'm';\n" +
+				'\tif (preview) r10cm[r10key]();\n',
+			/a computed member call on an object whose method defaults read the preview value/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} shape must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} shape must be named:\n${output}`);
+			}
+		);
+	}
+});
+
+test('member dispatch and settled iteration fail the audit (R10-3 adjacent, self-attack)', () => {
+	const shapes = [
+		[
+			'.call dispatch of a method default',
+			'\tconst r10c = { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } };\n' +
+				"\tif (preview) { const v = r10c.m.call(r10c); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'.apply dispatch of a method default',
+			'\tconst r10ap = { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } };\n' +
+				"\tif (preview) { const v = r10ap.m.apply(r10ap, []); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'for-of over the settled array writing .value',
+			"\tasync function r10fo() { if (!preview) return; const rs = await Promise.allSettled([preview]); for (const w of rs) (w as PromiseFulfilledResult<DraftPreview>).value.html = '<img src=x>'; }\n" +
+				'\tif (preview) void r10fo();\n',
+			/writes to \.html on/,
+		],
+		[
+			'a bound wrapper element writing .value',
+			"\tasync function r10bw() { if (!preview) return; const rs = await Promise.allSettled([preview]); const w = rs[0]; (w as PromiseFulfilledResult<DraftPreview>).value.html = '<img src=x>'; }\n" +
+				'\tif (preview) void r10bw();\n',
+			/writes to \.html on/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.match(output, message, `the ${label} shape must name the write:\n${output}`);
+			}
+		);
+	}
+	// The paired positive: a local method proven never to write its parameter
+	// keeps a value-carrying member call clean.
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					"\tconst r10ro = { len(p: DraftPreview | null): number { return (p?.html ?? '').length; } };\n" +
+					'\tif (preview) console.log(r10ro.len(preview));\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`a read-only local method receiving the value must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+test('allSettled reads that never touch the value stay clean (R10-3 positives)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tif (preview) void Promise.allSettled([preview]).then((rs) => { console.log(rs[0].status); });\n' +
+					'\tif (preview) void Promise.allSettled([preview]).then((rs) => { const wrapped = (rs[0] as PromiseFulfilledResult<DraftPreview>).value; console.log(wrapped === preview); });\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`status reads and write-free .value reads of allSettled wrappers must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   Round 10 — R10-4: container-returning helpers
+   ============================================================
+
+   The round-10 attack laundered through a tracked NON-MUTATING helper whose
+   return is a container holding the reference — `function box(v) { return
+   [v]; }; const [p] = box(preview); p.html = …` — audited green at 69587aa.
+   The closure now reads literal container returns of local helpers, so a
+   destructure of the call result, and element/property reads of it, bind the
+   identity. */
+
+test('container-returning helper destructures fail the audit (R10-4 exact plants)', () => {
+	const shapes = [
+		[
+			'array-container helper destructure',
+			'\tfunction r10box(v: DraftPreview): DraftPreview[] { return [v]; }\n' +
+				"\tif (preview) { const [p] = r10box(preview); p.html = '<img src=x>'; }\n",
+			/writes to p\.html/,
+		],
+		[
+			'object-container helper destructure',
+			'\tfunction r10boxO(v: DraftPreview): { body: DraftPreview } { return { body: v }; }\n' +
+				"\tif (preview) { const { body } = r10boxO(preview); body.html = '<img src=x>'; }\n",
+			/writes to body\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.match(output, message, `the ${label} shape must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('direct reads into a container helper result fail (R10-4 adjacent)', () => {
+	const shapes = [
+		[
+			'element read of the call result',
+			'\tfunction r10boxE(v: DraftPreview): DraftPreview[] { return [v]; }\n' +
+				"\tif (preview) r10boxE(preview)[0].html = '<img src=x>';\n",
+			/writes to \.html on a value that entered a local container/,
+		],
+		[
+			'property read of the call result',
+			'\tfunction r10boxP(v: DraftPreview): { body: DraftPreview } { return { body: v }; }\n' +
+				"\tif (preview) r10boxP(preview).body.html = '<img src=x>';\n",
+			/writes to \.html on/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail the audit:\n${output}`);
+				assert.match(output, message, `the ${label} shape must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('container helpers over non-preview values stay clean (R10-4 positive)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tfunction r10plain(n: number): number[] { return [n, 1]; }\n' +
+					'\tconst [r10a] = r10plain(2);\n' +
+					'\tif (preview) console.log(r10a);\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`a container helper carrying no preview value must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   Round 10 — R10-5: tagged templates and manual generators
+   ============================================================
+
+   The round-10 report's LOW shapes: a tagged template carrying the value
+   (`tag`${preview}``) and a manual generator read (`gen().next().value`).
+   The gate binds a tagged template's interpolations to the tag's parameters
+   (after the leading template-strings position) and judges the tag like any
+   local callee; a generator's `.next()` result is a wrapper whose `.value`
+   read carries, and its iterator object is iterable like the call. */
+
+test('tagged-template and manual-generator relays fail the audit (R10-5 exact plants)', () => {
+	const shapes = [
+		[
+			'tagged-template relay',
+			'\tfunction r10tag(_s: TemplateStringsArray, ...vals: unknown[]): unknown { return vals[0]; }\n' +
+				"\tif (preview) { const v = r10tag`${preview}` as DraftPreview; v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'manual generator .next().value relay',
+			'\tfunction* r10gen(): Generator<DraftPreview> { yield preview as DraftPreview; }\n' +
+				"\tif (preview) { const w = r10gen().next().value; w.html = '<img src=x>'; }\n",
+			/writes to w\.html/,
+		],
+		[
+			'for-of over the generator iterator object',
+			'\tfunction* r10gen2(): Generator<DraftPreview> { yield preview as DraftPreview; }\n' +
+				"\tif (preview) { const it = r10gen2(); for (const g of it) g.html = '<img src=x>'; }\n",
+			/writes to g\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} relay must fail the audit:\n${output}`);
+				assert.match(output, message, `the ${label} relay must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('a scalar-returning tag stays clean (R10-5 positive)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					"\tfunction r10lentag(_s: TemplateStringsArray, ...vals: unknown[]): number { return String(vals[0] ?? '').length; }\n" +
+					'\tif (preview) { const n = r10lentag`${preview}`; console.log(n); }\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 0, `a read-only tag over the value must stay clean:\n${output}`);
+		}
+	);
+});
+
+/* ============================================================
+   Round 10 — R10-6: post-literal alias mutations fail closed
+   ============================================================
+
+   The round-10 attack mutated the table after the literal the scan reads —
+   `cfg.resolve.alias.push({…})` and `cfg.resolve.alias = […]` — audited
+   green at 69587aa while the runtime honored the mutation. Any write or
+   mutating call whose target names `resolve.alias` makes the table
+   unreadable: the scan would judge the dead literal while the runtime
+   resolves with the mutation. */
+
+/** Wrap the config's returned object in a variable so a mutation can follow. */
+function r10ConfigWithMutation(mutation) {
+	const source = readFileSync(join(repoRoot, VITE_CONFIG), 'utf8');
+	if (!source.includes('\treturn {'))
+		throw new Error('the config return anchor moved — re-anchor the R10-6 probes');
+	const head = source.replace('\treturn {', '\tconst r10cfg = {');
+	const cut = head.lastIndexOf('\t};');
+	if (cut === -1) throw new Error('the config tail anchor moved — re-anchor the R10-6 probes');
+	return `${head.slice(0, cut)}\t};\n\t${mutation}\n\treturn r10cfg;${head.slice(cut + '\t};'.length)}`;
+}
+
+test('post-literal alias mutations fail closed (R10-6 exact plants)', () => {
+	const evilEntry = "{ find: '@r10evil', replacement: path.resolve(root, 'build/__r10_x__.js') }";
+	const shapes = [
+		['push mutation', `(r10cfg.resolve.alias as unknown[]).push(${evilEntry});`],
+		['reassignment mutation', `r10cfg.resolve.alias = [${evilEntry}];`],
+		['splice mutation', `(r10cfg.resolve.alias as unknown[]).splice(0, 0, ${evilEntry});`],
+		['unshift mutation', `(r10cfg.resolve.alias as unknown[]).unshift(${evilEntry});`],
+		['element-write mutation', `(r10cfg.resolve.alias as unknown[])[0] = ${evilEntry};`],
+	];
+	for (const [label, mutation] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} of resolve.alias must fail:\n${output}`);
+				assert.match(
+					output,
+					/mutates resolve\.alias after the declaration/,
+					`the ${label} must be named as a mutation:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+/* ============================================================
+   Round 10 — R10-7: new URL literals join the closure
+   ============================================================
+
+   `new URL('<literal>', import.meta.url)` targets are bundled by Vite as
+   assets or workers, and the round-10 review proved routes into excluded
+   roots dropped silently. Literal targets are collected and judged as
+   routes; directory anchors (`new URL('.', import.meta.url)`) and
+   non-executable targets stay clean. */
+
+test('new URL routes into excluded roots fail closed (R10-7 exact plants)', () => {
+	const uprootAll = () => {
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		rmSync(join(repoRoot, 'build/__r10_x__.js'), { force: true });
+	};
+	try {
+		plantR10Excluded('build/__r10_x__.js');
+
+		// A relative target escaping into build/.
+		plant(
+			R10_ROUTE,
+			'<script lang="ts">\n' +
+				"\tconst u = new URL('../../../build/__r10_x__.js', import.meta.url);\n" +
+				'\tconst q = u.href;\n' +
+				'</script>\n<p>{q}</p>\n'
+		);
+		let result = runAudit();
+		assert.equal(result.status, 1, `a new URL route into build/ must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/routes "new URL\('\.\.\/\.\.\/\.\.\/build\/__r10_x__\.js', import\.meta\.url\)" — the route resolves into the excluded root "build"/,
+			`the new URL route must be classified:\n${result.output}`
+		);
+
+		// A root-absolute target into build/.
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+		plant(
+			R10_ROUTE,
+			'<script lang="ts">\n' +
+				"\tconst u = new URL('/build/__r10_x__.js', import.meta.url);\n" +
+				'\tconst q = u.href;\n' +
+				'</script>\n<p>{q}</p>\n'
+		);
+		result = runAudit();
+		assert.equal(result.status, 1, `a root-absolute new URL route must fail:\n${result.output}`);
+		assert.match(
+			result.output,
+			/the route resolves into the excluded root "build"/,
+			`the root-absolute new URL route must be classified:\n${result.output}`
+		);
+	} finally {
+		uprootAll();
+	}
+});
+
+test('new URL anchors, owned targets, and non-executables stay clean (R10-7 positives)', () => {
+	plant(
+		R10_ROUTE,
+		'<script lang="ts">\n' +
+			"\tconst dir = new URL('.', import.meta.url);\n" +
+			"\tconst owned = new URL('./preview-state-helpers.ts', import.meta.url);\n" +
+			"\tconst note = new URL('./__r10_note__.md', import.meta.url);\n" +
+			'\tconst q = `${dir.href} ${owned.href} ${note.href}`;\n' +
+			'</script>\n<p>{q}</p>\n'
+	);
+	try {
+		const { status, output } = runAudit();
+		assert.equal(
+			status,
+			0,
+			`directory anchors, owned targets, and non-executable new URL targets must stay clean:\n${output}`
+		);
+	} finally {
+		rmSync(join(repoRoot, R10_ROUTE), { force: true });
+	}
+});
+
+test('the tree audits clean after every round-10 plant is uprooted', () => {
+	const { status, output } = runAudit();
+	assert.equal(status, 0, output);
+});

@@ -103,6 +103,23 @@
  *      return read exactly as a collection transform's is; and an inline
  *      IIFE returning the value is a relay exactly as a named local arrow
  *      is, with a provably fresh literal return the one cleared shape.
+ *      Round-10 (R10-3/R10-4/R10-5) closes what that reading still skipped:
+ *      a BINDING-ELEMENT default reading the value (`{ x = preview } = {}`
+ *      at parameter or declaration position) binds the element at any call
+ *      or destructure that can leave its key/position to the default;
+ *      object-literal and class METHODS resolve at member call sites
+ *      (`o.m()`), so a method parameter default binds and a `return p` marks
+ *      the method preview-returning for the member spelling, with a computed
+ *      member call on an object carrying value-default methods failing
+ *      closed; `Promise.allSettled` fulfillments ADDITIONALLY carry behind
+ *      each wrapper's `.value` read (elements stay carried, over-approximated,
+ *      as round-9 bound them), and a generator's `.next()` result carries the
+ *      same way; a local helper returning a LITERAL container holding the
+ *      value (`function box(v) { return [v]; }`) makes a destructure of the
+ *      call result, and element/property reads of it, bind the identity; and
+ *      a tagged template handing the value to its tag is judged exactly as a
+ *      call, while scalar-returning tags that never write their parameters
+ *      stay clean the way read-only helpers do.
  *   9. The executable source universe is derived from reachability, not from
  *      the `src/` walk (round-7 R7-2): an executable module outside the
  *      classified owned/vendored roots that an owned file or a build entry
@@ -120,18 +137,40 @@
  *      arrays of patterns beside plain strings, failing closed on any
  *      non-literal glob argument. Round-9 (R9-1/R9-2) closes what that
  *      closure still dropped: a resolved route base NO CANDIDATE MATCHES is
- *      classified instead of silently passed — only a provably benign
- *      resolution (a classified owned/vendored root, a governed root
- *      module, a non-executable path, or a `node_modules` package
- *      `package.json` declares and installs) stays clean, while a route
- *      into any other excluded root, escaping the repository, or answered
- *      for by nothing is a finding, in every route spelling (alias,
+ *      classified instead of silently passed — the benign set the
+ *      classification proves (a classified owned/vendored root, a governed
+ *      root module, a non-executable path, or a `node_modules` package
+ *      `package.json` declares and installs — the last as POLICY over the
+ *      declared dependency graph SEC-3 screens, not a byte proof over what
+ *      an install contains) stays clean, while a route into any other
+ *      excluded root, escaping the repository, or answered for by nothing is
+ *      a finding, in each route spelling the closure models (alias,
  *      relative, root-relative, glob — aliased or plain — and dynamic
  *      import); and the alias table itself is distrusted where the runtime
  *      can override the declaration: an entry carrying any property the
  *      model does not consume (`customResolver` first — its return IS the
  *      resolution), a config declaring `resolve.alias` more than once, and
  *      a table naming one find twice are all unreadable and fail closed.
+ *      Round-10 (R10-1/R10-2/R10-6/R10-7) closes what that closure still
+ *      served un-normalized or un-consulted: EVERY resolved route base is
+ *      normalized (`.`/`..` folded the way the runtime folds them) before
+ *      candidate matching and miss classification, in every spelling —
+ *      `$lib`, root-relative, alias-resolved bare, glob patterns, dynamic
+ *      imports, and `new URL(…, import.meta.url)` targets — because the
+ *      bundler normalizes alias-replaced paths the gate kept raw, and a
+ *      classifier trusting the un-normalized prefix cleared excluded-root
+ *      files; the alias table is consulted for EVERY specifier spelling
+ *      (first match wins over the raw specifier, exactly as the runtime),
+ *      and an alias match redirecting a module the audit scans somewhere
+ *      else is a finding; a POST-LITERAL write or mutation of
+ *      `resolve.alias` (`cfg.resolve.alias.push(…)`, reassignment, mutating
+ *      methods, a mutated table-bound identifier) makes the table
+ *      unreadable, because the runtime resolves with the mutation while a
+ *      sequential reader meets only the declaration; and `new URL` literals
+ *      into the repository are collected as routes — a worker/asset spelling
+ *      Vite bundles — with a route into `node_modules` staying clean only
+ *      as POLICY (the declared and installed dependency graph SEC-3
+ *      screens), never as a byte-level proof over what an install contains.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -181,6 +220,7 @@ import {
 	alternateSinksInScript,
 	alternateSinksInSvelte,
 	eachNode,
+	normalizeRepoPath,
 	parseResolveAliases,
 	parseTypeScript,
 	previewDisplayScriptFindings,
@@ -842,34 +882,23 @@ function walkUniverse(dir) {
  * file. Query and hash suffixes are already stripped by the caller. A bare
  * specifier is a package and returns null.
  *
- * R9-1: a `..` the importer's directory depth cannot absorb ESCAPES the
- * repository root, and the resolved base keeps the leading `..` segments
- * instead of silently dropping them — the route the bundler would refuse or
- * serve from outside the root is exactly the route the scan must fail closed
- * on, and it cannot when the escape is folded away to nothing.
+ * R10-1: EVERY resolved base is normalized — `.`/`..` folded the way the
+ * runtime folds them — whatever the spelling. The round-9 reading folded
+ * `..` only for the relative spellings, so a `$lib/x/../../build/y.js`, a
+ * `/src/x/../../build/y.js`, or a regex-alias path carrying `..` kept the
+ * un-normalized segments, and the classifier trusted a prefix the runtime
+ * never serves. Leading `..` segments the base cannot absorb stay visible —
+ * they are the escape the classification fails closed on (R9-1).
  */
 function resolveUniverseSpecifier(specifier, fromFile) {
 	let target;
 	if (specifier.startsWith('$lib/')) target = `src/lib/${specifier.slice('$lib/'.length)}`;
 	else if (specifier === '$lib') target = 'src/lib';
 	else if (specifier.startsWith('/')) target = specifier.slice(1);
-	else if (specifier.startsWith('./') || specifier.startsWith('../')) {
-		const parts = fromFile.split('/');
-		const resolved = parts.slice(0, -1);
-		for (const part of specifier.split('/')) {
-			if (part === '.' || part === '') continue;
-			if (part === '..') {
-				if (resolved.length === 0 || resolved[0] === '..') resolved.push('..');
-				else resolved.pop();
-				continue;
-			}
-			resolved.push(part);
-		}
-		target = resolved.join('/');
-	} else {
-		return null;
-	}
-	return target;
+	else if (specifier.startsWith('./') || specifier.startsWith('../'))
+		target = `${fromFile.split('/').slice(0, -1).join('/')}/${specifier}`;
+	else return null;
+	return normalizeRepoPath(target);
 }
 
 /**
@@ -906,11 +935,15 @@ function bareSpecifierPackage(specifier) {
  * all land in `unresolved`, reported once by the universe check and turned
  * into fail-closed verdicts by both scans.
  *
- * R9-2 widened the unreadable set to everything the runtime can override: an
+ * R9-2 widened the unreadable set to the override shapes the model names: an
  * entry carrying a property the model does not consume (`customResolver` and
  * any other extra key), a config that declares `resolve.alias` more than once
  * (the runtime keeps the LAST table), and a table naming one find twice (the
- * winner is runtime semantics the scan cannot faithfully model).
+ * winner is runtime semantics the scan cannot faithfully model). R10-6 adds
+ * POST-LITERAL writes and mutations of the table — a member assignment, an
+ * element write, a mutating method call (`push`/`splice` and kin),
+ * `Object.assign`, or a mutated identifier- or shorthand-bound table — which
+ * the runtime honors while a sequential reader meets only the declaration.
  */
 function readBuildAliases() {
 	const aliases = [];
@@ -935,7 +968,12 @@ function readBuildAliases() {
 			if (replacement.startsWith('./')) normalized = replacement.slice(2);
 			else if (!replacement.startsWith('/')) normalized = replacement;
 			else normalized = null; // absolute, outside the repository reading
-			aliases.push({ find, replacement: normalized });
+			// R10-1: a replacement can itself carry `.`/`..` the runtime folds —
+			// normalize it so consumers judge the base the runtime serves.
+			aliases.push({
+				find,
+				replacement: normalized === null ? null : normalizeRepoPath(normalized),
+			});
 		}
 	}
 	return { aliases, unresolved };
@@ -986,6 +1024,44 @@ function importMetaGlobPatterns(source, { jsx = false } = {}) {
 		unresolved.push(argument.getText(sourceFile).slice(0, 60));
 	});
 	return { patterns, unresolved };
+}
+
+/**
+ * The `new URL('<literal>', import.meta.url)` targets in script text — Vite
+ * bundles the referenced module (asset or worker) exactly as a spelled import
+ * would, so a target that resolves into the executable universe joins the
+ * closure.
+ *
+ * R10-7: the round-10 review proved worker/asset routes into excluded roots
+ * dropped silently while Vite bundled both patterns. Literal targets — the
+ * shape Vite rewrites — are collected and judged as routes; a target no
+ * static read can name is left to the same posture the dynamic-import reading
+ * takes over its own unreadable positions elsewhere in this audit.
+ */
+function metaUrlLiterals(source, { jsx = false } = {}) {
+	const sourceFile = parseTypeScript(source, { jsx });
+	const literals = [];
+	eachNode(sourceFile, (node) => {
+		if (
+			!ts.isNewExpression(node) ||
+			!ts.isIdentifier(node.expression) ||
+			node.expression.text !== 'URL'
+		)
+			return;
+		const args = node.arguments ?? [];
+		const target = args[0];
+		const baseUrl = args[1];
+		if (!target || !baseUrl) return;
+		const isMetaUrl =
+			ts.isMetaProperty(baseUrl) ||
+			(ts.isPropertyAccessExpression(baseUrl) &&
+				ts.isMetaProperty(baseUrl.expression) &&
+				baseUrl.name.text === 'url');
+		if (!isMetaUrl) return;
+		if (ts.isStringLiteral(target) || ts.isNoSubstitutionTemplateLiteral(target))
+			literals.push(target.text);
+	});
+	return literals;
 }
 
 /** Compile a Vite-style glob pattern into a matcher over repository paths. */
@@ -1039,16 +1115,37 @@ function globToRegExp(pattern) {
  * `docs/`, to a planted `node_modules` package, a relative import into
  * `build/`, a glob over it. The walk never opens those roots, so no candidate
  * existed to match, and the route left no hit and no finding. The closure now
- * CLASSIFIES every missed base: only a provably benign resolution — a
- * classified owned/vendored root, a governed root module, a non-executable
- * path, or a `node_modules` package `package.json` declares and installs —
- * stays clean; a route into any other excluded root, escaping the repository,
- * or answered for by nothing is a finding, for aliases, spelled routes,
- * aliased and plain globs, and dynamic imports alike. The alias reading itself
- * fails closed where the runtime can override the declaration (R9-2): an entry
- * property the model does not consume (`customResolver`'s return IS the
- * resolution), a second `resolve.alias` declaration in one config, and a
- * duplicate find in one table are all unreadable.
+ * CLASSIFIES every missed base: a classified owned/vendored root, a governed
+ * root module, a non-executable path, or a route into a `node_modules`
+ * package `package.json` declares and installs stays clean — the last as
+ * POLICY over the declared dependency graph SEC-3 screens, not as a byte
+ * proof over what an install contains; a route into any other excluded root,
+ * escaping the repository, or answered for by nothing is a finding, for
+ * aliases, spelled routes, aliased and plain globs, and dynamic imports
+ * alike. The alias reading itself fails closed where the runtime can override
+ * the declaration (R9-2): an entry property the model does not consume
+ * (`customResolver`'s return IS the resolution), a second `resolve.alias`
+ * declaration in one config, and a duplicate find in one table are all
+ * unreadable.
+ *
+ * ROUND 10 CLOSES THE SHAPES THE ROUND-10 REVIEW PLANTED against that state.
+ * R10-1: every resolved route base is NORMALIZED — `.`/`..` folded exactly as
+ * the runtime folds them — before candidate matching and classification, in
+ * every spelling, because the round-9 reading folded only the relative ones
+ * and a `$lib/x/../../build/y.js`, a `/src/x/../../build/y.js`, or a
+ * regex-alias path carrying `..` was classified by a prefix the runtime never
+ * serves. R10-2: the alias table is consulted for EVERY specifier spelling —
+ * the runtime's first-match-wins over the raw specifier is not limited to
+ * bare ones — and an alias match redirecting a module the audit scans
+ * somewhere else is a finding (the round-10 plant aliased
+ * `$lib/review/PreviewBody.svelte` itself to a root shim that shipped).
+ * R10-6: a write or mutation of `resolve.alias` after the literal —
+ * `cfg.resolve.alias.push(…)`, a reassignment, a mutating method, a mutated
+ * table-bound identifier — makes the table unreadable, because the runtime
+ * resolves with the mutation while a sequential reader meets only the
+ * declaration. R10-7: `new URL('<literal>', import.meta.url)` targets join
+ * the closure as routes — Vite bundles the worker/asset spelling — and the
+ * `node_modules` bullet above is stated as policy rather than proof.
  */
 function checkExecutableSourceUniverse() {
 	const problems = [];
@@ -1096,12 +1193,13 @@ function checkExecutableSourceUniverse() {
 	// --- R9-1: classification of resolved routes -----------------------------
 	// The round-8 closure recorded only the HITS of a resolved base and was
 	// silent on everything else — and the round-9 review proved the silence:
-	// every route spelling into an excluded root (`build`, `docs`, a planted
-	// `node_modules` package) resolved to a base no candidate could match and
-	// dropped without a finding, because the walk never opens those roots and
-	// therefore never lists what lives in them. A route the closure cannot
-	// match to a candidate is therefore classified, and only a PROVABLY benign
-	// resolution stays clean — when in doubt, it is a finding.
+	// each modeled route spelling into an excluded root (`build`, `docs`, a
+	// planted `node_modules` package) resolved to a base no candidate could
+	// match and dropped without a finding, because the walk never opens those
+	// roots and therefore never lists what lives in them. A route the closure
+	// cannot match to a candidate is therefore classified, and only the benign
+	// set the classification proves stays clean — when in doubt, it is a
+	// finding.
 	const declaredPackages = (() => {
 		const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
 		return new Set([
@@ -1119,17 +1217,21 @@ function checkExecutableSourceUniverse() {
 	 *     route into the audit itself;
 	 *   - a path whose final segment carries a non-executable extension is not
 	 *     module code — the universe is executable source;
-	 *   - a route INTO `node_modules` is benign only while `package.json`
-	 *     declares the package and the package is installed — the declared
-	 *     dependency graph is what SEC-3 screens, and it contains no
-	 *     contentus-owned source;
+	 *   - a route INTO `node_modules` is clean only while `package.json`
+	 *     declares the package and the package is installed. That is POLICY,
+	 *     not a byte proof: the declared dependency graph is what SEC-3
+	 *     screens and `pnpm install --frozen-lockfile` reconstructs, and this
+	 *     scan does not verify the bytes inside an installed package — a
+	 *     locally tampered `node_modules` sits outside its reach the same way
+	 *     any local file write does (the probe suite's own plants live at
+	 *     that trust level).
 	 *
 	 * Everything else fails closed: a route escaping the repository, a route
 	 * into any other excluded root (the roots the walk never opens), an
 	 * undeclared package path, and any base nothing answers for.
 	 */
 	const classifyMissedRoute = (base) => {
-		if (base.startsWith('../')) return { kind: 'escape' };
+		if (base === '..' || base.startsWith('../')) return { kind: 'escape' };
 		if (OWNED_SOURCE_DIRS.some((dir) => isUnder(base, dir))) return null;
 		if (VENDORED_SOURCE_ROOTS.some((dir) => isUnder(base, dir))) return null;
 		// Vendored loose files and governed root modules, with the same
@@ -1143,6 +1245,14 @@ function checkExecutableSourceUniverse() {
 		const last = base.split('/').pop();
 		const dot = last.lastIndexOf('.');
 		if (dot > 0 && !EXECUTABLE_SOURCE.test(last)) return null;
+		// A route INTO `node_modules` is clean while `package.json` declares
+		// the package and the package is installed. This is POLICY, not byte
+		// proof: the declared dependency graph is what SEC-3 screens and
+		// `pnpm install --frozen-lockfile` reconstructs, and this scan does
+		// not verify the bytes inside an installed package — a locally
+		// tampered `node_modules` is outside its reach the same way any local
+		// file write is (the probe suite's own plants live at that trust
+		// level).
 		if (base === 'node_modules' || base.startsWith('node_modules/')) {
 			const rest = base === 'node_modules' ? '' : base.slice('node_modules/'.length);
 			const pkgRoot = rest.startsWith('@')
@@ -1206,6 +1316,22 @@ function checkExecutableSourceUniverse() {
 		);
 	};
 
+	// R10-2: whether a normalized base names a module the audit scans SOMEWHERE
+	// ELSE — an owned/vendored root, a vendored loose file, or a governed root
+	// module. An alias match redirecting such a module anywhere else is the
+	// round-10 hijack: the runtime loads the alias target while the gate scans
+	// the spelled module.
+	const isScannedBase = (base) => {
+		if (OWNED_SOURCE_DIRS.some((dir) => isUnder(base, dir))) return true;
+		if (VENDORED_SOURCE_ROOTS.some((dir) => isUnder(base, dir))) return true;
+		for (const extension of UNIVERSE_RESOLVE_EXTENSIONS) {
+			const withExt = `${base}${extension}`;
+			if (VENDORED_SOURCE_FILES.includes(withExt)) return true;
+			if (GOVERNED_ROOT_MODULES.includes(withExt)) return true;
+		}
+		return false;
+	};
+
 	// --- the build's alias table (R8-1) ----------------------------------------
 	// The bundler's `resolve.alias` is a route spelling like any other: the
 	// round-8 C-1 plant loaded a root-level shim through an owned file's
@@ -1257,14 +1383,17 @@ function checkExecutableSourceUniverse() {
 		const jsx = /\.(tsx|jsx)$/i.test(current);
 		let specifiers;
 		let globbed;
+		let urlLiterals;
 		try {
 			if (current.toLowerCase().endsWith('.svelte')) {
 				const script = liveScript(current, source);
 				specifiers = moduleSpecifiers(script);
 				globbed = importMetaGlobPatterns(script);
+				urlLiterals = metaUrlLiterals(script);
 			} else {
 				specifiers = moduleSpecifiers(source, { jsx });
 				globbed = importMetaGlobPatterns(source, { jsx });
+				urlLiterals = metaUrlLiterals(source, { jsx });
 			}
 		} catch (error) {
 			problems.push(
@@ -1283,45 +1412,60 @@ function checkExecutableSourceUniverse() {
 		};
 		for (const specifier of specifiers) {
 			const cleaned = modulePath(specifier);
-			const base = resolveUniverseSpecifier(cleaned, current);
-			if (base === null) {
-				// BARE SPECIFIER (R8-1): the alias table is read exactly as the
-				// bundler reads it — a matched entry routes the specifier to its
-				// replacement, scanned like any spelled route. An entry the scan
-				// matched but cannot follow is a finding; a specifier no alias
-				// claims and no installed package answers for is a route no
-				// static read can prove, and it fails closed too.
-				const aliased = resolveAliasedSpecifier(cleaned, buildAliasTable);
-				if (aliased !== null) {
-					if (aliased.kind === 'path') {
-						const hit = matchCandidate(aliased.path);
-						if (hit) record(hit, `loads it through a resolve alias ("${specifier}")`);
-						else {
-							// R9-1: an alias-resolved base no candidate matches is a
-							// route the walk must classify — a target inside an
-							// excluded root dropped silently at round 8.
-							const miss = classifyMissedRoute(aliased.path);
-							if (miss)
-								routeProblem(
-									current,
-									specifier,
-									aliased.path,
-									miss,
-									'routes through a resolve alias'
-								);
-						}
-					} else {
-						const key = `${current}\u0000${cleaned}`;
+			// R10-2: the runtime's alias matching runs on EVERY raw specifier —
+			// first match wins — not only bare ones, so the closure consults the
+			// table first for every spelling. An alias match that redirects a
+			// module the audit scans somewhere else is a finding in itself: the
+			// runtime loads the alias target while the gate scans the spelled
+			// module (the round-10 plant aliased `$lib/review/PreviewBody.svelte`
+			// to a root shim).
+			const aliased = resolveAliasedSpecifier(cleaned, buildAliasTable);
+			const plain = resolveUniverseSpecifier(cleaned, current);
+			if (aliased !== null) {
+				if (aliased.kind === 'path') {
+					if (plain !== null && aliased.path !== plain && isScannedBase(plain)) {
+						const key = `${current}\u0000${cleaned}\u0000redirect`;
 						if (!reportedBare.has(key)) {
 							reportedBare.add(key);
 							problems.push(
-								`${current} loads "${specifier}" through a resolve alias the scan cannot follow — ` +
-									'an alias route no static read can prove fails closed'
+								`${current} loads "${specifier}" through a resolve alias redirecting the scanned module "${plain}" to "${aliased.path}" — ` +
+									'the runtime loads the alias target while the scan judges the spelled module'
 							);
 						}
 					}
-					continue;
+					const hit = matchCandidate(aliased.path);
+					if (hit) record(hit, `loads it through a resolve alias ("${specifier}")`);
+					else {
+						// R9-1: an alias-resolved base no candidate matches is a
+						// route the walk must classify — a target inside an
+						// excluded root dropped silently at round 8.
+						const miss = classifyMissedRoute(aliased.path);
+						if (miss)
+							routeProblem(
+								current,
+								specifier,
+								aliased.path,
+								miss,
+								'routes through a resolve alias'
+							);
+					}
+				} else {
+					const key = `${current}\u0000${cleaned}`;
+					if (!reportedBare.has(key)) {
+						reportedBare.add(key);
+						problems.push(
+							`${current} loads "${specifier}" through a resolve alias the scan cannot follow — ` +
+								'an alias route no static read can prove fails closed'
+						);
+					}
 				}
+				continue;
+			}
+			if (plain === null) {
+				// BARE SPECIFIER no alias claims (R8-1). An unreadable alias
+				// entry could capture it; a specifier no installed package
+				// answers for is a route no static read can prove — both fail
+				// closed.
 				if (aliasUnresolvedEntries.length > 0) {
 					const key = `${current}\u0000${cleaned}`;
 					if (!reportedBare.has(key)) {
@@ -1345,27 +1489,35 @@ function checkExecutableSourceUniverse() {
 				}
 				continue;
 			}
-			const hit = matchCandidate(base);
+			const hit = matchCandidate(plain);
 			if (hit) record(hit, `loads it ("${specifier}")`);
 			else {
 				// R9-1: a spelled route no candidate matches is classified —
 				// bases inside excluded roots, escaping the repository, or
 				// answered for by nothing fail closed instead of dropping.
-				const miss = classifyMissedRoute(base);
-				if (miss) routeProblem(current, specifier, base, miss, 'routes');
+				const miss = classifyMissedRoute(plain);
+				if (miss) routeProblem(current, specifier, plain, miss, 'routes');
 			}
 		}
 		for (const pattern of globbed.patterns) {
-			let base = resolveUniverseSpecifier(pattern, current);
-			if (base === null) {
-				// R9-1: a pattern spelled neither relative nor root-relative can
-				// still be routed by the bundler's alias table — resolve it the
-				// way a specifier is. Anything the scan cannot place is a route
-				// it cannot prove, and fails closed.
-				const aliasedPattern = resolveAliasedSpecifier(pattern, buildAliasTable);
-				if (aliasedPattern !== null && aliasedPattern.kind === 'path') {
-					base = aliasedPattern.path;
-				} else {
+			// R10-2: alias consultation is first-match-wins over the raw pattern
+			// exactly as over an import specifier.
+			const aliasedPattern = resolveAliasedSpecifier(pattern, buildAliasTable);
+			let base;
+			if (aliasedPattern !== null) {
+				if (aliasedPattern.kind !== 'path') {
+					problems.push(
+						`${current} globs "${pattern}" through a resolve alias the scan cannot follow — ` +
+							'a glob route no static read can prove fails closed'
+					);
+					continue;
+				}
+				base = aliasedPattern.path;
+			} else {
+				base = resolveUniverseSpecifier(pattern, current);
+				if (base === null) {
+					// R9-1: a pattern spelled neither relative nor root-relative
+					// and claimed by no alias — nothing the scan can place.
 					routeProblem(current, pattern, '(unplaced)', { kind: 'unplaced' }, 'globs');
 					continue;
 				}
@@ -1384,6 +1536,33 @@ function checkExecutableSourceUniverse() {
 				// enumerate executable source there, whatever matches today.
 				const miss = classifyMissedRoute(staticGlobPrefix(base));
 				if (miss) routeProblem(current, pattern, base, miss, 'globs');
+			}
+		}
+		// R10-7: `new URL('<literal>', import.meta.url)` targets — Vite bundles
+		// the pattern as an asset or worker exactly as a spelled import would,
+		// and the round-10 review proved routes into excluded roots dropped
+		// silently. Literal targets join the closure; a protocol URL is not a
+		// repository route.
+		for (const literal of urlLiterals) {
+			const cleaned = modulePath(literal);
+			const spec =
+				cleaned.startsWith('/') || cleaned.startsWith('./') || cleaned.startsWith('../')
+					? cleaned
+					: /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(cleaned)
+						? null
+						: `./${cleaned}`;
+			if (spec === null) continue;
+			const base = resolveUniverseSpecifier(spec, current);
+			// A bare `.`/`..` chain resolving to the repository ROOT is the
+			// directory-anchor spelling (`fileURLToPath(new URL('.',
+			// import.meta.url))`), not a route to a module.
+			if (base === null || base === '') continue;
+			const hit = matchCandidate(base);
+			if (hit) record(hit, `loads it through new URL('${literal}', import.meta.url)`);
+			else {
+				const miss = classifyMissedRoute(base);
+				if (miss)
+					routeProblem(current, `new URL('${literal}', import.meta.url)`, base, miss, 'routes');
 			}
 		}
 		for (const snippet of globbed.unresolved) {

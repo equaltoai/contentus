@@ -256,11 +256,15 @@ The fold is bounded and fails
 closed: an alias entry it cannot read, a replacement it cannot place inside
 the repository, and a bare specifier that matches no alias and no installed
 package are findings rather than benign, while Node builtins and installed
-packages stay benign. Round 9 (R9-2) widened the unreadable set to
-everything the runtime can override the declaration with — an entry carrying
+packages stay benign. Round 9 (R9-2) widened the unreadable set to the
+override shapes the model names — an entry carrying
 any property the model does not consume (`customResolver` first: its return
 IS the resolution, so the declared replacement is advisory), a config
-declaring `resolve.alias` more than once, and a table naming one find twice. **R8-2** is the value-path closure described in the
+declaring `resolve.alias` more than once, and a table naming one find twice
+— and round 10 (R10-6) added a post-literal write or mutation of the table
+(member assignment, element writes, mutating method calls, `Object.assign`,
+and a mutated identifier- or shorthand-bound table), which the runtime
+honors while a sequential reader meets only the declaration. **R8-2** is the value-path closure described in the
 round-5 paragraph above. **R8-3** collects every `import.meta.glob` argument
 shape the bundler accepts — a plain string, a no-substitution template
 literal, and an array whose elements are strings or no-substitution template
@@ -270,27 +274,86 @@ glob the scan cannot enumerate could load any module.
 Round-9 (R9-1/R9-2/R9-3) closed the shapes the round-9 adversarial review
 planted against that state, and this note again records only what the gate
 proves. **R9-1** classifies every resolved route base the universe closure
-cannot match to a candidate, in every route spelling — alias, relative,
-root-relative, glob (aliased or plain, with or without options), and dynamic
-import. Only a provably benign resolution stays clean: a classified
-owned/vendored root, a governed root module, a non-executable path, or a
-`node_modules` package `package.json` declares and installs — the declared
-dependency graph SEC-3 screens, carrying no contentus-owned source. A route
-into any other excluded root (the roots the walk never opens — `build`,
-`docs`, `gov-infra`, the steward trees, and their kin), a route escaping the
-repository, a route into a package no declaration answers for, and a base
-nothing answers for are findings; silence is no longer a verdict. **R9-2**
-fails closed on everything the runtime can override in the alias table: an
-entry carrying any property the model does not consume (`customResolver`
-first — its return IS the resolution), a config declaring `resolve.alias`
-more than once (the runtime keeps the LAST table; a sequential reader meets
-the FIRST), and a table naming one find twice (the winner is runtime
-semantics the scan cannot faithfully model). **R9-3** is the value-path
-closure recorded in the round-5 paragraph above. What this gate is, stays
-stated: a static analysis over the owned module graph that proves the shapes
-it models and fails closed on the shapes it cannot resolve — it is not a
-dynamic guarantee, and a future shape that defeats it is a probe to add, not
-a prose correction.
+cannot match to a candidate, in the route spellings the closure models —
+alias-resolved, relative, root-relative, glob (aliased or plain, with or
+without options), dynamic import, and (since round 10) `new URL('<literal>',
+import.meta.url)` targets, each base normalized the way the runtime
+normalizes before it is judged. The benign set the classification proves is
+exactly: a classified owned/vendored root, a governed root module, a
+non-executable path, or a route into a `node_modules` package `package.json`
+declares and installs — and that last verdict is POLICY, not a byte proof:
+the declared dependency graph is what SEC-3 screens and `pnpm install
+--frozen-lockfile` reconstructs; this scan does not verify the bytes inside
+an installed package, and a locally tampered `node_modules` sits outside its
+reach the same way any local file write does (the probe suite's own plants
+live at that trust level). A route into any other excluded root (the roots
+the walk never opens — `build`, `docs`, `gov-infra`, the steward trees, and
+their kin), a route escaping the repository, a route into a package no
+declaration answers for, and a base nothing answers for are findings: a
+resolved base no candidate matches receives one of these verdicts, never a
+drop. **R9-2** fails closed on the override shapes the model names in the
+alias table: an entry carrying any property the model does not consume
+(`customResolver` first — its return IS the resolution), a config declaring
+`resolve.alias` more than once (the runtime keeps the LAST table; a
+sequential reader meets the FIRST), a table naming one find twice (the
+winner is runtime semantics the scan cannot faithfully model), and — since
+round 10 — a post-literal write or mutation of the table. **R9-3** is the
+value-path closure recorded in the round-5 paragraph above. What this gate
+is, stays stated: a static analysis over the owned module graph that proves
+the shapes it models and fails closed on the shapes it cannot resolve — it
+is not a dynamic guarantee, and a future shape that defeats it is a probe to
+add, not a prose correction.
+
+Round-10 (R10-1…R10-7) closed the shapes the round-10 standing attack
+planted against that state, and this note again records only what the gate
+proves. **R10-1** normalizes EVERY resolved route base — `.`/`..` folded the
+way the runtime folds them — before candidate matching and miss
+classification, in each spelling the closure models: `$lib`, root-relative,
+alias-resolved bare (including paths the `/^src\//` regex alias returns,
+which the bundler folds and the round-9 gate kept raw), glob static
+prefixes, dynamic imports, and `new URL` literals. The round-9 reading
+folded only the relative spellings, and an un-normalized base still wearing
+an owned prefix classified clean while excluded-root files shipped — proven
+end-to-end at the round-9 head for the `$lib`, docs/, and regex-alias
+plants. Root-absolute `/src/…` imports are refused by the bundler; the gate
+classifies them anyway, as unplaced bases nothing answers for. **R10-2**
+consults the alias table for every specifier spelling — the runtime's
+first-match-wins matching runs on the raw specifier, not only bare ones —
+and an alias match redirecting a module the audit scans (an owned or
+vendored path) somewhere else is a finding in both the universe closure and
+the component-callee resolution: the round-10 plant aliased
+`$lib/review/PreviewBody.svelte` itself to a root shim that audited green
+and shipped its marker into the client bundle at the round-9 head. An alias
+resolving to the SAME module stays clean, and the repository's own `$lib`,
+`$app/*`, regex, and stub entries are the paired positive. **R10-3** binds
+binding-element defaults (`{ x = preview } = {}`) at call and destructure
+positions; resolves object-literal, class, and instance METHODS at member
+call sites — `.call`/`.apply` dispatch included — so a method-parameter
+default binds, a `return p` marks the method preview-returning, a method
+proven never to write its parameters keeps a value-carrying member call
+clean, and a computed member call over an object carrying value-default
+methods fails closed; records `Promise.allSettled` fulfillments
+ADDITIONALLY behind each wrapper's `.value` read — elements stay carried,
+over-approximated, as round 9 bound them — whether the result arrives by
+`await`, `.then` parameter, destructure, element read, or for-of; and a
+generator's `.next()` result is a wrapper whose `.value` read carries, its
+iterator object iterable like the call. **R10-4** reads a local helper's
+literal container returns — `function box(v) { return [v]; }` — so a
+destructure of the call result, and element/property reads of it, bind the
+identity; a helper whose returns carry no preview value stays clean.
+**R10-5** judges a tagged template handing the value to its tag exactly as
+a call — interpolations bind at the tag's parameters after the
+template-strings position, a tag proven never to write its parameters stays
+clean the way a read-only helper does — and covers the manual generator
+spelling above. **R10-6** fails closed on a post-literal write or mutation
+of `resolve.alias` — member assignment, element writes, `.push`/`.splice`/
+`.unshift` and the other mutating methods, `Object.assign`, and a mutated
+identifier- or shorthand-bound table — because the runtime resolves with the
+mutation while a sequential reader meets only the declaration. **R10-7**
+collects `new URL('<literal>', import.meta.url)` targets as routes — Vite
+bundles the worker/asset spelling — with directory anchors, owned targets,
+and non-executable paths staying clean, and states the `node_modules` benign
+rule as policy rather than proof (R9-1 paragraph above).
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
