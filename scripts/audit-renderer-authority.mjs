@@ -171,23 +171,23 @@
  *      Vite bundles — with a route into `node_modules` staying clean only
  *      as POLICY (the declared and installed dependency graph SEC-3
  *      screens), never as a byte-level proof over what an install contains.
- *      Round-11 (R11-1/R11-2/R11-3) closes what that state still read or
- *      resolved too narrowly: the alias table is treated as UNREADABLE the
- *      moment it escapes the literal's textual reach — identifiers assigned
- *      or destructured from any chain ending in `resolve`/`alias` (chased to
- *      a fixed point), the builtin mutation APIs (`Object.assign`,
- *      `Object.defineProperty`, `Object.defineProperties`, `Reflect.set`,
- *      `Reflect.defineProperty`) handed the table, its `resolve` object, or
- *      the config object, and the state flowing into any call argument,
- *      member-call receiver, or spread — making every consumer fail closed;
- *      a member call on an instance whose own class lacks the member CHASES
- *      THE HERITAGE CLAUSE to the declaring base — bounded, cycle-guarded,
- *      multi-hop and class-expression heritage included — failing closed when
- *      the member cannot be proven, with class getters and computed member
- *      calls reading the same chain; and the barrel tracer consults the alias
- *      table BEFORE owned resolution, exactly as an import and the runtime
- *      do, catching a hijacked re-export rather than leaving it to the
- *      universe closure alone.
+ *      Rounds 11–12 (R11-1/2/3, R12-1/2/3) close what that state still read
+ *      or resolved too narrowly: the alias table is UNREADABLE the moment it
+ *      escapes the literal's textual reach — identifiers bound from a chain
+ *      ending in `resolve`/`alias` only through the modeled channels (direct
+ *      identifier or pattern bindings, parameter or binding-element
+ *      defaults); the builtin mutation APIs handed the table, its `resolve`
+ *      object, or the config object; the state flowing into any call
+ *      argument, member-call receiver, or spread; and any unmodeled binding
+ *      position — a return or yield, a wrapped initializer, a member or
+ *      element assignment target, a property slot, a computed key — so every
+ *      consumer fails closed; a member call CHASES THE HERITAGE CLAUSE to
+ *      the declaring base — bounded, cycle-guarded, multi-hop,
+ *      class-expression, STATIC, and SUPER dispatch included, cast receivers
+ *      unwrapped, an in-file prototype or constructor install tainting the
+ *      chain — with getters and computed calls reading it; and the barrel
+ *      tracer consults the alias table BEFORE owned resolution, catching a
+ *      hijacked re-export rather than leaving it to the universe closure.
  *
  * WHY THE GATE IS A PARSER NOW. Round-1 adversarial review proved three live
  * bypasses against the previous comment-stripped regex gate: a `/*` inside a
@@ -966,7 +966,16 @@ function bareSpecifierPackage(specifier) {
  * mutation API handed one of those targets, and the state flowing into any
  * call argument, member-call receiver, or spread — once the reference leaves
  * the declaration's textual reach, the table is unreadable and every
- * consumer fails closed.
+ * consumer fails closed. R12-1 completes the closure by treating the table
+ * as ESCAPED unless every binding derived from it is provably through the
+ * modeled channels: derivation keeps only direct identifier and pattern
+ * bindings (keyed to the state-bearing keys of the config literal, so a
+ * sibling like `plugins` binds nothing the table touches) and parameter or
+ * binding-element defaults, and any other position a state read appears in —
+ * a return, a yield, a concise-arrow body, a wrapped initializer, a member
+ * or element assignment target, a property or class-property slot, a computed
+ * pattern key — fails closed. The one stated exception: the config object
+ * itself, returned or yielded as the identifier the declaration bound it to.
  */
 function readBuildAliases() {
 	const aliases = [];

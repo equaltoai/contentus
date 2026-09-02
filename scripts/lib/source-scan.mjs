@@ -2333,72 +2333,182 @@ function previewValuePathFindings(file, sourceFile) {
 		}
 	});
 
+	// R12-2 channel 3: MEMBERS INSTALLED AT RUNTIME — an in-file
+	// `Object.defineProperty(A.prototype, …)` (and its `defineProperties`,
+	// `Reflect.defineProperty`, `Reflect.set`, `Object.assign` spellings, and
+	// a direct `A.prototype.m = …` write) puts a member on the class the
+	// declaration walk never saw, so a "provably absent" verdict over the
+	// chain is unsound for every class an install touches: the member walk
+	// treats such a class's members as UNPROVEN and fails closed. The
+	// round-12 plant installed a getter; its method analogue was already
+	// caught — not by the chase, but because the call scan fails closed on a
+	// member it cannot read when the value is HANDED to it (`a.m(preview)`),
+	// while a getter read hands nothing, so the chase itself must carry the
+	// verdict. Installs on the class object itself taint its STATIC side.
+	const prototypeTainted = new Set();
+	const staticTainted = new Set();
+	const taintTargetClass = (node) => {
+		const inner = unwrapValueNode(node);
+		if (
+			ts.isPropertyAccessExpression(inner) &&
+			!inner.computed &&
+			inner.name.text === 'prototype' &&
+			ts.isIdentifier(inner.expression) &&
+			localClassNames.has(inner.expression.text)
+		)
+			return { name: inner.expression.text, side: 'prototype' };
+		if (ts.isIdentifier(inner) && localClassNames.has(inner.text))
+			return { name: inner.text, side: 'static' };
+		return null;
+	};
+	eachNode(sourceFile, (node) => {
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			!node.expression.computed &&
+			ts.isIdentifier(node.expression.expression) &&
+			node.arguments.length > 0
+		) {
+			const builtin = `${node.expression.expression.text}.${node.expression.name.text}`;
+			const target = taintTargetClass(node.arguments[0]);
+			if (!target) return;
+			if (
+				builtin === 'Object.defineProperty' ||
+				builtin === 'Object.defineProperties' ||
+				builtin === 'Reflect.defineProperty' ||
+				builtin === 'Reflect.set'
+			) {
+				if (target.side === 'prototype') prototypeTainted.add(target.name);
+				else staticTainted.add(target.name);
+			} else if (builtin === 'Object.assign' && target.side === 'prototype')
+				prototypeTainted.add(target.name);
+		}
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+		) {
+			const lhs = unwrapValueNode(node.left);
+			if (ts.isPropertyAccessExpression(lhs) || ts.isElementAccessExpression(lhs)) {
+				const target = taintTargetClass(lhs.expression);
+				if (target && target.side === 'prototype') prototypeTainted.add(target.name);
+			}
+		}
+	});
+
 	/**
-	 * R11-2: chase a locally declared class's heritage clause for a member its
-	 * own body does not declare — `class B extends A {}` then `b.m()` resolves
-	 * to `A`'s method exactly as the runtime's prototype walk does. Bounded,
-	 * cycle-guarded, and honest about what it cannot see: a chain that reaches
-	 * an imported or otherwise undeclared base, a heritage expression no
-	 * identifier names (a mixin call), or the depth bound returns
-	 * `proven: false`; a chain exhausted through locally declared classes with
-	 * the member nowhere returns `proven: true` with no infos — the member is
-	 * provably absent. Callers fail closed on both unproven shapes.
+	 * R11-2 / R12-2: the runtime's prototype walk for a member — a chain
+	 * class's OWN body first, then its extends base, bounded and
+	 * cycle-guarded, with the round-12 taint baked in: a class whose prototype
+	 * (or, on the static side, whose constructor object) had a member
+	 * installed in-file offers members the declaration walk never saw, so
+	 * resolution THROUGH it is unproven — taint is checked BEFORE the class's
+	 * own declared members, because an install executed after the declaration
+	 * overwrites what the body declared. Found members report their declaring
+	 * class; a chain exhausted through untainted locally declared classes
+	 * reports 'absent'; an imported or undeclared base, a heritage expression
+	 * no identifier names (a mixin call), the depth bound, a cycle, or a
+	 * tainted class reports 'unproven', and each consumer fails closed on it
+	 * by its own posture.
 	 */
-	const chaseClassMember = (className, memberName, memberMap) => {
+	const walkClassMember = (className, memberName, memberMap, taintSet) => {
 		const visited = new Set();
 		let current = className;
 		for (let depth = 0; depth < HERITAGE_DEPTH_BOUND; depth += 1) {
-			if (!localClassNames.has(current) || visited.has(current))
-				return { infos: null, declaringName: null, proven: false };
+			if (!localClassNames.has(current) || visited.has(current)) return { status: 'unproven' };
 			visited.add(current);
+			if (taintSet.has(current)) return { status: 'unproven' };
 			const infos = memberMap.get(`${current}.${memberName}`);
-			if (infos) return { infos, declaringName: current, proven: true };
-			if (!classHeritage.has(current)) return { infos: null, declaringName: null, proven: true };
+			if (infos) return { status: 'found', infos, declaringName: current };
+			if (!classHeritage.has(current)) return { status: 'absent' };
 			const base = unwrapValueNode(classHeritage.get(current));
-			if (!ts.isIdentifier(base)) return { infos: null, declaringName: null, proven: false };
+			if (!ts.isIdentifier(base)) return { status: 'unproven' };
 			current = base.text;
 		}
-		return { infos: null, declaringName: null, proven: false };
+		return { status: 'unproven' };
 	};
-	/**
-	 * R11-2: the locally declared classes an instance's heritage chain visits,
-	 * starting at the instance's own class — the computed-member reading walks
-	 * these for value-default methods the instance selects by an unknowable
-	 * key. Stops at the first base the chase cannot prove local.
-	 */
-	const classChain = (className) => {
-		const chain = [];
+	/** Whether the visible heritage chain of a class touches a tainted class. */
+	const chainTouchesTaint = (className, taintSet) => {
 		const visited = new Set();
 		let current = className;
 		for (let depth = 0; depth < HERITAGE_DEPTH_BOUND; depth += 1) {
-			if (!localClassNames.has(current) || visited.has(current)) break;
+			if (!localClassNames.has(current) || visited.has(current)) return false;
 			visited.add(current);
-			chain.push(current);
-			if (!classHeritage.has(current)) break;
+			if (taintSet.has(current)) return true;
+			if (!classHeritage.has(current)) return false;
 			const base = unwrapValueNode(classHeritage.get(current));
-			if (!ts.isIdentifier(base)) break;
+			if (!ts.isIdentifier(base)) return false;
 			current = base.text;
 		}
-		return chain;
+		return false;
 	};
 	/**
-	 * R11-2: the method infos a member callee resolves to — the owner's own
-	 * key first (an object literal or a static call), then the instance's
-	 * class, then the heritage chase when the class itself lacks the member.
-	 * Null when nothing the scan can see declares the method; how null is
-	 * judged belongs to each consumer (the carrier and the call scan fail
-	 * closed for instances of locally declared classes, the binding pass has
-	 * nothing to bind).
+	 * R12-2 channel 2: the name of the locally declared class a `super`
+	 * dispatch binds — the nearest enclosing class declaration, or the
+	 * variable a class expression is bound to. `super` reaches through nested
+	 * arrows to the method's own class; a nested class binds its own.
+	 */
+	const enclosingClassName = (node) => {
+		let cursor = node.parent;
+		while (cursor) {
+			if (ts.isClassDeclaration(cursor)) return cursor.name?.text ?? null;
+			if (ts.isClassExpression(cursor)) {
+				if (ts.isVariableDeclaration(cursor.parent) && ts.isIdentifier(cursor.parent.name))
+					return cursor.parent.name.text;
+				return null;
+			}
+			cursor = cursor.parent;
+		}
+		return null;
+	};
+	/**
+	 * R12-2 channel 2: a SUPER dispatch resolves on the enclosing class's
+	 * EXTENDS base — the runtime skips the class's own prototype. In an
+	 * instance method it lands on the base's prototype (instance side); in a
+	 * static method it lands on the base class object (static side). The walk
+	 * therefore treats a base as tainted when EITHER side had a member
+	 * installed in-file, failing closed rather than guessing which side the
+	 * dispatch targets. Null when the dispatch cannot even be placed (a
+	 * `super` with no enclosing class, no extends clause, or a heritage
+	 * expression no identifier names); the callers fail closed on null exactly
+	 * as on an unproven walk.
+	 */
+	const resolveSuperWalk = (node, memberName, memberMap) => {
+		const cls = enclosingClassName(node);
+		if (cls === null || !localClassNames.has(cls)) return null;
+		const heritage = classHeritage.get(cls);
+		if (!heritage) return null;
+		const base = unwrapValueNode(heritage);
+		if (!ts.isIdentifier(base)) return null;
+		const superTaint = new Set([...prototypeTainted, ...staticTainted]);
+		return walkClassMember(base.text, memberName, memberMap, superTaint);
+	};
+	/**
+	 * R11-2 / R12-2: the method infos a member callee resolves to — the
+	 * owner's own key first (an object literal), then the instance's class
+	 * walked down its heritage, then the STATIC spelling: a member call on a
+	 * locally declared class name chases the same chain for inherited
+	 * statics. Null when nothing the scan can see declares the method, or
+	 * when a taint makes the member unproven; how null is judged belongs to
+	 * each consumer (the carrier and the call scan fail closed for instances
+	 * of locally declared classes, the binding pass has nothing to bind).
 	 */
 	const resolveMemberMethodInfos = (owner, memberName) => {
 		const direct = methodInfos.get(`${owner}.${memberName}`);
-		if (direct) return direct;
-		if (!instanceClass.has(owner)) return null;
-		const cls = instanceClass.get(owner);
-		const onClass = methodInfos.get(`${cls}.${memberName}`);
-		if (onClass) return onClass;
-		if (!localClassNames.has(cls)) return null;
-		return chaseClassMember(cls, memberName, methodInfos).infos;
+		// a constructor whose static side had a member installed in-file could
+		// have replaced the declared static — the infos are not provable
+		if (direct && !(localClassNames.has(owner) && staticTainted.has(owner))) return direct;
+		if (instanceClass.has(owner)) {
+			const cls = instanceClass.get(owner);
+			if (!localClassNames.has(cls)) return null;
+			const walk = walkClassMember(cls, memberName, methodInfos, prototypeTainted);
+			return walk.status === 'found' ? walk.infos : null;
+		}
+		if (localClassNames.has(owner)) {
+			const walk = walkClassMember(owner, memberName, methodInfos, staticTainted);
+			return walk.status === 'found' ? walk.infos : null;
+		}
+		return null;
 	};
 
 	/** `$state(<value>)` / `$state.raw(<value>)` — same-reference rune wrappers. */
@@ -2849,13 +2959,31 @@ function previewValuePathFindings(file, sourceFile) {
 	 */
 	const memberCallCarries = (owner, methodName) => {
 		if (previewReturningMethods.has(`${owner}.${methodName}`)) return true;
-		if (!instanceClass.has(owner)) return false;
-		const cls = instanceClass.get(owner);
-		if (previewReturningMethods.has(`${cls}.${methodName}`)) return true;
-		if (!localClassNames.has(cls)) return false;
-		const chase = chaseClassMember(cls, methodName, methodInfos);
-		if (!chase.proven || !chase.infos) return true; // unproven — fail closed
-		return previewReturningMethods.has(`${chase.declaringName}.${methodName}`);
+		if (instanceClass.has(owner)) {
+			const cls = instanceClass.get(owner);
+			if (!localClassNames.has(cls)) return false;
+			const walk = walkClassMember(cls, methodName, methodInfos, prototypeTainted);
+			// unproven — taint included — fails closed, and so does a member
+			// provably absent: the round-11 posture for instances of locally
+			// declared classes
+			if (walk.status !== 'found') return true;
+			return previewReturningMethods.has(`${walk.declaringName}.${methodName}`);
+		}
+		// R12-2 channel 1: STATIC dispatch on the class name — a static member
+		// is inherited down the class's own heritage exactly as an instance
+		// member is down the prototype chain, so `class B extends A {}` then
+		// `B.m()` resolves `A`'s static `m`. The round-11 reading keyed the
+		// instance map and early-returned on a class name, so the static side
+		// never chased. An inherited static the chain cannot prove carries only
+		// when an in-file install taints the visible chain — a class-name
+		// receiver kept the pre-round-12 posture otherwise.
+		if (localClassNames.has(owner)) {
+			const walk = walkClassMember(owner, methodName, methodInfos, staticTainted);
+			if (walk.status === 'found')
+				return previewReturningMethods.has(`${walk.declaringName}.${methodName}`);
+			return walk.status === 'unproven' && chainTouchesTaint(owner, staticTainted);
+		}
+		return false;
 	};
 
 	/** Whether an expression provably holds the preview reference. */
@@ -2906,26 +3034,47 @@ function previewValuePathFindings(file, sourceFile) {
 					return true;
 			}
 		}
-		if (ts.isPropertyAccessExpression(inner) && ts.isIdentifier(inner.expression)) {
-			const props = containerPaths.get(inner.expression.text);
+		// R12-2 channel 2 (getter spelling): a SUPER property read dispatches
+		// to the enclosing class's extends base — `super.g` resolves the
+		// getter the base declares, and a getter the walk cannot prove fails
+		// closed exactly as an unproven method call does.
+		if (
+			ts.isPropertyAccessExpression(inner) &&
+			!inner.computed &&
+			inner.expression.kind === ts.SyntaxKind.SuperKeyword
+		) {
+			const walk = resolveSuperWalk(inner, inner.name.text, classGetterInfos);
+			if (walk === null || walk.status !== 'found') return true; // fail closed
+			return walk.infos.some((accessor) => getterCanCarry(accessor));
+		}
+		if (
+			ts.isPropertyAccessExpression(inner) &&
+			ts.isIdentifier(unwrapValueNode(inner.expression))
+		) {
+			// R12-3: casts and parentheses dress the receiver — `(b as T).g`
+			// unwraps to the instance the reading keys on, consistent with the
+			// unwrap discipline every other receiver comparison applies.
+			const receiver = unwrapValueNode(inner.expression);
+			const props = containerPaths.get(receiver.text);
 			if (props && (props.has(inner.name.text) || props.has('*'))) return true;
-			// R11-2: a GETTER read on a class instance — the object-literal
-			// getter reading extended down the heritage clause, so
-			// `class B extends A {}` then `b.g` resolves the getter `A`
-			// declares. A getter the chase cannot prove fails closed exactly as
-			// an unproven method does; a getter proven to return a fresh value
-			// stays clean, and instances of classes the file never declares
-			// keep the pre-round-11 posture.
-			if (!inner.computed && instanceClass.has(inner.expression.text)) {
-				const cls = instanceClass.get(inner.expression.text);
-				let accessors = classGetterInfos.get(`${cls}.${inner.name.text}`) ?? null;
-				if (!accessors && localClassNames.has(cls)) {
-					const chase = chaseClassMember(cls, inner.name.text, classGetterInfos);
-					if (!chase.proven) return true; // unproven — fail closed
-					accessors = chase.infos;
+			// R11-2 / R12-2 channel 3: a GETTER read on a class instance — the
+			// object-literal getter reading extended down the heritage clause,
+			// so `class B extends A {}` then `b.g` resolves the getter `A`
+			// declares, with the round-12 taint in the walk: a class whose
+			// prototype had a getter INSTALLED in-file makes the chain
+			// unproven, because the round-11 "provably absent" verdict cannot
+			// see an installed member. A getter the walk cannot prove fails
+			// closed exactly as an unproven method does; a getter proven to
+			// return a fresh value stays clean, and instances of classes the
+			// file never declares keep the pre-round-11 posture.
+			if (!inner.computed && instanceClass.has(receiver.text)) {
+				const cls = instanceClass.get(receiver.text);
+				if (localClassNames.has(cls)) {
+					const walk = walkClassMember(cls, inner.name.text, classGetterInfos, prototypeTainted);
+					if (walk.status === 'unproven') return true; // taint or unseen base — fail closed
+					if (walk.status === 'absent') return false; // provably absent — clean
+					return walk.infos.some((accessor) => getterCanCarry(accessor));
 				}
-				if (accessors && accessors.length > 0)
-					return accessors.some((accessor) => getterCanCarry(accessor));
 			}
 			return false;
 		}
@@ -2997,19 +3146,33 @@ function previewValuePathFindings(file, sourceFile) {
 			// method proven to return the value — `o.m()` is the member spelling
 			// of a preview-returning call, and its result carries exactly as the
 			// identifier call's does. `.call`/`.apply` dispatch of such a method
-			// carries the same way.
+			// carries the same way. R12-3: the receiver is unwrapped before the
+			// reading keys on it — `(b as T).m()` names the same instance as
+			// `b.m()`. R12-2 channel 2: a SUPER dispatch — `super.m()` —
+			// resolves on the enclosing class's extends base, and a dispatch
+			// the walk cannot prove fails closed as carrying.
 			const memberCallee = propertyName(inner.expression);
-			if (memberCallee && !memberCallee.computed && ts.isIdentifier(memberCallee.object)) {
-				if (memberCallCarries(memberCallee.object.text, memberCallee.name)) return true;
+			const memberReceiver =
+				memberCallee && !memberCallee.computed ? unwrapValueNode(memberCallee.object) : null;
+			if (memberReceiver && memberReceiver.kind === ts.SyntaxKind.SuperKeyword) {
+				const walk = resolveSuperWalk(inner, memberCallee.name, methodInfos);
+				if (walk === null || walk.status !== 'found') return true; // fail closed
+				if (previewReturningMethods.has(`${walk.declaringName}.${memberCallee.name}`)) return true;
+			} else if (memberReceiver && ts.isIdentifier(memberReceiver)) {
+				if (memberCallCarries(memberReceiver.text, memberCallee.name)) return true;
 			}
-			if (
+			const callDispatch =
 				memberCallee &&
 				!memberCallee.computed &&
-				(memberCallee.name === 'call' || memberCallee.name === 'apply') &&
-				ts.isPropertyAccessExpression(memberCallee.object) &&
-				ts.isIdentifier(memberCallee.object.expression)
-			) {
-				if (memberCallCarries(memberCallee.object.expression.text, memberCallee.object.name.text))
+				(memberCallee.name === 'call' || memberCallee.name === 'apply')
+					? unwrapValueNode(memberCallee.object)
+					: null;
+			if (callDispatch && ts.isPropertyAccessExpression(callDispatch)) {
+				const dispatchedReceiver = unwrapValueNode(callDispatch.expression); // R12-3
+				if (
+					ts.isIdentifier(dispatchedReceiver) &&
+					memberCallCarries(dispatchedReceiver.text, callDispatch.name.text)
+				)
 					return true;
 			}
 			if (
@@ -3641,29 +3804,37 @@ function previewValuePathFindings(file, sourceFile) {
 			// parameters, so a method default binds exactly as a standalone
 			// function's does. R11-2: the resolution chases the heritage clause
 			// when the instance's own class lacks the member, so an inherited
-			// default binds exactly as a declared one does.
-			if (
-				!infos &&
-				ts.isPropertyAccessExpression(calleeExpr) &&
-				ts.isIdentifier(calleeExpr.expression)
-			) {
-				infos = resolveMemberMethodInfos(calleeExpr.expression.text, calleeExpr.name.text);
+			// default binds exactly as a declared one does. R12-3: casts are
+			// unwrapped off the receiver first. R12-2 channel 2: `super.m(…)`
+			// binds the base member's parameters at the enclosing class's base.
+			if (!infos && ts.isPropertyAccessExpression(calleeExpr)) {
+				const calleeReceiver = unwrapValueNode(calleeExpr.expression);
+				if (calleeReceiver.kind === ts.SyntaxKind.SuperKeyword) {
+					const walk = resolveSuperWalk(node, calleeExpr.name.text, methodInfos);
+					if (walk !== null && walk.status === 'found') infos = walk.infos;
+				} else if (ts.isIdentifier(calleeReceiver)) {
+					infos = resolveMemberMethodInfos(calleeReceiver.text, calleeExpr.name.text);
+				}
 			}
 			// R10-3 adjacent: `.call`/`.apply` dispatch of a resolvable member
 			// callee — `o.m.call(o)` / `o.m.apply(o, [v])` — invokes the method
 			// itself; the arguments shift past the receiver. An `.apply` whose
 			// array no static read can resolve binds nothing here.
 			let callArgs = args;
-			if (
+			const callDispatchTarget =
 				!infos &&
 				ts.isPropertyAccessExpression(calleeExpr) &&
-				(calleeExpr.name.text === 'call' || calleeExpr.name.text === 'apply') &&
-				ts.isPropertyAccessExpression(calleeExpr.expression) &&
-				ts.isIdentifier(calleeExpr.expression.expression)
+				(calleeExpr.name.text === 'call' || calleeExpr.name.text === 'apply')
+					? unwrapValueNode(calleeExpr.expression) // parens/casts dress `X.m` too
+					: null;
+			if (
+				callDispatchTarget &&
+				ts.isPropertyAccessExpression(callDispatchTarget) &&
+				ts.isIdentifier(unwrapValueNode(callDispatchTarget.expression)) // R12-3
 			) {
 				infos = resolveMemberMethodInfos(
-					calleeExpr.expression.expression.text,
-					calleeExpr.expression.name.text
+					unwrapValueNode(callDispatchTarget.expression).text,
+					callDispatchTarget.name.text
 				);
 				if (infos) {
 					if (calleeExpr.name.text === 'call') callArgs = args.slice(1);
@@ -4338,11 +4509,20 @@ function previewValuePathFindings(file, sourceFile) {
 		if (
 			ts.isPropertyAccessExpression(target) &&
 			(target.name.text === 'call' || target.name.text === 'apply') &&
-			ts.isPropertyAccessExpression(target.expression)
+			ts.isPropertyAccessExpression(unwrapValueNode(target.expression))
 		)
-			target = target.expression;
-		if (!ts.isPropertyAccessExpression(target) || !ts.isIdentifier(target.expression)) return null;
-		return resolveMemberMethodInfos(target.expression.text, target.name.text);
+			target = unwrapValueNode(target.expression); // parens/casts dress `X.m` too
+		if (!ts.isPropertyAccessExpression(target)) return null;
+		// R12-3: casts and parentheses dress the receiver of a hand-off exactly
+		// as they dress the carrier's. R12-2 channel 2: a SUPER dispatch hands
+		// the value to the enclosing class's base member.
+		const receiver = unwrapValueNode(target.expression);
+		if (receiver.kind === ts.SyntaxKind.SuperKeyword) {
+			const walk = resolveSuperWalk(target, target.name.text, methodInfos);
+			return walk !== null && walk.status === 'found' ? walk.infos : null;
+		}
+		if (!ts.isIdentifier(receiver)) return null;
+		return resolveMemberMethodInfos(receiver.text, target.name.text);
 	};
 
 	// --- the write / mutation / call scan ------------------------------------
@@ -4649,22 +4829,32 @@ function previewValuePathFindings(file, sourceFile) {
 			}
 			if (dangerous) break;
 		}
-		// R11-2: an instance selects among INHERITED methods by the same
-		// unknowable key — every declared class in the heritage chain joins the
-		// scan, and a chain the chase cannot complete names bases whose methods
-		// no static read can see, which fails closed here as elsewhere.
-		// Instances of classes the file never declares keep the R10-3 posture.
-		if (
-			!dangerous &&
-			instanceClass.has(owner.text) &&
-			localClassNames.has(instanceClass.get(owner.text))
-		) {
+		// R11-2 / R12-2: an instance selects among INHERITED methods by the
+		// same unknowable key — every declared class in the heritage chain
+		// joins the scan, and a chain the chase cannot complete names bases
+		// whose methods no static read can see, which fails closed here as
+		// elsewhere. Instances of classes the file never declares keep the
+		// R10-3 posture. R12-2: the STATIC spelling — a computed call on the
+		// class name itself — walks the same chain for inherited statics, and
+		// a class the round-12 readings found with members installed in-file
+		// offers value-default methods the declaration walk never saw.
+		const computedChainRoot = instanceClass.has(owner.text)
+			? instanceClass.get(owner.text)
+			: localClassNames.has(owner.text)
+				? owner.text
+				: null;
+		const computedChainTaint = instanceClass.has(owner.text) ? prototypeTainted : staticTainted;
+		if (!dangerous && computedChainRoot !== null && localClassNames.has(computedChainRoot)) {
 			const visited = new Set();
-			let current = instanceClass.get(owner.text);
+			let current = computedChainRoot;
 			let complete = false;
 			for (let depth = 0; depth < HERITAGE_DEPTH_BOUND; depth += 1) {
 				if (!localClassNames.has(current) || visited.has(current)) break;
 				visited.add(current);
+				if (computedChainTaint.has(current)) {
+					dangerous = true; // installed members cannot be proven clean
+					break;
+				}
 				for (const [key, infos] of methodInfos) {
 					if (!key.startsWith(`${current}.`)) continue;
 					for (const { node: fnNode } of infos) {
@@ -5561,6 +5751,14 @@ export function previewForwardingFindings(files, options = {}) {
 		'.jsx',
 	];
 	const findModuleFile = (base) => {
+		// R12-5: a base that ALREADY carries a module extension — an alias
+		// target like `src/lib/review/PreviewBody.svelte` — names the file
+		// itself; the suffixing loops below would only try double extensions.
+		if (
+			SCRIPT_MODULE_EXTENSIONS.some((extension) => base.endsWith(extension)) &&
+			moduleExists(base)
+		)
+			return base;
 		for (const extension of SCRIPT_MODULE_EXTENSIONS) {
 			if (moduleExists(base + extension)) return base + extension;
 		}
@@ -6441,11 +6639,18 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	// or `Object.defineProperty` naming the `resolve` object, a `push` through
 	// the identifier a destructure binds (`const { alias } = cfg.resolve`),
 	// and an element write inside a helper the table is handed to
-	// (`w(cfg.resolve.alias)`). Three readings close the escape:
+	// (`w(cfg.resolve.alias)`). The round-12 attack aliased it through the
+	// wrappers the round-11 closure did not model — a function return or a
+	// generator yield, a conditional or comma expression, an array or object
+	// wrap, a member or element assignment target, a parameter default, a
+	// class or object property, a computed key — and mutated it through the
+	// alias over a green audit. Four readings close the escape:
 	//   - DERIVED NAMES — every identifier the table, its `resolve` parent, or
-	//     the config object is bound into (assignment or destructure, chased
-	//     to a fixed point), so a write or escape through the name is one
-	//     through the table;
+	//     the config object is bound into through the MODELED channels (a
+	//     direct identifier or pattern binding, a parameter or binding-element
+	//     default), chased to a fixed point and recorded at the level of state
+	//     it holds, so a write or escape through the name is one through the
+	//     table;
 	//   - MUTATIONS — any write, mutating method, or builtin mutation API
 	//     (`Object.assign`, `Object.defineProperty`, `Object.defineProperties`,
 	//     `Reflect.set`, `Reflect.defineProperty`) whose target names the
@@ -6454,7 +6659,14 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	//     config object flowing into ANY call argument, being the receiver of
 	//     ANY member call, or being spread: once the reference travels into
 	//     code the scan cannot read, a mutation the runtime honors can happen
-	//     anywhere it travels.
+	//     anywhere it travels;
+	//   - BINDING POSITIONS — the table is escaped unless every binding
+	//     derived from it is provably through the modeled channels: a state
+	//     read in a return, yield, or concise-arrow-body position, a wrapped
+	//     initializer or assignment source, a member or element assignment
+	//     target, a property or class-property slot, or a computed pattern key
+	//     fails closed. The one stated exception: the config object itself,
+	//     returned or yielded as the identifier the declaration bound it to.
 	// Casts and parentheses are unwrapped throughout. Any hit makes the table
 	// unreadable and every consumer fails closed.
 	const aliasTableNames = new Set();
@@ -6493,24 +6705,50 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	// holds it (`resolve`), and so on — plus the identifiers bound to those
 	// literals (the "config object" and its parents). A builtin mutation API
 	// or a spread handed one of these shares the table by reference.
+	//
+	// R12-1: each ancestor literal also records the LEVEL of object it IS —
+	// the literal holding the `alias` property is the resolve object; every
+	// literal above it is a config object — and the property keys that hold
+	// alias state, at the level they hold it: `{ resolve: { alias: [...] } }`
+	// records `alias` at 'table' on the resolve literal and `resolve` at
+	// 'resolve' on the config literal. The key-aware destructure reading
+	// narrows to exactly those keys (R12-4): `const { resolve } = cfg` binds
+	// the resolve object, while `const { plugins } = cfg` binds a sibling the
+	// table never touches and derives nothing.
 	const aliasAncestorObjects = new Set();
+	const aliasAncestorLevels = new Map(); // object literal -> 'resolve' | 'config'
+	const aliasStateKeys = new Map(); // object literal -> Map(key -> level held)
+	const levelRank = { table: 0, resolve: 1, config: 2 };
 	for (const property of aliasPropertyNodes) {
 		let cursor = property;
-		while (cursor) {
-			if (
-				(ts.isPropertyAssignment(cursor) || ts.isShorthandPropertyAssignment(cursor)) &&
-				cursor.parent &&
-				ts.isObjectLiteralExpression(cursor.parent)
-			) {
-				const container = cursor.parent;
-				aliasAncestorObjects.add(container);
-				cursor = container.parent;
-				continue;
+		let carriedLevel = 'table'; // the level the next container's key holds
+		let depth = 0;
+		while (
+			(ts.isPropertyAssignment(cursor) || ts.isShorthandPropertyAssignment(cursor)) &&
+			cursor.parent &&
+			ts.isObjectLiteralExpression(cursor.parent)
+		) {
+			const container = cursor.parent;
+			aliasAncestorObjects.add(container);
+			if (!aliasAncestorLevels.has(container))
+				aliasAncestorLevels.set(container, depth === 0 ? 'resolve' : 'config');
+			const key = ts.isShorthandPropertyAssignment(cursor)
+				? cursor.name.text
+				: ts.isIdentifier(cursor.name) || ts.isStringLiteral(cursor.name)
+					? cursor.name.text
+					: null;
+			if (key !== null) {
+				const keys = aliasStateKeys.get(container) ?? new Map();
+				keys.set(key, carriedLevel);
+				aliasStateKeys.set(container, keys);
 			}
-			break;
+			carriedLevel = carriedLevel === 'table' ? 'resolve' : 'config';
+			depth += 1;
+			cursor = container.parent;
 		}
 	}
 	const configObjectNames = new Set();
+	const configObjectLevels = new Map(); // variable name -> 'resolve' | 'config'
 	if (aliasAncestorObjects.size > 0)
 		eachNode(sourceFile, (node) => {
 			if (
@@ -6518,83 +6756,169 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				ts.isIdentifier(node.name) &&
 				node.initializer &&
 				aliasAncestorObjects.has(unwrapValueNode(node.initializer))
-			)
+			) {
 				configObjectNames.add(node.name.text);
+				const level = aliasAncestorLevels.get(unwrapValueNode(node.initializer)) ?? 'config';
+				const existing = configObjectLevels.get(node.name.text);
+				if (existing === undefined || levelRank[level] < levelRank[existing])
+					configObjectLevels.set(node.name.text, level);
+			}
 		});
-	// R11-1: identifiers the table, its `resolve` parent, or the config object
-	// is BOUND INTO — an assignment or destructure whose source is a chain
-	// ending in `resolve`/`alias`, a table-bound identifier, another derived
-	// identifier, or the config object. `const { alias } = cfg.resolve` binds
-	// the table itself; `const r = cfg.resolve` binds its parent. Chased to a
-	// fixed point so `const u = t` over a derived `t` is derived too.
-	const aliasDerivedNames = new Set(aliasTableNames);
+	// R11-1 / R12-1: the identifiers the table, its `resolve` parent, or the
+	// config object is BOUND INTO — chased to a fixed point, each recorded at
+	// the LEVEL of state it holds: 'table' for the alias array itself,
+	// 'resolve' for the object holding it, 'config' for the object holding
+	// that. `const { alias } = cfg.resolve` binds the table itself;
+	// `const r = cfg.resolve` binds its parent; `const u = t` over a derived
+	// `t` is derived too.
+	//
+	// Derivation is provable only through the MODELED channels: a direct
+	// identifier or pattern binding whose source IS the state (a chain ending
+	// in `resolve`/`alias`, a derived identifier, the config object, or a
+	// computed read over one of those), and a parameter or binding-element
+	// default. Every other shape a state read can appear in — a wrapped
+	// initializer (conditional, comma, call result, array/object wrap), a
+	// return or yield position, a member or element assignment target, a
+	// property or class-property slot, a computed pattern key — is left to
+	// the binding-position reading below, which fails closed on it: the table
+	// is escaped unless every binding derived from it is provably modeled.
+	const aliasDerivedLevels = new Map(); // identifier -> 'table' | 'resolve' | 'config'
+	const deriveLevel = (name, level) => {
+		const existing = aliasDerivedLevels.get(name);
+		if (existing === undefined || levelRank[level] < levelRank[existing])
+			aliasDerivedLevels.set(name, level);
+	};
+	for (const name of aliasTableNames) deriveLevel(name, 'table');
+	for (const name of configObjectNames) deriveLevel(name, configObjectLevels.get(name) ?? 'config');
+	// R12-4: the key names that hold alias state OUT OF each level of object —
+	// every key an ancestor literal records at the 'resolve' level lifts the
+	// resolve object out of a config object, and every key recorded at the
+	// 'table' level lifts the table out of the resolve object. A destructure
+	// derives a name only under those keys; siblings bind properties the
+	// table never touches.
+	const configStateKeys = new Set();
+	const resolveStateKeys = new Set();
+	for (const keys of aliasStateKeys.values())
+		for (const [key, held] of keys) {
+			if (held === 'resolve') configStateKeys.add(key);
+			if (held === 'table') resolveStateKeys.add(key);
+		}
+	// The level a DIRECT source binds — a chain ending in `resolve`/`alias`,
+	// a derived identifier, or a COMPUTED read over one of those (R12-1
+	// channel 10: `cfg.resolve[k]` with an unfoldable key could read the
+	// state-bearing property itself, so it binds one step toward the table).
+	const aliasSourceLevel = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner) return null;
+		if (ts.isIdentifier(inner)) return aliasDerivedLevels.get(inner.text) ?? null;
+		const end = chainEndName(inner);
+		if (end !== null) return end === 'alias' ? 'table' : 'resolve';
+		if (ts.isElementAccessExpression(inner)) {
+			const base = aliasSourceLevel(inner.expression);
+			if (base !== null) return base === 'config' ? 'resolve' : 'table';
+		}
+		return null;
+	};
+	// A destructure target over a DIRECT source: derive the names it binds at
+	// the levels they hold, and report false for the shapes the
+	// binding-position reading fails closed on — a computed key, or an array
+	// shape over the resolve/config object. Handles declaration patterns and
+	// the literal-side spelling of destructuring assignments alike.
+	const derivePattern = (target, level) => {
+		const node = unwrapValueNode(target);
+		if (!node) return false;
+		if (ts.isIdentifier(node)) {
+			deriveLevel(node.text, level);
+			return true;
+		}
+		// a default inside a pattern still binds its name at the element
+		if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken)
+			return derivePattern(node.left, level);
+		if (ts.isBindingElement(node)) {
+			// a rest element holds everything the keys did not take — the
+			// state survives in it at the source's own level
+			if (node.dotDotDotToken) return derivePattern(node.name, level);
+			const key = node.propertyName ?? node.name;
+			return derivePatternEntry(key, node.name, level);
+		}
+		if (ts.isShorthandPropertyAssignment(node)) return derivePattern(node.name, level);
+		if (ts.isSpreadAssignment(node) || ts.isSpreadElement(node))
+			return derivePattern(node.expression, level);
+		if (ts.isPropertyAssignment(node)) return derivePattern(node.initializer, level);
+		if (ts.isObjectBindingPattern(node) || ts.isObjectLiteralExpression(node)) {
+			const elements = ts.isObjectBindingPattern(node) ? node.elements : node.properties;
+			for (const element of elements) {
+				if (ts.isOmittedExpression(element)) continue;
+				if (!derivePattern(element, level)) return false;
+			}
+			return true;
+		}
+		if (ts.isArrayBindingPattern(node) || ts.isArrayLiteralExpression(node)) {
+			// the table is an array — its positions hold entries; the
+			// resolve/config objects are not arrays, and an array shape over
+			// them is a position the reading cannot prove
+			if (level !== 'table') return false;
+			for (const element of node.elements) {
+				if (ts.isOmittedExpression(element)) continue;
+				if (!derivePattern(element, 'table')) return false;
+			}
+			return true;
+		}
+		return false;
+	};
+	const derivePatternEntry = (keyNode, valueNode, level) => {
+		const keyText = ts.isIdentifier(keyNode)
+			? keyNode.text
+			: ts.isStringLiteral(keyNode)
+				? keyNode.text
+				: ts.isNumericLiteral(keyNode)
+					? keyNode.text
+					: null;
+		if (keyText === null) return false; // a computed key — unprovable
+		let heldLevel = null;
+		if (level === 'table') heldLevel = 'table';
+		else if (level === 'resolve' && resolveStateKeys.has(keyText)) heldLevel = 'table';
+		else if (level === 'config' && configStateKeys.has(keyText)) heldLevel = 'resolve';
+		// a sibling key of the state — `const { plugins } = cfg` — binds a
+		// property the table never touches and derives nothing (R12-4)
+		if (heldLevel === null) return true;
+		return derivePattern(valueNode, heldLevel);
+	};
+	const deriveBinding = (nameNode, sourceNode) => {
+		const level = aliasSourceLevel(sourceNode);
+		if (level === null) return; // the binding-position reading judges it
+		const target = unwrapValueNode(nameNode);
+		if (!target) return;
+		if (ts.isIdentifier(target)) {
+			deriveLevel(target.text, level);
+			return;
+		}
+		if (ts.isObjectBindingPattern(target) || ts.isArrayBindingPattern(target))
+			derivePattern(target, level);
+		// a member or element target derives nothing — the binding-position
+		// reading fails closed on it
+	};
 	{
-		const isAliasSource = (node) => {
-			const inner = unwrapValueNode(node);
-			if (!inner) return false;
-			if (chainEndName(inner)) return true;
-			return (
-				ts.isIdentifier(inner) &&
-				(aliasDerivedNames.has(inner.text) || configObjectNames.has(inner.text))
-			);
-		};
-		// The names an expression-side destructure target binds — `({ a } = s)`,
-		// `({ a: x } = s)`, `[a = d] = s`, nested patterns and spreads alike.
-		const destructuredNames = (node, names) => {
-			const inner = unwrapValueNode(node);
-			if (!inner) return;
-			if (ts.isIdentifier(inner)) {
-				names.push(inner.text);
-				return;
-			}
-			if (ts.isBinaryExpression(inner) && inner.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-				destructuredNames(inner.left, names); // a default: the name is on the left
-				return;
-			}
-			if (ts.isShorthandPropertyAssignment(inner)) {
-				names.push(inner.name.text);
-				return;
-			}
-			if (ts.isPropertyAssignment(inner)) {
-				destructuredNames(inner.initializer, names);
-				return;
-			}
-			if (ts.isSpreadAssignment(inner) || ts.isSpreadElement(inner)) {
-				destructuredNames(inner.expression, names);
-				return;
-			}
-			if (ts.isObjectLiteralExpression(inner))
-				for (const property of inner.properties) destructuredNames(property, names);
-			if (ts.isArrayLiteralExpression(inner))
-				for (const element of inner.elements) destructuredNames(element, names);
-		};
 		let changed = true;
 		while (changed) {
-			const before = aliasDerivedNames.size;
+			const before = aliasDerivedLevels.size;
 			eachNode(sourceFile, (node) => {
-				if (ts.isVariableDeclaration(node) && node.initializer && isAliasSource(node.initializer))
-					for (const name of bindingNames(node.name)) aliasDerivedNames.add(name);
+				if (ts.isVariableDeclaration(node) && node.initializer)
+					deriveBinding(node.name, node.initializer);
+				// R12-1 channel 8: a parameter or binding-element DEFAULT binds
+				// the state at declaration exactly as an initializer does —
+				// `function f(t = cfg.resolve.alias)` hands the table to `t`
+				if (ts.isParameter(node) && node.initializer) deriveBinding(node.name, node.initializer);
+				if (ts.isBindingElement(node) && node.initializer)
+					deriveBinding(node.name, node.initializer);
 				if (
 					ts.isBinaryExpression(node) &&
 					node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-					node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
-					isAliasSource(node.right)
-				) {
-					const lhs = unwrapValueNode(node.left);
-					if (lhs && (ts.isObjectLiteralExpression(lhs) || ts.isArrayLiteralExpression(lhs))) {
-						const names = [];
-						destructuredNames(lhs, names);
-						for (const name of names) aliasDerivedNames.add(name);
-					} else if (lhs && ts.isIdentifier(lhs)) {
-						aliasDerivedNames.add(lhs.text);
-					} else if (lhs) {
-						// A target the destructure reading does not model binds a
-						// name the scan cannot see; the binding itself is the escape.
-						aliasDerivedNames.add(`\u0000destructure@${lhs.pos}`);
-					}
-				}
+					node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+				)
+					deriveBinding(node.left, node.right);
 			});
-			changed = aliasDerivedNames.size !== before;
+			changed = aliasDerivedLevels.size !== before;
 		}
 	}
 	const isAliasTableAccess = (node) => {
@@ -6639,10 +6963,9 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 		const inner = unwrapValueNode(node);
 		if (!inner) return false;
 		if (chainEndName(inner)) return true;
-		if (ts.isIdentifier(inner))
-			return aliasDerivedNames.has(inner.text) || configObjectNames.has(inner.text);
+		if (ts.isIdentifier(inner)) return aliasDerivedLevels.has(inner.text);
 		const base = chainBaseIdentifier(inner);
-		return base !== null && (aliasDerivedNames.has(base) || configObjectNames.has(base));
+		return base !== null && aliasDerivedLevels.has(base);
 	};
 	const ALIAS_MUTATING_BUILTINS = new Set([
 		'Object.assign',
@@ -6723,6 +7046,166 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			}
 		}
 	});
+	// R12-1: the round-12 attack bound the state through positions the
+	// derivation and escape readings above do not model — a function RETURN
+	// or a generator YIELD carrying the table out (`const t = f()` over
+	// `function f() { return cfg.resolve.alias }`), expression wrappers over
+	// a direct binding (a conditional, a comma expression, an array or object
+	// wrap), a member or element ASSIGNMENT TARGET (`o.x = cfg.resolve.alias`),
+	// a property or class-property SLOT, and a computed key read of the
+	// resolve object. The table is treated as ESCAPED unless every binding
+	// derived from it is provably through the modeled channels: each of these
+	// positions fails closed. The one exception is the round-11 positive —
+	// the config object ITSELF, returned or yielded as the identifier the
+	// declaration bound it to, which the cross-file residual statement covers.
+	const aliasPositionEscapeSnippets = new Set();
+	const declarationStatements = new Set();
+	for (const property of aliasPropertyNodes) {
+		let cursor = property;
+		while (cursor && !ts.isStatement(cursor)) cursor = cursor.parent;
+		if (cursor) declarationStatements.add(cursor);
+	}
+	const inAliasDeclaration = (node) => {
+		let cursor = node;
+		while (cursor) {
+			if (declarationStatements.has(cursor)) return true;
+			cursor = cursor.parent;
+		}
+		return false;
+	};
+	// Whether a subtree names the state OUTSIDE any function body — a read
+	// inside a function body is judged at the position that carries it out
+	// (its return, its yield, its concise body), not again at every binding
+	// the function value travels through. A CALLEE position names code, not
+	// the state — `path.resolve(…)` ends in `.resolve` textually but is a
+	// function, not the resolve object — so the walk reads a call's arguments
+	// and template, never its callee.
+	const containsAliasStateRead = (node) => {
+		let found = false;
+		const walk = (n) => {
+			if (found) return;
+			if (
+				ts.isFunctionDeclaration(n) ||
+				ts.isFunctionExpression(n) ||
+				ts.isArrowFunction(n) ||
+				ts.isMethodDeclaration(n) ||
+				ts.isGetAccessorDeclaration(n) ||
+				ts.isSetAccessorDeclaration(n) ||
+				ts.isConstructorDeclaration(n)
+			)
+				return;
+			if (targetsAliasState(n)) {
+				found = true;
+				return;
+			}
+			if (ts.isCallExpression(n) || ts.isNewExpression(n) || ts.isTaggedTemplateExpression(n)) {
+				for (const argument of n.arguments ?? []) walk(argument);
+				if (ts.isTaggedTemplateExpression(n)) walk(n.template);
+				return;
+			}
+			ts.forEachChild(n, walk);
+		};
+		walk(node);
+		return found;
+	};
+	const recordPositionEscape = (node) =>
+		aliasPositionEscapeSnippets.add(node.getText(sourceFile).slice(0, 200));
+	const classifyTransport = (expr) => {
+		if (inAliasDeclaration(expr)) return;
+		const inner = unwrapValueNode(expr);
+		if (ts.isIdentifier(inner) && aliasDerivedLevels.get(inner.text) === 'config') return;
+		if (containsAliasStateRead(expr)) recordPositionEscape(expr);
+	};
+	const classifyBinding = (nameNode, initializer) => {
+		if (inAliasDeclaration(initializer)) return;
+		const level = aliasSourceLevel(initializer);
+		if (level !== null) {
+			const target = unwrapValueNode(nameNode);
+			// a direct source bound through a pattern is provable exactly
+			// when the derivation walk proved it — a computed key or an array
+			// shape over the resolve/config object is not
+			if (target && !ts.isIdentifier(target) && !derivePattern(target, level))
+				recordPositionEscape(initializer);
+			return;
+		}
+		if (containsAliasStateRead(initializer)) recordPositionEscape(initializer);
+	};
+	const classifyAssignment = (bin) => {
+		if (inAliasDeclaration(bin.right)) return;
+		if (!containsAliasStateRead(bin.right)) return;
+		const lhs = unwrapValueNode(bin.left);
+		const level = aliasSourceLevel(bin.right);
+		if (level !== null) {
+			if (ts.isIdentifier(lhs)) return; // derived by the fixed point
+			if (
+				(ts.isObjectLiteralExpression(lhs) || ts.isArrayLiteralExpression(lhs)) &&
+				derivePattern(lhs, level)
+			)
+				return; // a modeled destructure target
+		}
+		// a member or element target, or a binding the walk cannot prove —
+		// the state sits at a position the scan cannot read back
+		recordPositionEscape(bin);
+	};
+	const classifySlot = (value) => {
+		if (inAliasDeclaration(value)) return;
+		const inner = unwrapValueNode(value);
+		// a function-valued slot is judged by the transport readings on what
+		// its body returns or yields, not as a direct binding of the state
+		if (
+			ts.isArrowFunction(inner) ||
+			ts.isFunctionExpression(inner) ||
+			ts.isGetAccessorDeclaration(inner) ||
+			ts.isSetAccessorDeclaration(inner) ||
+			ts.isMethodDeclaration(inner)
+		)
+			return;
+		if (containsAliasStateRead(value)) recordPositionEscape(value);
+	};
+	eachNode(sourceFile, (node) => {
+		if (ts.isReturnStatement(node) && node.expression) {
+			classifyTransport(node.expression);
+			return;
+		}
+		if (ts.isYieldExpression(node) && node.expression) {
+			classifyTransport(node.expression);
+			return;
+		}
+		// a concise arrow body IS its return
+		if (ts.isArrowFunction(node) && node.body && !ts.isBlock(node.body)) {
+			classifyTransport(node.body);
+			return;
+		}
+		if (ts.isVariableDeclaration(node) && node.initializer) {
+			classifyBinding(node.name, node.initializer);
+			return;
+		}
+		if ((ts.isParameter(node) || ts.isBindingElement(node)) && node.initializer) {
+			classifyBinding(node.name, node.initializer);
+			return;
+		}
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+			!targetsAliasState(node.left) // a write TO the state is the mutation reading's
+		) {
+			classifyAssignment(node);
+			return;
+		}
+		if (ts.isPropertyAssignment(node)) {
+			classifySlot(node.initializer);
+			return;
+		}
+		if (ts.isShorthandPropertyAssignment(node)) {
+			classifySlot(node.name);
+			return;
+		}
+		if (ts.isPropertyDeclaration(node) && node.initializer) {
+			classifySlot(node.initializer);
+			return;
+		}
+	});
 	for (const snippet of aliasEscapeSnippets) {
 		// A snippet already named as a mutation keeps the mutation wording.
 		if (!aliasMutationSnippets.has(snippet))
@@ -6730,7 +7213,17 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				`hands the resolve.alias state to code the scan cannot read (${snippet}) — once the table or its resolve object escapes the declaration's textual reach, the runtime can resolve with a mutation the scan never meets, so the table is unreadable`
 			);
 	}
-	if (aliasMutationSnippets.size > 0 || aliasEscapeSnippets.size > 0) {
+	for (const snippet of aliasPositionEscapeSnippets) {
+		if (!aliasMutationSnippets.has(snippet) && !aliasEscapeSnippets.has(snippet))
+			unresolved.push(
+				`binds the resolve.alias state through a position the scan cannot track (${snippet}) — a binding the reading cannot model is an escape it cannot rule out, so the table is unreadable`
+			);
+	}
+	if (
+		aliasMutationSnippets.size > 0 ||
+		aliasEscapeSnippets.size > 0 ||
+		aliasPositionEscapeSnippets.size > 0
+	) {
 		for (const snippet of aliasMutationSnippets)
 			unresolved.push(
 				`mutates resolve.alias after the declaration (${snippet}) — the runtime resolves with the mutation, so the table the scan reads is not the table that ships`

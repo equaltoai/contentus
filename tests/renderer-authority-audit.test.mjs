@@ -4901,7 +4901,471 @@ test('inherited read-only members stay clean (R11-2 positives)', () => {
 	}
 });
 
-test('the tree audits clean after every round-10 and round-11 plant is uprooted', () => {
+/* ============================================================
+   Round 12 — R12-1: the alias table's unmodeled binding channels
+   ============================================================
+
+   The round-11 closure derived names through direct bindings and judged
+   call arguments, member-call receivers, and spreads. The round-12 attack
+   aliased the table through the channels that derivation did not model —
+   a function RETURN or a generator YIELD carrying the table out, a
+   conditional/comma/array/object wrapper over a direct binding, a member
+   or element assignment TARGET, a parameter default, a class property, an
+   object-literal getter, and a computed-key read — and mutated it through
+   every alias over a green audit. The table is now treated as ESCAPED
+   unless every binding derived from it is provably through the modeled
+   channels: each unmodeled position fails closed. */
+
+const R12_EVIL_ENTRY = "{ find: 'svelte', replacement: path.resolve(root, 'build/__r12_x__.js') }";
+
+test('alias-table aliasing channels fail closed (R12-1 exact plants)', () => {
+	const shapes = [
+		[
+			'return-position relay',
+			`function r12f1() { return r10cfg.resolve.alias; }\n\tconst r12t1 = r12f1();\n\t(r12t1 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'IIFE return relay',
+			`const r12t2 = (() => r10cfg.resolve.alias)();\n\t(r12t2 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'comma wrapper',
+			`const r12t3 = (0, r10cfg.resolve.alias);\n\t(r12t3 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'conditional wrapper',
+			`const r12c4 = true;\n\tconst r12t4 = r12c4 ? r10cfg.resolve.alias : [];\n\t(r12t4 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'array-wrap destructure',
+			`const [r12t5] = [r10cfg.resolve.alias];\n\t(r12t5 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'member-target assignment',
+			`const r12o6: { x?: unknown } = {};\n\tr12o6.x = r10cfg.resolve.alias;\n\t(r12o6.x as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'element-target assignment',
+			`const r12a7: unknown[] = [];\n\tr12a7[0] = r10cfg.resolve.alias;\n\t(r12a7[0] as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'parameter default',
+			`function r12f8(r12t8: unknown[] = r10cfg.resolve.alias) { (r12t8 as unknown[]).push(${R12_EVIL_ENTRY}); }\n\tr12f8();`,
+		],
+		[
+			'class property',
+			`class R12C9 { r12t9 = r10cfg.resolve.alias; }\n\tconst r12c9 = new R12C9();\n\t(r12c9.r12t9 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'computed-key read',
+			`const r12k10 = 'alias';\n\tconst r12t10 = (r10cfg.resolve as Record<string, unknown>)[r12k10];\n\t(r12t10 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'object-literal getter',
+			`const r12o11 = { get r12t11() { return r10cfg.resolve.alias; } };\n\t(r12o11.r12t11 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'generator yield',
+			`function* r12g12() { yield r10cfg.resolve.alias; }\n\tconst [r12t12] = [...r12g12()];\n\t(r12t12 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+	];
+	for (const [label, mutation] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} channel must fail:\n${output}`);
+				assert.match(
+					output,
+					/(?:mutates resolve\.alias after the declaration|binds the resolve\.alias state through a position the scan cannot track)/,
+					`the ${label} channel must be named as an escape of the table:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('alias-table binding-position adjacents fail closed (R12-1 adjacent)', () => {
+	const shapes = [
+		[
+			'object-property slot binding',
+			`const r12o = { x: r10cfg.resolve.alias };\n\t(r12o.x as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'nested pattern default',
+			`function r12f({ a = r10cfg.resolve.alias }: { a?: unknown[] }) { (a as unknown[]).push(${R12_EVIL_ENTRY}); }\n\tr12f({});`,
+		],
+		['array pattern over the config object', `const [r12x] = r10cfg;`],
+		[
+			'computed pattern key',
+			`const r12k = 'alias';\n\tconst { [r12k]: r12x2 } = r10cfg.resolve;\n\t(r12x2 as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+		[
+			'entry write through a derived element',
+			`const { alias: r12a } = r10cfg.resolve;\n\tconst r12e = r12a[0] as { find?: unknown };\n\tr12e.find = '@r12evil';`,
+		],
+		['template-literal transport', `const r12s = \`\${r10cfg.resolve.alias}\`;`],
+		[
+			'two-hop derived binding',
+			`const r12t = r10cfg.resolve.alias;\n\tconst r12u = r12t;\n\t(r12u as unknown[]).push(${R12_EVIL_ENTRY});`,
+		],
+	];
+	for (const [label, mutation] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} shape must fail:\n${output}`);
+				assert.match(
+					output,
+					/(?:mutates resolve\.alias after the declaration|binds the resolve\.alias state through a position the scan cannot track)/,
+					`the ${label} shape must be named as an escape of the table:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('the round-12 alias positives stay clean (R12-1 positives, R12-4 narrowing)', () => {
+	// R12-4: the destructure reading narrows to the keys that hold alias
+	// state — `const { resolve } = cfg` binds the resolve object, while a
+	// sibling key binds a property the table never touches, so mutating a
+	// sibling binding is not a mutation of the table. A bare member read of
+	// a derived name (`.length` and the like) still fails closed: the
+	// conservative direction the finding accepted, stated here rather than
+	// probed clean.
+	const shapes = [
+		[
+			'a sibling property destructure mutating its own binding',
+			`const { plugins } = r10cfg;\n\t(plugins as unknown[]).push({});`,
+		],
+		['an unused sibling destructure', `const { ssr } = r10cfg;`],
+		['an unused config rebind', `const r12c2 = r10cfg;`],
+	];
+	for (const [label, mutation] of shapes) {
+		withPlantedViteConfig(
+			() => r10ConfigWithMutation(mutation),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+/* ============================================================
+   Round 12 — R12-2: static, super, and installed-member dispatch
+   ============================================================
+
+   The round-11 heritage chase keyed instance dispatch and early-returned
+   on everything else. The round-12 attack dispatched through the spellings
+   the chase never saw — a STATIC member inherited down the class's own
+   extends clause, a SUPER dispatch resolving on the enclosing class's base,
+   and a getter `Object.defineProperty` installs on a prototype, whose
+   method analogue was caught only because the call scan fails closed when
+   the value is HANDED to an unproven member while a getter read hands
+   nothing. Statics now chase on the class name, `super.` callees resolve
+   on the base, and any in-file install on a class's prototype (or on the
+   class object itself, for statics) makes the chain unproven. */
+
+test('static, super, and installed-member dispatch fail closed (R12-2 exact plants)', () => {
+	const shapes = [
+		[
+			'static heritage relay',
+			'\tclass R12A { static m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R12B extends R12A {}\n' +
+				"\tif (preview) { const v = R12B.m(); if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'super dispatch relay',
+			'\tclass R12SA { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R12SB extends R12SA { m2(): DraftPreview | null { return super.m(); } }\n' +
+				'\tconst r12sb = new R12SB();\n' +
+				"\tif (preview) { const v = r12sb.m2(); if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'prototype-installed getter relay',
+			'\tclass R12GA {}\n' +
+				"\tObject.defineProperty(R12GA.prototype, 'g', { get() { return preview; } });\n" +
+				'\tconst r12ga = new R12GA();\n' +
+				"\tif (preview) { const v = r12ga.g; if (v) v.html = '<img src=x>'; }\n",
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} must be a value-path finding:\n${output}`
+				);
+				assert.match(output, /writes to v\.html/, `the ${label} must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('dispatch spelling adjacents fail closed (R12-2 adjacent)', () => {
+	const shapes = [
+		[
+			'static two-hop relay',
+			'\tclass R12HA { static m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R12HM extends R12HA {}\n' +
+				'\tclass R12HB extends R12HM {}\n' +
+				"\tif (preview) { const v = R12HB.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'super dispatch inside an async method',
+			'\tclass R12SA2 { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R12SB2 extends R12SA2 { async am2(): Promise<DraftPreview | null> { return super.m(); } }\n' +
+				'\tconst r12sb2 = new R12SB2();\n' +
+				"\tif (preview) { const v = r12sb2.am2(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'super dispatch inside a generator method',
+			'\tclass R12SA3 { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tclass R12SB3 extends R12SA3 { *gm2(): Generator<never, DraftPreview | null, unknown> { return super.m(); } }\n' +
+				'\tconst r12sb3 = new R12SB3();\n' +
+				"\tif (preview) { const v = r12sb3.gm2(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'super getter relay',
+			'\tclass R12GA4 { get g(): DraftPreview | null { return preview; } }\n' +
+				'\tclass R12GB4 extends R12GA4 { get sg(): DraftPreview | null { return super.g; } }\n' +
+				'\tconst r12gb4 = new R12GB4();\n' +
+				"\tif (preview) { const v = r12gb4.sg; if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'prototype assignment install handed the value',
+			'\tclass R12MA5 {}\n' +
+				"\tR12MA5.prototype.wm = function (p: DraftPreview | null) { if (p) p.html = '<img src=x>'; };\n" +
+				'\tconst r12ma5 = new R12MA5();\n' +
+				'\tif (preview) r12ma5.wm(preview);\n',
+			/passes the preview value to r12ma5\.wm/,
+		],
+		[
+			'constructor-side install over a declared static',
+			'\tclass R12SA6 { static m(): number { return 1; } }\n' +
+				"\tObject.defineProperty(R12SA6, 'm', { value(p: DraftPreview | null = preview) { return p; } });\n" +
+				"\tif (preview) { const v = R12SA6.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'installed getter inherited down the heritage chain',
+			'\tclass R12GA7 {}\n' +
+				"\tObject.defineProperty(R12GA7.prototype, 'g', { get() { return preview; } });\n" +
+				'\tclass R12GB7 extends R12GA7 {}\n' +
+				'\tconst r12gb7 = new R12GB7();\n' +
+				"\tif (preview) { const v = r12gb7.g; if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'mixin-call heritage stays failed closed',
+			'\tclass R12MIX { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tconst r12mixin = (c: typeof R12MIX) => c;\n' +
+				'\tclass R12MB extends r12mixin(R12MIX) {}\n' +
+				'\tconst r12mb = new R12MB();\n' +
+				"\tif (preview) { const v = r12mb.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+		[
+			'heritage cycle stays failed closed',
+			'\tclass R12CX extends R12CY {}\n' +
+				'\tclass R12CY extends R12CX { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tconst r12cx = new R12CX();\n' +
+				"\tif (preview) { const v = r12cx.m(); if (v) v.html = '<img src=x>'; }\n",
+			/writes to v\.html/,
+		],
+	];
+	for (const [label, plantText, message] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} must be a value-path finding:\n${output}`
+				);
+				assert.match(output, message, `the ${label} must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('read-only statics, fresh supers, and non-class installs stay clean (R12-2 positives)', () => {
+	const shapes = [
+		[
+			'an inherited read-only static',
+			'\tclass R12QA { static make(): number { return 1; } }\n' +
+				'\tclass R12QB extends R12QA {}\n' +
+				'\tif (preview) console.log(R12QB.make());\n',
+		],
+		[
+			'a super dispatch to a fresh-returning base',
+			"\tclass R12QA2 { f(): string { return 'x'; } }\n" +
+				'\tclass R12QB2 extends R12QA2 { g(): string { return super.f(); } }\n' +
+				'\tconst r12qb2 = new R12QB2();\n' +
+				'\tif (preview) console.log(r12qb2.g().length);\n',
+		],
+		[
+			'a defineProperty install on a non-class object',
+			"\tconst r12obj: { g?: unknown } = {};\n\tObject.defineProperty(r12obj, 'g', { value: 1 });\n\tif (preview) console.log(r12obj.g);\n",
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+/* ============================================================
+   Round 12 — R12-3: cast receivers on member dispatch
+   ============================================================
+
+   The member-call carrier keyed its receiver on the identifier spelling,
+   so `(b as T).m()` slipped past with an unproven member auditing clean.
+   Receivers now unwrap casts and parentheses everywhere the dispatch
+   readings key on them — the carrier, the getter read, the call-site
+   parameter binding, and the hand-off resolution. */
+
+test('cast receivers fail closed (R12-3 exact plants)', () => {
+	const shapes = [
+		[
+			'cast-receiver member call',
+			'\tclass R12CA { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tconst r12ca = new R12CA();\n' +
+				"\tif (preview) { const v = (r12ca as R12CA).m(); if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'cast-receiver getter read',
+			'\tclass R12CA8 { get g(): DraftPreview | null { return preview; } }\n' +
+				'\tconst r12ca8 = new R12CA8();\n' +
+				"\tif (preview) { const v = (r12ca8 as R12CA8).g; if (v) v.html = '<img src=x>'; }\n",
+		],
+		[
+			'parenthesized cast .call dispatch',
+			'\tclass R12CA9 { m(p: DraftPreview | null = preview): DraftPreview | null { return p; } }\n' +
+				'\tconst r12ca9 = new R12CA9();\n' +
+				"\tif (preview) { const v = ((r12ca9 as R12CA9).m).call(r12ca9); if (v) v.html = '<img src=x>'; }\n",
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} must be a value-path finding:\n${output}`
+				);
+				assert.match(output, /writes to v\.html/, `the ${label} must name the write:\n${output}`);
+			}
+		);
+	}
+});
+
+test('a cast receiver over a read-only method stays clean (R12-3 positive)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					"\tclass R12CA10 { len(p: DraftPreview | null): number { return (p?.html ?? '').length; } }\n" +
+					'\tconst r12ca10 = new R12CA10();\n' +
+					'\tif (preview) console.log((r12ca10 as R12CA10).len(preview));\n'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(
+				status,
+				0,
+				`a cast receiver over a read-only method must stay clean:\n${output}`
+			);
+		}
+	);
+});
+
+/* ============================================================
+   Round 12 — R12-5: the barrel tracer's alias-first consultation
+   ============================================================
+
+   Round 11 moved `traceBarrel` to consult the alias table BEFORE owned
+   resolution, matching the runtime's first-match-wins reading; no probe
+   pinned the tracer path because the universe closure also judges the
+   specifier a barrel re-exports. The two findings are distinct: the
+   universe names a module that LOADS the specifier, the tracer names the
+   barrel that RE-EXPORTS it. This probe asserts the tracer's own finding —
+   a regression that dropped the alias-first consultation from
+   `traceBarrel` would silence exactly this line while the universe line
+   survives. The alias target here is an owned module, so the universe's
+   route classification stays silent on the redirect itself and the shape
+   isolates the tracer's judgment. */
+
+test('a barrel re-export through an alias is named by the tracer (R12-5 isolation)', () => {
+	const shim = 'src/lib/compose/__r12_shim__.svelte';
+	const real = 'src/lib/compose/__r12_real__.svelte';
+	const barrel = 'src/lib/compose/__r12_barrel__.ts';
+	const probe = 'src/lib/compose/__r12_probe__.svelte';
+	withPlantedViteConfig(
+		(source) =>
+			source.replace(
+				ALIAS_ANCHOR,
+				`{ find: '$lib/compose/__r12_real__.svelte', replacement: path.resolve(root, 'src/lib/compose/__r12_shim__.svelte') },\n\t\t\t\t${ALIAS_ANCHOR}`
+			),
+		() => {
+			plant(
+				shim,
+				'<script lang="ts">\n' +
+					"\timport PreviewBody from '$lib/review/PreviewBody.svelte';\n" +
+					"\timport type { DraftPreview } from '$lib/cms/review';\n\n" +
+					'\tinterface Props {\n' +
+					'\t\tpreview: DraftPreview;\n' +
+					'\t}\n' +
+					'\tlet { preview }: Props = $props();\n' +
+					"\tconst shown: DraftPreview = { ...preview, html: (preview.html ?? '') + '<img src=x data-plant=r12>' };\n" +
+					'</script>\n\n<PreviewBody preview={shown} />\n'
+			);
+			plant(
+				real,
+				'<script lang="ts">\n\tinterface Props { label?: string }\n\tlet { label = \'\' }: Props = $props();\n</script>\n\n<p>{label}</p>\n'
+			);
+			plant(barrel, "export { default as R12Body } from '$lib/compose/__r12_real__.svelte';\n");
+			plant(
+				probe,
+				'<script lang="ts">\n\timport { R12Body } from \'$lib/compose/__r12_barrel__\';\n</script>\n\n<R12Body label="x" />\n'
+			);
+			try {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the aliased barrel re-export must fail the audit:\n${output}`);
+				assert.match(
+					output,
+					/re-exports "\$lib\/compose\/__r12_real__\.svelte" through a resolve alias redirecting/,
+					`the tracer finding must name the barrel's re-export:\n${output}`
+				);
+			} finally {
+				uproot(shim);
+				uproot(real);
+				uproot(barrel);
+				uproot(probe);
+			}
+		}
+	);
+});
+
+test('the tree audits clean after every round-10, round-11, and round-12 plant is uprooted', () => {
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });

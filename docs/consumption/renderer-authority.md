@@ -398,6 +398,50 @@ that fires only on literal targets, so a computed target bundles nothing),
 while a computed dynamic import fails closed (the runtime loader reaches
 it).
 
+Round-12 (R12-1…R12-5) closed the shapes the round-12 standing attack
+planted against that state. **R12-1** treats the alias table as ESCAPED
+unless every binding derived from it is provably through the modeled
+channels. The round-11 derivation fixed point modeled only identifier and
+destructure targets whose source is DIRECTLY a chain ending in
+`resolve`/`alias`, a derived name, or the config object, and the round-12
+attack aliased the table through twelve wrappers it did not reach — a
+function return, an IIFE return, a comma expression, a conditional, an
+array wrap, a member-target assignment, an element-target assignment, a
+parameter default, a class property, a computed-key read, an object-literal
+getter, and a generator yield — each mutating the shipped table over a green
+audit. Now: derivation keeps only direct identifier and pattern bindings
+and parameter or binding-element defaults, chased to a fixed point; any
+other position a state read appears in — a return, a yield, a concise-arrow
+body, a wrapped initializer, a member or element assignment target, a
+property or class-property slot, a computed pattern key — fails closed as an
+escape of the table. One stated exception stays clean: the config object
+itself, returned or yielded as the identifier the declaration bound it to
+(the cross-file residual of a returned config object remains the stated
+one). **R12-4** narrows the destructure reading to the keys the config
+literal records as holding alias state — `const { resolve } = cfg` binds
+the resolve object, while a sibling key (`const { plugins } = cfg`) binds a
+property the table never touches and derives nothing; a bare member read of
+a derived name still fails closed, the conservative direction. **R12-2**
+extends the heritage chase to the spellings the round-11 reading keyed out:
+STATIC members chase on the class name down the same extends clause, SUPER
+dispatch resolves on the enclosing class's base, and any in-file install on
+a class's prototype (`Object.defineProperty`/`defineProperties`,
+`Reflect.defineProperty`/`set`, `Object.assign`, or a direct
+`A.prototype.m = …` write) — or on the class object itself for statics —
+makes the chain UNPROVEN, because a member installed at runtime is one the
+declaration walk never saw (the round-12 getter plant; its method analogue
+was already caught only because the call scan fails closed when the value is
+handed to an unproven member, and a getter read hands nothing). **R12-3**
+unwraps casts and parentheses off member-call receivers everywhere the
+dispatch readings key on them — the carrier, the getter read, the call-site
+parameter binding, and the hand-off resolution — closing `(b as T).m()`
+with an unproven member. **R12-5** pins the round-11 alias-first barrel
+tracer with a probe isolating the tracer path: the universe closure names a
+module that LOADS a specifier, the tracer names the barrel that RE-EXPORTS
+it, and the probe asserts the tracer's own finding, which a regression
+dropping the alias-first consultation would silence while the universe line
+survives.
+
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
 "Canonical sanitized HTML. Never fall back to rendering content when this
