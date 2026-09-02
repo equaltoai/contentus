@@ -5742,3 +5742,466 @@ test('the tree audits clean after every round-10, round-11, round-12, and round-
 	const { status, output } = runAudit();
 	assert.equal(status, 0, output);
 });
+
+/* ============================================================
+   Round 14 — the remaining enumerated-spelling holes
+   ============================================================
+
+   The round-13 closure tracked the value's reach, but two families of
+   readings still modeled only the spellings they enumerated.
+
+   R13-A1: the install taint's declaration map recorded only
+   declarations-with-initializers, first-binding-wins and scope-blind, and
+   the callee/target readers chased nothing else. Eight spellings installed
+   the preview getter over green audits — an assignment-aliased callee, an
+   assignment-bound target, a folded computed `prototype` key, an
+   element-access callee, an indirect comma callee, a destructure off a
+   namespace alias, a shadow declared after a benign first binding, and an
+   `Object.assign` onto the class object for statics. The map now records
+   EVERY binding a name receives (declarations and assignments), the callee
+   reads the element-access and comma spellings, the target folds computed
+   keys, a destructure reads its source through the same binding map and
+   folds computed binding keys, and `Object.assign` taints the static side
+   exactly as the defineProperty family does.
+
+   R13-C1: the plugins-array reading modeled only the enumerated spellings;
+   the hook below — the isolated call hand-off, red whenever the hook is
+   judged — sailed through a shorthand `plugins` key, a `get config()`
+   accessor, a spread into the plugin object, a hook assigned onto the
+   bound plugin object, a `new` of a locally declared class, and a list
+   populated after its literal. The scan now chases those readable shapes,
+   and a list it cannot enumerate fails closed.
+
+   R13-C2: the binding-position readings early-returned inside the alias
+   declaration's statement, but the plugins array — every inline hook body
+   — sits INSIDE that statement, so an inline hook handing its parameter to
+   unreadable code through an assignment sailed through while the identical
+   bound body was caught. The exemption is gone; inline hook bodies are
+   judged by the same mutation/escape/binding-position readings as bound
+   ones. */
+
+const R14_HAND_OFF = '(globalThis as { r14m?: (c: unknown) => void }).r14m?.(c);';
+const R14_GETTER_TAIL = (cls, inst) =>
+	`\tconst ${inst} = new ${cls}();\n` +
+	`\tif (preview) { const v = ${inst}.g; if (v) v.html = '<img src=x>'; }\n`;
+
+test('prototype installs through assignment and shadow bindings fail closed (R14-A exact plants)', () => {
+	const shapes = [
+		[
+			'ae1 assignment-aliased callee',
+			'\tclass R14AA {}\n' +
+				'\tlet r14da;\n' +
+				'\tr14da = Object.defineProperty;\n' +
+				"\tr14da(R14AA.prototype, 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AA', 'r14aa'),
+		],
+		[
+			'ae2 assignment-bound target',
+			'\tclass R14AB {}\n' +
+				'\tlet r14pb;\n' +
+				'\tr14pb = R14AB.prototype;\n' +
+				"\tObject.defineProperty(r14pb, 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AB', 'r14ab'),
+		],
+		[
+			'ae3 computed prototype key',
+			'\tclass R14AC {}\n' +
+				"\tconst r14k = 'prototype';\n" +
+				"\tObject.defineProperty(R14AC[r14k], 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AC', 'r14ac'),
+		],
+		[
+			'ae4 element-access callee',
+			'\tclass R14AD {}\n' +
+				"\tObject['defineProperty'](R14AD.prototype, 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AD', 'r14ad'),
+		],
+		[
+			'ae5 indirect comma callee',
+			'\tclass R14AE {}\n' +
+				"\t(0, Object.defineProperty)(R14AE.prototype, 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AE', 'r14ae'),
+		],
+		[
+			'ae6 destructure off a namespace alias',
+			'\tconst R14R = Reflect;\n' +
+				'\tconst { defineProperty: r14dp } = R14R;\n' +
+				'\tclass R14AF {}\n' +
+				"\tr14dp(R14AF.prototype, 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AF', 'r14af'),
+		],
+		[
+			'ae7 computed destructure key, caught by the value-path reading itself',
+			"\tconst { ['defineProperty']: r14dp9 } = Object;\n" +
+				'\tclass R14AI {}\n' +
+				"\tr14dp9(R14AI.prototype, 'g', { get() { return preview; } });\n" +
+				R14_GETTER_TAIL('R14AI', 'r14ai'),
+		],
+		[
+			'ae12 a shadow declared after a benign first binding',
+			'\tconst r14dp8 = (o: unknown) => o;\n' +
+				'\tclass R14AG {}\n' +
+				'\tfunction r14shadow() {\n' +
+				'\t\tconst r14dp8 = Object.defineProperty;\n' +
+				"\t\tr14dp8(R14AG.prototype, 'g', { get() { return preview; } });\n" +
+				'\t}\n' +
+				'\tr14shadow();\n' +
+				R14_GETTER_TAIL('R14AG', 'r14ag'),
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 1, `the ${label} install must fail the audit:\n${output}`);
+				assert.ok(
+					output.includes('[preview value path]'),
+					`the ${label} install must be a value-path finding:\n${output}`
+				);
+				assert.match(
+					output,
+					/writes to v\.html/,
+					`the ${label} install must taint the getter read:\n${output}`
+				);
+			}
+		);
+	}
+});
+
+test('Object.assign onto a class object taints the static side (R14-A ae10)', () => {
+	withPlantedWorkspace(
+		(source) =>
+			source.replace(
+				PREVIEW_STATE_ANCHOR,
+				PREVIEW_STATE_ANCHOR +
+					'\tclass R14AH {}\n' +
+					'\tObject.assign(R14AH, { g: () => preview });\n' +
+					"\tif (preview) { const v = R14AH.g(); if (v) v.html = '<img src=x>'; }\n"
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `a static install through Object.assign must fail:\n${output}`);
+			assert.ok(
+				output.includes('[preview value path]'),
+				`the static install must be a value-path finding:\n${output}`
+			);
+			assert.match(
+				output,
+				/writes to v\.html/,
+				`the static install must taint the static read:\n${output}`
+			);
+		}
+	);
+});
+
+test('assignment installs on non-class targets stay clean (R14-A positives)', () => {
+	const shapes = [
+		[
+			'an assignment-aliased builtin install on a plain object',
+			"\tlet r14do;\n\tr14do = Object.defineProperty;\n\tconst r14obj3: { g?: unknown } = {};\n\tr14do(r14obj3, 'g', { value: 1 });\n\tif (preview) console.log(r14obj3.g);\n",
+		],
+		[
+			'an Object.assign onto a plain object',
+			'\tconst r14obj4: { g?: unknown } = {};\n\tObject.assign(r14obj4, { g: () => 1 });\n\tif (preview) console.log(r14obj4.g);\n',
+		],
+	];
+	for (const [label, plantText] of shapes) {
+		withPlantedWorkspace(
+			(source) => source.replace(PREVIEW_STATE_ANCHOR, PREVIEW_STATE_ANCHOR + plantText),
+			() => {
+				const { status, output } = runAudit();
+				assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+			}
+		);
+	}
+});
+
+test('readable plugin-list spellings the scan declined to chase fail closed (R14-C exact plants)', () => {
+	const plugin = (body) => `plugins: [\n\t\t\t{\n${body}\n\t\t\t},`;
+	const shapes = [
+		[
+			'isoCtrl property-assignment control (red since round 13)',
+			(source) =>
+				source.replace(
+					'plugins: [',
+					plugin(
+						"\t\t\t\tname: 'r14-iso-ctrl',\n" +
+							'\t\t\t\tconfig(c) {\n' +
+							`\t\t\t\t\t${R14_HAND_OFF}\n` +
+							'\t\t\t\t},'
+					)
+				),
+		],
+		[
+			'isoShort shorthand plugins key',
+			(source) =>
+				source
+					.replace('plugins: [', 'r14dummyPlugins: [')
+					.replace(
+						'\treturn {',
+						'\tconst plugins = [\n' +
+							'\t\t{\n' +
+							"\t\t\tname: 'r14-iso-short',\n" +
+							'\t\t\tconfig(c) {\n' +
+							`\t\t\t\t${R14_HAND_OFF}\n` +
+							'\t\t\t},\n' +
+							'\t\t},\n' +
+							'\t];\n' +
+							'\treturn {\n' +
+							'\t\tplugins,'
+					),
+		],
+		[
+			'isoGetter accessor config',
+			(source) =>
+				source.replace(
+					'plugins: [',
+					plugin(
+						"\t\t\t\tname: 'r14-iso-getter',\n" +
+							'\t\t\t\tget config() {\n' +
+							'\t\t\t\t\treturn (c: unknown) => {\n' +
+							`\t\t\t\t\t\t${R14_HAND_OFF}\n` +
+							'\t\t\t\t\t};\n' +
+							'\t\t\t\t},'
+					)
+				),
+		],
+		[
+			'isoSpreadObj spread into the plugin object',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'const r14base = {\n' +
+							"\tname: 'r14-iso-spread',\n" +
+							'\tconfig(c: unknown) {\n' +
+							`\t\t${R14_HAND_OFF}\n` +
+							'\t},\n' +
+							'};\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\t{ ...r14base },'),
+		],
+		[
+			'isoAssignHook member-assigned config',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'const r14p: { name?: string; config?: (c: unknown) => void } = {};\n' +
+							"r14p.name = 'r14-iso-assign';\n" +
+							'r14p.config = (c: unknown) => {\n' +
+							`\t${R14_HAND_OFF}\n` +
+							'};\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\tr14p,'),
+		],
+		[
+			'isoClass class-instance plugin',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'class R14IsoClass {\n' +
+							'\tconfig(c: unknown) {\n' +
+							`\t\t${R14_HAND_OFF}\n` +
+							'\t}\n' +
+							'}\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\tnew R14IsoClass(),'),
+		],
+		[
+			'isoPush late-populated list',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'const r14list: unknown[] = [];\n' +
+							'r14list.push({\n' +
+							"\tname: 'r14-iso-push',\n" +
+							'\tconfig(c: unknown) {\n' +
+							`\t\t${R14_HAND_OFF}\n` +
+							'\t},\n' +
+							'});\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\t...r14list,'),
+		],
+	];
+	for (const [label, mutate] of shapes) {
+		withPlantedViteConfig(mutate, () => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the ${label} shape must fail:\n${output}`);
+			assert.match(
+				output,
+				/(?:hands the resolve\.alias state to code the scan cannot read|leaves resolve\.alias open to a plugin config\(\) hook)/,
+				`the ${label} shape must name the judged hook or the unenumerable list:\n${output}`
+			);
+		});
+	}
+});
+
+test('readable benign plugins through the round-14 chases stay clean (R14-C positives)', () => {
+	const plugin = (body) => `plugins: [\n\t\t\t{\n${body}\n\t\t\t},`;
+	const shapes = [
+		[
+			'a getter config returning a hook that contributes nothing',
+			(source) =>
+				source.replace(
+					'plugins: [',
+					plugin(
+						"\t\t\t\tname: 'r14-benign-getter',\n" +
+							'\t\t\t\tget config() {\n' +
+							'\t\t\t\t\treturn () => ({ define: {} });\n' +
+							'\t\t\t\t},'
+					)
+				),
+		],
+		[
+			'a class-instance plugin with a harmless config',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'class R14BenignClass {\n' +
+							'\tconfig() {\n' +
+							'\t\treturn { define: {} };\n' +
+							'\t}\n' +
+							'}\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\tnew R14BenignClass(),'),
+		],
+		[
+			'a class-instance plugin with no config member',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						"class R14NoConfig {\n\tname = 'r14-no-config';\n}\n\nconst root ="
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\tnew R14NoConfig(),'),
+		],
+		[
+			'a spread of a plugin base with no config hook',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'const r14benignBase = {\n' +
+							"\tname: 'r14-benign-base',\n" +
+							'\ttransform() {\n' +
+							'\t\treturn null;\n' +
+							'\t},\n' +
+							'};\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\t{ ...r14benignBase },'),
+		],
+		[
+			'a member-assigned config hook returning a clean partial',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'const r14benignAssign: { config?: () => { define: Record<string, never> } } = {};\n' +
+							'r14benignAssign.config = () => ({ define: {} });\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\tr14benignAssign,'),
+		],
+		[
+			'a spread of an unpopulated bound list',
+			(source) =>
+				source
+					.replace(
+						'const root =',
+						'const r14benignList = [\n' +
+							'\t{\n' +
+							"\t\tname: 'r14-benign-listed',\n" +
+							'\t\ttransform() {\n' +
+							'\t\t\treturn null;\n' +
+							'\t\t},\n' +
+							'\t},\n' +
+							'];\n\nconst root ='
+					)
+					.replace('plugins: [', 'plugins: [\n\t\t\t...r14benignList,'),
+		],
+	];
+	for (const [label, mutate] of shapes) {
+		withPlantedViteConfig(mutate, () => {
+			const { status, output } = runAudit();
+			assert.equal(status, 0, `${label} must stay clean:\n${output}`);
+		});
+	}
+});
+
+test('an inline plugin hook handing its parameter by assignment fails closed (R14-C2 exact plant)', () => {
+	withPlantedViteConfig(
+		(source) =>
+			source.replace(
+				'plugins: [',
+				'plugins: [\n\t\t\t{\n' +
+					"\t\t\t\tname: 'r14-c2-inline',\n" +
+					'\t\t\t\tconfig(c) {\n' +
+					'\t\t\t\t\t(globalThis as { r14sink?: unknown }).r14sink = c;\n' +
+					'\t\t\t\t},\n' +
+					'\t\t\t},'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the inline hook assignment must fail:\n${output}`);
+			assert.match(
+				output,
+				/binds the resolve\.alias state through a position the scan cannot track/,
+				`the inline hook body must be judged by the same binding-position reading as a bound hook:\n${output}`
+			);
+		}
+	);
+	// The identical body in a plugin bound OUTSIDE the config literal stayed
+	// caught at round 13; it keeps the same sentence.
+	withPlantedViteConfig(
+		(source) =>
+			source
+				.replace(
+					'const root =',
+					'const r14bound = {\n' +
+						"\tname: 'r14-c2-bound',\n" +
+						'\tconfig(c: unknown) {\n' +
+						'\t\t(globalThis as { r14sink?: unknown }).r14sink = c;\n' +
+						'\t},\n' +
+						'};\n\nconst root ='
+				)
+				.replace('plugins: [', 'plugins: [\n\t\t\tr14bound,'),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 1, `the bound hook assignment must stay caught:\n${output}`);
+			assert.match(
+				output,
+				/binds the resolve\.alias state through a position the scan cannot track/,
+				`the bound hook must keep naming the position escape:\n${output}`
+			);
+		}
+	);
+});
+
+test('a modeled binding of an inline hook parameter stays clean (R14-C2 positive)', () => {
+	withPlantedViteConfig(
+		(source) =>
+			source.replace(
+				'plugins: [',
+				'plugins: [\n\t\t\t{\n' +
+					"\t\t\t\tname: 'r14-c2-benign',\n" +
+					'\t\t\t\tconfig(c) {\n' +
+					'\t\t\t\t\tconst r14keep = c;\n' +
+					'\t\t\t\t\tvoid r14keep;\n' +
+					'\t\t\t\t},\n' +
+					'\t\t\t},'
+			),
+		() => {
+			const { status, output } = runAudit();
+			assert.equal(status, 0, `a modeled inline-hook binding must stay clean:\n${output}`);
+		}
+	);
+});
+
+test('the tree audits clean after every round-14 plant is uprooted', () => {
+	const { status, output } = runAudit();
+	assert.equal(status, 0, output);
+});

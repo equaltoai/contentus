@@ -436,11 +436,17 @@ a class's prototype (`Object.defineProperty`/`defineProperties`,
 `A.prototype.m = …` write) — or on the class object itself for statics —
 makes the chain UNPROVEN, because a member installed at runtime is one the
 declaration walk never saw. The install taint keys on the value's reach,
-not the spelling: the builtin and the target each resolve through the
-declaration map, so an aliased builtin (`const dp = Object.defineProperty`,
-a namespace `const R = Reflect`), a prototype value held by an intermediate
-binding, an element access with a literal key, or a destructure taints the
-chain exactly as the literal spelling does (the round-13 W1–W5 plants). The
+not the spelling: the builtin and the target each resolve through EVERY
+binding the name receives — declarations and assignments alike, a shadow
+over a benign first binding included — so an aliased builtin (`const dp =
+Object.defineProperty`, `let d; d = Object.defineProperty`, a namespace
+`const R = Reflect`, an element-access callee `Object['defineProperty']`,
+an indirect comma `(0, Object.defineProperty)`), a prototype value held by
+an intermediate binding or a folded computed key (`C[k]` over
+`const k = 'prototype'`), or a destructure — off a namespace alias, with a
+computed binding key included — taints the chain exactly as the literal
+spelling does, and `Object.assign` taints the static side exactly as the
+prototype side (the round-13 W1–W5 plants, the round-14 ae plants). The
 round-12 plant installed a getter; its method analogue was already caught
 only because the call scan fails closed when the value is handed to an
 unproven member, and a getter read hands nothing. **R12-3**
@@ -479,6 +485,40 @@ value-carrying array into call arguments laundered the preview past the
 call gate — the call-side mirror of the round-9 rest-parameter closure; the
 spread holds the value exactly as a direct argument does, at any position,
 and a spread of a fresh literal holding nothing stays clean.
+
+Round-14 (R13-A1, R13-C1, R13-C2) closed the enumerated-spelling holes the
+round-13 reach readings still left in two families. **R13-A1**: the install
+taint's declaration map recorded only declarations-with-initializers,
+first-binding-wins and scope-blind, and the callee/target readers chased
+nothing else, so eight spellings installed the preview getter over green
+audits — an assignment-aliased callee, an assignment-bound target, a folded
+computed `prototype` key, an element-access callee, an indirect comma
+callee, a destructure off a namespace alias, a shadow declared after a
+benign first binding, and an `Object.assign` onto the class object for
+statics. The map now records every binding a name receives (declarations and
+assignments, shadows included), the callee reads the element-access and
+comma spellings, the target folds computed keys, a destructure reads its
+source through the same binding map and folds computed binding keys, and
+`Object.assign` taints the static side exactly as the prototype side — this
+is what makes the value-reach statement above (and the round-12 "class
+object itself for statics" sentence) true as executed. **R13-C1**: the
+plugins-array reading modeled only the enumerated spellings, so the isolated
+call hand-off hook sailed through a shorthand `plugins` key, a `get
+config()` accessor, a spread into the plugin object, a hook assigned onto
+the bound plugin object, a `new` of a locally declared class, and a list
+populated after its literal. The scan now chases each of those readable
+shapes — the shorthand key through its declaration, the accessor by what it
+returns, the spread through its readable source, the assigned hook on the
+bound object, the `config` member the class declaration names — and fails
+closed on a list it cannot enumerate; opaque plugin values (a call result
+like `svelte(...)`, an import) keep the disclosed residual. **R13-C2**: the
+binding-position readings early-returned inside the alias declaration's
+statement, and the plugins array — every inline hook body — sits inside that
+statement, so an inline hook handing its parameter to unreadable code
+through an assignment sailed through while the identical bound body was
+caught. The exemption is removed: an inline hook body is judged by the same
+mutation/escape/binding-position readings as a bound hook body, which is
+what the R12-C seeding sentence above claims as executed.
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as

@@ -185,7 +185,9 @@
  *      CHASES THE HERITAGE CLAUSE to the declaring base — bounded, cycle-
  *      guarded, multi-hop, class-expression, STATIC, SUPER dispatch, cast
  *      receivers unwrapped, an install tainting the chain through ANY
- *      spelling that reaches the prototype or constructor, getters and
+ *      binding that reaches the prototype or constructor — declarations and
+ *      assignments alike, shadows included, aliased and element-access
+ *      callees and folded computed keys resolved — getters and
  *      computed calls reading it; and the barrel tracer consults the alias
  *      table BEFORE owned resolution, catching a hijacked re-export.
  *
@@ -983,7 +985,15 @@ function bareSpecifierPackage(specifier) {
  * config object and whose return it merges, escapes the table when it
  * returns or mutates `resolve.alias` (or its shape is unreadable), while
  * readable hooks that provably contribute no alias state and opaque plugin
- * values like `svelte(...)` stay clean.
+ * values like `svelte(...)` stay clean. Round 14 chases the readable plugin
+ * spellings that scan declined — a shorthand `plugins` key, a `get
+ * config()` accessor judged by what it returns, a spread into the plugin
+ * object, a hook ASSIGNED onto the bound plugin object after its literal,
+ * an instance of a locally declared class read as its `config` member —
+ * fails closed on a list populated after its literal, and drops the
+ * declaration-statement exemption from the binding-position readings, so an
+ * INLINE hook body is judged by the same mutation/escape/binding-position
+ * readings as a bound one.
  */
 function readBuildAliases() {
 	const aliases = [];
@@ -1646,14 +1656,24 @@ function checkExecutableSourceUniverse() {
  *
  * ROUND 13 KEYS THE VALUE'S REACH, NOT THE SPELLING, in the two places the
  * round-12 reading still matched text. The prototype-install taint resolves
- * its callee and its target through the declaration map — an aliased builtin
- * (`const dp = Object.defineProperty`, a namespace `const R = Reflect`), a
- * prototype value held by an intermediate binding, an element access with a
- * literal key, or a destructure taints the chain exactly as the literal
- * spelling does. And a SPREAD of a value-carrying array into call arguments
- * holds the value at the call gate — `f(...args)` over `const args =
- * [preview]` hands the reference exactly as `f(preview)` does, at any
- * position the spread lands it.
+ * its callee and its target through the bindings a name receives, and a
+ * SPREAD of a value-carrying array into call arguments holds the value at
+ * the call gate — `f(...args)` over `const args = [preview]` hands the
+ * reference exactly as `f(preview)` does, at any position the spread lands
+ * it.
+ *
+ * ROUND 14 CLOSES THE SPELLINGS THE ROUND-13 MAP DECLINED: it recorded only
+ * declarations-with-initializers, first-binding-wins and scope-blind, and
+ * the callee/target readers chased nothing else, so eight plants installed
+ * the getter over green. Now the map records EVERY binding of a name —
+ * declarations and assignments, a shadow over a benign first binding
+ * included; the callee reads the element-access (`Object['defineProperty']`)
+ * and indirect comma (`(0, Object.defineProperty)`) spellings and resolves
+ * the namespace of either through the same bindings; the target folds
+ * computed `prototype` keys (`C[k]` over `const k = 'prototype'`); a
+ * destructure reads its source through the same bindings and folds computed
+ * binding keys (`const { ['defineProperty']: dp } = Object`); and
+ * `Object.assign` taints the static side exactly as the prototype side.
  */
 function checkPreviewValuePath() {
 	const problems = [];
