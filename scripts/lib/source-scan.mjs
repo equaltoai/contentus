@@ -2151,14 +2151,19 @@ function previewValuePathFindings(file, sourceFile) {
 	const containerReturns = new Map();
 	// One-hop declaration chase for return classification.
 	const localDeclarations = new Map();
-	// R14-A: EVERY binding a name receives — declarations AND plain
-	// assignments, in file order. The round-13 map recorded only
-	// declarations-with-initializers, first-binding-wins and scope-blind, so
-	// an assignment binding (`let d; d = Object.defineProperty`), a shadow
-	// declared after a benign first binding, or a late rebind of the target
-	// value was invisible to the install resolutions below. A name resolves
-	// through ALL of its bindings: any binding that can hold the install
-	// value at runtime taints exactly as the literal spelling does.
+	// R14-A / R15-1: the bindings a name receives — declarations and the FULL
+	// assignment-operator range (`=`, `??=`, `||=`, compound included), plus
+	// the identifier positions an ARRAY-shape destructuring assignment binds —
+	// in file order. The round-13 map recorded only
+	// declarations-with-initializers, first-binding-wins and scope-blind; the
+	// round-14 map added plain `=` assignments but still declined the compound
+	// operators, destructuring-assignment targets, and values stored at member
+	// positions, so `d ??= Object.defineProperty`, `({ defineProperty: d } =
+	// Object)`, `[d] = [Object.defineProperty]`, and `o['d'] =
+	// Object.defineProperty` stayed invisible to the install resolutions below.
+	// A name resolves through ALL of its bindings and a member position reads
+	// back through its stores: any binding that can hold the install value at
+	// runtime taints exactly as the literal spelling does.
 	const localBindings = new Map(); // name -> [source expressions]
 	const addLocalBinding = (name, source) => {
 		const list = localBindings.get(name) ?? [];
@@ -2176,15 +2181,83 @@ function previewValuePathFindings(file, sourceFile) {
 				localDeclarations.set(node.name.text, node.initializer);
 			addLocalBinding(node.name.text, node.initializer);
 		}
-		if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+		// R15-1: the FULL assignment-operator range, mirroring the alias-level
+		// derivation fixed point below — `d ??= Object.defineProperty` and
+		// `d ||= Object.defineProperty` bind the value to `d` exactly as `=`
+		// does, and the round-14 map recorded only `=`. A compound operator can
+		// leave the prior value in place, so this is an over-approximation (the
+		// name MAY hold the right side) — the same conservative posture the
+		// derivation fixed point takes, and the one the install readers need:
+		// any binding that can hold the install value taints.
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+		) {
 			const target = unwrapValueNode(node.left);
-			if (target && ts.isIdentifier(target)) addLocalBinding(target.text, node.right);
+			if (!target) return;
+			if (ts.isIdentifier(target)) {
+				addLocalBinding(target.text, node.right);
+				return;
+			}
+			// R15-1: an ARRAY-shape destructuring assignment binds each
+			// position the element it lines up with — `[d] =
+			// [Object.defineProperty]` hands the element to `d` — exactly as a
+			// declaration pattern does.
+			const source = unwrapValueNode(node.right);
+			if (ts.isArrayLiteralExpression(target) && ts.isArrayLiteralExpression(source)) {
+				for (let i = 0; i < target.elements.length; i += 1) {
+					const element = target.elements[i];
+					if (ts.isOmittedExpression(element)) continue;
+					const name = unwrapValueNode(element);
+					const value = source.elements[i];
+					if (ts.isIdentifier(name) && value && !ts.isOmittedExpression(value))
+						addLocalBinding(name.text, value);
+				}
+			}
 		}
 	});
 	const foldLocalKey = (node) =>
 		node && ts.isIdentifier(node) && constantStrings.has(node.text)
 			? constantStrings.get(node.text)
 			: foldPropertyKey(node);
+
+	// R15-1: element/member STORES — `o['d'] = v`, `o.d = v` — the value sits
+	// at a readable position the callee and target readers chase, exactly as a
+	// named binding does. Recorded after the constant strings are folded so a
+	// computed key (`o[k] = v` over `const k = 'd'`) names the same position
+	// the literal spelling does.
+	const memberStores = new Map(); // "object.key" -> [stored source expressions]
+	const memberStoreKey = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner) return null;
+		let objectExpr = null;
+		let keyText = null;
+		if (ts.isPropertyAccessExpression(inner) && !inner.computed) {
+			objectExpr = inner.expression;
+			keyText = inner.name.text;
+		} else if (ts.isElementAccessExpression(inner)) {
+			objectExpr = inner.expression;
+			keyText = foldLocalKey(inner.argumentExpression);
+		} else return null;
+		if (keyText === null) return null;
+		const object = unwrapValueNode(objectExpr);
+		if (!object || !ts.isIdentifier(object)) return null;
+		return `${object.text}.${keyText}`;
+	};
+	eachNode(sourceFile, (node) => {
+		if (
+			!ts.isBinaryExpression(node) ||
+			node.operatorToken.kind < ts.SyntaxKind.FirstAssignment ||
+			node.operatorToken.kind > ts.SyntaxKind.LastAssignment
+		)
+			return;
+		const storeKey = memberStoreKey(node.left);
+		if (storeKey === null) return;
+		const list = memberStores.get(storeKey) ?? [];
+		list.push(node.right);
+		memberStores.set(storeKey, list);
+	});
 
 	const addValueName = (name) => {
 		if (!valueNames.has(name)) {
@@ -2432,25 +2505,53 @@ function previewValuePathFindings(file, sourceFile) {
 	// namespace alias or an assignment of `Object`/`Reflect` counts), and a
 	// computed binding key folds exactly as a literal one.
 	const destructuredInstallBuiltins = new Map(); // bound name -> builtin spelling
-	eachNode(sourceFile, (node) => {
-		if (
-			!ts.isVariableDeclaration(node) ||
-			!ts.isObjectBindingPattern(node.name) ||
-			!node.initializer
-		)
-			return;
-		const source = unwrapValueNode(node.initializer);
-		if (!ts.isIdentifier(source)) return;
+	/**
+	 * R15-1: the builtin extractions an OBJECT destructure names, whether the
+	 * pattern is a DECLARATION (`const { defineProperty: dp } = Object`) or an
+	 * ASSIGNMENT (`({ defineProperty: dp } = Object)`) — both bind the member
+	 * the key names. The pattern elements differ by node kind between the two
+	 * spellings, so the bound name and the key are read per shape.
+	 */
+	const recordObjectDestructureBuiltins = (pattern, sourceNode) => {
+		const source = unwrapValueNode(sourceNode);
+		if (!source || !ts.isIdentifier(source)) return;
 		const ns = namespaceObjectName(source.text, 0);
 		if (ns !== 'Object' && ns !== 'Reflect') return;
-		for (const element of node.name.elements) {
-			if (!ts.isIdentifier(element.name)) continue;
-			const keyText = bindingKeyText(element.propertyName ?? element.name);
+		const elements = ts.isObjectBindingPattern(pattern) ? pattern.elements : pattern.properties;
+		for (const element of elements) {
+			let nameNode = null;
+			let keyNode = null;
+			if (ts.isBindingElement(element)) {
+				if (!ts.isIdentifier(element.name)) continue;
+				nameNode = element.name;
+				keyNode = element.propertyName ?? element.name;
+			} else if (ts.isPropertyAssignment(element)) {
+				nameNode = unwrapValueNode(element.initializer);
+				keyNode = element.name;
+			} else if (ts.isShorthandPropertyAssignment(element)) {
+				nameNode = element.name;
+				keyNode = element.name;
+			} else continue;
+			if (!nameNode || !ts.isIdentifier(nameNode)) continue;
+			const keyText = bindingKeyText(keyNode);
 			if (keyText === null) continue;
 			if (ns === 'Object' && ['assign', 'defineProperty', 'defineProperties'].includes(keyText))
-				destructuredInstallBuiltins.set(element.name.text, `Object.${keyText}`);
+				destructuredInstallBuiltins.set(nameNode.text, `Object.${keyText}`);
 			if (ns === 'Reflect' && ['set', 'defineProperty'].includes(keyText))
-				destructuredInstallBuiltins.set(element.name.text, `Reflect.${keyText}`);
+				destructuredInstallBuiltins.set(nameNode.text, `Reflect.${keyText}`);
+		}
+	};
+	eachNode(sourceFile, (node) => {
+		if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer)
+			recordObjectDestructureBuiltins(node.name, node.initializer);
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+		) {
+			const target = unwrapValueNode(node.left);
+			if (target && ts.isObjectLiteralExpression(target))
+				recordObjectDestructureBuiltins(target, node.right);
 		}
 	});
 	/**
@@ -2486,8 +2587,16 @@ function previewValuePathFindings(file, sourceFile) {
 		if (methodName !== null) {
 			const object = unwrapValueNode(objectExpr);
 			if (!ts.isIdentifier(object)) return null;
-			const ns = namespaceObjectName(object.text, 0, new Set());
-			return ns ? `${ns}.${methodName}` : null;
+			const ns = namespaceObjectName(object.text, 0);
+			if (ns) return `${ns}.${methodName}`;
+			// R15-1: a value STORED at this member position reads back through
+			// the store — `o['d'] = Object.defineProperty; o['d'](…)` invokes
+			// the stored builtin exactly as the literal spelling does.
+			for (const stored of memberStores.get(`${object.text}.${methodName}`) ?? []) {
+				const resolved = resolveInstallCallee(stored, depth + 1);
+				if (resolved) return resolved;
+			}
+			return null;
 		}
 		if (ts.isIdentifier(inner)) {
 			const destructured = destructuredInstallBuiltins.get(inner.text);
@@ -2535,6 +2644,19 @@ function previewValuePathFindings(file, sourceFile) {
 			}
 			return null;
 		}
+		// R15-1: a class value STORED at a member position reads back through
+		// the store — `o['p'] = C.prototype; install(o['p'], …)` targets the
+		// prototype exactly as the literal spelling does. The `.prototype`
+		// spelling itself is handled above; this chases any other stored key.
+		if (ts.isPropertyAccessExpression(inner) || ts.isElementAccessExpression(inner)) {
+			const storeKey = memberStoreKey(inner);
+			if (storeKey !== null) {
+				for (const stored of memberStores.get(storeKey) ?? []) {
+					const resolved = resolveInstallTargetClass(stored, depth + 1);
+					if (resolved) return resolved;
+				}
+			}
+		}
 		return null;
 	};
 	// R13-A: the names a destructure binds OUT OF a class's prototype —
@@ -2561,6 +2683,68 @@ function previewValuePathFindings(file, sourceFile) {
 				});
 		}
 	});
+	// R15-1: values stored through the builtin install APIs —
+	// `Object.assign(o, { d: v })`, `Object.defineProperties(o, { d: { value: v } })`,
+	// `Object.defineProperty(o, 'd', { value: v })`, and `Reflect.set(o, 'd', v)`
+	// — place the value at the same readable position a direct store writes, so
+	// a builtin or class value laundered through them (`Object.assign(o, { d:
+	// Object.defineProperty }); o['d'](C.prototype, …)`) resolves exactly as the
+	// literal spelling does.
+	eachNode(sourceFile, (node) => {
+		if (!ts.isCallExpression(node) || node.arguments.length < 2) return;
+		const builtin = resolveInstallCallee(node.expression, 0);
+		if (!builtin) return;
+		const receiver = unwrapValueNode(node.arguments[0]);
+		if (!receiver || !ts.isIdentifier(receiver)) return;
+		const storeValue = (key, value) => {
+			if (key === null || !value) return;
+			const storeKey = `${receiver.text}.${key}`;
+			const list = memberStores.get(storeKey) ?? [];
+			list.push(value);
+			memberStores.set(storeKey, list);
+		};
+		const descriptorValue = (descriptor) => {
+			const inner = unwrapValueNode(descriptor);
+			if (!inner || !ts.isObjectLiteralExpression(inner)) return null;
+			for (const property of inner.properties) {
+				let key = null;
+				if (property.name && ts.isIdentifier(property.name)) key = property.name.text;
+				else if (property.name && ts.isStringLiteral(property.name)) key = property.name.text;
+				if (key === 'value')
+					return ts.isPropertyAssignment(property) ? property.initializer : property;
+			}
+			return null;
+		};
+		if (builtin === 'Object.assign' || builtin === 'Object.defineProperties') {
+			const source = unwrapValueNode(node.arguments[1]);
+			if (!source || !ts.isObjectLiteralExpression(source)) return;
+			for (const property of source.properties) {
+				if (ts.isShorthandPropertyAssignment(property)) {
+					storeValue(property.name.text, property.name);
+					continue;
+				}
+				if (!ts.isPropertyAssignment(property) && !ts.isMethodDeclaration(property)) continue;
+				let key = null;
+				if (ts.isIdentifier(property.name)) key = property.name.text;
+				else if (ts.isStringLiteral(property.name)) key = property.name.text;
+				else if (ts.isComputedPropertyName(property.name))
+					key = foldLocalKey(property.name.expression);
+				if (key === null) continue;
+				if (builtin === 'Object.defineProperties')
+					storeValue(key, descriptorValue(property.initializer));
+				else if (ts.isMethodDeclaration(property)) storeValue(key, property);
+				else storeValue(key, property.initializer);
+			}
+			return;
+		}
+		if (builtin === 'Object.defineProperty' || builtin === 'Reflect.defineProperty') {
+			if (node.arguments.length < 3) return;
+			storeValue(foldLocalKey(node.arguments[1]), descriptorValue(node.arguments[2]));
+			return;
+		}
+		if (builtin === 'Reflect.set' && node.arguments.length >= 3)
+			storeValue(foldLocalKey(node.arguments[1]), node.arguments[2]);
+	});
 	eachNode(sourceFile, (node) => {
 		if (ts.isCallExpression(node) && node.arguments.length > 0) {
 			const builtin = resolveInstallCallee(node.expression, 0);
@@ -2583,7 +2767,15 @@ function previewValuePathFindings(file, sourceFile) {
 			const lhs = unwrapValueNode(node.left);
 			if (ts.isPropertyAccessExpression(lhs) || ts.isElementAccessExpression(lhs)) {
 				const target = resolveInstallTargetClass(lhs.expression, 0);
+				// R15-2: a DIRECT write installs a member on whichever side it
+				// names. The round-14 reading tainted only the prototype side, so
+				// `class C {}; C.g = () => preview;` — a static getter installed
+				// by plain assignment — sailed past a green audit while the
+				// identical `Object.assign(C, …)` spelling (the call branch above)
+				// was caught. Both sides taint exactly as the install-builtin call
+				// does.
 				if (target && target.side === 'prototype') prototypeTainted.add(target.name);
+				else if (target) staticTainted.add(target.name);
 			}
 		}
 	});
@@ -7098,11 +7290,17 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 		// a member or element target derives nothing — the binding-position
 		// reading fails closed on it
 	};
-	// R13-C: a Vite plugin's `config` hook is handed the config object and
-	// RETURNS a partial config Vite MERGES into it — a hook that returns or
-	// mutates `resolve.alias` rewrites the table after this reader has
-	// judged the declaration, breaking the audit's premise that the table it
-	// reads is the table that ships. The reading is therefore:
+	// R13-C / R15-3: TWO Vite plugin hooks can rewrite the alias table the
+	// runtime ships with. The `config` hook is handed the config object and
+	// RETURNS a partial config Vite MERGES into it. The `configResolved` hook
+	// is handed the RESOLVED config and its return is IGNORED by Vite — but it
+	// can MUTATE the config, and the bundled-environment path re-reads
+	// `config.resolve.alias` at environment creation AFTER `configResolved`
+	// runs, so a mutation there reaches the shipped table exactly as a
+	// `config` return does. (contentus ships via `vite build`, the bundled
+	// path.) A hook that returns or mutates `resolve.alias` rewrites the table
+	// after this reader has judged the declaration, breaking the audit's
+	// premise that the table it reads is the table that ships. The reading is:
 	//   - the hook's first parameter is seeded at the config level, so every
 	//     mutation, escape, and binding-position reading in this function
 	//     judges what flows through it (`(c.resolve!.alias as
@@ -7110,24 +7308,32 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	//     `sink = c`, a `return c` variant the exception admits) — for a
 	//     hook bound OUTSIDE the config declaration and for one written
 	//     INLINE in the plugins array alike;
-	//   - a return value that could contribute a `resolve.alias` — a literal
-	//     carrying the keys, or ANY unreadable shape — is an escape;
-	//   - an unreadable `config` member (a shorthand or a non-function
-	//     binding) is an escape.
+	//   - for `config`, a return value that could contribute a `resolve.alias`
+	//     — a literal carrying the keys, or ANY unreadable shape — is an
+	//     escape; `configResolved` returns nothing Vite consumes, so only its
+	//     parameter is seeded (the mutation/escape readings judge the rest);
+	//   - an unreadable hook member (a shorthand or a non-function binding) is
+	//     an escape.
 	// Inline plugin objects are those the scan can READ: elements of a
 	// `plugins:` array literal or bound to its SHORTHAND key (nested arrays,
 	// logical/conditional branches, identifier bindings chased to a fixed
-	// bound), and the hook itself can arrive through any of the spellings
-	// the round-14 attack enumerated — a `get config()` accessor (judged by
-	// what it returns), a spread of a readable object, a hook ASSIGNED onto
-	// the bound plugin object after its literal, or an instance of a locally
-	// declared class with a `config` member. A plugins list POPULATED after
-	// its literal (`list.push(plugin)`, an element write) is not the list
-	// the literal reads, so the position fails closed. A plugin value the
-	// scan cannot read — a call result like `svelte(...)`, an import, a
-	// `new` of a class the file never declares — keeps the pre-round-13
-	// posture: the reading proves nothing about what it cannot see, and the
-	// real config's plugin list must stay clean.
+	// bound), and the hook itself can arrive through any of the spellings the
+	// round-14 and round-15 attacks enumerated — a `get config()` accessor
+	// (judged by what it returns), a spread of a readable object, a hook
+	// INSTALLED onto the bound plugin object after its literal (a dot or
+	// computed assignment, `Object.assign`, `Object.defineProperty` /
+	// `defineProperties`, `Reflect.set` / `Reflect.defineProperty`), or an
+	// instance of a locally declared class with a `config`/`configResolved`
+	// member. A plugins list POPULATED after its literal (`list.push(plugin)`,
+	// an element write) is not the list the literal reads, so the position
+	// fails closed. A plugin value the scan cannot read — a call result like
+	// `svelte(...)`, an import, a `new` of a class the file never declares —
+	// keeps the pre-round-13 posture: the reading proves nothing about what it
+	// cannot see, and the real config's plugin list must stay clean. Every
+	// OTHER Vite plugin hook (transform, resolveId, buildStart, options, and
+	// kin) is left unjudged: none receives the config object to mutate, and
+	// the dev-only hooks never run in the bundled build the audit models; this
+	// is disclosed in docs/consumption/renderer-authority.md.
 	const pluginConfigHookEscapes = new Set();
 	const pluginArrayInitializers = [];
 	eachNode(sourceFile, (node) => {
@@ -7150,8 +7356,43 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 	// instantiates, hooks ASSIGNED onto a bound plugin object after its
 	// literal, and array-bound names populated after their literal.
 	const pluginClassNodes = new Map(); // class name -> class node
-	const memberConfigAssignments = new Map(); // identifier -> [`config` values]
+	// R15: the two Vite plugin hooks that can rewrite the alias table the
+	// runtime ships with. `config` returns a partial config Vite MERGES;
+	// `configResolved` receives the resolved config and can mutate it, and the
+	// bundled-environment path re-reads `config.resolve.alias` at environment
+	// creation AFTER `configResolved` runs, so both are judged. Every other
+	// plugin hook is disclosed as unjudged in the consumption docs.
+	const CONFIG_AFFECTING_HOOKS = new Set(['config', 'configResolved']);
+	// R15-4: a hook installed onto a bound plugin object after its literal,
+	// keyed by receiver name. Each install records WHICH hook and the value
+	// node, because `config` and `configResolved` are judged differently.
+	const memberHookInstalls = new Map(); // identifier -> [{ hook, node }]
 	const populatedArrayNames = new Set();
+	/** Fold a property-key expression to text, chasing one-hop declarations. */
+	const configKeyText = (node) => {
+		const inner = unwrapValueNode(node);
+		if (!inner) return null;
+		if (ts.isStringLiteral(inner) || ts.isNoSubstitutionTemplateLiteral(inner)) return inner.text;
+		if (ts.isIdentifier(inner)) {
+			const initializer = declarations.get(inner.text);
+			if (initializer && initializer !== inner) return configKeyText(initializer);
+		}
+		return null;
+	};
+	/** The key an object-literal property names, or null when unreadable. */
+	const configPropertyKey = (property) => {
+		if (ts.isShorthandPropertyAssignment(property)) return property.name.text;
+		if (!property.name) return null;
+		if (ts.isIdentifier(property.name)) return property.name.text;
+		if (ts.isStringLiteral(property.name)) return property.name.text;
+		if (ts.isComputedPropertyName(property.name)) return configKeyText(property.name.expression);
+		return null;
+	};
+	const recordHookInstall = (receiverName, hook, installNode) => {
+		const list = memberHookInstalls.get(receiverName) ?? [];
+		list.push({ hook, node: installNode });
+		memberHookInstalls.set(receiverName, list);
+	};
 	eachNode(sourceFile, (node) => {
 		if (ts.isClassDeclaration(node) && node.name) pluginClassNodes.set(node.name.text, node);
 		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
@@ -7164,13 +7405,30 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
 		) {
 			const lhs = unwrapValueNode(node.left);
-			if (ts.isPropertyAccessExpression(lhs) && !lhs.computed && lhs.name.text === 'config') {
-				const receiver = unwrapValueNode(lhs.expression);
-				if (receiver && ts.isIdentifier(receiver)) {
-					const list = memberConfigAssignments.get(receiver.text) ?? [];
-					list.push(node.right);
-					memberConfigAssignments.set(receiver.text, list);
+			// R15-4: EVERY assignment spelling that installs a hook — the
+			// round-14 scan recorded only the dot-assignment LHS, so
+			// `p['config'] = hook` sailed past. Both hook names, both member
+			// and element spellings, any assignment operator.
+			let hookKey = null;
+			let receiverExpr = null;
+			if (
+				ts.isPropertyAccessExpression(lhs) &&
+				!lhs.computed &&
+				CONFIG_AFFECTING_HOOKS.has(lhs.name.text)
+			) {
+				hookKey = lhs.name.text;
+				receiverExpr = lhs.expression;
+			} else if (ts.isElementAccessExpression(lhs)) {
+				const folded = configKeyText(lhs.argumentExpression);
+				if (folded !== null && CONFIG_AFFECTING_HOOKS.has(folded)) {
+					hookKey = folded;
+					receiverExpr = lhs.expression;
 				}
+			}
+			if (hookKey !== null) {
+				const receiver = unwrapValueNode(receiverExpr);
+				if (receiver && ts.isIdentifier(receiver))
+					recordHookInstall(receiver.text, hookKey, node.right);
 			}
 			if (ts.isElementAccessExpression(lhs)) {
 				const receiver = unwrapValueNode(lhs.expression);
@@ -7178,12 +7436,82 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			}
 		}
 		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+			const calleeObject = unwrapValueNode(node.expression.expression);
+			const methodName = node.expression.name.text;
+			// R15-4: hook installs through the builtin install APIs —
+			// `Object.assign(p, { config(…){…} })`,
+			// `Object.defineProperty(p, 'config', { value(…){…} })`,
+			// `Object.defineProperties(p, { config: { value(…){…} } })`,
+			// `Reflect.set(p, 'config', hook)`, and
+			// `Reflect.defineProperty(p, 'config', { value(…){…} })`.
+			if (calleeObject && ts.isIdentifier(calleeObject)) {
+				const builtin = `${calleeObject.text}.${methodName}`;
+				if (
+					(builtin === 'Object.assign' || builtin === 'Object.defineProperties') &&
+					node.arguments.length >= 2
+				) {
+					const receiver = unwrapValueNode(node.arguments[0]);
+					if (receiver && ts.isIdentifier(receiver)) {
+						const source = unwrapValueNode(node.arguments[1]);
+						// A readable source object literal, or an identifier the
+						// declarations map reads to one. R15-4: the round-14
+						// handler read only an inline literal, so
+						// `Object.assign(p, base)` over `const base = { config(…){…} }`
+						// sailed past.
+						let sourceLiteral = null;
+						if (source && ts.isObjectLiteralExpression(source)) sourceLiteral = source;
+						else if (source && ts.isIdentifier(source) && declarations.has(source.text)) {
+							const bound = unwrapValueNode(declarations.get(source.text));
+							if (bound && ts.isObjectLiteralExpression(bound)) sourceLiteral = bound;
+						}
+						if (sourceLiteral && sourceLiteral.properties.some(ts.isSpreadAssignment)) {
+							// a spread could carry in a config hook the literal read
+							// cannot enumerate — fail closed
+							recordHookInstall(receiver.text, null, node.arguments[1]);
+						} else if (sourceLiteral) {
+							for (const property of sourceLiteral.properties) {
+								const key = configPropertyKey(property);
+								if (key !== null && CONFIG_AFFECTING_HOOKS.has(key))
+									recordHookInstall(receiver.text, key, property);
+							}
+						} else {
+							// an unreadable source could install a config-affecting
+							// hook this reading never sees — fail closed
+							recordHookInstall(receiver.text, null, node.arguments[1]);
+						}
+					}
+				}
+				if (
+					(builtin === 'Object.defineProperty' || builtin === 'Reflect.defineProperty') &&
+					node.arguments.length >= 3
+				) {
+					const receiver = unwrapValueNode(node.arguments[0]);
+					const key = configKeyText(node.arguments[1]);
+					const descriptor = unwrapValueNode(node.arguments[2]);
+					if (
+						receiver &&
+						ts.isIdentifier(receiver) &&
+						key !== null &&
+						CONFIG_AFFECTING_HOOKS.has(key) &&
+						descriptor &&
+						ts.isObjectLiteralExpression(descriptor)
+					)
+						recordHookInstall(receiver.text, key, descriptor);
+				}
+				if (builtin === 'Reflect.set' && node.arguments.length >= 3) {
+					const receiver = unwrapValueNode(node.arguments[0]);
+					const key = configKeyText(node.arguments[1]);
+					if (
+						receiver &&
+						ts.isIdentifier(receiver) &&
+						key !== null &&
+						CONFIG_AFFECTING_HOOKS.has(key)
+					)
+						recordHookInstall(receiver.text, key, node.arguments[2]);
+				}
+			}
 			const receiver = unwrapValueNode(node.expression.expression);
-			if (
-				receiver &&
-				ts.isIdentifier(receiver) &&
-				ALIAS_MUTATING_METHODS.has(node.expression.name.text)
-			)
+			if (receiver && ts.isIdentifier(receiver) && ALIAS_MUTATING_METHODS.has(methodName))
 				populatedArrayNames.add(receiver.text);
 		}
 	});
@@ -7211,8 +7539,18 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 		}
 		return false;
 	};
-	/** Judge one readable `config` hook of an inline plugin object. */
-	const judgePluginConfigHook = (hookFn) => {
+	/**
+	 * Judge one readable config-affecting hook of an inline plugin object.
+	 * `config` hands the hook the config object and Vite MERGES what it
+	 * returns, so both the parameter seeding and the returns are judged.
+	 * `configResolved` hands the hook the RESOLVED config and its return is
+	 * ignored by Vite, so only the parameter is seeded — but the seeded level
+	 * means every mutation, escape, and binding-position reading judges what
+	 * flows through it, which matters because the bundled-environment path
+	 * re-reads `config.resolve.alias` at environment creation after
+	 * `configResolved` runs.
+	 */
+	const judgePluginConfigHookBody = (hookFn, judgeReturns) => {
 		// The config Vite hands the hook IS the config object: seed its
 		// binding so the mutation/escape/binding-position readings judge it,
 		// chased to a fixed point by the derivation below. A destructured
@@ -7222,6 +7560,7 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 			if (ts.isIdentifier(param.name)) deriveLevel(param.name.text, 'config');
 			else pluginConfigHookEscapes.add(param.getText(sourceFile).slice(0, 200));
 		}
+		if (!judgeReturns) return;
 		// The hook's returns merge into the resolved config.
 		const returns = [];
 		if (hookFn.body && !ts.isBlock(hookFn.body)) returns.push(hookFn.body);
@@ -7238,38 +7577,113 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				pluginConfigHookEscapes.add(returned.getText(sourceFile).slice(0, 200));
 		}
 	};
+	const judgePluginConfigHook = (hookFn) => judgePluginConfigHookBody(hookFn, true);
+	const judgePluginConfigResolvedHook = (hookFn) => judgePluginConfigHookBody(hookFn, false);
+	// Dispatch by hook name through a direct, nameable call — CON-5 reads the
+	// pinned scripts and cannot rule out a callee it cannot name, so the
+	// `configResolved`/`config` split is a named branch, never a returned
+	// function invoked in place.
+	const judgeHookFnByName = (hook, hookFn) => {
+		if (hook === 'configResolved') judgePluginConfigResolvedHook(hookFn);
+		else judgePluginConfigHook(hookFn);
+	};
+	const judgeHookGetterByName = (hook, accessor) => {
+		if (hook === 'configResolved') judgePluginConfigResolvedGetter(accessor);
+		else judgePluginConfigGetter(accessor);
+	};
 	/**
-	 * R14-C: an expression that must BE the hook — a function directly, a
-	 * bound function the declarations map chases; anything else fails
-	 * closed as a hook the scan cannot read.
+	 * R14-C / R15-4: an expression that must BE the hook — a function directly
+	 * (arrow, function expression, or method shorthand), a bound function the
+	 * declarations map chases, or a `get` accessor; anything else fails closed
+	 * as a hook the scan cannot read.
 	 */
-	const judgeHookExpression = (expr) => {
+	const judgeHookExpressionByName = (hook, expr) => {
 		const value = unwrapValueNode(expr);
-		if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
-			judgePluginConfigHook(value);
+		if (
+			ts.isArrowFunction(value) ||
+			ts.isFunctionExpression(value) ||
+			ts.isMethodDeclaration(value)
+		) {
+			judgeHookFnByName(hook, value);
+			return;
+		}
+		if (ts.isGetAccessorDeclaration(value)) {
+			judgeHookGetterByName(hook, value);
 			return;
 		}
 		if (ts.isIdentifier(value) && declarations.has(value.text)) {
 			const bound = unwrapValueNode(declarations.get(value.text));
-			if (ts.isArrowFunction(bound) || ts.isFunctionExpression(bound)) {
-				judgePluginConfigHook(bound);
+			if (
+				ts.isArrowFunction(bound) ||
+				ts.isFunctionExpression(bound) ||
+				ts.isMethodDeclaration(bound)
+			) {
+				judgeHookFnByName(hook, bound);
+				return;
+			}
+			if (ts.isGetAccessorDeclaration(bound)) {
+				judgeHookGetterByName(hook, bound);
 				return;
 			}
 		}
 		pluginConfigHookEscapes.add(expr.getText(sourceFile).slice(0, 200));
 	};
+	const judgeHookExpression = (expr) => judgeHookExpressionByName('config', expr);
 	/**
 	 * R14-C: a `get config()` accessor hands Vite what it RETURNS — judge
 	 * each return as the hook it can be; a return the scan cannot read to a
 	 * function fails closed; an accessor with no return returns undefined,
 	 * which Vite calls nothing.
 	 */
-	const judgePluginConfigGetter = (accessor) => {
+	const judgePluginConfigGetterByName = (hook, accessor) => {
 		const returns = [];
 		eachNode(accessor.body ?? accessor, (node) => {
 			if (ts.isReturnStatement(node) && node.expression) returns.push(node.expression);
 		});
-		for (const returned of returns) judgeHookExpression(returned);
+		for (const returned of returns) judgeHookExpressionByName(hook, returned);
+	};
+	const judgePluginConfigGetter = (accessor) => judgePluginConfigGetterByName('config', accessor);
+	const judgePluginConfigResolvedGetter = (accessor) =>
+		judgePluginConfigGetterByName('configResolved', accessor);
+	/**
+	 * R15-4: a hook installed onto a bound plugin object after its literal —
+	 * judge the installed value by its hook name. A property wrapper is judged
+	 * by the value it names; a property DESCRIPTOR (`{ value(…){…} }` /
+	 * `{ get(…){…} }`) is judged by the accessor Vite actually installs.
+	 */
+	const judgeInstalledHook = (hook, installNode) => {
+		// R15-4: a null hook marks an install the reading could not enumerate —
+		// an unreadable `Object.assign` source or a spread that could carry a
+		// config hook in. Fail closed rather than accept it silently.
+		if (hook === null) {
+			pluginConfigHookEscapes.add(installNode.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		const value = unwrapValueNode(installNode);
+		if (ts.isPropertyAssignment(value)) return judgeInstalledHook(hook, value.initializer);
+		if (ts.isShorthandPropertyAssignment(value)) return judgeInstalledHook(hook, value.name);
+		if (ts.isObjectLiteralExpression(value)) {
+			let judged = false;
+			for (const property of value.properties) {
+				const key = configPropertyKey(property);
+				if (key === 'value') {
+					judgeInstalledHook(
+						hook,
+						ts.isPropertyAssignment(property) ? property.initializer : property
+					);
+					judged = true;
+				} else if (key === 'get') {
+					judgePluginConfigGetterByName(
+						hook,
+						ts.isPropertyAssignment(property) ? unwrapValueNode(property.initializer) : property
+					);
+					judged = true;
+				}
+			}
+			if (!judged) pluginConfigHookEscapes.add(installNode.getText(sourceFile).slice(0, 200));
+			return;
+		}
+		judgeHookExpressionByName(hook, value);
 	};
 	/**
 	 * R14-C: the `config` member a locally declared class hands an instance
@@ -7284,21 +7698,20 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 					: member.name && ts.isStringLiteral(member.name)
 						? member.name.text
 						: null;
-			if (key !== 'config') continue;
+			if (key === null || !CONFIG_AFFECTING_HOOKS.has(key)) continue;
 			if (ts.isMethodDeclaration(member)) {
-				judgePluginConfigHook(member);
-				return;
+				judgeHookFnByName(key, member);
+				continue;
 			}
 			if (ts.isGetAccessorDeclaration(member)) {
-				judgePluginConfigGetter(member);
-				return;
+				judgeHookGetterByName(key, member);
+				continue;
 			}
 			if (ts.isPropertyDeclaration(member) && member.initializer) {
-				judgeHookExpression(member.initializer);
-				return;
+				judgeHookExpressionByName(key, member.initializer);
+				continue;
 			}
 			pluginConfigHookEscapes.add(member.getText(sourceFile).slice(0, 200));
-			return;
 		}
 	};
 	/** Walk one position of a plugins list, bounded and cycle-guarded. */
@@ -7381,10 +7794,13 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 		scanPluginObject(inner, depth, boundName);
 	};
 	/**
-	 * R14-C: one plugin object literal — its `config` member in any spelling
-	 * (method, function-valued property, bound hook, accessor, shorthand),
-	 * the hooks a SPREAD carries in from a readable object, and the hooks
-	 * ASSIGNED onto the bound object after the literal.
+	 * R14-C / R15: one plugin object literal — its `config` and
+	 * `configResolved` members in any spelling (method, function-valued
+	 * property, bound hook, accessor, shorthand), the hooks a SPREAD carries in
+	 * from a readable object, and the hooks INSTALLED onto the bound object
+	 * after the literal through any install spelling (a dot or computed
+	 * assignment, `Object.assign`, `Object.defineProperty` / `defineProperties`,
+	 * `Reflect.set` / `Reflect.defineProperty`).
 	 */
 	const scanPluginObject = (literal, depth, boundName) => {
 		for (const property of literal.properties) {
@@ -7410,26 +7826,30 @@ export function parseResolveAliases(source, { file = 'vite.config.ts', jsx = fal
 				if (property.name && ts.isIdentifier(property.name)) key = property.name.text;
 				else if (property.name && ts.isStringLiteral(property.name)) key = property.name.text;
 			} else if (ts.isShorthandPropertyAssignment(property)) key = property.name.text;
-			if (key !== 'config') continue;
+			if (key === null || !CONFIG_AFFECTING_HOOKS.has(key)) continue;
 			if (ts.isMethodDeclaration(property)) {
-				judgePluginConfigHook(property);
+				judgeHookFnByName(key, property);
 				continue;
 			}
 			if (ts.isGetAccessorDeclaration(property)) {
-				judgePluginConfigGetter(property);
+				judgeHookGetterByName(key, property);
 				continue;
 			}
 			if (ts.isPropertyAssignment(property)) {
-				judgeHookExpression(property.initializer);
+				judgeHookExpressionByName(key, property.initializer);
 				continue;
 			}
-			// a shorthand `config` binding — the function is elsewhere
+			// a shorthand `config`/`configResolved` binding — the function is elsewhere
 			pluginConfigHookEscapes.add(property.getText(sourceFile).slice(0, 200));
 		}
 		// A bound plugin object can receive its hook by ASSIGNMENT after the
-		// literal — `const p = {}; p.config = hook;` — which the literal
-		// read never sees.
-		for (const value of memberConfigAssignments.get(boundName) ?? []) judgeHookExpression(value);
+		// literal — `const p = {}; p.config = hook;` — which the literal read
+		// never sees. R15-4: that is every install spelling — a computed access
+		// (`p['config'] = hook`), `Object.assign(p, { config(…){…} })`,
+		// `Object.defineProperty(p, 'config', { value(…){…} })`, the
+		// `defineProperties` and `Reflect` forms — and both hook names.
+		for (const install of memberHookInstalls.get(boundName) ?? [])
+			judgeInstalledHook(install.hook, install.node);
 	};
 	for (const initializer of pluginArrayInitializers) scanPluginValue(initializer, 0);
 	{

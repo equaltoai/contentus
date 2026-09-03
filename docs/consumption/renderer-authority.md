@@ -495,20 +495,23 @@ audits — an assignment-aliased callee, an assignment-bound target, a folded
 computed `prototype` key, an element-access callee, an indirect comma
 callee, a destructure off a namespace alias, a shadow declared after a
 benign first binding, and an `Object.assign` onto the class object for
-statics. The map now records every binding a name receives (declarations and
-assignments, shadows included), the callee reads the element-access and
+statics. The map records the declarations and the plain `=` assignments a
+name receives (shadows included), the callee reads the element-access and
 comma spellings, the target folds computed keys, a destructure reads its
 source through the same binding map and folds computed binding keys, and
-`Object.assign` taints the static side exactly as the prototype side — this
-is what makes the value-reach statement above (and the round-12 "class
-object itself for statics" sentence) true as executed. **R13-C1**: the
+`Object.assign` taints the static side exactly as the prototype side. This
+round's wording claimed that as "every binding a name receives" and the
+statics sentence as "true as executed"; both were one spelling wide — the map
+recorded only `=` to a bare identifier, and the direct-write taint covered
+only the prototype side — and it is round 15 (R14-1, R14-2 below) that makes
+them true as executed. **R13-C1**: the
 plugins-array reading modeled only the enumerated spellings, so the isolated
 call hand-off hook sailed through a shorthand `plugins` key, a `get
 config()` accessor, a spread into the plugin object, a hook assigned onto
 the bound plugin object, a `new` of a locally declared class, and a list
 populated after its literal. The scan now chases each of those readable
 shapes — the shorthand key through its declaration, the accessor by what it
-returns, the spread through its readable source, the assigned hook on the
+returns, the spread through its readable source, the hook installed onto the
 bound object, the `config` member the class declaration names — and fails
 closed on a list it cannot enumerate; opaque plugin values (a call result
 like `svelte(...)`, an import) keep the disclosed residual. **R13-C2**: the
@@ -519,6 +522,63 @@ through an assignment sailed through while the identical bound body was
 caught. The exemption is removed: an inline hook body is judged by the same
 mutation/escape/binding-position readings as a bound hook body, which is
 what the R12-C seeding sentence above claims as executed.
+
+Round-15 (R14-1, R14-2, R14-3, R14-4) closed four families of SIBLING
+spellings the round-14 closures left open — readings keyed on one spelling of
+a mutable value with the adjacent spellings unjudged — and corrects the
+round-14 claims those gaps falsified. **R14-1**: the install binding map
+recorded only a plain `=` to a bare identifier, so five spellings installed
+the preview getter over green audits — a `??=`/`||=` compound-assignment
+callee, an object destructuring assignment (`({ defineProperty: d } =
+Object)`), an array destructuring assignment (`[d] =
+[Object.defineProperty]`), and an element store (`o['d'] =
+Object.defineProperty; o['d'](…)`). The map now mirrors the alias-level
+derivation fixed point: it records the full assignment-operator range on
+identifier targets, the identifier positions an array-shape destructuring
+assignment binds, and the values stored at member and element positions —
+direct stores and stores through `Object.assign`/`defineProperties`/
+`defineProperty`/`Reflect.set` alike — and the callee and target readers read
+back through those stores. This is what makes the R12-2 value-reach statement
+(the builtin and the target each resolve through every binding the name
+receives) true as executed. **R14-2**: the direct-write taint covered only the
+prototype side, so `class C {}; C.g = () => preview;` — a static getter
+installed by plain assignment — sailed past while the identical
+`Object.assign(C, …)` spelling was caught. A direct write now taints whichever
+side it names, prototype or static, exactly as the install-builtin call does;
+this is what makes the "class object itself for statics" sentence fully true
+as executed. **R14-3**: `configResolved` was unjudged and undisclosed. Vite
+hands `configResolved` the resolved config and ignores its return, but the
+hook can MUTATE the config, and the bundled-environment path re-reads
+`config.resolve.alias` at environment creation AFTER `configResolved` runs —
+and contentus ships via `vite build`, the bundled path — so a `configResolved`
+mutation reaches the shipped table. `configResolved` is now judged by the same
+machinery as `config()`: its first parameter is seeded at the config level so
+the mutation/escape/binding-position readings judge what flows through it, for
+an inline and a bound-plugin spelling alike, while its return — nothing Vite
+consumes — is not judged as a contribution. Of the Vite plugin hooks, only
+`config` and `configResolved` can rewrite the shipped alias table, and only
+those two are judged; every other hook is left unjudged and is disclosed here
+with the reason. The Rollup-level hooks (`options`, `outputOptions`,
+`buildStart`, `buildEnd`, `resolveId`, `load`, `transform`, `moduleParsed`,
+`renderChunk`, `generateBundle`, `writeBundle`, `closeBundle`) receive Rollup
+options or per-module/per-chunk data, never the Vite config object, so none
+can mutate `resolve.alias`; and the dev-server and HMR hooks
+(`configureServer`, `configurePreviewServer`, `handleHotUpdate`) do not run in
+the bundled build this audit models. **R14-4**: the bound-plugin hook chase
+recorded only the dot-assignment LHS, so `Object.assign(p, { config(…){…} })`,
+`Object.defineProperty(p, 'config', { value(…){…} })`, and `p['config'] =
+hook` sailed through. A hook installed onto a bound plugin object after its
+literal is now chased through every install spelling — a dot or computed
+assignment, `Object.assign`/`defineProperties` over a source object literal or
+an identifier the declarations map reads to one, an
+`Object.defineProperty`/`Reflect.defineProperty` descriptor, and
+`Reflect.set` — for both hook names, and a hook installed through an
+unreadable source fails closed rather than being silently accepted. The
+round-15 self-attack sweep closed two further siblings the families imply: an
+install builtin laundered through `Object.assign` onto a plain object and read
+back (`Object.assign(o, { d: Object.defineProperty }); o['d'](C.prototype,
+…)`), and a readable plugin base merged into a bound plugin (`Object.assign(p,
+base)` over `const base = { config(…){…} }`).
 
 **Resolved upstream, 2026-08-07.** lesser v1.6.2 added exactly the field this
 note said would close the gap: `Article.renderedHtml`, documented in-schema as
