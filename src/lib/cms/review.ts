@@ -22,11 +22,15 @@
  *
  * 1. RENDERER AUTHORITY. No document selects `Draft.content`. Not "selects it
  *    and declines to render it" — does not ask for it. The only body that
- *    reaches a reviewer is `draftPreview.renderedHtml`, which lesser produced
- *    with `cms.RenderDraftPreview` and which the vendored blog face sanitizes
- *    again on the way to the DOM. A preview that did not render is an explained
- *    failure carrying lesser's own deterministic errors, never a fallback to
- *    source.
+ *    reaches a reviewer is `draftPreview.renderedHtml`, produced by lesser's
+ *    opted-in `cms.RenderDraftPreviewWithMedia` (the `includeAccessUrls: true`
+ *    branch) and displayed through `src/lib/review/PreviewBody.svelte` exactly
+ *    as lesser rendered and sanitized it — verbatim, no second pass. The
+ *    vendored article sanitizer (`Article.Content`'s fediverse allowlist) is
+ *    deliberately NOT in the authenticated preview display path: it strips the
+ *    lesser-authored `<figure>`/`<img>` that the media opt-in exists to serve.
+ *    A preview that did not render is an explained failure carrying lesser's
+ *    own deterministic errors, never a fallback to source.
  *
  * 2. THE GATE IS LESSER'S. `publishDraft` enforces unanimous approval across
  *    active reviewer grants, plus the instance principal's approval whenever

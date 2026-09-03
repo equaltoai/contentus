@@ -298,7 +298,14 @@ test('the vendored source this guard exists for is still unedited', () => {
 	// widening precisely so the vendored file stays byte-identical and checksummed.
 	// If this rune ever disappears from source, it was either fixed upstream (drop
 	// the widening) or edited locally (do not).
-	const vendored = 'src/lib/greater/faces/blog/components/Article/context.ts';
+	//
+	// R2-4 update: at greater-v0.13.7 the release renamed this module to
+	// `context.svelte.ts`, which the plugin compiles by filename convention, and
+	// the unlisted v0.11.9 `context.ts` leftover was removed (it was not part of
+	// the release universe). The widened module filter still covers the whole
+	// vendored greater tree, so the rune-bearing file named here is the one the
+	// guard's rationale now applies to.
+	const vendored = 'src/lib/greater/faces/blog/components/Article/context.svelte.ts';
 	const source = readFileSync(join(repoRoot, vendored), 'utf8');
 
 	assert.match(

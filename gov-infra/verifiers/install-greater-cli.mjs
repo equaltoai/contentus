@@ -34,6 +34,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { resolve } from 'node:path';
 
 import { readStrictJson } from './strict-json.mjs';
+import { CLI_ASSET_NAME, cliAssetUrl } from './authenticate-release-index.mjs';
 
 const CONTRACT = 'gov-infra/planning/contentus-pinned-repo-contract.json';
 const TOOLS = 'gov-infra/.tools';
@@ -41,8 +42,15 @@ const TARBALL = `${TOOLS}/greater-components-cli.tgz`;
 
 const contract = readStrictJson(CONTRACT);
 const asset = contract.greater?.cli_asset;
-if (typeof asset?.url !== 'string' || !/^https:\/\//.test(asset.url)) {
-	console.error(`${CONTRACT}: greater.cli_asset.url must be an https URL`);
+// R5-2: the fetch URL is DERIVED from the canonical release facts, never read
+// out of the child contract — the contract's `url` field is a comparison
+// subject, so a coordinated counterfeit that repoints it fails here instead
+// of downloading from the repointed source.
+if (asset?.url !== cliAssetUrl()) {
+	console.error(
+		`${CONTRACT}: greater.cli_asset.url differs from the canonical release asset URL ` +
+			`(${cliAssetUrl()}); the fetch is derived from the release identity, not the contract`
+	);
 	process.exit(1);
 }
 if (typeof asset?.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(asset.sha256)) {
@@ -57,20 +65,37 @@ mkdirSync(TOOLS, { recursive: true });
 if (existsSync(TARBALL) && digestOf(TARBALL) === asset.sha256) {
 	console.log(`greater CLI asset already present and matching the pin: ${TARBALL}`);
 } else {
-	console.log(`Downloading ${asset.url}`);
-	const response = await fetch(asset.url);
+	console.log(`Downloading ${cliAssetUrl()}`);
+	const response = await fetch(cliAssetUrl(), {
+		redirect: 'follow',
+		signal: AbortSignal.timeout(30_000),
+		headers: {
+			Accept: 'application/octet-stream',
+			'User-Agent': 'equaltoai-contentus-release-verifier',
+		},
+	});
 	if (!response.ok) {
 		console.error(`download failed: HTTP ${response.status} ${response.statusText}`);
 		process.exit(1);
 	}
-	writeFileSync(TARBALL, Buffer.from(await response.arrayBuffer()));
+	const body = Buffer.from(await response.arrayBuffer());
+	// Bounded size before anything is written: the real asset is ~230 KiB.
+	if (body.length === 0 || body.length > 50 * 1024 * 1024) {
+		console.error(`download is ${body.length} bytes — outside the bounded asset size; discarded`);
+		process.exit(1);
+	}
+	writeFileSync(TARBALL, body);
 	const actual = digestOf(TARBALL);
 	if (actual !== asset.sha256) {
 		rmSync(TARBALL, { force: true });
 		console.error('greater CLI asset digest does not match the pin — download discarded.');
 		console.error(`  pinned: ${asset.sha256}`);
 		console.error(`  actual: ${actual}`);
-		console.error(`Move the pin in ${CONTRACT} only for a release you verified upstream.`);
+		console.error(
+			'Move the pin in ' +
+				`${CONTRACT} only for a release you verified upstream; the pin is child-governed, and the ` +
+				'canonical authenticator anchors the asset to GitHub release metadata'
+		);
 		process.exit(1);
 	}
 	console.log(`Verified SHA-256 ${actual} against ${CONTRACT}.`);

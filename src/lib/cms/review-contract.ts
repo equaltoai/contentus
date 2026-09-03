@@ -17,7 +17,8 @@
  * its own renderer. `tests/review.test.mjs` asserts that over every exported
  * document, so a field added in a hurry fails the build rather than shipping.
  *
- * Verified against lesser release v1.6.4.
+ * Verified against lesser release v1.6.28 (the contract greater-v0.13.7 pins;
+ * the v1.6.4 notes below are the history of how this selection grew).
  */
 
 import type {
@@ -156,10 +157,23 @@ export const DRAFT_REVIEW_QUERY = `
  * a preview that failed has to be able to say so specifically. lesser's limits
  * are 256 KiB of source and 512 KiB of rendered output, and a draft that
  * crossed one is a different problem from a draft whose Markdown did not parse.
+ *
+ * `includeAccessUrls: true` is the media opt-in lesser v1.6.28 added to this
+ * operation, and it is ON HERE AND NOWHERE ELSE in this face. Bearer URL
+ * minting is intentionally opt-in upstream: the default branch renders media
+ * references with no usable `src`, while the opted-in branch
+ * (`RenderDraftPreviewWithMedia`, `graph/query_resolvers_cms.go`) mints the
+ * per-usage short-lived access URLs and composes them into the very
+ * `renderedHtml` this document selects — a bound image reaches the reviewer as
+ * the `<figure><img …></figure>` lesser authored, with nothing to mint or
+ * resolve client-side. The URLs are short-lived bearer artifacts, so the opt-in
+ * lives only on the authenticated preview read: never on a queue projection,
+ * never server-side, and never in a fixture, log, or document that an
+ * unauthenticated caller could reach.
  */
 export const DRAFT_PREVIEW_QUERY = `
 	query ContentusDraftPreview($id: ID!) {
-		draftPreview(id: $id) {
+		draftPreview(id: $id, includeAccessUrls: true) {
 			draftId
 			success
 			renderedHtml

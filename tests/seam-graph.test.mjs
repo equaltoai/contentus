@@ -6,6 +6,8 @@ import { test } from 'node:test';
 
 import { build } from 'vite';
 
+import { withSourceLock } from './helpers/source-lock.mjs';
+
 import { auditSeamGraph, overlayPlugin, unattributedAssets } from '../scripts/audit-seam-graph.mjs';
 
 /**
@@ -166,7 +168,18 @@ const reaching = (specifier) => `import ${JSON.stringify(specifier)};\n${contrac
  * 10's case unchanged.
  */
 const audit = async (overlay, blind, external) =>
-	(await auditSeamGraph({ root: repoRoot, overlay, blind, external })).findings;
+	// The build is locked against the mutators: the renderer-authority and
+	// release-binding probes mutate real source (ReviewWorkspace.svelte,
+	// PreviewBody.svelte, vendored files) while they audit it, and a build must
+	// never resolve a fixture over the shipped file. The hold is SHARED, so
+	// builds and reads run alongside each other and only exclude the mutation
+	// windows — a single broad exclusive lock would make every reader wait
+	// behind every other reader.
+	(
+		await withSourceLock(() => auditSeamGraph({ root: repoRoot, overlay, blind, external }), {
+			shared: true,
+		})
+	).findings;
 
 /** Close the stylesheet window for one component's own `<style>` and nothing else. */
 const stylesheetOf = (component) => (id) =>
@@ -206,27 +219,34 @@ const styled = (name, ...rules) =>
  */
 async function emittedByClientBuild(overlay) {
 	const assets = [];
-	await build({
-		root: repoRoot,
-		logLevel: 'error',
-		build: { write: false, minify: false, sourcemap: false },
-		plugins: [
-			overlayPlugin(repoRoot, overlay),
-			{
-				name: 'contentus:seam-graph-witness',
-				enforce: 'post',
-				generateBundle(_options, bundle) {
-					for (const [fileName, output] of Object.entries(bundle))
-						if (output.type === 'asset')
-							assets.push({
-								fileName,
-								from: output.originalFileNames ?? [],
-								text: typeof output.source === 'string' ? output.source : '',
-							});
-				},
-			},
-		],
-	});
+	// Locked like the audit builds above — a build must never resolve a probe
+	// fixture over the shipped file — and shared like them, so reader holds
+	// exclude only the mutation windows, not each other.
+	await withSourceLock(
+		() =>
+			build({
+				root: repoRoot,
+				logLevel: 'error',
+				build: { write: false, minify: false, sourcemap: false },
+				plugins: [
+					overlayPlugin(repoRoot, overlay),
+					{
+						name: 'contentus:seam-graph-witness',
+						enforce: 'post',
+						generateBundle(_options, bundle) {
+							for (const [fileName, output] of Object.entries(bundle))
+								if (output.type === 'asset')
+									assets.push({
+										fileName,
+										from: output.originalFileNames ?? [],
+										text: typeof output.source === 'string' ? output.source : '',
+									});
+						},
+					},
+				],
+			}),
+		{ shared: true }
+	);
 	return assets;
 }
 
@@ -915,7 +935,10 @@ test('the text of a component does not answer for the component', async () => {
 	// on that `?raw` module really being in the graph. A `?raw` import the overlay
 	// dropped would leave the control green for the wrong reason and the attack red
 	// for round 11's reason, and the case would prove neither thing.
-	const { sink } = await auditSeamGraph({ root: repoRoot, overlay: textAndReference });
+	const { sink } = await withSourceLock(
+		() => auditSeamGraph({ root: repoRoot, overlay: textAndReference }),
+		{ shared: true }
+	);
 	assert.ok(
 		sink.reached.get('client')?.resolved.has(FACE_COMPONENT_TEXT),
 		'the ?raw plant must be a module the client pass resolved'

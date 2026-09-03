@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { after, beforeEach, test } from 'node:test';
 
 import { initialSchedulingOffer } from '../src/lib/review/scheduling-offer.ts';
@@ -21,6 +21,19 @@ const aliases = new Map([
 	['$app/paths', pathToFileURL(resolve('src/facetheory/shims/app-paths.ts')).href],
 ]);
 
+/**
+ * Barrel directories the CLI substitutes as alias TARGETS and Node will not
+ * resolve as modules. Mapped to the module that OWNS the one symbol the import
+ * chain consumes — the pattern `tests/vendored-messaging-render.test.mjs`
+ * discloses for `sanitizeHtml`: the probe drives the real code, and the barrel
+ * itself is a directory no resolver can load.
+ */
+const barrelOwners = new Map([
+	// `src/lib/components/Review/state.ts` imports only `formatDateTime` from
+	// the greater utils barrel; `relativeTime.ts` owns it.
+	['src/lib/greater/utils', 'src/lib/greater/utils/relativeTime.ts'],
+]);
+
 registerHooks({
 	resolve(specifier, context, nextResolve) {
 		const url = aliases.get(specifier);
@@ -31,6 +44,9 @@ registerHooks({
 			specifier.startsWith('.')
 		) {
 			const resolved = new URL(specifier, context.parentURL);
+			const owner = barrelOwners.get(relative(process.cwd(), fileURLToPath(resolved)));
+			if (owner) return { url: pathToFileURL(resolve(owner)).href, shortCircuit: true };
+
 			const candidates = resolved.pathname.endsWith('.js')
 				? [resolved.pathname.slice(0, -3) + '.ts']
 				: [`${resolved.pathname}.ts`];
@@ -445,20 +461,42 @@ test('the publish action wires the served answer in, and the refusal still ends 
 	);
 });
 
-test('loadDraftPreview shows lesser rendered output, and nothing when it failed', async () => {
+/**
+ * A canonical preview body as lesser's renderer composes one when
+ * `includeAccessUrls: true`: `buildArticleFigure` (lesser `pkg/cmsrender/
+ * compose.go`) emits the `<figure>`/`<img>` pair with the minted access URL as
+ * the `src`. The URL below is a SYNTACTIC placeholder shaped like the presigned
+ * form lesser serves — never a real bearer artifact, which this repository does
+ * not record in fixtures, logs, or documents.
+ */
+const FIGURE_HTML =
+	'<h1>What the agent wrote</h1>' +
+	'<p>Some prose the agent produced.</p>' +
+	'<figure>' +
+	'<img src="https://media.instance.test/editorial/access/PLACEHOLDER?signature=PLACEHOLDER" ' +
+	'alt="A chart of the results" width="600" height="400">' +
+	'<figcaption>Figure one — Photo: Scribe</figcaption>' +
+	'</figure>';
+
+test('loadDraftPreview opts into the media contract and carries lesser figures whole', async () => {
 	const ok = await withGraphql(
-		({ query }) => {
-			assert.match(query, /draftPreview\(id: \$id\)/);
+		({ query, variables }) => {
+			// The wire format of the opt-in: the literal argument, on this
+			// document, with nothing else changed around it.
+			assert.match(query, /draftPreview\(id: \$id, includeAccessUrls: true\)/);
+			assert.match(query, /query ContentusDraftPreview\(\$id: ID!\)/);
 			assert.doesNotMatch(query.replace(/renderedHtml/g, ''), /\bcontent\b/);
+			assert.deepEqual(variables, { id: DRAFT_ID });
+
 			return {
 				data: {
 					draftPreview: {
 						draftId: DRAFT_ID,
 						success: true,
-						renderedHtml: '<h1>Rendered by lesser</h1>',
+						renderedHtml: FIGURE_HTML,
 						sourceFormat: 'markdown',
 						sourceBytes: 40,
-						renderedBytes: 26,
+						renderedBytes: FIGURE_HTML.length,
 						errors: [],
 					},
 				},
@@ -466,7 +504,18 @@ test('loadDraftPreview shows lesser rendered output, and nothing when it failed'
 		},
 		() => loadDraftPreview(TOKEN, DRAFT_ID)
 	);
-	assert.equal(ok.value.value.html, '<h1>Rendered by lesser</h1>');
+
+	assert.equal(ok.value.ok, true);
+	// The bound image reaches the projection byte-for-byte as lesser authored
+	// it: figure, img, minted src, alt, dimensions, figcaption. Anything less
+	// is a transform, and the display contract (PreviewBody) renders whatever
+	// arrives here without a second pass.
+	assert.equal(ok.value.value.html, FIGURE_HTML);
+	assert.match(ok.value.value.html, /<figure><img src="[^"]+" alt="A chart of the results"/);
+	assert.match(
+		ok.value.value.html,
+		/<figcaption>Figure one — Photo: Scribe<\/figcaption><\/figure>/
+	);
 
 	const failed = await withGraphql(
 		() => ({
@@ -486,6 +535,260 @@ test('loadDraftPreview shows lesser rendered output, and nothing when it failed'
 	);
 	assert.equal(failed.value.value.html, null, 'partial output from a failed render is dropped');
 	assert.deepEqual(failed.value.value.errors, ['draft source exceeds the 256 KiB limit']);
+});
+
+test('loadDraftPreview is never attempted without a session', async () => {
+	// The media opt-in mints short-lived bearer URLs; the request that carries
+	// it is authenticated or it does not happen.
+	const { value, calls } = await withGraphql(
+		() => ({ data: { draftPreview: { draftId: DRAFT_ID, success: true } } }),
+		() => loadDraftPreview(null, DRAFT_ID)
+	);
+
+	assert.deepEqual(calls, [], 'no unauthenticated preview request may reach the instance');
+	assert.equal(value.failure.reason, 'unauthenticated');
+});
+
+/* ---------------------------------------------------------------------------
+ * Stale approval vs current approval — through the REAL adapters AND the
+ * released Greater resolver
+ *
+ * The operator failure behind #112: an old `APPROVED` activity read as current
+ * approval while principal approval was still outstanding. The fix is the
+ * released `resolveReviewState` (greater-v0.13.7, upstream #1055/#1058),
+ * which consumes lesser's own `stale`/`current` markers on the newest verdict
+ * and demotes a voided approval to the `stale-approved` state. These probes
+ * drive the shipped transport against fixtures shaped like lesser's contract
+ * and feed its projection to the vendored resolver — no reimplementation and
+ * no stand-in oracle anywhere in the chain.
+ * ------------------------------------------------------------------------ */
+
+const {
+	REVIEW_STALE_APPROVAL_DETAIL,
+	REVIEW_STALE_APPROVAL_DETAIL_PRINCIPAL,
+	REVIEW_STALE_APPROVAL_LABEL,
+	resolveReviewState,
+} = await import('../src/lib/components/Review/state.ts');
+
+/** A `draftReview` answer bent per case; the shape is lesser's v1.6.28 contract. */
+const draftReviewWith = (overrides = {}) => ({
+	data: {
+		draftReview: {
+			draftId: DRAFT_ID,
+			title: 'What the agent wrote',
+			status: 'DRAFT',
+			contentFormat: 'MARKDOWN',
+			updatedAt: '2026-08-31T12:00:00Z',
+			createdAt: '2026-08-31T09:00:00Z',
+			generatedBy: agent,
+			reviewedBy: reviewer,
+			reviewStatus: 'APPROVED',
+			editorNotes: null,
+			contentHash: 'sha256:current-revision',
+			revision: 4,
+			activeReviewerIds: [reviewer.id],
+			publishEligibility: {
+				eligible: false,
+				blockingReasons: [
+					'generated draft requires an active approval from the instance principal',
+				],
+				reviewersApproved: true,
+				principalApprovalRequired: true,
+				principalApproved: false,
+			},
+			grant: { grantedAt: '2026-08-31T10:00:00Z', reviewer },
+			verdicts: [],
+			...overrides,
+		},
+	},
+});
+
+test('a stale APPROVED activity is superseded, never presented as current approval', async () => {
+	// The exact #112 shape: `reviewStatus` still spells the approval, but the
+	// newest verdict carries lesser's void markers because the media changed
+	// after it was recorded, and the principal gate is still unsatisfied.
+	const { value } = await withGraphql(
+		() =>
+			draftReviewWith({
+				verdicts: [
+					{
+						verdict: 'APPROVED',
+						notes: null,
+						contentHash: 'sha256:older-revision',
+						current: false,
+						stale: true,
+						recordedAt: '2026-08-31T10:30:00Z',
+						reviewer,
+					},
+				],
+			}),
+		() => loadDraftReview(TOKEN, DRAFT_ID)
+	);
+
+	assert.equal(value.ok, true);
+	const review = value.value;
+	// lesser's markers survive the projection unread — the resolver consumes
+	// them; nothing client-side recomputes them.
+	assert.equal(review.verdicts[0].stale, true);
+	assert.equal(review.verdicts[0].current, false);
+
+	const state = resolveReviewState(review);
+	assert.equal(state.tone, 'stale-approved', 'the voided approval leaves the success tone');
+	assert.equal(state.label, REVIEW_STALE_APPROVAL_LABEL);
+	assert.equal(state.label, 'Latest verdict: Approved (superseded)');
+	assert.equal(state.stale, true);
+	assert.equal(
+		state.detail,
+		REVIEW_STALE_APPROVAL_DETAIL_PRINCIPAL,
+		'the principal gate is in force and unsatisfied, so the detail names it'
+	);
+	assert.equal(
+		state.detail,
+		'This approval no longer counts. Principal approval for the current revision is outstanding.'
+	);
+});
+
+test('a void marker reading current: false alone demotes the approval just the same', () => {
+	// lesser can stamp either marker; the resolver must not require both.
+	const review = draftReviewWith({
+		verdicts: [
+			{
+				verdict: 'APPROVED',
+				notes: null,
+				current: false,
+				recordedAt: '2026-08-31T10:30:00Z',
+				reviewer,
+			},
+		],
+	}).data.draftReview;
+
+	const state = resolveReviewState(review);
+	assert.equal(state.tone, 'stale-approved');
+	assert.equal(state.label, REVIEW_STALE_APPROVAL_LABEL);
+});
+
+test('a stale approval without a principal rule gets the generic explanation', () => {
+	const review = draftReviewWith({
+		publishEligibility: {
+			eligible: false,
+			blockingReasons: ['draft requires approval from every active reviewer'],
+			reviewersApproved: false,
+			principalApprovalRequired: false,
+			principalApproved: false,
+		},
+		generatedBy: null,
+		verdicts: [
+			{
+				verdict: 'APPROVED',
+				notes: null,
+				stale: true,
+				recordedAt: '2026-08-31T10:30:00Z',
+				reviewer,
+			},
+		],
+	}).data.draftReview;
+
+	const state = resolveReviewState(review);
+	assert.equal(state.tone, 'stale-approved');
+	assert.equal(state.detail, REVIEW_STALE_APPROVAL_DETAIL);
+	assert.equal(
+		state.detail,
+		'This approval no longer counts. Approval for the current revision is outstanding.'
+	);
+});
+
+test('a genuinely current approval keeps the approved representation', async () => {
+	const { value } = await withGraphql(
+		() =>
+			draftReviewWith({
+				publishEligibility: {
+					eligible: true,
+					blockingReasons: [],
+					reviewersApproved: true,
+					principalApprovalRequired: true,
+					principalApproved: true,
+				},
+				verdicts: [
+					{
+						verdict: 'APPROVED',
+						notes: null,
+						contentHash: 'sha256:current-revision',
+						current: true,
+						stale: false,
+						recordedAt: '2026-08-31T11:45:00Z',
+						reviewer,
+					},
+				],
+			}),
+		() => loadDraftReview(TOKEN, DRAFT_ID)
+	);
+
+	assert.equal(value.ok, true);
+	const state = resolveReviewState(value.value);
+
+	assert.equal(state.tone, 'approved', 'a current approval keeps the success tone');
+	assert.notEqual(state.tone, 'stale-approved');
+	assert.notEqual(state.label, REVIEW_STALE_APPROVAL_LABEL, 'and none of the superseded wording');
+	assert.equal(state.stale, false);
+	assert.equal(state.detail, undefined, 'a current approval needs no demotion explanation');
+});
+
+test('absent markers leave a recorded approval standing — staleness is consumed, never inferred', () => {
+	// An older or partial projection without `stale`/`current`: the resolver
+	// must not invent staleness, which would demote a real approval.
+	const review = draftReviewWith({
+		verdicts: [
+			{
+				verdict: 'APPROVED',
+				notes: null,
+				recordedAt: '2026-08-31T11:45:00Z',
+				reviewer,
+			},
+		],
+	}).data.draftReview;
+	delete review.verdicts[0].current;
+	delete review.verdicts[0].stale;
+
+	const state = resolveReviewState(review);
+	assert.equal(state.tone, 'approved');
+	assert.equal(state.stale, false);
+});
+
+test('publish availability stays lesser projection, untouched by the activity state', async () => {
+	// The stale badge is activity; the gate is `publishEligibility`. Neither
+	// the demotion nor its absence may rewrite what lesser projected.
+	const stale = await withGraphql(
+		() =>
+			draftReviewWith({
+				verdicts: [
+					{
+						verdict: 'APPROVED',
+						notes: null,
+						stale: true,
+						recordedAt: '2026-08-31T10:30:00Z',
+						reviewer,
+					},
+				],
+			}),
+		() => loadDraftReview(TOKEN, DRAFT_ID)
+	);
+
+	assert.equal(stale.value.value.publishEligibility.eligible, false);
+	assert.deepEqual(stale.value.value.publishEligibility.blockingReasons, [
+		'generated draft requires an active approval from the instance principal',
+	]);
+
+	const resolved = resolveReviewState(stale.value.value);
+	assert.equal(
+		resolved.source !== 'none' && resolved.tone === 'stale-approved',
+		true,
+		'the badge demotes the activity...'
+	);
+	assert.equal(
+		stale.value.value.publishEligibility.eligible,
+		false,
+		'...without touching lesser gate evaluation'
+	);
 });
 
 test('the ownership probe answers from whether lesser resolved it', async () => {

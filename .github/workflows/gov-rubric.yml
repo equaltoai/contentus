@@ -34,6 +34,16 @@ jobs:
       # into a soft one.
       - name: Fetch the pinned greater CLI release asset
         run: node gov-infra/verifiers/install-greater-cli.mjs
+      # The verifier derives Greater's owner/repository/tag/commit/path internally,
+      # verifies GitHub's published release and tag resolve to the exact allowed
+      # commit, then fetches the registry index from that immutable commit AND
+      # binds the CLI release asset to the same authenticated release (exact asset
+      # name, derived browser_download_url, bounded size, redirect chain, honest
+      # child-governed digest). Contract URL/digest fields are comparison subjects,
+      # never network trust coordinates.
+      # MAI-4 requires this unique, unconditional step before the rubric consumer.
+      - name: Authenticate the registry index and CLI asset against the release
+        run: node gov-infra/verifiers/authenticate-release-index.mjs
       - name: Run governance rubric
         run: bash gov-infra/verifiers/gov-verify-rubric.sh
       - name: Upload governance evidence

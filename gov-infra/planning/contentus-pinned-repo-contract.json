@@ -77,7 +77,7 @@
       "`node gov-infra/verifiers/check-package-scripts.mjs --print-hashes` prints this map",
       "for the current tree, so a legitimate move is mechanical rather than hand-computed.",
       "",
-      "TWO gov-infra FILES ARE PINNED HERE, which is a governance decision rather than an",
+      "FOUR gov-infra FILES ARE PINNED HERE, which is a governance decision rather than an",
       "oversight. `tests/con5-import-reader.test.mjs` runs this control's own verifier over",
       "a synthetic tree, so that verifier — and `strict-json.mjs`, which it imports — are",
       "code a guarded command executes, and this map's whole claim is that such code is",
@@ -136,11 +136,92 @@
       "argv element or a constant declared elsewhere, there is no literal to check the claim",
       "against, so the site is carried by its REASON rather than by a pin nothing compares",
       "to anything. The practical rule for an author is short: write the path where you run",
-      "it, and then bind it."
+      "it, and then bind it.",
+      "",
+      "A SECOND ROOT SET WAS ADMITTED at round 5: the executables the WORKFLOWS and the RUBRIC SHELL invoke directly. The pinned-script closure above covers what `pnpm run` executes; `install-greater-cli.mjs`, `authenticate-release-index.mjs`, the rubric verifiers (`check-disclosed-audit.mjs`, `check-supply-chain.mjs`, `check-greater-provenance.mjs`, `check-greater-doctor.mjs`, `check-install-manifest.mjs`, `check-security-tests.mjs`, `validate-workflows.mjs`), `gov-verify-rubric.sh`, `scripts/dco-check.mjs`, `scripts/main-guard-check.mjs` and their transitive imports run from `.github/workflows/*.yml` `run:` steps and from the rubric shell, and round-5 review established they carried no CON-5 pin at all. CON-5 now admits every `node <path>`/`bash <path>` target a workflow `run:` step names (inline or in a `|` block) and every `node \"$VERIFY/<name>.mjs\"` the rubric shell invokes, closing over their imports like any other target; a pin missing for one is a finding, and a pin no leg reaches is a finding too, so the map stays exactly the union closure. `gov-verify-rubric.sh` is hashed like any other target but not import-walked — it is shell, not module code, and its `node` invocations are the legs admitted above."
     ],
     "unpinned_import_roots": ["src/", "build/"],
     "allowed_globs": ["tests/*.test.mjs", "scripts/*.test.mjs"],
     "unfollowable_loads_disclosed": [
+      {
+        "file": "gov-infra/verifiers/release-binding.mjs",
+        "line": 214,
+        "expression": "spawnSync",
+        "reason": "Runs the system `npm` binary to install the greater CLI's declared runtime dependencies (zod, fs-extra) into the quarantine the verifier extracts from the digest-verified release tarball, with `--ignore-scripts` — SEC-7's exact dependency boundary. No repository file is handed to `npm`: the target package.json lives inside the verified archive, outside any repo-local hash boundary."
+      },
+      {
+        "file": "gov-infra/verifiers/release-binding.mjs",
+        "line": 239,
+        "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, sourcePathsModule)).href\n\t)",
+        "reason": "Loads the greater CLI's canonical virtual-path mapping module (`dist/utils/source-paths.js`, named by the `sourcePathsModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the mapping that decides each vendored file's release source is the CLI's own, not a repository copy. The path is assembled at run time inside the quarantine; the archive member it came from is verified against the pinned release-asset digest before extraction."
+      },
+      {
+        "file": "gov-infra/verifiers/release-binding.mjs",
+        "line": 242,
+        "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, transformModule)).href\n\t)",
+        "reason": "Loads the greater CLI's canonical import-transform module (`dist/utils/transform.js`, named by the `transformModule` constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the transform that re-derives the vendored bytes is the CLI's own, not a repository copy. Same quarantine provenance as the source-paths load above; the archive member is verified against the pinned release-asset digest before extraction."
+      },
+      {
+        "file": "gov-infra/verifiers/release-binding.mjs",
+        "line": 245,
+        "expression": "import(\n\t\tpathToFileURL(join(quarantine, moduleDirectory, installPathModule)).href\n\t)",
+        "reason": "Loads the greater CLI's canonical install-path mapping module (dist/utils/install-path.js, named by the installPathModule constant) from the quarantine this verifier extracted from the digest-verified release tarball, so the disk path each manifest virtual path resolves to is the CLI's own mapping, not a repository copy. Same quarantine provenance as the source-paths and transform loads; the archive member is verified against the pinned release-asset digest before extraction. This is the R2-4 mapping fix: components.json aliases do not cover every registry segment (shared/... components install under src/lib/components/...), and a mapping this gate re-implements can drift from the one that installed the files."
+      },
+      {
+        "file": "gov-infra/verifiers/check-greater-provenance.mjs",
+        "line": 257,
+        "expression": "spawnSync",
+        "reason": "Runs the system `npm` binary to install the greater CLI's declared runtime dependencies into the quarantine this gate extracted from the digest-verified release tarball, with `--ignore-scripts` — SEC-7's exact dependency boundary. No repository file is handed to `npm`: the target package.json lives inside the verified archive, outside any repo-local hash boundary."
+      },
+      {
+        "file": "gov-infra/verifiers/check-greater-provenance.mjs",
+        "line": 290,
+        "expression": "spawnSync",
+        "reason": "Runs the quarantined greater CLI entry point (`--version`, `doctor --json`) that this gate extracted from the digest-verified release tarball — the executed code is the archive's own, re-verified byte-for-byte after extraction, so there is no repository file to bind."
+      },
+      {
+        "file": "gov-infra/verifiers/check-greater-provenance.mjs",
+        "line": 315,
+        "expression": "spawnSync",
+        "reason": "Runs this repository's own doctor-verdict checker (`gov-infra/verifiers/check-greater-doctor.mjs`, named by the `DOCTOR_CHECKER` constant) over the doctor JSON the quarantined CLI produced. The target is a repository file, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
+        "binds": ["gov-infra/verifiers/check-greater-doctor.mjs"]
+      },
+      {
+        "file": "gov-infra/verifiers/check-security-tests.mjs",
+        "line": 119,
+        "expression": "spawnSync",
+        "reason": "Runs each pinned SEC-6 probe (`node --test --experimental-strip-types --test-reporter=tap <file>`) on its own. The file names come from `security_tests.expected` in the pinned contract — a loop variable, so no reading can see them at the site and a `binds` here would pin nothing checkable; the reason carries the target instead. Each probe carries its own pinned SHA-256 in the SEC-6 inventory, which is the binding those files already have."
+      },
+      {
+        "file": "gov-infra/verifiers/check-install-manifest.mjs",
+        "line": 256,
+        "expression": "import(pathToFileURL(resolvedHandler).href)",
+        "reason": "Imports the built SSR handler the manifest names, which is how COM-1 asserts the artifact really exports the symbol `server.export` names. The path is assembled at run time from the manifest, and its target is under `build/` — a declared unpinned root, generated output asserted by COM-1 and driven by SEC-6 — so a `binds` there would pin no bytes and is refused."
+      },
+      {
+        "file": "gov-infra/verifiers/install-greater-cli.mjs",
+        "line": 104,
+        "expression": "spawnSync",
+        "reason": "Runs the system `npm` binary to install the digest-verified release asset for local development, with `--ignore-scripts` as everywhere else. The tarball it opens lives in `gov-infra/.tools/` and is itself the verified archive whose digest the gate re-checks at SEC-7; the repository files `npm` reads are the pinned package manifests of that archive, outside this walk's module boundary — and SEC-7 never executes this tree, extracting its own quarantined copy instead."
+      },
+      {
+        "file": "scripts/audit-graphql-documents.mjs",
+        "line": 57,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary to list the tracked files under src/, NUL-separated and rooted with `-C`, which is what makes the swept set what the repository CARRIES rather than what is on the disk beside a concurrent probe planting fixtures in src/lib/compose. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system's, outside any repo-local hash boundary."
+      },
+      {
+        "file": "scripts/audit-renderer-authority.mjs",
+        "line": 227,
+        "expression": "import { builtinModules } from 'node:module';",
+        "reason": "Imports ONLY `builtinModules`, the read-only list of Node's own module names, which the round-8 executable-source-universe scan uses to exempt Node builtins from the fail-closed bare-specifier rule — a Node builtin is never an executable outsider. `node:module` is disclosed because it CAN hand out loaders (`createRequire`, `registerHooks`); this site uses none of them, only the name list, and the file itself carries a pinned SHA-256 in this closure."
+      },
+      {
+        "file": "scripts/audit-seam-graph.mjs",
+        "line": 856,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary to list the tracked files under the face directory, which is what makes the walked set what the repository CARRIES rather than what is on the disk beside a concurrent probe. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system installation, outside anything a repo-local hash can bind."
+      },
       {
         "file": "scripts/deploy-client.mjs",
         "line": 370,
@@ -154,52 +235,10 @@
         "reason": "Loads build/server/handler.mjs, the SSR entry the build just produced. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and its path is assembled at run time rather than written."
       },
       {
-        "file": "tests/ssr-routes.test.mjs",
-        "line": 37,
-        "expression": "import(`${pathToFileURL(entry).href}?install=regression-test`)",
-        "reason": "Loads build/server/handler.mjs with the same query suffix lesser's client_ssr_host wrapper appends, which is the regression probe for the double-instantiation defect that 500'd every context-using route. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and the suffixed specifier is assembled at run time rather than written."
-      },
-      {
-        "file": "tests/messaging-races.test.mjs",
-        "line": 590,
-        "expression": "import(pathToFileURL(file).href)",
-        "reason": "Loads a rewritten copy of a vendored module the probe has just written to a temp directory, so the real component runs against stubbed imports. The bytes are produced by this pinned probe from vendored source; there is no repository file to hash."
-      },
-      {
-        "file": "tests/auth-session.test.mjs",
-        "line": 43,
-        "expression": "import { registerHooks } from 'node:module';",
-        "reason": "Installs a resolve hook that maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims, and resolves the TypeScript source extensions Vite supplies but Node does not. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probe drives the real auth session module. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
-      },
-      {
         "file": "tests/agent-act-as.test.mjs",
         "line": 19,
         "expression": "import { registerHooks } from 'node:module';",
         "reason": "Installs the same resolve hook `tests/auth-session.test.mjs` discloses: it maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims and resolves the TypeScript source extensions Vite supplies but Node does not, because the act-as module imports the auth session module, which imports both aliases. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
-      },
-      {
-        "file": "tests/review-adapters.test.mjs",
-        "line": 3,
-        "expression": "import { registerHooks } from 'node:module';",
-        "reason": "Installs the same resolve hook `tests/agent-act-as.test.mjs` discloses: the review transport imports the act-as module, which imports the auth session module with its SvelteKit `$app/*` aliases and extensionless relative imports, none of which `node --test` resolves on its own. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing — the probes drive the real transport. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
-      },
-      {
-        "file": "tests/vendored-messaging-render.test.mjs",
-        "line": 40,
-        "expression": "import { registerHooks } from 'node:module';",
-        "reason": "Installs a resolve hook that points the vendored barrel `../../greater/utils` — a directory Node will not resolve — at the real module owning `sanitizeHtml`, which is the resolution vite supplies and Node does not. It redirects one specifier inside `src/`, a declared unpinned root, and stubs nothing; the loader it hands out is not otherwise used. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
-      },
-      {
-        "file": "tests/vendored-content-renderer.test.mjs",
-        "line": 97,
-        "expression": "import(pathToFileURL(file).href)",
-        "reason": "Loads a slice extracted from vendored source and written to a temp directory, which is how the probe reaches a function the component does not export. Same shape as the messaging-races disclosure: the bytes are this pinned probe's output."
-      },
-      {
-        "file": "scripts/audit-seam-graph.mjs",
-        "line": 856,
-        "expression": "execFileSync",
-        "reason": "Runs the system `git` binary to list the tracked files under the face directory, which is what makes the walked set what the repository CARRIES rather than what is on the disk beside a concurrent probe. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system installation, outside anything a repo-local hash can bind."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
@@ -226,24 +265,17 @@
         "reason": "Runs the system `git` binary, which stages one of the two fixture files, so the assertion can tell tracked from untracked. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
+        "file": "tests/auth-session.test.mjs",
+        "line": 43,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs a resolve hook that maps SvelteKit's `$app/environment` and `$app/paths` aliases to contentus's real FaceTheory shims, and resolves the TypeScript source extensions Vite supplies but Node does not. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probe drives the real auth session module. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
         "file": "tests/con5-import-reader.test.mjs",
         "line": 168,
         "expression": "spawnSync",
         "reason": "Runs this control's own verifier over a synthetic three-file repository in a temp directory — the only way to assert what CON-5 does with a tree, since it takes its root from `process.cwd()`. The verifier IS bound: `binds` names it, so it is pinned, hashed and walked for its own imports like any other file a guarded command executes, and the path is spelled as a literal at the call so that claim is checkable against the site. The previous entry exempted it instead, on the ground that gov-infra is genome content the parent stages and `packDigest` in `gov-infra/pack.json` binds. Round 9's review refuted that: `packDigest` appears nowhere in this repository but in the file that declares it, no local control recomputes or verifies it, and the pack's file inventory and digest algorithm are not available here to build one — so this verifier's bytes changed in this very pull request while `pack.json` did not move. Verifying `packDigest` belongs to the parent's staging discipline and is routed there; the strongest LOCAL control is the one every other executable in this closure already has, and it is applied here. The cost is real and accepted: a parent restage of the pack turns CON-5 red until this pin moves. A restage is a recorded event, and a pin that forces it to be re-acknowledged is the honest behaviour — an exemption resting on a digest nothing checks is not.",
         "binds": ["gov-infra/verifiers/check-package-scripts.mjs"]
-      },
-      {
-        "file": "tests/renderer-authority-audit.test.mjs",
-        "line": 39,
-        "expression": "spawnSync",
-        "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how this probe asserts the audit’s exit code and output rather than its internals. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
-        "binds": ["scripts/audit-renderer-authority.mjs"]
-      },
-      {
-        "file": "scripts/audit-graphql-documents.mjs",
-        "line": 57,
-        "expression": "execFileSync",
-        "reason": "Runs the system `git` binary to list the tracked files under src/, NUL-separated and rooted with `-C`, which is what makes the swept set what the repository CARRIES rather than what is on the disk beside a concurrent probe planting fixtures in src/lib/compose. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system's, outside any repo-local hash boundary."
       },
       {
         "file": "tests/graphql-documents.test.mjs",
@@ -252,22 +284,112 @@
         "reason": "Runs the system `git` binary for the same tracked-file listing the gate uses, so the probe asserts the inventory against the same set the gate judges rather than against a directory listing that can differ. No repository file is executed."
       },
       {
+        "file": "tests/greater-release-binding.test.mjs",
+        "line": 72,
+        "expression": "spawnSync",
+        "reason": "Runs the CON-4 verifier (`gov-infra/verifiers/check-greater-pins.mjs`) in a child process against the real tree with a planted coordinated vendored-file+checksum edit, which is how this probe asserts the release binding rejects the F4 attack shape. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
+        "binds": ["gov-infra/verifiers/check-greater-pins.mjs"]
+      },
+      {
         "file": "tests/helpers/tracked-source.mjs",
         "line": 72,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary to list a directory's tracked files, NUL-separated and rooted with `-C`, which is the reading three probes share so none of them lists a directory a concurrent probe is planting fixtures in. No repository file is executed."
+      },
+      {
+        "file": "tests/messaging-races.test.mjs",
+        "line": 590,
+        "expression": "import(pathToFileURL(file).href)",
+        "reason": "Loads a rewritten copy of a vendored module the probe has just written to a temp directory, so the real component runs against stubbed imports. The bytes are produced by this pinned probe from vendored source; there is no repository file to hash."
+      },
+      {
+        "file": "tests/greater-release-binding.test.mjs",
+        "line": 359,
+        "expression": "spawnSync",
+        "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how the R5-3 composed probe asserts the renderer audit stays green over a file DECLARED vendored while the release binding rejects it — the two gates cannot both pass for a loose `$lib` sink. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
+        "binds": ["scripts/audit-renderer-authority.mjs"]
+      },
+      {
+        "file": "tests/renderer-authority-audit.test.mjs",
+        "line": 68,
+        "expression": "spawnSync",
+        "reason": "Runs `scripts/audit-renderer-authority.mjs` in a child process, which is how this probe asserts the audit’s exit code and output rather than its internals. The target is a repository file written as a literal, so it is bound: `binds` admits it to the closure, and it carries a pinned SHA-256 like any import.",
+        "binds": ["scripts/audit-renderer-authority.mjs"]
+      },
+      {
+        "file": "tests/review-adapters.test.mjs",
+        "line": 3,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs the same resolve hook `tests/agent-act-as.test.mjs` discloses: the review transport imports the act-as module, which imports the auth session module with its SvelteKit `$app/*` aliases and extensionless relative imports, none of which `node --test` resolves on its own. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing — the probes drive the real transport. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
+        "file": "tests/review-preview-render.test.mjs",
+        "line": 3,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs the same resolve hook family `tests/review-adapters.test.mjs` discloses: it maps the vendored review chrome's `.js`-spelled relative imports onto the real `.ts` modules, and the `src/lib/greater/utils` barrel directory — the CLI's alias-target substitution, which Node cannot load — onto the module owning the one symbol the import chain consumes. Every redirected target is under `src/`, a declared unpinned root, and the hook stubs nothing: the probes compile and render the real vendored components. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
+        "file": "tests/review-preview-render.test.mjs",
+        "line": 117,
+        "expression": "import(pathToFileURL(file).href)",
+        "reason": "Loads a server-compiled copy of a real repository component the probe has just written to a temp directory — svelte/compiler output of the shipped `PreviewBody` and `QueueCard` sources, imports rewritten to the repository's own modules — so the rendered markup is evidence about the components that run. The bytes are this pinned probe's compiler output; there is no repository file to hash."
+      },
+      {
+        "file": "scripts/dco-check.mjs",
+        "line": 36,
+        "expression": "execFileSync",
+        "reason": "Runs the system `git` binary to read the signed-off history between the base and head commits, which is what the DCO gate asserts over. No repository file is executed: `git` is resolved on PATH and its bytes are the operating system's, outside any repo-local hash boundary."
+      },
+      {
+        "file": "tests/ssr-routes.test.mjs",
+        "line": 37,
+        "expression": "import(`${pathToFileURL(entry).href}?install=regression-test`)",
+        "reason": "Loads build/server/handler.mjs with the same query suffix lesser's client_ssr_host wrapper appends, which is the regression probe for the double-instantiation defect that 500'd every context-using route. `build/` is a declared unpinned root — generated output asserted by COM-1 and driven by SEC-6 — and the suffixed specifier is assembled at run time rather than written."
+      },
+      {
+        "file": "tests/vendored-content-renderer.test.mjs",
+        "line": 97,
+        "expression": "import(pathToFileURL(file).href)",
+        "reason": "Loads a slice extracted from vendored source and written to a temp directory, which is how the probe reaches a function the component does not export. Same shape as the messaging-races disclosure: the bytes are this pinned probe's output."
+      },
+      {
+        "file": "tests/vendored-messaging-render.test.mjs",
+        "line": 40,
+        "expression": "import { registerHooks } from 'node:module';",
+        "reason": "Installs a resolve hook that points the vendored barrel `../../greater/utils` — a directory Node will not resolve — at the real module owning `sanitizeHtml`, which is the resolution vite supplies and Node does not. It redirects one specifier inside `src/`, a declared unpinned root, and stubs nothing; the loader it hands out is not otherwise used. Named here because a resolve hook can re-point any load in the process, which is exactly what this walk cannot follow."
+      },
+      {
+        "file": "tests/source-lock.test.mjs",
+        "line": 47,
+        "expression": "spawn",
+        "reason": "Runs a worker script the probe just wrote to a temp directory, which is how the lock is exercised across REAL processes — the same shape the parallel suite contends over. The worker code is written inline in this pinned test, and its only repository import is the source-lock helper, named in `binds` so it stays pinned like any import; no other repository file is executed."
       }
     ],
     "sha256": {
-      "gov-infra/verifiers/check-package-scripts.mjs": "55e2bb2d2661048050817071bc5d3407b7fe74612f27eafd3caa491d5bb26919",
+      "gov-infra/verifiers/authenticate-release-index.mjs": "617cc3b4b9f970181f0db3c424b06564f4d6d91905e1278cd7e01845eae48e18",
+      "gov-infra/verifiers/check-disclosed-audit.mjs": "7dc380f0bfe11bfea0c00adbc4cee1b8da932408f93bb716540c38b6408c4d7c",
+      "gov-infra/verifiers/check-greater-doctor.mjs": "1c267b2fb87b38b413fa235eda6d42ba120ad944203ab3e5014702d5372c04e5",
+      "gov-infra/verifiers/check-greater-pins.mjs": "760e913b695e3160a5c6e6843c32580ef1843621796bb2d9d185d53e582c61e8",
+      "gov-infra/verifiers/check-greater-provenance.mjs": "9c5b61d56f91f7b2963c83ef22f0dee62c126570f8fb86b139ae08c16320c66f",
+      "gov-infra/verifiers/check-install-manifest.mjs": "b4f3109fc159582fd9eaba92ad79d82a69bb901daec18764d16950e870656baf",
+      "gov-infra/verifiers/check-package-scripts.mjs": "5f48ae60827c46f2d2590157b317df4ed9b1e9e2ee69e9061671139b566d1041",
+      "gov-infra/verifiers/check-security-tests.mjs": "a7786224903c5c66f3f73ad693dd484afb1d2b76aa4e35c7e57260638220cd23",
+      "gov-infra/verifiers/check-supply-chain.mjs": "0e696f20bbb677694304f88cdff8ed0c836926bea5f54d89d9dfde1b6cb36b61",
+      "gov-infra/verifiers/gov-verify-rubric.sh": "0cec9c93c4d629797425f683e79a38902c420876ad8a1bfb7b11c252a8bd6754",
+      "gov-infra/verifiers/install-greater-cli.mjs": "6f2db8283ee511ae2731dfb5911fceb73a76df9cca82d213f183d9cdadf246e6",
+      "gov-infra/verifiers/pin-schema.mjs": "72cbbe89a138153ac716c8ca415725ea980d5bb961d8ac896410d81d5a3f78ae",
+      "gov-infra/verifiers/release-binding.mjs": "0da0668ac6338e439acbc1f02b887ab6ca7f32917f3d046be5b1ef9de629b732",
       "gov-infra/verifiers/strict-json.mjs": "81035d46aa668a6c34d159ed14853171c98bdf7e0ea1a8a76ad51e0f32f1d32c",
+      "gov-infra/verifiers/validate-workflows.mjs": "cad0d317c4fa7c946b846eeec70724fa8dbf416045a98ab81a038e7f4a1c3b98",
+      "gov-infra/verifiers/verified-tarball.mjs": "7c4f48da792731656a35273c4b1e4104db4034c4ec8281e67232be8434857314",
       "scripts/audit-csp.mjs": "bbacba15b7191fd8e40f6239682d28ff4566210974eca1f11735b8d155c4c5f5",
       "scripts/audit-graphql-documents.mjs": "0914bf2be0d768b70ff47b02d07b02d0bd7cd92e8da6a0f60eab7409607a85f0",
-      "scripts/audit-renderer-authority.mjs": "1b4b5f236947d0b3a452881bc178b3e9a4d8e6fe19b349f08ac55150509f7451",
+      "scripts/audit-renderer-authority.mjs": "2099970ff70fae8d5b2b29bd2f5b8f941137d7ce37cf113b3a2bb22798fcd6a2",
       "scripts/audit-seam-graph.mjs": "ad9a54dff7facf374bee4495e4b661d68a51a40627f65d43f4fb3b3552dc06f7",
       "scripts/build-stylesheet.mjs": "da351be4b6364043cd40339a96fe6199fbe3c301d511300ffa416a8d72e9fb45",
       "scripts/copy-brand-assets.mjs": "fe3ef19ba97e7ca8d27b6e01660e93b771e49edac41cbb8c22a0347abbae3376",
       "scripts/copy-facetheory-manifest.mjs": "129c7d31db38d00810be10759d17caf1ab2512ed5d7753daf53ffdb66960ed88",
+      "scripts/dco-check.mjs": "9774468f7f40852c34c6903870cd4fb18323e8e7ebde611aa24d43e71bb505e8",
       "scripts/deploy-client.mjs": "18e1d0d976a3b458d537b7a1bb333788cbadd328c9295d21bed7f00983499d52",
       "scripts/deploy-client.test.mjs": "8aa5d6d33d8d7a2ab0475c71951ac0f0c37d1b2a23b8f3a59140d4edd71a060d",
       "scripts/lib/agent-seams.mjs": "994a769cad95aeec31f09304b7f0c989ed632ef3f8e247516e43c59d74171159",
@@ -275,12 +397,14 @@
       "scripts/lib/graphql-inventory.mjs": "247330fc23b02e248cbb4f093204a5f7c6729e0dc7de275fcf8222210555aacf",
       "scripts/lib/module-imports.mjs": "03ef1380e131c9ae8625d9d2ac6f7a66cc608cfce5e0c689c0a0f011a2e7cd5c",
       "scripts/lib/schema-pin.mjs": "e173e93932ed0fa671d1082891da514f2b8df6dc6115804af18c9ebd0526e856",
+      "scripts/lib/source-scan.mjs": "63c64397e6601a123868aafa37048bec10d7754878079ba8555279bec619651a",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
+      "scripts/main-guard-check.mjs": "37a68ec6fc26fb17b7bbac3362b14a25548b6dadea3fb820dc036f9ea0a93639",
       "scripts/probe-live-contract.mjs": "9b2f71f2d9dce3d4a829c2317586e8792265099a44f2e9b77afb25f20f625a5d",
       "scripts/probe-share-flow.mjs": "0dcc58259f912232776aa4c2790255f9264388b3f56a4bfc63deb877fba6847f",
       "scripts/render-routes.mjs": "9503fc543e7c6e3bcc8ccee402738343135fccca1d782e7d509675994be2f0b5",
       "scripts/verify-schema-provenance.mjs": "1cd2a9194bd63948296dede9f4c710af976a9d4a2266d00a56a858a15612f8d3",
-      "tests/act-as-banner.test.mjs": "72f6ed24c3ea6e0795528c15d244e6f0b8dd72bb9bc360e687482cfcb1d35274",
+      "tests/act-as-banner.test.mjs": "376d801190fbca25716d8ae9c09b4abcdb068d58174ec47755f78ef81e6935ac",
       "tests/agent-act-as.test.mjs": "9698b1cb3ac036b534ea5d153fac77dbcf19e6ebdba0290eee6838163b036327",
       "tests/agent-activity-client.test.mjs": "8b1a7d867906eafd064ea44f4c35dcee551b4582651501b445a1c58b9369e558",
       "tests/agent-activity-view.test.mjs": "f22579101f3f69c8d8ccb169e1716039fd7bad3183cfa0eab2a4a5c3511acec9",
@@ -293,15 +417,18 @@
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
+      "tests/authenticate-release-index.test.mjs": "826b6854b7343476eb46bbe8e82fb74a7d97979b9c74217045df7c5e8a116577",
       "tests/cms-graphql.test.mjs": "b68fd637f56b28001e226d68a964b2a3cedb8353640218c72a21d52550afdd7a",
       "tests/compose.test.mjs": "c13d10a0ef01b38bccbd0b662d04ccf75d0b9add5196a20472736509d4f964bf",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
       "tests/contrast.test.mjs": "e3b270bb502be325d631b61363cd7fc3093dde4fba0e90d0758b9d08fe65136c",
-      "tests/drone-seams.test.mjs": "e3c721943e3deee16182604b1dc0fd76656c8e438e0780854fd99e44a46db4b1",
+      "tests/drone-seams.test.mjs": "4a54df996eb17a204f37eec6e1cfc961c79ab501f461e72a42cda74469181820",
       "tests/drones-mobile.test.mjs": "e6d153c03bf942c04113bcceffdedf84cc8028b95570f10071f02e44425d9fc4",
       "tests/drones-roster.test.mjs": "ba213606df245962697b3f1050828b163f3a4b3d110388452beec242720047a8",
       "tests/graphql-documents.test.mjs": "3fb1ac32868a44fff9c543af506568092d9da7604622df34282210b036d2504a",
+      "tests/greater-release-binding.test.mjs": "b12f0a1ccb7994bfbd54027e08bc36319dd653c63c13d5ca0a5278e7c51e3c4b",
       "tests/helpers/print-graphql.mjs": "5049aa4306e9a4ceccd33ada0ab06ad4e8505555f3a5d0271e859c26e6c23a79",
+      "tests/helpers/source-lock.mjs": "6d91b310f2ae1267e102dab6ddbbc02a7c0284bd56d4209e9673db60afdd46b0",
       "tests/helpers/tracked-source.mjs": "99e217ee5626b5a4e04fdb1c08e624de3fa2c48e18fcbed1a2192a6230d5d9bb",
       "tests/instance-info.test.mjs": "cf463d0831e9c38b3c32164a00d296513771fdf18666ab57934932db7934459e",
       "tests/live-probe.test.mjs": "bfb25de29ae381a313b54cba6f71dccff350e563c4dd54d42206651d585c812d",
@@ -312,16 +439,19 @@
       "tests/messaging-session.test.mjs": "4be22b812fc7b35b1ca66676aa73a4f9144e1fabdbe18f95f248ccae92c8d528",
       "tests/mobile-chrome.test.mjs": "6a1ea66c9d4b298c4449a97312ad2a7fe9f6e743a25d039bad1959ef718c55a4",
       "tests/mobile-messaging.test.mjs": "d830e5c9c00860a0d047aad802ae9f8fd65fb04cb0060b72ea4bade9c9c79c54",
-      "tests/renderer-authority-audit.test.mjs": "d8ed3deb435c7f2fb92f11ea9cec6adde7862152a0001ef0f728ac14c9cc5ba7",
+      "tests/renderer-authority-audit.test.mjs": "61cd91296b21f8b77ae025bb24dab392ef71c236f75ee3f373e86960b94963cd",
       "tests/renderer-authority.test.mjs": "c246f85eb4b59937610b83ba0604a9678c65a8f32deb9f43582c0e02fcd3f1f6",
-      "tests/review-adapters.test.mjs": "0475990df80b097374ba2ba61fa8c7e8f43b463177dfc615a7fc75e7edcdf705",
+      "tests/review-adapters.test.mjs": "83771e9b5cadb9e235cc50e11367d18b6bf9c1504457f797d9b5394f89a2e966",
+      "tests/review-csp.test.mjs": "a594eb3290ad1d028f5895d8441bda352ab3fa7a5c4f03454299fb9055e746dd",
+      "tests/review-preview-render.test.mjs": "93b6f24647d6d2b0ee138e20389e7e7d9fa9d5d5e51fbfacf9251f3441a392c4",
       "tests/review-round-trip.test.mjs": "8a3e525affd543cfcc1c5aae314f344e30821369bad86353deaa63bcff556285",
-      "tests/review.test.mjs": "1f83db67c1dc699530bfa064e7f7f7492c350999feb13a0565675545a8627b1a",
+      "tests/review.test.mjs": "6f0f264f6e0629ada5a6212eda5ea550f4ca4552402b87d63ca7f3cb77e01d4a",
       "tests/schema-provenance.test.mjs": "d0a48b24531d18200e94e8d6b466b668f042ed3a8efb216f241b943f78893a14",
-      "tests/seam-graph.test.mjs": "41ecf50c046bfdff0f6eaafee51ddf8f45f16bf22885907362c492a265c04280",
+      "tests/seam-graph.test.mjs": "d945036d98fd7b86b6ef29d43bbebcede3f645c46ec6daa170108c62f051a3f8",
       "tests/share-flow-probe.test.mjs": "2732956b719316e1a170ed93ca800fc0eabfb46d3e9e28e1cc6aaac17518c78a",
+      "tests/source-lock.test.mjs": "c655d40b86302be4e601e602a23da8ea540440a56221be2cb2004ffbfd00c78c",
       "tests/ssr-messages.test.mjs": "e192d936c27ce5045bcd6bbfb4d258f6dbfe1e4a6b8c3b82e96d28c6c215a683",
-      "tests/ssr-review.test.mjs": "3220730a7765cf24bac90a7bf953c870ca4747c9ff471682ffd6b083f1387a76",
+      "tests/ssr-review.test.mjs": "5097837e226ab6455e6b23ca9a0d8dca08a1136a5c6fe40e41dc0ded3c2f72e0",
       "tests/ssr-routes.test.mjs": "185043b629e875a2b66d2342468a348ca0cf524663beda637a39614d016acde4",
       "tests/ssr-timelines.test.mjs": "1b585873f1092f119c05dab7460027ebc4ca9599210a3365c25e81f6d927808b",
       "tests/stylesheet.test.mjs": "666d465a3323769c68f047a48f685ae2f54a220863201f51586c984ce1e9f4e4",
@@ -331,7 +461,8 @@
       "tests/timeline-subscription.test.mjs": "c02c20e9547b6cc8977b8655ce167e0007a20487c03423458f815584058b1848",
       "tests/vendored-content-renderer.test.mjs": "a6fe1483279fad32b037b25c7a2dc09795b97f164923c8d9d6724802510e7936",
       "tests/vendored-messaging-render.test.mjs": "4634a97b213685733fb03d8e27114f0f60224a7b60c3a145805efc4ce2f26e80",
-      "tests/vendored-runes.test.mjs": "b35d47a32182afedc28fd80ee797f94602514efaafbdba22f2fb2d31dda10bb2"
+      "tests/vendored-runes.test.mjs": "2c9c3e48dec69b6389da60abb5af9671e51a70948d21b88503beac1a5834c143",
+      "tests/workflow-release-order.test.mjs": "228e5f8a4a88e477e9c6afd37fa382ff48ed2b52a243351bc2bd63b1a9d7feb5"
     }
   },
   "install_manifest": {
@@ -405,6 +536,21 @@
       "greater-v0.13.2 vendoring came from, recorded at the audit-remediation `greater",
       "update` run — the release named in `release_tag` beside it, which is the only pin",
       "this block asserts.",
+      "",
+      "CON-4 ALSO BINDS THE VENDORED BYTES THEMSELVES, which is the round-1 F4 closure.",
+      "The manifest's own checksums are repository-controlled: an author who edits a",
+      "vendored file and its `components.json` checksum together defeats `greater doctor`",
+      "and the manifest-field checks alike. So `registry_index` pins the release's OWN",
+      "registry manifest — `registry/index.json` at the pinned vendoring commit — and",
+      "CON-4 re-derives every vendored file from it: each on-disk file must equal the",
+      "release's canonical bytes for its source path (or the digest-verified greater",
+      "CLI's documented import-transform of those bytes, which is how the CLI's alias",
+      "substitution ships), and each recorded checksum must match the same canonical",
+      "value. The committed copy under `gov-infra/release/` is verified against this",
+      "digest before anything trusts it, and the URL is bound so the digest is",
+      "independently re-derivable by fetching the release. An attacker who changes a",
+      "vendored file and its checksum together must also change this pin — a governance",
+      "edit in the same diff, and one the release's own bytes contradict.",
       "",
       "Both values move together at a CLI pin bump and only through the CLI.",
       "`cli_version` is the version string the CLI must print; a digest-verified install",
@@ -511,17 +657,37 @@
       "  payload into the verdict record when present — runtime-harmless, but",
       "  the narrowing claim above measures types only, not this pass-through.",
       "",
+      "  0.13.5 -> 0.13.7 at contentus #112 (live principal review). The release",
+      "  (upstream #1055/#1058) teaches the review chrome this client mounts to",
+      "  demote a stale approval out of the success tone: `resolveReviewState`",
+      "  consumes Lesser's own `DraftReviewVerdictRecord.stale` / `.current`",
+      "  markers, emits the `stale-approved` descriptor with an explanation that",
+      "  the recorded approval no longer counts, and QueueCard/AttributionStrip",
+      "  render that detail beside the badge. It also syncs the generated",
+      "  adapters to the Lesser v1.6.28 + Lesser Host v1.6.8 contract, which is",
+      "  the contract this milestone's authenticated preview document moves to",
+      "  `draftPreview(id:, includeAccessUrls: true)` against, and the contract",
+      "  the lesser schema pin in contracts/lesser/ moved to in the same change.",
+      "  FaceTheory stays v4.0.9, the version 0.13.7 itself pins. The bump's own",
+      "  `update --all` (at `--ref greater-v0.13.7`) summary is recorded in the",
+      "  milestone PR body with the dry-run/real output and the before/after",
+      "  manifest audit.",
+      "",
       "CON-4 forces the rest, at every bump: each `installed[]` entry must carry",
       "`vendored_ref`, so the whole vendored tree and every tarball pin move together, in",
       "one commit, through the CLI. The alternative — hand-copying components — is the",
       "vendored-source edit this repository refuses outright."
     ],
-    "release_tag": "greater-v0.13.5",
-    "vendored_ref": "6374ce9f8461c4dbbf529491d01db1b534144ffb",
-    "cli_version": "0.13.5",
+    "release_tag": "greater-v0.13.7",
+    "vendored_ref": "4592c439b3b0e53ba47b7cddebab196c1f88abdf",
+    "cli_version": "0.13.7",
     "cli_asset": {
-      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.5/greater-components-cli.tgz",
-      "sha256": "e560e7b807584cb760f528af261a0eabd2814ec0d51266a950d26ddfa6007736"
+      "url": "https://github.com/equaltoai/greater-components/releases/download/greater-v0.13.7/greater-components-cli.tgz",
+      "sha256": "14aa235a46721317d717b53969d7e61e2745bc45fa13f9dcddbe37b101400b9a"
+    },
+    "registry_index": {
+      "url": "https://raw.githubusercontent.com/equaltoai/greater-components/4592c439b3b0e53ba47b7cddebab196c1f88abdf/registry/index.json",
+      "sha256": "cd005f57bba38149052cff1fe40337af9c604fe4bf16ecca19c7460d81a95d34"
     }
   },
   "workflows": {
