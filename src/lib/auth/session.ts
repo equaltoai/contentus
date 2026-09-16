@@ -243,18 +243,51 @@ function authDebugClientId(clientId: unknown): string {
 }
 
 /**
- * A string that crossed a trust boundary, bounded.
+ * A string this trace did not compose itself, bounded.
  *
- * The callback URL's `error` parameter is attacker-chosen and unbounded, and the
- * instance's `error`, `token_type`, and `token_endpoint_auth_method` are
- * remote-chosen. This trace is written into `sessionStorage` and is meant to be
- * pasted into an issue, so no line gets to carry an arbitrary amount of somebody
- * else's text. Values this app reads out of its own same-origin storage are not
- * bounded: anyone who can write those already owns the origin.
+ * THE RULE, stated once because every call site below depends on it: a trace
+ * line carries an unbounded string only if this module wrote that string out of
+ * its own closed set — a `reason`, `branch`, `decision`, or `phase` literal, a
+ * storage key constant, or a redirect URI derived from this app's own origin.
+ * Everything else is somebody else's text and is bounded: the callback URL's
+ * `error` parameter and parameter NAMES are attacker-chosen, the instance's
+ * `error`, `token_type`, `token_endpoint_auth_method`, `created_at`,
+ * `expires_in`, and response key names are remote-chosen, and the values this
+ * module reads back out of `sessionStorage` and `localStorage` were written by
+ * some earlier page. This trace lands in `sessionStorage` and is meant to be
+ * pasted into an issue, so no line gets to carry an arbitrary amount of it.
+ *
+ * Bounding costs nothing diagnostically: a real timestamp, scope, or error code
+ * is far inside 200 characters, and a value that is NOT inside 200 characters is
+ * itself the finding — which the `…(truncated,len=N)` marker reports exactly.
  */
 function authDebugText(value: unknown, max = 200): string | null {
 	if (typeof value !== 'string') return null;
 	return value.length > max ? `${value.slice(0, max)}…(truncated,len=${value.length})` : value;
+}
+
+/**
+ * A remote-sourced scalar of unspecified type, rendered safely.
+ *
+ * `created_at` and `expires_in` are typed `unknown` here on purpose: a response
+ * that states a lifetime as a string is one of the failure modes this trace
+ * exists to catch, and reducing it to `null` would hide the very thing worth
+ * seeing. Numbers stay numbers, with non-finite ones named rather than flattened
+ * to JSON's `null`; strings are bounded; objects and arrays are reduced to a
+ * type name, because a trace line is not a place to dump a response body.
+ */
+function authDebugScalar(value: unknown): number | string | boolean | null {
+	if (typeof value === 'number') return authDebugNumber(value);
+	if (typeof value === 'boolean') return value;
+	if (typeof value === 'string') return authDebugText(value);
+	if (value === null) return null;
+	return `unrendered(${typeof value})`;
+}
+
+/** Remote- or URL-chosen key names, bounded in count and in each name's length. */
+function authDebugNames(names: string[], max = 40): string[] {
+	const bounded = names.slice(0, max).map((name) => authDebugText(name, 64) ?? '');
+	return names.length > max ? [...bounded, `…(${names.length - max} more names)`] : bounded;
 }
 
 /** How many lines the buffer already holds, read before the next one is added. */
@@ -736,7 +769,7 @@ function readOAuthClientFromStorage(
 			authDebug('oauthClientCache.miss', {
 				reason: 'redirect-uri-mismatch',
 				cacheBucket,
-				storedRedirectUri: parsed.redirectUri,
+				storedRedirectUri: authDebugText(parsed.redirectUri),
 				computedRedirectUri: redirectUri,
 			});
 			return null;
@@ -761,7 +794,7 @@ function readOAuthClientFromStorage(
 			authDebug('oauthClientCache.discard', {
 				reason: 'not-a-public-client',
 				cacheBucket,
-				storedAuthMethod: String(parsed.tokenEndpointAuthMethod),
+				storedAuthMethod: authDebugScalar(parsed.tokenEndpointAuthMethod),
 			});
 			localStorage.removeItem(storageKey);
 			return null;
@@ -943,7 +976,7 @@ export async function startLogin(
 		redirectUri,
 		scope,
 		authorizePath: '/auth/login',
-		authorizeParamNames: Array.from(params.keys()).sort(),
+		authorizeParamNames: authDebugNames(Array.from(params.keys()).sort()),
 		stateNonce: authDebugPresence(stateNonce),
 		verifier: authDebugPresence(codeVerifier),
 		returnToStamped: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthReturnTo)),
@@ -1007,15 +1040,15 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		nowIso: authDebugIso(callbackMs),
 		timezoneOffsetMinutes: new Date(callbackMs).getTimezoneOffset(),
 		traceEntriesBefore: authDebugEntryCount(),
-		paramNames: Array.from(searchParams.keys()).sort(),
+		paramNames: authDebugNames(Array.from(searchParams.keys()).sort()),
 		errorParam: authDebugText(searchParams.get('error')),
 		errorDescriptionPresent: searchParams.get('error_description') !== null,
 		code: authDebugPresence(searchParams.get('code')),
 		state: authDebugPresence(searchParams.get('state')),
 		ssOAuthState: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthState)),
 		ssVerifier: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthVerifier)),
-		ssClientBucketRaw: sessionStorage.getItem(STORAGE_KEYS.oauthClientBucket),
-		ssClientNotAfterRaw: sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter),
+		ssClientBucketRaw: authDebugText(sessionStorage.getItem(STORAGE_KEYS.oauthClientBucket)),
+		ssClientNotAfterRaw: authDebugText(sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter)),
 		ssClientNotAfterNumber: Number(sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter)),
 		ssClientNotAfterFinite: Number.isFinite(
 			Number(sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter))
@@ -1027,7 +1060,10 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	const oauthError = searchParams.get('error');
 	if (oauthError) {
 		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
-		authDebug('completeLogin.branch', { branch: 'oauth-error-param', error: oauthError });
+		authDebug('completeLogin.branch', {
+			branch: 'oauth-error-param',
+			error: authDebugText(oauthError),
+		});
 		return { ok: false, error: searchParams.get('error_description') ?? oauthError };
 	}
 
@@ -1072,7 +1108,7 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
 		authDebug('completeLogin.branch', {
 			branch: 'missing-oauth-client-bucket',
-			ssClientBucketRaw: clientBucket,
+			ssClientBucketRaw: authDebugText(clientBucket),
 		});
 		return { ok: false, error: 'Missing OAuth client bucket. Please sign in again.' };
 	}
@@ -1102,7 +1138,7 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		clientCreatedAtIso: authDebugIso(client.createdAt),
 		clientNotAfter: authDebugNumber(clientNotAfter),
 		clientNotAfterIso: authDebugIso(clientNotAfter),
-		clientNotAfterRaw: clientNotAfterRaw,
+		clientNotAfterRaw: authDebugText(clientNotAfterRaw),
 		clientNotAfterFinite: Number.isFinite(clientNotAfter),
 		clientId: authDebugClientId(client.clientId),
 		clientDecision: authDebugCallbackTrace.decision,
@@ -1122,7 +1158,7 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 			branch: 'oauth-client-changed-before-callback',
 			clientCreatedAt: authDebugNumber(client.createdAt),
 			clientNotAfter: authDebugNumber(clientNotAfter),
-			clientNotAfterRaw: clientNotAfterRaw,
+			clientNotAfterRaw: authDebugText(clientNotAfterRaw),
 			deltaMs: authDebugNumber(client.createdAt - clientNotAfter),
 			registeredNewApp: authDebugCallbackTrace.registeredNewApp,
 			nowMs: Date.now(),
@@ -1182,10 +1218,10 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		status: tokenResponse.status,
 		ok: tokenResponse.ok,
 		bodyParsed: tokenJson !== null,
-		bodyKeys: tokenJson === null ? null : Object.keys(debugTokenBody).sort(),
-		createdAtRaw: debugTokenBody.created_at ?? null,
+		bodyKeys: tokenJson === null ? null : authDebugNames(Object.keys(debugTokenBody).sort()),
+		createdAtRaw: authDebugScalar(debugTokenBody.created_at),
 		createdAtTypeof: typeof debugTokenBody.created_at,
-		expiresInRaw: debugTokenBody.expires_in ?? null,
+		expiresInRaw: authDebugScalar(debugTokenBody.expires_in),
 		expiresInTypeof: typeof debugTokenBody.expires_in,
 		tokenTypeValue: authDebugText(debugTokenBody.token_type),
 		scopePresent: typeof debugTokenBody.scope === 'string',
@@ -1247,11 +1283,9 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	// here, because a string `created_at` fails the check below and reads as a
 	// clock problem from the outside.
 	authDebug('completeLogin.statedLifetime', {
-		createdAtSeconds:
-			typeof createdAtSeconds === 'number' ? authDebugNumber(createdAtSeconds) : null,
+		createdAtSeconds: authDebugScalar(createdAtSeconds),
 		createdAtSecondsTypeof: typeof createdAtSeconds,
-		expiresInSeconds:
-			typeof expiresInSeconds === 'number' ? authDebugNumber(expiresInSeconds) : null,
+		expiresInSeconds: authDebugScalar(expiresInSeconds),
 		expiresInSecondsTypeof: typeof expiresInSeconds,
 		nowMs: Date.now(),
 		nowSeconds: Math.floor(Date.now() / 1000),
