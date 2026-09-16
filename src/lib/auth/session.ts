@@ -182,6 +182,157 @@ const STORAGE_KEYS = {
 	oauthReturnTo: 'contentus:oauth_return_to',
 } as const;
 
+// ---------------------------------------------------------------------------
+// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+//
+// Instrumentation only, and it stays that way by construction: nothing below
+// returns a value any decision reads, and every console and storage touch is
+// wrapped so a failure here cannot change the outcome of a sign-in.
+//
+// WHAT NEVER APPEARS IN A TRACE LINE. No `access_token`, `refresh_token`,
+// `client_secret`, authorization code, PKCE verifier, or state nonce VALUE —
+// those are reported as presence and length only. `client_id` is reported as a
+// six-character prefix plus its length, which is what keeps this module's
+// "the raw `client_id` is never written to storage" property true of the trace
+// buffer it now writes, while still letting an operator correlate a line with
+// the `client_id_hash` in the instance's own logs.
+//
+// TO REMOVE: delete this block, the `AUTH_DEBUG_STORAGE_KEY` entry in
+// `SESSION_STORAGE_KEYS`, and every call site marked with the same
+// `TEMPORARY DEBUG` comment. Nothing else references any of it.
+// ---------------------------------------------------------------------------
+
+/** Where the mirrored trace lives, so it survives the same-tab redirects. */
+const AUTH_DEBUG_STORAGE_KEY = 'contentus:auth-debug';
+
+/** Ring-buffer cap; the oldest lines are the ones dropped. */
+const AUTH_DEBUG_MAX_ENTRIES = 100;
+
+/** Presence and length, never the value. */
+function authDebugPresence(value: unknown): string {
+	if (typeof value !== 'string') return `absent(${value === null ? 'null' : typeof value})`;
+	if (value.length === 0) return 'present(empty)';
+	return `present(len=${value.length})`;
+}
+
+/**
+ * A number that stays a number. `JSON.stringify` writes `NaN` and `Infinity`
+ * as `null`, and "the computed expiry was `null`" is exactly the ambiguity this
+ * trace exists to remove — `1e308 * 1000` is `Infinity` and this file refuses
+ * it two lines later.
+ */
+function authDebugNumber(value: number): number | string {
+	return Number.isFinite(value) ? value : String(value);
+}
+
+/** An ISO rendering of a millisecond instant that may not be one. */
+function authDebugIso(milliseconds: number): string | null {
+	try {
+		const date = new Date(milliseconds);
+		return Number.isNaN(date.getTime()) ? null : date.toISOString();
+	} catch {
+		return null;
+	}
+}
+
+/** A `client_id` short enough to correlate and long enough not to be the identifier. */
+function authDebugClientId(clientId: unknown): string {
+	if (typeof clientId !== 'string') return authDebugPresence(clientId);
+	const prefix = clientId.length > 12 ? `${clientId.slice(0, 6)}…` : 'short';
+	return `${prefix}(len=${clientId.length})`;
+}
+
+/**
+ * A string that crossed a trust boundary, bounded.
+ *
+ * The callback URL's `error` parameter is attacker-chosen and unbounded, and the
+ * instance's `error`, `token_type`, and `token_endpoint_auth_method` are
+ * remote-chosen. This trace is written into `sessionStorage` and is meant to be
+ * pasted into an issue, so no line gets to carry an arbitrary amount of somebody
+ * else's text. Values this app reads out of its own same-origin storage are not
+ * bounded: anyone who can write those already owns the origin.
+ */
+function authDebugText(value: unknown, max = 200): string | null {
+	if (typeof value !== 'string') return null;
+	return value.length > max ? `${value.slice(0, max)}…(truncated,len=${value.length})` : value;
+}
+
+/** How many lines the buffer already holds, read before the next one is added. */
+function authDebugEntryCount(): number {
+	try {
+		if (typeof sessionStorage === 'undefined') return 0;
+		const parsed: unknown = JSON.parse(sessionStorage.getItem(AUTH_DEBUG_STORAGE_KEY) ?? 'null');
+		return Array.isArray(parsed) ? parsed.length : 0;
+	} catch {
+		return 0;
+	}
+}
+
+/** Append one line to the ring buffer. Never throws. */
+function authDebugPersist(line: string): void {
+	try {
+		if (typeof sessionStorage === 'undefined') return;
+
+		let entries: string[] = [];
+		const raw = sessionStorage.getItem(AUTH_DEBUG_STORAGE_KEY);
+		if (raw) {
+			const parsed: unknown = JSON.parse(raw);
+			if (Array.isArray(parsed)) {
+				entries = parsed.filter((entry): entry is string => typeof entry === 'string');
+			}
+		}
+
+		entries.push(line);
+		if (entries.length > AUTH_DEBUG_MAX_ENTRIES) {
+			entries = entries.slice(entries.length - AUTH_DEBUG_MAX_ENTRIES);
+		}
+		sessionStorage.setItem(AUTH_DEBUG_STORAGE_KEY, JSON.stringify(entries));
+	} catch {
+		// A trace that cannot be written is not a reason to fail a sign-in.
+	}
+}
+
+/**
+ * Emit one UTC-ISO-stamped line to `console.debug` and to the ring buffer.
+ *
+ * Field order is the order the call site writes it in, so the interesting
+ * value goes first.
+ */
+function authDebug(event: string, fields?: Record<string, unknown>): void {
+	if (!browser) return;
+
+	let line = `${new Date().toISOString()} ${event}`;
+	if (fields !== undefined) {
+		try {
+			line += ` ${JSON.stringify(fields)}`;
+		} catch {
+			line += ' [unserializable fields]';
+		}
+	}
+
+	try {
+		console.debug(`[contentus-auth-debug] ${line}`);
+	} catch {
+		// Same rule as the buffer: instrumentation cannot break the flow.
+	}
+	authDebugPersist(line);
+}
+
+/**
+ * What `ensureOAuthClient` decided, carried back to its caller so the caller's
+ * own line can state it. The callee writes these three fields, the caller reads
+ * them once, and no decision anywhere consults them.
+ */
+type AuthDebugClientTrace = {
+	phase: string;
+	decision: string;
+	registeredNewApp: boolean;
+	cachedCreatedAt: number | null;
+};
+
+// TEMPORARY DEBUG — issue: Windows passkey sign-in loop (end of block)
+// ---------------------------------------------------------------------------
+
 /**
  * Every key this module writes to `sessionStorage`, which is every key it
  * writes that is not the public client cache. `clearSession` empties all of
@@ -194,6 +345,10 @@ const SESSION_STORAGE_KEYS: readonly string[] = [
 	STORAGE_KEYS.oauthState,
 	STORAGE_KEYS.oauthVerifier,
 	STORAGE_KEYS.oauthReturnTo,
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Listed so sign-out
+	// keeps emptying every key this module writes; remove with the block above.
+	// While it is here, `session-events.ts`'s "removes six keys" reads as seven.
+	AUTH_DEBUG_STORAGE_KEY,
 ];
 
 /**
@@ -471,6 +626,15 @@ async function registerOAuthClient(
 		website: window.location.origin,
 	});
 
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+	authDebug('registerOAuthClient.request', {
+		postingNewAppRegistration: true,
+		cacheBucket,
+		redirectUri,
+		scope,
+		nowMs: Date.now(),
+	});
+
 	const response = await fetch('/api/v1/apps', {
 		method: 'POST',
 		headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -481,6 +645,25 @@ async function registerOAuthClient(
 	const registration: RegistrationProjection = response.ok
 		? parseRegistrationResponse(data)
 		: { outcome: 'unreadable' };
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Key NAMES and the
+	// stated auth method only; `client_secret` is in this body and is not read.
+	const debugRegistrationBody = (data && typeof data === 'object' ? data : {}) as Record<
+		string,
+		unknown
+	>;
+	authDebug('registerOAuthClient.response', {
+		status: response.status,
+		ok: response.ok,
+		bodyParsed: data !== null,
+		outcome: registration.outcome,
+		statedAuthMethod: authDebugText(debugRegistrationBody.token_endpoint_auth_method),
+		clientId:
+			registration.outcome === 'public-client'
+				? authDebugClientId(registration.clientId)
+				: undefined,
+		nowMs: Date.now(),
+	});
 
 	// ORDER IS THE CONTROL. Both refusals are `throw`, and they are here — above
 	// the cache write, and therefore above `startLogin`'s redirect, which never
@@ -505,6 +688,18 @@ async function registerOAuthClient(
 	if (cacheBucket) {
 		localStorage.setItem(oauthClientStorageKey(cacheBucket), JSON.stringify(client));
 	}
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. `stampedCreatedAt`
+	// is the client-side clock this client will later be compared against.
+	authDebug('registerOAuthClient.cached', {
+		cacheBucket,
+		cachedTo: cacheBucket ? oauthClientStorageKey(cacheBucket) : null,
+		clientId: authDebugClientId(client.clientId),
+		stampedCreatedAt: client.createdAt,
+		stampedCreatedAtIso: authDebugIso(client.createdAt),
+		nowMs: Date.now(),
+	});
+
 	return client;
 }
 
@@ -516,27 +711,76 @@ function readOAuthClientFromStorage(
 
 	const storageKey = oauthClientStorageKey(cacheBucket);
 	const raw = localStorage.getItem(storageKey);
-	if (!raw) return null;
+	if (!raw) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('oauthClientCache.miss', { reason: 'no-entry', cacheBucket, storageKey });
+		return null;
+	}
 
 	try {
 		const parsed = JSON.parse(raw) as Partial<
 			StoredOAuthClient & { clientSecret?: unknown; tokenEndpointAuthMethod?: unknown }
 		>;
-		if (typeof parsed?.clientId !== 'string' || !parsed.clientId.trim()) return null;
-		if (parsed.redirectUri !== redirectUri) return null;
+		if (typeof parsed?.clientId !== 'string' || !parsed.clientId.trim()) {
+			// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+			authDebug('oauthClientCache.miss', {
+				reason: 'client-id-unusable',
+				cacheBucket,
+				clientId: authDebugPresence(parsed?.clientId),
+			});
+			return null;
+		}
+		if (parsed.redirectUri !== redirectUri) {
+			// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Neither value
+			// is a credential; a mismatch here is a cache miss that re-registers.
+			authDebug('oauthClientCache.miss', {
+				reason: 'redirect-uri-mismatch',
+				cacheBucket,
+				storedRedirectUri: parsed.redirectUri,
+				computedRedirectUri: redirectUri,
+			});
+			return null;
+		}
 
 		// Two discards, and they are the cache half of the public-client
 		// invariant: a cache that ever held a secret is not trusted to be public
 		// now, and a client whose token endpoint wants authentication is not one
 		// this app can present credentials for.
 		if (Object.prototype.hasOwnProperty.call(parsed, 'clientSecret')) {
+			// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. The reason
+			// only; the secret itself is never read into a trace line.
+			authDebug('oauthClientCache.discard', {
+				reason: 'cached-client-secret',
+				cacheBucket,
+			});
 			localStorage.removeItem(storageKey);
 			return null;
 		}
 		if (parsed.tokenEndpointAuthMethod !== PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD) {
+			// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+			authDebug('oauthClientCache.discard', {
+				reason: 'not-a-public-client',
+				cacheBucket,
+				storedAuthMethod: String(parsed.tokenEndpointAuthMethod),
+			});
 			localStorage.removeItem(storageKey);
 			return null;
 		}
+
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop.
+		// `createdAtDefaulted` is the load-bearing field: a stored client with no
+		// numeric `createdAt` is handed `Date.now()`, which is by construction
+		// newer than any `clientNotAfter` stamped before it.
+		authDebug('oauthClientCache.hit', {
+			cacheBucket,
+			clientId: authDebugClientId(parsed.clientId),
+			storedCreatedAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : null,
+			storedCreatedAtIso:
+				typeof parsed.createdAt === 'number' ? authDebugIso(parsed.createdAt) : null,
+			createdAtDefaulted: typeof parsed.createdAt !== 'number',
+			effectiveCreatedAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
+			nowMs: Date.now(),
+		});
 
 		return {
 			clientId: parsed.clientId,
@@ -545,12 +789,20 @@ function readOAuthClientFromStorage(
 			tokenEndpointAuthMethod: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD,
 		};
 	} catch {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('oauthClientCache.miss', { reason: 'unparseable', cacheBucket });
 		localStorage.removeItem(storageKey);
 		return null;
 	}
 }
 
-async function ensureOAuthClient(redirectUri: string, scope: string): Promise<StoredOAuthClient> {
+async function ensureOAuthClient(
+	redirectUri: string,
+	scope: string,
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Optional and read
+	// only by the trace lines; both call sites are in this file.
+	debugTrace?: AuthDebugClientTrace
+): Promise<StoredOAuthClient> {
 	if (!browser) throw new Error('OAuth client config is only available in the browser');
 
 	localStorage.removeItem(LEGACY_OAUTH_CLIENT_KEY);
@@ -558,10 +810,57 @@ async function ensureOAuthClient(redirectUri: string, scope: string): Promise<St
 	const cacheBucket = scopeToCacheBucket(scope);
 	if (cacheBucket) {
 		const storedClient = readOAuthClientFromStorage(redirectUri, cacheBucket);
-		if (storedClient) return storedClient;
+		if (storedClient) {
+			// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+			if (debugTrace) {
+				debugTrace.decision = 'cache-hit';
+				debugTrace.registeredNewApp = false;
+				debugTrace.cachedCreatedAt = storedClient.createdAt;
+			}
+			authDebug('ensureOAuthClient', {
+				phase: debugTrace?.phase ?? 'unspecified',
+				decision: 'cache-hit',
+				registeredNewApp: false,
+				cacheBucket,
+				redirectUri,
+				clientId: authDebugClientId(storedClient.clientId),
+				clientCreatedAt: storedClient.createdAt,
+				clientCreatedAtIso: authDebugIso(storedClient.createdAt),
+				nowMs: Date.now(),
+			});
+			return storedClient;
+		}
 	}
 
-	return registerOAuthClient(redirectUri, scope, cacheBucket);
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+	const debugDecision = cacheBucket ? 'cache-miss-registered' : 'no-bucket-registered';
+	if (debugTrace) {
+		debugTrace.decision = debugDecision;
+		debugTrace.registeredNewApp = true;
+		debugTrace.cachedCreatedAt = null;
+	}
+	authDebug('ensureOAuthClient', {
+		phase: debugTrace?.phase ?? 'unspecified',
+		decision: debugDecision,
+		registeredNewApp: true,
+		cacheBucket,
+		redirectUri,
+		scope,
+		nowMs: Date.now(),
+	});
+
+	const registered = await registerOAuthClient(redirectUri, scope, cacheBucket);
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+	authDebug('ensureOAuthClient.registered', {
+		phase: debugTrace?.phase ?? 'unspecified',
+		clientId: authDebugClientId(registered.clientId),
+		clientCreatedAt: registered.createdAt,
+		clientCreatedAtIso: authDebugIso(registered.createdAt),
+		nowMs: Date.now(),
+	});
+
+	return registered;
 }
 
 // ---------------------------------------------------------------------------
@@ -580,7 +879,17 @@ export async function startLogin(
 	}
 
 	const redirectUri = getRedirectUri();
-	const client = await ensureOAuthClient(redirectUri, scope);
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+	const authDebugTrace: AuthDebugClientTrace = {
+		phase: 'startLogin',
+		decision: 'unreached',
+		registeredNewApp: false,
+		cachedCreatedAt: null,
+	};
+	const flowStartMs = Date.now();
+
+	const client = await ensureOAuthClient(redirectUri, scope, authDebugTrace);
 
 	const stateNonce = generateRandomString(16);
 	const state = createOAuthState(
@@ -596,7 +905,8 @@ export async function startLogin(
 	// instead of exchanging the code with the wrong client_id. The client
 	// identifier binding travels in OAuth state as a state-salted SHA-256
 	// fingerprint so the raw client_id is never written to storage.
-	sessionStorage.setItem(STORAGE_KEYS.oauthClientNotAfter, String(Date.now()));
+	const clientNotAfterMs = Date.now();
+	sessionStorage.setItem(STORAGE_KEYS.oauthClientNotAfter, String(clientNotAfterMs));
 	sessionStorage.setItem(STORAGE_KEYS.oauthVerifier, codeVerifier);
 	sessionStorage.setItem(
 		STORAGE_KEYS.oauthReturnTo,
@@ -612,6 +922,31 @@ export async function startLogin(
 		state,
 		code_challenge: codeChallenge,
 		code_challenge_method: 'S256',
+	});
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Everything this
+	// handoff stamps, plus the clock it stamped it with. The authorize URL is
+	// deliberately absent: it carries the raw `client_id`.
+	authDebug('startLogin.handoff', {
+		bucket: clientBucket,
+		stampedNotAfter: clientNotAfterMs,
+		stampedNotAfterIso: authDebugIso(clientNotAfterMs),
+		flowStartMs,
+		nowMs: Date.now(),
+		clientDecision: authDebugTrace.decision,
+		registeredNewApp: authDebugTrace.registeredNewApp,
+		cachedClientCreatedAt: authDebugTrace.cachedCreatedAt,
+		clientId: authDebugClientId(client.clientId),
+		clientCreatedAt: client.createdAt,
+		clientCreatedAtIso: authDebugIso(client.createdAt),
+		clientCreatedAtMinusNotAfterMs: authDebugNumber(client.createdAt - clientNotAfterMs),
+		redirectUri,
+		scope,
+		authorizePath: '/auth/login',
+		authorizeParamNames: Array.from(params.keys()).sort(),
+		stateNonce: authDebugPresence(stateNonce),
+		verifier: authDebugPresence(codeVerifier),
+		returnToStamped: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthReturnTo)),
 	});
 
 	// lesser's auth-ui owns the credential surface. Contentus hands off and
@@ -663,42 +998,148 @@ function isStorableInstant(milliseconds: number): boolean {
 export async function completeLogin(searchParams: URLSearchParams): Promise<CallbackResult> {
 	if (!browser) return { ok: false, error: 'OAuth callback must run in the browser' };
 
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. The client-side
+	// clock and the raw sessionStorage state this callback is about to trust.
+	// Presence and length only for the code, state, and verifier.
+	const callbackMs = Date.now();
+	authDebug('completeLogin.entry', {
+		nowMs: callbackMs,
+		nowIso: authDebugIso(callbackMs),
+		timezoneOffsetMinutes: new Date(callbackMs).getTimezoneOffset(),
+		traceEntriesBefore: authDebugEntryCount(),
+		paramNames: Array.from(searchParams.keys()).sort(),
+		errorParam: authDebugText(searchParams.get('error')),
+		errorDescriptionPresent: searchParams.get('error_description') !== null,
+		code: authDebugPresence(searchParams.get('code')),
+		state: authDebugPresence(searchParams.get('state')),
+		ssOAuthState: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthState)),
+		ssVerifier: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthVerifier)),
+		ssClientBucketRaw: sessionStorage.getItem(STORAGE_KEYS.oauthClientBucket),
+		ssClientNotAfterRaw: sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter),
+		ssClientNotAfterNumber: Number(sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter)),
+		ssClientNotAfterFinite: Number.isFinite(
+			Number(sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter))
+		),
+		ssReturnTo: authDebugPresence(sessionStorage.getItem(STORAGE_KEYS.oauthReturnTo)),
+		storedSessionPresent: sessionStorage.getItem(STORAGE_KEYS.session) !== null,
+	});
+
 	const oauthError = searchParams.get('error');
 	if (oauthError) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', { branch: 'oauth-error-param', error: oauthError });
 		return { ok: false, error: searchParams.get('error_description') ?? oauthError };
 	}
 
 	const code = searchParams.get('code');
 	const state = searchParams.get('state');
-	if (!code) return { ok: false, error: 'Missing authorization code.' };
-	if (!state) return { ok: false, error: 'Missing OAuth state.' };
+	if (!code) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', { branch: 'missing-authorization-code' });
+		return { ok: false, error: 'Missing authorization code.' };
+	}
+	if (!state) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', { branch: 'missing-oauth-state' });
+		return { ok: false, error: 'Missing OAuth state.' };
+	}
 
 	const expectedState = sessionStorage.getItem(STORAGE_KEYS.oauthState);
 	const clientBucket = sessionStorage.getItem(STORAGE_KEYS.oauthClientBucket);
-	const clientNotAfter = Number(sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter));
+	const clientNotAfterRaw = sessionStorage.getItem(STORAGE_KEYS.oauthClientNotAfter);
+	const clientNotAfter = Number(clientNotAfterRaw);
 	const codeVerifier = sessionStorage.getItem(STORAGE_KEYS.oauthVerifier);
 	const parsedState = parseOAuthState(state);
 
 	if (!parsedState || !expectedState || parsedState.stateNonce !== expectedState) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Which of the
+		// three failed, never the values that failed it.
+		authDebug('completeLogin.branch', {
+			branch: 'oauth-state-mismatch',
+			parsedStatePresent: parsedState !== null,
+			expectedStatePresent: expectedState !== null,
+			nonceMatches: parsedState && expectedState ? parsedState.stateNonce === expectedState : null,
+			nowMs: Date.now(),
+		});
 		return { ok: false, error: 'OAuth state mismatch. Please sign in again.' };
 	}
 	if (!codeVerifier) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', { branch: 'missing-pkce-verifier' });
 		return { ok: false, error: 'Missing PKCE verifier. Please sign in again.' };
 	}
 	if (!isOAuthClientCacheBucket(clientBucket)) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', {
+			branch: 'missing-oauth-client-bucket',
+			ssClientBucketRaw: clientBucket,
+		});
 		return { ok: false, error: 'Missing OAuth client bucket. Please sign in again.' };
 	}
 
 	const redirectUri = getRedirectUri();
-	const client = await ensureOAuthClient(redirectUri, OAUTH_CLIENT_BUCKET_SCOPES[clientBucket]);
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+	const authDebugCallbackTrace: AuthDebugClientTrace = {
+		phase: 'completeLogin',
+		decision: 'unreached',
+		registeredNewApp: false,
+		cachedCreatedAt: null,
+	};
+
+	const client = await ensureOAuthClient(
+		redirectUri,
+		OAUTH_CLIENT_BUCKET_SCOPES[clientBucket],
+		authDebugCallbackTrace
+	);
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. The exact inputs to
+	// the comparison below, emitted whether or not it fails: `clientNotAfterRaw`
+	// of `null` becomes the number `0`, which is finite, so an absent stamp makes
+	// every freshly registered client look rotated.
+	authDebug('completeLogin.clientNotAfterCheck', {
+		clientCreatedAt: authDebugNumber(client.createdAt),
+		clientCreatedAtIso: authDebugIso(client.createdAt),
+		clientNotAfter: authDebugNumber(clientNotAfter),
+		clientNotAfterIso: authDebugIso(clientNotAfter),
+		clientNotAfterRaw: clientNotAfterRaw,
+		clientNotAfterFinite: Number.isFinite(clientNotAfter),
+		clientId: authDebugClientId(client.clientId),
+		clientDecision: authDebugCallbackTrace.decision,
+		registeredNewApp: authDebugCallbackTrace.registeredNewApp,
+		cachedClientCreatedAt: authDebugCallbackTrace.cachedCreatedAt,
+		createdAtMinusNotAfterMs: authDebugNumber(client.createdAt - clientNotAfter),
+		comparisonSaysChanged: client.createdAt > clientNotAfter,
+		willFail: Number.isFinite(clientNotAfter) && client.createdAt > clientNotAfter,
+		redirectUri,
+		bucket: clientBucket,
+		nowMs: Date.now(),
+	});
 
 	if (Number.isFinite(clientNotAfter) && client.createdAt > clientNotAfter) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', {
+			branch: 'oauth-client-changed-before-callback',
+			clientCreatedAt: authDebugNumber(client.createdAt),
+			clientNotAfter: authDebugNumber(clientNotAfter),
+			clientNotAfterRaw: clientNotAfterRaw,
+			deltaMs: authDebugNumber(client.createdAt - clientNotAfter),
+			registeredNewApp: authDebugCallbackTrace.registeredNewApp,
+			nowMs: Date.now(),
+		});
 		return { ok: false, error: 'OAuth client changed before callback. Please sign in again.' };
 	}
 	if (
 		(await digestOAuthClientBinding(parsedState.stateNonce, client.clientId)) !==
 		parsedState.clientBinding
 	) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. The digests are
+		// state-salted and are not logged; only the outcome is.
+		authDebug('completeLogin.branch', {
+			branch: 'oauth-client-identifier-mismatch',
+			clientId: authDebugClientId(client.clientId),
+			registeredNewApp: authDebugCallbackTrace.registeredNewApp,
+		});
 		return { ok: false, error: 'OAuth client identifier mismatch. Please sign in again.' };
 	}
 
@@ -731,6 +1172,36 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		error_description?: unknown;
 	} | null;
 
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. What the instance
+	// actually sent. KEY NAMES for the credential fields: `access_token` is
+	// reported as presence and length, and `refresh_token` stays unread — naming
+	// a key selects no value, which is why the key set is the honest way to show
+	// the operator that lesser sent one without this client reading it.
+	const debugTokenBody = (tokenJson ?? {}) as Record<string, unknown>;
+	authDebug('completeLogin.tokenResponse', {
+		status: tokenResponse.status,
+		ok: tokenResponse.ok,
+		bodyParsed: tokenJson !== null,
+		bodyKeys: tokenJson === null ? null : Object.keys(debugTokenBody).sort(),
+		createdAtRaw: debugTokenBody.created_at ?? null,
+		createdAtTypeof: typeof debugTokenBody.created_at,
+		expiresInRaw: debugTokenBody.expires_in ?? null,
+		expiresInTypeof: typeof debugTokenBody.expires_in,
+		tokenTypeValue: authDebugText(debugTokenBody.token_type),
+		scopePresent: typeof debugTokenBody.scope === 'string',
+		accessTokenPresent:
+			typeof debugTokenBody.access_token === 'string' && debugTokenBody.access_token.length > 0,
+		accessTokenLength:
+			typeof debugTokenBody.access_token === 'string' ? debugTokenBody.access_token.length : 0,
+		errorValue: authDebugText(debugTokenBody.error),
+		errorDescriptionLength:
+			typeof debugTokenBody.error_description === 'string'
+				? debugTokenBody.error_description.length
+				: 0,
+		nowMs: Date.now(),
+		nowIso: authDebugIso(Date.now()),
+	});
+
 	// A BLANK TOKEN IS NOT A TOKEN. A 200 carrying `access_token: ""` used to
 	// pass this predicate, get stored, and return `ok: true` — and then
 	// `readSession` rejected the session the caller had just been told it had.
@@ -743,14 +1214,49 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		for (const key of ['error_description', 'error'] as const) {
 			const candidate = tokenJson?.[key];
 			if (typeof candidate === 'string' && candidate.trim()) {
+				// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. The field
+				// name and its length; the instance's free text is already shown to
+				// the operator by the callback route, and is not copied here.
+				authDebug('completeLogin.branch', {
+					branch: 'token-exchange-refused-by-instance',
+					reportedField: key,
+					reportedFieldLength: candidate.length,
+					status: tokenResponse.status,
+				});
 				return { ok: false, error: candidate };
 			}
 		}
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', {
+			branch: 'token-exchange-failed',
+			status: tokenResponse.status,
+			ok: tokenResponse.ok,
+			bodyParsed: tokenJson !== null,
+			accessTokenPresent: accessToken.length > 0,
+			accessTokenLength: accessToken.length,
+			nowMs: Date.now(),
+		});
 		return { ok: false, error: `Token exchange failed (${tokenResponse.status}).` };
 	}
 
 	const createdAtSeconds = tokenJson.created_at;
 	const expiresInSeconds = tokenJson.expires_in;
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. What the response
+	// STATED, before any arithmetic — the type is as interesting as the value
+	// here, because a string `created_at` fails the check below and reads as a
+	// clock problem from the outside.
+	authDebug('completeLogin.statedLifetime', {
+		createdAtSeconds:
+			typeof createdAtSeconds === 'number' ? authDebugNumber(createdAtSeconds) : null,
+		createdAtSecondsTypeof: typeof createdAtSeconds,
+		expiresInSeconds:
+			typeof expiresInSeconds === 'number' ? authDebugNumber(expiresInSeconds) : null,
+		expiresInSecondsTypeof: typeof expiresInSeconds,
+		nowMs: Date.now(),
+		nowSeconds: Math.floor(Date.now() / 1000),
+	});
+
 	if (
 		typeof createdAtSeconds !== 'number' ||
 		!Number.isFinite(createdAtSeconds) ||
@@ -758,6 +1264,8 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		!Number.isFinite(expiresInSeconds) ||
 		expiresInSeconds <= 0
 	) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', { branch: 'unusable-token-lifetime-as-stated' });
 		return { ok: false, error: UNUSABLE_TOKEN_LIFETIME };
 	}
 
@@ -769,7 +1277,32 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	// session `readSession` finds a moment later has no `expiresAt` at all.
 	const createdAt = createdAtSeconds * 1000;
 	const expiresAt = createdAt + expiresInSeconds * 1000;
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. The arithmetic the
+	// two refusals below run on, and `clockSkewSeconds` — this browser's clock
+	// minus the instance's `created_at` — which is the single number that decides
+	// ALREADY_EXPIRED_TOKEN.
+	const debugLifetimeNowMs = Date.now();
+	authDebug('completeLogin.lifetime', {
+		createdAtSeconds,
+		expiresInSeconds,
+		createdAtMs: authDebugNumber(createdAt),
+		createdAtIso: authDebugIso(createdAt),
+		expiresAtMs: authDebugNumber(expiresAt),
+		expiresAtIso: authDebugIso(expiresAt),
+		nowMs: debugLifetimeNowMs,
+		nowIso: authDebugIso(debugLifetimeNowMs),
+		nowMinusExpiresAtMs: authDebugNumber(debugLifetimeNowMs - expiresAt),
+		alreadyExpired: debugLifetimeNowMs >= expiresAt,
+		createdAtStorable: isStorableInstant(createdAt),
+		expiresAtStorable: isStorableInstant(expiresAt),
+		clockSkewSeconds: Math.floor(debugLifetimeNowMs / 1000) - createdAtSeconds,
+		callbackElapsedMs: debugLifetimeNowMs - callbackMs,
+	});
+
 	if (!isStorableInstant(createdAt) || !isStorableInstant(expiresAt)) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', { branch: 'unusable-token-lifetime-unstorable' });
 		return { ok: false, error: UNUSABLE_TOKEN_LIFETIME };
 	}
 
@@ -781,6 +1314,15 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	// the reader can find. A user whose clock disagrees with the instance now
 	// gets a stated reason instead of a sign-in that silently un-happens.
 	if (Date.now() >= expiresAt) {
+		// TEMPORARY DEBUG — issue: Windows passkey sign-in loop
+		authDebug('completeLogin.branch', {
+			branch: 'already-expired-token',
+			nowMs: Date.now(),
+			expiresAtMs: authDebugNumber(expiresAt),
+			nowMinusExpiresAtMs: authDebugNumber(Date.now() - expiresAt),
+			createdAtSeconds,
+			expiresInSeconds,
+		});
 		return { ok: false, error: ALREADY_EXPIRED_TOKEN };
 	}
 
@@ -808,6 +1350,23 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	sessionStorage.removeItem(STORAGE_KEYS.oauthClientNotAfter);
 	sessionStorage.removeItem(STORAGE_KEYS.oauthVerifier);
 	sessionStorage.removeItem(STORAGE_KEYS.oauthReturnTo);
+
+	// TEMPORARY DEBUG — issue: Windows passkey sign-in loop. Emitted last, so a
+	// trace that ends without this line is a trace of a refusal, and the line
+	// itself says which outcome the callback reported to the route.
+	authDebug('completeLogin.success', {
+		branch: 'ok',
+		nowMs: Date.now(),
+		createdAtMs: authDebugNumber(createdAt),
+		expiresAtMs: authDebugNumber(expiresAt),
+		expiresAtIso: authDebugIso(expiresAt),
+		storedSessionPresent: sessionStorage.getItem(STORAGE_KEYS.session) !== null,
+		midFlowKeysCleared:
+			sessionStorage.getItem(STORAGE_KEYS.oauthState) === null &&
+			sessionStorage.getItem(STORAGE_KEYS.oauthVerifier) === null,
+		returnTo,
+		callbackElapsedMs: Date.now() - callbackMs,
+	});
 
 	return { ok: true, returnTo };
 }
