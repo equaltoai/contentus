@@ -292,7 +292,7 @@
       "tests/agents-trust.test.mjs": "08fedf3e445a43d0828883230084bf7b212d4f3a9bc6e94227a18111e83fc0d8",
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
-      "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
+      "tests/auth-session.test.mjs": "7d102ba245e4244319cc806d8f6c435757664b654967313a1e2cb098e912de45",
       "tests/cms-graphql.test.mjs": "b68fd637f56b28001e226d68a964b2a3cedb8353640218c72a21d52550afdd7a",
       "tests/compose.test.mjs": "c13d10a0ef01b38bccbd0b662d04ccf75d0b9add5196a20472736509d4f964bf",
       "tests/con5-import-reader.test.mjs": "c58ca6b3a584ac26c8204b12fe9ad69c11882bac8de732605eeb2b9bf735fd1d",
