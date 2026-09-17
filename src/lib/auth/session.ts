@@ -113,6 +113,26 @@ import { notifySessionChange } from './session-events';
  *   - `returnTo` must be an app-relative path. Sim hands its value to
  *     SvelteKit's `goto`; contentus hands it to `window.location.replace`,
  *     which would follow an absolute URL.
+ *   - A cached public client whose `createdAt` cannot be true is discarded and
+ *     re-registered rather than trusted. Sim reads the field as written and
+ *     hands a non-numeric one `Date.now()`, and both of those feed the
+ *     cross-tab rotation guard, which compares them against a stamp this tab
+ *     took before it redirected. A `createdAt` in the FUTURE — written by a
+ *     clock that was later corrected — therefore refuses every callback
+ *     forever, with no way back that does not involve clearing site data by
+ *     hand. That is not hypothetical: it is what locked a Windows/Chrome
+ *     passkey sign-in out permanently on trenchcoat-dev (#117), where the
+ *     cached entry sat sixteen minutes ahead of a clock verified correct
+ *     against server logs. Local state does not get to be a permanent
+ *     lockout, and the recovery costs one registration request, which is the
+ *     cache-miss path this file already had.
+ *   - A sign-in attempt that reached the token exchange and failed there drops
+ *     its own flow state. The authorization code is spent either way; what the
+ *     clearing buys is that a replayed callback URL fails closed on a missing
+ *     state instead of re-presenting a dead code and reporting the instance's
+ *     `invalid_grant` as though it were news. The refusals ABOVE the exchange
+ *     clear nothing, because the state-mismatch one is reachable from callback
+ *     input nobody authenticated.
  *
  * Invariants this file exists to keep:
  *
@@ -195,6 +215,18 @@ const SESSION_STORAGE_KEYS: readonly string[] = [
 	STORAGE_KEYS.oauthVerifier,
 	STORAGE_KEYS.oauthReturnTo,
 ];
+
+/**
+ * The keys one sign-in ATTEMPT lives in, which is the list above minus the
+ * session it is trying to produce.
+ *
+ * Derived rather than spelled a second time: `clearSession` and a spent attempt
+ * must drop the same five keys, and a key added to the list above then lands in
+ * both without anyone remembering to edit two places.
+ */
+const PENDING_FLOW_STORAGE_KEYS: readonly string[] = SESSION_STORAGE_KEYS.filter(
+	(key) => key !== STORAGE_KEYS.session
+);
 
 /**
  * The single-bucket key the pre-transplant implementation cached under. It is
@@ -343,6 +375,38 @@ export function clearSession(): void {
 		sessionStorage.removeItem(key);
 	}
 	notifySessionChange('signed-out');
+}
+
+/**
+ * Drop the state of a sign-in attempt that cannot complete.
+ *
+ * The authorization code is single-use, so once this client has presented it
+ * there is nothing left to retry: the only way forward is a fresh `startLogin`,
+ * which overwrites all five keys anyway. What leaving them behind costs is a
+ * second and worse failure — a refreshed or replayed callback URL still matches
+ * the stored state, verifier, and bucket, so the spent code gets presented
+ * again and the person signing in reads the instance's `invalid_grant` instead
+ * of this client failing closed on state it already knows is dead. That is the
+ * loop #117 was reported as.
+ *
+ * NO ANNOUNCEMENT, DELIBERATELY, and this is the whole difference from
+ * `clearSession`. That one notifies because a session ended. Here none began,
+ * and a `signed-out` would tear down subscribers — the messages face closes an
+ * authorized socket on it — on behalf of a session that is still live in this
+ * tab and had nothing to do with the attempt that failed.
+ *
+ * NOT EVERY FAILURE CALLS THIS, and the boundary is the token exchange. The
+ * refusals above it leave the flow state alone because they have not spent the
+ * code, and the state-mismatch one has to: it is reachable from callback input
+ * nobody authenticated, so clearing there would let any third party wipe a
+ * victim's in-flight flow just by navigating them to a bogus
+ * `/auth/callback?code=x&state=y`.
+ */
+function clearPendingOAuthFlow(): void {
+	if (!browser) return;
+	for (const key of PENDING_FLOW_STORAGE_KEYS) {
+		sessionStorage.removeItem(key);
+	}
 }
 
 export function isAuthenticated(): boolean {
@@ -508,6 +572,29 @@ async function registerOAuthClient(
 	return client;
 }
 
+/**
+ * How far ahead of this machine's clock a cached client may claim to have been
+ * created before the entry is read as corrupt rather than as a rotation.
+ *
+ * `createdAt` is stamped by `Date.now()` in this same browser, so an entry that
+ * is in the future when it is read back means the clock that wrote it and the
+ * clock reading it disagree: an NTP correction, a manual change, a suspend that
+ * resumed into a different time. Ordinary slew is sub-second, and a minute buys
+ * every plausible in-flight correction without discarding an entry that was
+ * fine. It is also small against the corruption actually seen in the field,
+ * which sat sixteen minutes ahead (#117).
+ *
+ * THE TOLERANCE IS NOT A HOLE, and the direction it errs is the point. An entry
+ * future-dated by LESS than this is used exactly as written, and the rotation
+ * guard in `completeLogin` still refuses it for as long as it is newer than the
+ * flow's own stamp — a refusal bounded by the tolerance itself, which ends on
+ * its own as the value ages into the past. Beyond the tolerance the entry is
+ * not a rotation at all, because nothing can be created in the future, so it is
+ * discarded. Refusing when in doubt is unchanged; what is new is that the doubt
+ * expires instead of being permanent.
+ */
+const MAX_CACHED_CLIENT_CLOCK_SKEW_MS = 60_000;
+
 function readOAuthClientFromStorage(
 	redirectUri: string,
 	cacheBucket: OAuthClientCacheBucket
@@ -525,10 +612,11 @@ function readOAuthClientFromStorage(
 		if (typeof parsed?.clientId !== 'string' || !parsed.clientId.trim()) return null;
 		if (parsed.redirectUri !== redirectUri) return null;
 
-		// Two discards, and they are the cache half of the public-client
-		// invariant: a cache that ever held a secret is not trusted to be public
-		// now, and a client whose token endpoint wants authentication is not one
-		// this app can present credentials for.
+		// The first two of three discards, and they are the cache half of the
+		// public-client invariant: a cache that ever held a secret is not trusted
+		// to be public now, and a client whose token endpoint wants authentication
+		// is not one this app can present credentials for. The third, below, is
+		// about time rather than credentials.
 		if (Object.prototype.hasOwnProperty.call(parsed, 'clientSecret')) {
 			localStorage.removeItem(storageKey);
 			return null;
@@ -538,10 +626,40 @@ function readOAuthClientFromStorage(
 			return null;
 		}
 
+		// THE THIRD DISCARD, AND THE ONE THAT MADE SIGN-IN UNRECOVERABLE. The
+		// rotation guard compares this value against a stamp the tab took before
+		// it redirected, so an entry created "in the future" is newer than every
+		// stamp anyone will ever take: it refuses the callback, survives the
+		// refusal untouched, and refuses the next one identically, forever, with
+		// nothing in the app able to rewrite it. A non-numeric `createdAt` was
+		// the same refusal wearing a different costume — the `?? Date.now()`
+		// default it used to get is by construction newer than any stamp taken
+		// before this read. Neither is a rotation. Both are corrupt, and the
+		// recovery is the cache-miss path this function already had: drop the
+		// entry and let `ensureOAuthClient` re-register, which costs one request
+		// and trusts nothing that was stored.
+		//
+		// `Number.isSafeInteger` is the same boundary `isStorableInstant` holds
+		// the session's own instants to, for the same three reasons: finite,
+		// because `JSON.stringify` writes `Infinity` as `null` and reads back as
+		// nothing; integral, because this is a millisecond stamp `Date.now()`
+		// wrote and rounding one to make it fit would be inventing a value; and
+		// inside ±(2^53 − 1), because past that neighbouring milliseconds stop
+		// being distinct and the comparison stops being about time.
+		const createdAt = parsed.createdAt;
+		if (
+			typeof createdAt !== 'number' ||
+			!Number.isSafeInteger(createdAt) ||
+			createdAt > Date.now() + MAX_CACHED_CLIENT_CLOCK_SKEW_MS
+		) {
+			localStorage.removeItem(storageKey);
+			return null;
+		}
+
 		return {
 			clientId: parsed.clientId,
 			redirectUri: parsed.redirectUri,
-			createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
+			createdAt,
 			tokenEndpointAuthMethod: PUBLIC_TOKEN_ENDPOINT_AUTH_METHOD,
 		};
 	} catch {
@@ -740,6 +858,10 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	// confidence, is what says the fields below are on an object that exists.
 	const accessToken = typeof tokenJson?.access_token === 'string' ? tokenJson.access_token : '';
 	if (!tokenResponse.ok || !tokenJson || !accessToken.trim()) {
+		// The code has been presented, so this attempt is over whatever the
+		// instance said. See `clearPendingOAuthFlow` for why the refusals above
+		// the exchange do not do this.
+		clearPendingOAuthFlow();
 		for (const key of ['error_description', 'error'] as const) {
 			const candidate = tokenJson?.[key];
 			if (typeof candidate === 'string' && candidate.trim()) {
@@ -758,6 +880,7 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		!Number.isFinite(expiresInSeconds) ||
 		expiresInSeconds <= 0
 	) {
+		clearPendingOAuthFlow();
 		return { ok: false, error: UNUSABLE_TOKEN_LIFETIME };
 	}
 
@@ -770,6 +893,7 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	const createdAt = createdAtSeconds * 1000;
 	const expiresAt = createdAt + expiresInSeconds * 1000;
 	if (!isStorableInstant(createdAt) || !isStorableInstant(expiresAt)) {
+		clearPendingOAuthFlow();
 		return { ok: false, error: UNUSABLE_TOKEN_LIFETIME };
 	}
 
@@ -780,7 +904,22 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 	// other check on this path and not a new policy: what the callback reports,
 	// the reader can find. A user whose clock disagrees with the instance now
 	// gets a stated reason instead of a sign-in that silently un-happens.
+	//
+	// NO SKEW TOLERANCE HERE, WHICH IS A CHOICE AND NOT AN OVERSIGHT. A clock
+	// running more than a token lifetime ahead of the instance makes every
+	// exchange fail this check, and it is tempting to let a few seconds — or a
+	// few hours — through. Both ways of doing that are worse than the failure.
+	// Tolerating it HERE alone breaks the agreement above in the direction that
+	// matters: the callback reports a sign-in, and the reader discards it on the
+	// next read, which is the exact defect this check was added for. Tolerating
+	// it in BOTH means this client decides a credential is live past the
+	// lifetime the instance stated, and the instance is the only party that can
+	// know that — it is the same reason `isStorableInstant` refuses to shorten a
+	// lifetime it finds absurd. So the comparison stays zero-tolerance and fails
+	// closed, and the recovery #117 asks for is the other half of the property:
+	// the failure strands nothing, and the next attempt starts clean.
 	if (Date.now() >= expiresAt) {
+		clearPendingOAuthFlow();
 		return { ok: false, error: ALREADY_EXPIRED_TOKEN };
 	}
 
@@ -802,12 +941,12 @@ export async function completeLogin(searchParams: URLSearchParams): Promise<Call
 		expiresAt,
 	});
 
+	// Read BEFORE the teardown, which takes the key it is stored under. The same
+	// five keys go on the way out as on a failed attempt, from the same list, so
+	// a key added to `SESSION_STORAGE_KEYS` cannot be left behind by one path and
+	// cleared by the other.
 	const returnTo = safeReturnTo(sessionStorage.getItem(STORAGE_KEYS.oauthReturnTo));
-	sessionStorage.removeItem(STORAGE_KEYS.oauthState);
-	sessionStorage.removeItem(STORAGE_KEYS.oauthClientBucket);
-	sessionStorage.removeItem(STORAGE_KEYS.oauthClientNotAfter);
-	sessionStorage.removeItem(STORAGE_KEYS.oauthVerifier);
-	sessionStorage.removeItem(STORAGE_KEYS.oauthReturnTo);
+	clearPendingOAuthFlow();
 
 	return { ok: true, returnTo };
 }
