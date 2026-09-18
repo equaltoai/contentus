@@ -27,7 +27,7 @@ build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
 build/client/assets/entry-client-khis0r45.js                725.21 kB │ gzip: 219.49 kB
 
-✓ built in 1.11s
+✓ built in 1.15s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
@@ -38,10 +38,10 @@ build/client/assets/entry-client-khis0r45.js                725.21 kB │ gzip: 
 > vite build --ssr src/facetheory/entry-server.ts
 
 vite v8.2.0 building ssr environment for production...
-[2Ktransforming...✓ 791 modules transformed.
+[2Ktransforming...✓ 792 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,161.84 kB │ gzip: 281.40 kB
+build/server/handler.mjs  1,165.38 kB │ gzip: 282.49 kB
 
 ✓ built in 1.04s
 
@@ -134,8 +134,8 @@ CSP audit: clean.
 
 - Build passes recorded: client, server
 - Modules the client build resolved / loaded: 814 / 814
-- Modules the server build resolved / loaded: 797 / 790
-- Dependency edges recorded: 4614
+- Modules the server build resolved / loaded: 798 / 791
+- Dependency edges recorded: 4620
 - Distinct edges into the face: 49
 - Findings: 0
 
