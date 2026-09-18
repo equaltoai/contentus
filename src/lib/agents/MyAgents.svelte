@@ -44,8 +44,6 @@ bandwidth, check the stamp for the correctness.
 	import { createSessionScope } from '$lib/auth/session-scope';
 
 	import AgentCard from './AgentCard.svelte';
-	import AgentDriversPanel from './AgentDriversPanel.svelte';
-	import AgentSharingPanel from './AgentSharingPanel.svelte';
 	import { fetchMyAgents, type AgentSummary, type AgentUnavailable } from './contract';
 
 	/**
@@ -142,10 +140,24 @@ bandwidth, check the stamp for the correctness.
 				{#each agents as agent (agent.id)}
 					<li class="contentus-agents__grid-item">
 						<!--
-							These cards carry the owner-only fields lesser redacts from
-							everyone else, because `myAgents` is answered as the owner. The
-							card renders them only when present, which for this list is
-							always and for the public roster is never.
+							CORRECTED, because it claimed close to the opposite of what the
+							card does (equaltoai/contentus#119). It said these cards carry the
+							owner-only fields lesser redacts from everyone else, on the
+							strength of `myAgents` being answered as the owner. `AgentCard`
+							rendered no such field then and renders none now: it shows the
+							handle, the display name, the type, the bio, the activity count,
+							the version, the trust badge, and whether an MCP endpoint exists
+							— every one of which lesser serves to anonymous callers too. The
+							redacted fields are `agentOwner` and `delegatedScopes`, and the
+							only card in this repository that renders either is the drones'
+							`DroneCard`, on another face, from another document.
+
+							What IS true of this list is narrower, and is the part worth
+							keeping: it is answered as the owner, so `agent.viewer` carries
+							lesser's served booleans for these rows instead of the anonymous
+							`false` the public roster gets. Nothing here renders them. They
+							are read on the agent page, which is where the owner's surfaces
+							live now.
 						-->
 						<AgentCard {agent} headingLevel={3} />
 					</li>
@@ -155,43 +167,28 @@ bandwidth, check the stamp for the correctness.
 	</Panel>
 
 	<!--
-		One sharing panel per owned agent, below the cards. Mounted only where
-		lesser says THIS VIEWER OWNS THIS AGENT — `agent.viewer.isOwner`, the
-		served `viewerIsOwner` (lesser#1418, pinned at 1ce2dc97), computed from
-		the same `AgentOwnerMatchesLocalPrincipal` rule the server authorizes
-		with.
+		THIS LIST IS NAVIGATION NOW, AND THAT IS THE WHOLE OF #119.
 
-		IT USED TO BE `agent.owner`, AND THAT WAS THE WRONG QUESTION. That block
-		is present exactly when `viewerCanSeePrivateFields` was served true,
-		which lesser serves true for owners AND ADMINS — so the gate said "may
-		see this agent's private fields" while the panels beneath it are the
-		owner's management surface. The gloss "may manage" papered over the
-		difference honestly but could not remove it; there was simply no
-		ownership field to read until lesser#1417 was filed and #1418 answered
-		it. An admin now gets `canSeePrivateFields: true` with `isOwner: false`
-		and no panel, which is lesser's own contract test made visible.
+		The owner's two panels — who holds access to an agent, and who has been
+		driving it — used to be mounted here, one pair per owned agent. That made
+		the roster the most expensive page on the face: opening `/agents` issued
+		`GET /api/v1/agents/{username}/share` and an `agentActivity` read for every
+		agent the viewer owned, before anyone had said which agent they cared
+		about, so M owned agents cost 2M requests to paint M links. Both panels are
+		on the agent page now — `AgentOwnerPanels.svelte`, behind the `AgentDetail`
+		seam — so the same two reads happen for the one agent a human actually
+		navigated to, and never for the ones they did not.
 
-		The mount is still lesser's answer and still never an inference from
-		which list the agent arrived in. `myAgents` now carries a description
-		saying membership means ownership, and this gate deliberately does not
-		lean on it: a description is a promise about a conforming instance, the
-		boolean is what this one said.
+		What this file keeps is the inventory and the session discipline around it,
+		both unchanged: one `myAgents` read, client-side, ending with the session.
 
-		Each panel is client-only like everything else in this block, reads its
-		own grants, and ends with the session — because who holds access to your
-		agent is the sensitive half of the capability.
+		OWNERSHIP IS STILL LESSER'S ANSWER, AND STILL NEVER AN INFERENCE FROM WHICH
+		LIST AN AGENT ARRIVED IN. The gate moved; the rule did not. `myAgents`
+		carries a schema description saying membership means ownership, and the gate
+		deliberately does not lean on it — a description is a promise about a
+		conforming instance, while `viewerIsOwner` is what this instance said.
+		lesser#1418 is still the field the mount reads, and an admin still gets
+		`canSeePrivateFields: true` with `isOwner: false` and no panel, which is
+		lesser's own contract test made visible.
 	-->
-	{#each agents as agent (agent.id)}
-		{#if agent.viewer.isOwner}
-			<AgentSharingPanel {agent} />
-			<!--
-				Who has been DRIVING the agent, directly below who HOLDS access to it
-				(M2.4, equaltoai/contentus#95). The two are companion answers and the
-				order is the owner's reading order: the grant ledger says who could,
-				this says who did. Same gate, same client-only rule, same reason —
-				lesser answers the activity log to the agent's owner and admins alone.
-			-->
-			<AgentDriversPanel {agent} />
-		{/if}
-	{/each}
 {/if}

@@ -15,10 +15,13 @@ import { MODULE_SOURCE, trackedSource } from './helpers/tracked-source.mjs';
 import {
 	AGENT_DETAIL_QUERY,
 	AGENT_MCP_ACCESS_QUERY,
+	AGENT_OWNERSHIP_QUERY,
 	fetchAgent,
 	fetchAgentMcpAccess,
+	fetchAgentOwnership,
 	fetchMyAgents,
 	MY_AGENTS_QUERY,
+	ownershipState,
 	toAgentSummary,
 } from '../src/lib/agents/contract.ts';
 import { notifySessionChange, sessionGeneration } from '../src/lib/auth/session-events.ts';
@@ -593,12 +596,18 @@ function callsFn(ast, name) {
 }
 
 /**
- * The four client-only panels on the agents route, each carrying private
+ * The five client-only panels this face mounts, each carrying private
  * session-scoped subject matter and each required to end with the session.
  *
  * The fields listed are what `closeSession` must empty on each panel — the
  * assertion below reads each body, and each entry is a field the panel would
  * otherwise still be holding one sign-in away from the next reader's screen.
+ *
+ * The list is the coverage, and it grew rather than merely changed in
+ * equaltoai/contentus#119: the owner's panels moved from the roster to the agent
+ * page, and the gate that had to be asked for on that page is itself a
+ * session-scoped read of a fact about the reader, so it is listed here beside
+ * the panels it decides whether to mount.
  */
 const SESSION_SCOPED_PANELS = [
 	{
@@ -625,11 +634,31 @@ const SESSION_SCOPED_PANELS = [
 		// below.
 		file: 'AgentSharedWithMePanel.svelte',
 		subject: 'the shared-with-me grants',
-		// `access` joined the list in M2.2 (equaltoai/contentus#93). The MCP
-		// endpoints in it are public — but WHICH agents were shared with this
-		// reader is not, and a populated map is that private fact keyed by agent
-		// username, one sign-in away from the next reader's screen.
-		emptied: [/session = 'anonymous'/, /grants = \[\]/, /access = \{\}/],
+		// The `access` map M2.2 added (equaltoai/contentus#93) left with the
+		// per-grant MCP fan-out in equaltoai/contentus#119: a row now links to the
+		// agent page, where lesser's whole bundle is already rendered, instead of
+		// the panel paying one GraphQL read per row to restate a URL that link
+		// leads to. WHAT THIS ENTRY STILL GUARDS is unchanged, and it is the
+		// private half — WHICH agents were shared with this reader — sitting in a
+		// populated `grants` list one sign-in away from the next reader's screen.
+		emptied: [/session = 'anonymous'/, /grants = \[\]/],
+	},
+	{
+		// equaltoai/contentus#119 moved the owner's two panels onto the agent page,
+		// and that page is painted ANONYMOUSLY, so the ownership gate had to be
+		// asked for rather than inherited. What this component holds is therefore
+		// an answer ABOUT THE READER: lesser's `viewerIsOwner` for the agent on
+		// screen. It is one boolean, and it is not private the way a grant ledger
+		// is — but leaving it standing across a sign-out leaves the next reader of
+		// this browser with the previous one's ownership answer gating the two
+		// panels either side of this entry, which are the sharpest subjects on the
+		// face. The abort matters more here than anywhere else on it, too: an
+		// ownership read in flight across a sign-out is a pending decision to mount
+		// somebody's management surface on the authority of a session that has
+		// ended.
+		file: 'AgentOwnerPanels.svelte',
+		subject: "lesser's ownership answer for the agent on screen",
+		emptied: [/session = 'anonymous'/, /ownership = null/],
 	},
 	{
 		// M2.4 (equaltoai/contentus#95). WHO HAS BEEN DRIVING an agent is the
@@ -648,8 +677,8 @@ test('the owned view tracks the session rather than snapshotting it at mount', (
 	// STRUCTURAL, and labelled as one: the repo has no DOM harness, so this reads
 	// each component's parsed instance script rather than mounting it. What the
 	// probes above prove about the guard, this proves is actually wired into the
-	// components that need it — all three of the route's session-scoped panels,
-	// not only the first one this check was written for.
+	// components that need it — every panel the list above names, not only the
+	// first one this check was written for.
 	for (const panel of SESSION_SCOPED_PANELS) {
 		const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents', panel.file), 'utf8'), {
 			modern: true,
@@ -708,7 +737,7 @@ function* walkTemplate(node, ancestors = []) {
 }
 
 /**
- * Evaluate an `{#if}` gate expression against one view model.
+ * Evaluate an `{#if}` gate expression against the values the gate reads.
  *
  * READING THE GATE'S NAME IS NOT READING THE GATE, which is the whole reason
  * this exists. The probe this replaced asserted that the mount sat behind an
@@ -717,70 +746,87 @@ function* walkTemplate(node, ancestors = []) {
  * could say nothing at all about WHICH VIEWERS the gate admits. That is the
  * question the migration is about: `agent.owner` and `agent.viewer.isOwner`
  * differ on exactly one viewer, the admin, and a name check cannot see the
- * difference. So the gate is executed against real view models instead, built
- * by `toAgentSummary` from the shapes lesser actually serves.
+ * difference. So the gate is executed against real values instead, built by the
+ * shipped readers from the shapes lesser actually serves.
+ *
+ * `bindings` maps each identifier the gate may read to the value the component
+ * would be holding when it reads it. Which values those are is the caller's
+ * claim and the caller's to justify: the roster's mount was handed a
+ * `toAgentSummary` view model, and the agent page's is handed the answer of a
+ * driven `fetchAgentOwnership` passed through `ownershipState` — in both cases
+ * the shipped code computes the binding, so what is executed here is the gate
+ * and not a copy of it.
  *
  * FAIL-CLOSED ON ANY NODE IT DOES NOT MODEL. A gate rewritten as `a && b`, a
- * call, a negation or an optional chain THROWS rather than returning a verdict.
- * A probe that quietly skipped the expressions it could not read would report a
- * pass it never established — the silent-cap shape — so the cost of a more
- * complex gate is that this function must be taught it deliberately.
+ * call, a negation, an optional chain or a comparison this function has not
+ * been taught THROWS rather than returning a verdict. A probe that quietly
+ * skipped the expressions it could not read would report a pass it never
+ * established — the silent-cap shape — so the cost of a more complex gate is
+ * that this function must be taught it deliberately. `===` against a literal is
+ * modelled because that is the shape the agent page's gate has
+ * (`ownershipGate === 'owner'`); `!==` is not, and a gate written that way fails
+ * here until someone has looked at which viewers it admits.
  */
-function evaluateGate(node, agent) {
+function evaluateGate(node, bindings) {
 	if (node?.type === 'Identifier') {
-		if (node.name !== 'agent') {
+		if (!Object.hasOwn(bindings, node.name)) {
 			throw new Error(`gate reads an identifier this probe does not model: ${node.name}`);
 		}
-		return agent;
+		return bindings[node.name];
 	}
+	if (node?.type === 'Literal') return node.value;
 	if (node?.type === 'MemberExpression') {
 		if (node.computed || node.optional) {
 			throw new Error('gate uses a computed or optional member access; teach this probe first');
 		}
-		const object = evaluateGate(node.object, agent);
+		const object = evaluateGate(node.object, bindings);
 		if (node.property?.type !== 'Identifier') {
 			throw new Error('gate uses a non-identifier property; teach this probe first');
 		}
 		return object == null ? undefined : object[node.property.name];
 	}
+	if (node?.type === 'BinaryExpression' && node.operator === '===') {
+		return evaluateGate(node.left, bindings) === evaluateGate(node.right, bindings);
+	}
 	throw new Error(`gate uses a ${node?.type ?? 'missing'} expression; teach this probe first`);
 }
 
 /**
- * Whether an expression reads the `agent` binding anywhere inside it.
+ * Whether an expression reads the named binding anywhere inside it.
  *
  * A GENERIC WALK, not a shape match, because a miss here would be a fail-open:
- * this decides which gates get executed, and a gate that reads `agent` in a
+ * this decides which gates get executed, and a gate that reads the binding in a
  * form the walker did not recognise would be silently excluded from the
  * verdict. Recursing over every own property cannot miss an `Identifier`.
  */
-function expressionReadsAgent(node) {
+function expressionReads(node, name) {
 	if (!node || typeof node !== 'object') return false;
-	if (Array.isArray(node)) return node.some(expressionReadsAgent);
-	if (node.type === 'Identifier' && node.name === 'agent') return true;
+	if (Array.isArray(node)) return node.some((entry) => expressionReads(entry, name));
+	if (node.type === 'Identifier' && node.name === name) return true;
 	return Object.entries(node).some(
-		([key, value]) => key !== 'parent' && key !== 'loc' && expressionReadsAgent(value)
+		([key, value]) => key !== 'parent' && key !== 'loc' && expressionReads(value, name)
 	);
 }
 
 /**
- * The per-agent `{#if}` tests guarding every mount of `panel`.
+ * The `{#if}` tests guarding every mount of `panel` that read `binding`.
  *
- * GATES THAT DO NOT READ `agent` ARE EXCLUDED, and that is not a hole. The one
- * such gate here is `{#if session === 'authenticated'}`, which decides whether
- * the whole block renders at all and is asserted separately; it cannot vary by
- * viewer, so including it would only mean modelling a second scope to reach the
- * same verdict. The direction that matters is covered: an extra non-agent gate
- * can only ever narrow the conjunction, while REPLACING the ownership gate with
- * one leaves no per-agent gate at all — and the caller requires at least one.
+ * GATES THAT DO NOT READ IT ARE EXCLUDED, and that is not a hole. The one such
+ * gate on either mount is `{#if session === 'authenticated'}`, which decides
+ * whether the whole block renders at all and is asserted separately; it cannot
+ * vary by viewer or by agent, so including it would only mean modelling a
+ * second scope to reach the same verdict. The direction that matters is
+ * covered: an extra gate can only ever narrow the conjunction, while REPLACING
+ * the ownership gate with one leaves no per-agent gate at all — and the caller
+ * requires at least one.
  */
-function mountGates(ast, panel) {
+function mountGates(ast, panel, binding) {
 	const mounts = [];
 	for (const { node, ancestors } of walkTemplate(ast.fragment)) {
 		if (node.type !== 'Component' || node.name !== panel) continue;
 		mounts.push(
 			ancestors
-				.filter((entry) => entry.type === 'IfBlock' && expressionReadsAgent(entry.test))
+				.filter((entry) => entry.type === 'IfBlock' && expressionReads(entry.test, binding))
 				.map((entry) => entry.test)
 		);
 	}
@@ -788,7 +834,7 @@ function mountGates(ast, panel) {
 }
 
 /**
- * The owner-only panels `MyAgents` mounts per agent, each gated on lesser's own
+ * The owner-only panels the agent page mounts, each gated on lesser's own
  * ownership statement.
  *
  * Both read a surface lesser answers to the agent's owner and admins alone —
@@ -796,8 +842,126 @@ function mountGates(ast, panel) {
  * equaltoai/contentus#95, `agentActivity` answers `Forbidden` to anyone else).
  * The server gate is the real one; this list holds the client to not ASKING on
  * a screen it should not have drawn.
+ *
+ * MOUNTED BY `AgentOwnerPanels` SINCE equaltoai/contentus#119, and before that
+ * by `MyAgents` — one pair per owned agent, which made the roster issue both
+ * reads for every agent the viewer owned before anyone had chosen one. The
+ * mount moved; the gate and this list did not.
  */
 const OWNER_GATED_PANELS = ['AgentSharingPanel', 'AgentDriversPanel'];
+
+/** The component that decides whether they exist on the page at all. */
+const OWNER_GATE_FILE = 'AgentOwnerPanels.svelte';
+
+/**
+ * The binding its template gates on, and the answer behind that binding.
+ *
+ * Named here because both halves are asserted: the gate expression is evaluated
+ * against the binding, and the binding is asserted to be the shipped classifier's
+ * output over the shipped read's answer. A probe that evaluated the template's
+ * gate against a value it had computed itself would be asserting its own
+ * arithmetic.
+ *
+ * The binding is not called `state`, and the probe below that holds the face to
+ * not binding a rune's name says why: `svelte-check` reads `$state` as the
+ * auto-subscription of a store by that name, so a component that binds `state`
+ * and calls `$state<T>(…)` elsewhere has its runes mistyped and its gate
+ * silently inferred as `any`.
+ */
+const GATE_BINDING = 'ownershipGate';
+const GATE_ANSWER = 'ownership';
+
+/** Drive one `fetchAgentOwnership` against a stubbed transport. */
+async function readOwnership(answer, { accessToken, username = 'weatherbot' } = {}) {
+	const seen = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input, init = {}) => {
+		const payload = init.body ? JSON.parse(init.body) : {};
+		seen.push({
+			query: payload.query ?? '',
+			variables: payload.variables ?? {},
+			authorization: new Headers(init.headers).get('authorization'),
+		});
+		return new Response(JSON.stringify(answer), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	};
+
+	try {
+		return {
+			seen,
+			result: await fetchAgentOwnership(accessToken ? { accessToken } : {}, username),
+		};
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+}
+
+/**
+ * The `$derived(<fn>(<arg>))` a name is declared with, as `{ fn, arg }`, or null
+ * when the declaration is not that shape.
+ *
+ * A SHAPE CHECK AND NOT A TEXT CHECK, because the text of a derived is exactly
+ * what a rewrite keeps while changing what it means. What this returns is the
+ * name of the function called and the name of the value handed it, both read
+ * off the tree, so `$derived(ownershipState(ownership))` and a hand-rolled
+ * `$derived(ownership?.ok && ownership.isOwner)` are different answers here
+ * rather than two spellings of one string.
+ */
+function derivedOf(script, name) {
+	const init = declaratorInit(script, name);
+	if (init?.type !== 'CallExpression' || init.callee?.name !== '$derived') return null;
+	const call = init.arguments?.[0];
+	if (call?.type !== 'CallExpression' || call.callee?.type !== 'Identifier') return null;
+	const arg = call.arguments?.[0];
+	return {
+		fn: call.callee.name,
+		arg: arg?.type === 'Identifier' ? arg.name : `<${arg?.type ?? 'missing'}>`,
+	};
+}
+
+/** Every value assigned to `name` in the instance script, `null` for a literal null. */
+function assignedValues(script, name) {
+	const values = [];
+	for (const node of walkAst(script)) {
+		if (node.type !== 'AssignmentExpression' || node.operator !== '=') continue;
+		if (node.left?.type !== 'Identifier' || node.left.name !== name) continue;
+		const right = node.right;
+		values.push(
+			right?.type === 'Literal' && right.value === null
+				? null
+				: right?.type === 'Identifier'
+					? right.name
+					: `<${right?.type ?? 'missing'}>`
+		);
+	}
+	return values;
+}
+
+/**
+ * The parameter `<fn>(…).then(…)` binds its answer to, or null when no such call
+ * exists in the script.
+ *
+ * THIS IS THE LINK BETWEEN A NAME AND A READER. `assignedValues` can say the
+ * gate's answer is only ever `null` or something called `result`; only this can
+ * say what `result` is the result OF, and without it a component that assigned
+ * the gate's answer from its own arithmetic would pass.
+ */
+function readerCallbackParam(script, fn) {
+	for (const node of walkAst(script)) {
+		if (node.type !== 'CallExpression') continue;
+		if (node.callee?.type !== 'MemberExpression') continue;
+		if (node.callee.property?.name !== 'then') continue;
+		const call = node.callee.object;
+		if (call?.type !== 'CallExpression' || call.callee?.name !== fn) continue;
+		const callback = node.arguments?.[0];
+		if (callback?.type !== 'ArrowFunctionExpression') return `<${callback?.type ?? 'missing'}>`;
+		const param = callback.params?.[0];
+		return param?.type === 'Identifier' ? param.name : `<${param?.type ?? 'missing'}>`;
+	}
+	return null;
+}
 
 /**
  * The three viewers lesser distinguishes, as this client receives them.
@@ -808,6 +972,13 @@ const OWNER_GATED_PANELS = ['AgentSharingPanel', 'AgentDriversPanel'];
  * ownership false. Under the old gate that viewer was admitted, because the
  * only boolean available to read said "you may see this agent's private
  * fields" and the panel beneath it is the owner's management surface.
+ *
+ * `served` is the shape of one `Agent` as lesser answers it, and both gate
+ * paths read the same field of it: the roster's `toAgentSummary` takes
+ * `viewerIsOwner` into `viewer.isOwner`, and `fetchAgentOwnership` takes the
+ * same boolean out of `AGENT_OWNERSHIP_QUERY`. One list drives both so that
+ * "the gate moved, the rule did not" is a measured property of this file and
+ * not a sentence in a comment.
  */
 const VIEWERS = [
 	{
@@ -842,41 +1013,425 @@ const VIEWERS = [
 	},
 ];
 
-test('the owner-only panels admit the owner and refuse every other viewer', () => {
+test('the owner-only panels admit the owner and refuse every other viewer', async () => {
 	// STRUCTURAL, like the session probes above: the mount gate is one line whose
-	// removal is silent — a later rework of the `{#each}` that drops the gate
-	// returns the defect it fixed, and every other check stays green. So the gate
-	// itself is the assertion, and it is EXECUTED rather than named.
-	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents/MyAgents.svelte'), 'utf8'), {
+	// removal is silent — a later rework that drops the gate returns the defect it
+	// fixed, and every other check stays green. So the gate itself is the
+	// assertion, and it is EXECUTED rather than named.
+	//
+	// WHAT equaltoai/contentus#119 CHANGED ABOUT THE EXECUTION, and why this probe
+	// grew a preamble instead of merely changing a file name. The panels used to
+	// hang off the owned roster, whose whole read is authenticated, so
+	// `agent.viewer.isOwner` was already in hand and the gate could be evaluated
+	// against a view model `toAgentSummary` built. The agent page is painted
+	// ANONYMOUSLY — its server pass carries no token, and its props are serialized
+	// into contentus's public hydration endpoint, where one reader's ownership
+	// answer would be served to any other — so that field arrives on this page as a
+	// correct `false` for everybody, the owner included, and gating on it would
+	// shut the panels for the one viewer they exist for. The gate there is a read
+	// of its own. So the read is what gets executed: each viewer's answer goes
+	// through the shipped `fetchAgentOwnership` over a stubbed transport, the
+	// shipped `ownershipState` classifies it, and the template's own gate
+	// expression is evaluated against that classification. No link of the chain is
+	// reproduced by this file.
+	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents', OWNER_GATE_FILE), 'utf8'), {
 		modern: true,
 	});
 
+	// THE BINDING IS THE CLASSIFIER'S OUTPUT, asserted before it is used, because
+	// every verdict below evaluates it — and a binding the component computed some
+	// other way would make those verdicts statements about a gate this component
+	// does not have.
+	assert.deepEqual(
+		derivedOf(ast.instance, GATE_BINDING),
+		{ fn: 'ownershipState', arg: GATE_ANSWER },
+		`${GATE_BINDING} must be $derived(ownershipState(${GATE_ANSWER})): the shipped classifier over the shipped read, not a second ownership test written into the component`
+	);
+
+	// AND THE ANSWER IT CLASSIFIES HAS ONE SOURCE. Two claims, because either one
+	// alone is satisfiable by a component that invents a third value: every
+	// assignment is either the read's own answer or a clearing null, and the name
+	// bound to that answer is the name the reader's callback binds it to. A gate
+	// that anything other than lesser's reply can satisfy is not a gate, and "we
+	// did not ask" is not an answer — see the state probe below.
+	assert.deepEqual(
+		new Set(assignedValues(ast.instance, GATE_ANSWER)),
+		new Set([null, 'result']),
+		`${GATE_ANSWER} is assigned only lesser’s answer or a clearing null — a third value is an ownership claim this client made for itself`
+	);
+	assert.equal(
+		readerCallbackParam(ast.instance, 'fetchAgentOwnership'),
+		'result',
+		'and `result` is what the shipped reader’s own callback binds, not a name this probe happened to find'
+	);
+
 	for (const panel of OWNER_GATED_PANELS) {
-		const mounts = mountGates(ast, panel);
-		assert.ok(mounts.length > 0, `MyAgents must mount ${panel} at all`);
+		const mounts = mountGates(ast, panel, GATE_BINDING);
+		assert.ok(mounts.length > 0, `${OWNER_GATE_FILE} must mount ${panel} at all`);
 
 		for (const viewer of VIEWERS) {
-			const agent = toAgentSummary(agentNode(viewer.served));
+			// Authenticated, because the question is: ownership is a statement about
+			// a caller, and the reader answers a missing token itself rather than
+			// sending a request that could only come back false-or-refused. That is
+			// probed on its own below.
+			const { result } = await readOwnership(
+				{ data: { agent: { viewerIsOwner: viewer.served.viewerIsOwner } } },
+				{ accessToken: 'token-bob' }
+			);
+			assert.equal(result.ok, true, `${viewer.name}: the read itself must succeed`);
+			const bindings = { [GATE_BINDING]: ownershipState(result) };
 
 			for (const gates of mounts) {
 				assert.ok(
 					gates.length > 0,
-					`${panel} must mount behind a per-agent gate at all — a session gate alone admits every agent in the list`
+					`${panel} must mount behind an ownership gate at all — a session gate alone admits every viewer of the page`
 				);
 				// EVERY enclosing `{#if}` must admit, which is how the mount is
 				// actually reached — asserting on one of them would let a second,
 				// wider gate be added beside it without notice.
-				const admitted = gates.every((gate) => Boolean(evaluateGate(gate, agent)));
+				const admitted = gates.every((gate) => Boolean(evaluateGate(gate, bindings)));
 				assert.equal(
 					admitted,
 					viewer.admit,
 					`${panel} must ${viewer.admit ? 'mount for' : 'stay unmounted for'} ${viewer.name}` +
-						' — the gate is lesser’s served viewerIsOwner, not the visibility boolean it' +
-						' stood in for before lesser#1418'
+						' — the gate is lesser’s served viewerIsOwner, asked for on the page rather' +
+						' than inherited from a list, and not the visibility boolean it stood in' +
+						' for before lesser#1418'
 				);
 			}
+
+			// THE MOUNT MOVED AND THE RULE DID NOT, measured here rather than
+			// asserted in a comment: the roster's view model and the page's read
+			// reach the same verdict for every viewer lesser distinguishes, because
+			// both are reading the one boolean it serves.
+			assert.equal(
+				toAgentSummary(agentNode(viewer.served)).viewer.isOwner,
+				result.ok && result.isOwner,
+				`${viewer.name}: the gate that moved must decide what the gate it replaced decided`
+			);
 		}
 	}
+});
+
+/* -------------------------------------------------------------------------
+ * The ownership read the agent page's gate asks for (equaltoai/contentus#119)
+ *
+ * ONE MORE READ ON A PAGE THAT ALREADY MADE ONE, and the reason is the page
+ * rather than the panels. `/agents/{username}` is server-rendered anonymously:
+ * the server pass carries no token, because the token is in the reader's
+ * `sessionStorage` where no server pass can reach it, and because this route's
+ * props are serialized into contentus's PUBLIC hydration endpoint, where an
+ * ownership answer about one reader would be served to any other. So the
+ * `viewerIsOwner` the page is painted with is a correct `false` for everybody —
+ * the owner included — and it is not a stale value a refresh would fix. The
+ * gate has to be asked for, and these probes hold what asking costs and what
+ * the answer may be used to conclude.
+ *
+ * WHAT THEY DO NOT RE-PROVE: that the panels are owner-gated server-side.
+ * lesser's `ListByAgent` and `agentActivity` both refuse everyone else, and
+ * that is the real gate. This is the client half — not ASKING on a screen it
+ * should not have drawn, and not DRAWING one either.
+ * ---------------------------------------------------------------------- */
+
+test('the ownership read asks one question and no private field', () => {
+	// ONE FIELD, and the assertion is the selection set rather than a search for
+	// the field's name: `assert.match(…, /viewerIsOwner/)` passes on a document
+	// that also asks for `agentOwner`, which is the whole thing this document must
+	// not do. Every field added here is a field a later surface can start
+	// rendering as an ownership claim, and the narrowness is the same discipline
+	// `AGENT_MCP_ACCESS_QUERY` states for its own selection.
+	assert.match(AGENT_OWNERSHIP_QUERY, /query ContentusAgentOwnership\(/);
+
+	const selection =
+		AGENT_OWNERSHIP_QUERY.match(/agent\(username: \$username\)\s*\{([^}]*)\}/)?.[1] ?? '';
+	assert.deepEqual(
+		selection.split(/[\s,]+/).filter(Boolean),
+		['viewerIsOwner'],
+		'the ownership read selects one field: not `id`, not `username` — the read is addressed by username, so echoing it back proves nothing — and nothing lesser redacts'
+	);
+});
+
+test('the ownership read is not sent at all when there is no token to send it with', async () => {
+	// ANSWERED IN THE READER, not by the instance. Ownership is a statement about
+	// a caller, so an anonymous form of the question has no answer; sending it
+	// anyway would spend a request on a reply that could only be false-or-refused,
+	// and would put a network read on the agent page for every anonymous visitor —
+	// which is the cost this milestone exists to remove, arriving by a new door.
+	//
+	// The stub below answers `viewerIsOwner: true`, so a reader that sent the
+	// request would report an owner. That it reports `unauthenticated` with an
+	// empty request log is the assertion, and it is why the stub is generous.
+	const { seen, result } = await readOwnership({ data: { agent: { viewerIsOwner: true } } });
+
+	assert.deepEqual(seen, [], 'no request is made on behalf of an anonymous reader');
+	assert.equal(result.ok, false);
+	assert.equal(result.failure?.reason, 'unauthenticated');
+
+	// And a handle that is not a handle is refused here rather than sent for
+	// lesser to reject: a not-found this client can see in its own arguments is
+	// not a question worth a request.
+	const { seen: blankSeen, result: blank } = await readOwnership(
+		{ data: { agent: { viewerIsOwner: true } } },
+		{ accessToken: 'token-bob', username: '   ' }
+	);
+	assert.deepEqual(blankSeen, [], 'a blank handle sends nothing either');
+	assert.equal(blank.ok, false);
+	assert.equal(blank.failure?.reason, 'not-found');
+});
+
+test('ownership is lesser’s boolean, read strictly', async () => {
+	// `viewerIsOwner` is `Boolean!` in lesser's schema, so a conforming answer is
+	// true or false. Everything else is read as false, which is the direction
+	// that mounts nothing: an absent field, a null, or the STRING 'true' arriving
+	// from an instance that serialized it differently all shut the gate rather
+	// than opening it on a value this client had to interpret.
+	const { seen, result } = await readOwnership(
+		{ data: { agent: { viewerIsOwner: true } } },
+		{ accessToken: 'token-bob' }
+	);
+	assert.equal(result.ok, true);
+	assert.equal(result.isOwner, true);
+	assert.match(seen[0].query, /query ContentusAgentOwnership\(/);
+	assert.deepEqual(seen[0].variables, { username: 'weatherbot' });
+	assert.equal(seen[0].authorization, 'Bearer token-bob', 'the caller’s own token is forwarded');
+
+	for (const served of ['true', 1, null, undefined, {}]) {
+		const { result: strict } = await readOwnership(
+			{ data: { agent: { viewerIsOwner: served } } },
+			{ accessToken: 'token-bob' }
+		);
+		assert.equal(strict.ok, true, `${JSON.stringify(served)} is still an answer`);
+		assert.equal(
+			strict.isOwner,
+			false,
+			`a served ${JSON.stringify(served)} is not lesser's true, and must not mount an owner's panel`
+		);
+	}
+
+	// An agent the instance will not resolve is a failure, not a `false`: the two
+	// are classified apart below, and folding them here would report a broken read
+	// as lesser's answer about this viewer.
+	const { result: missing } = await readOwnership({ data: { agent: null } }, { accessToken: 't' });
+	assert.equal(missing.ok, false);
+	assert.equal(missing.failure?.reason, 'not-found');
+});
+
+test('four states, because three of them are different facts that all permit nothing', () => {
+	// THE CLASSIFIER IS THE CONTRACT, and it is a pure function so this drives it
+	// directly instead of inferring a verdict from a rendered screen.
+	assert.equal(ownershipState(null), 'unknown', 'nothing has asked yet');
+	assert.equal(ownershipState({ ok: true, isOwner: true }), 'owner');
+	assert.equal(ownershipState({ ok: true, isOwner: false }), 'not-owner', 'lesser’s served false');
+	assert.equal(
+		ownershipState({ ok: false, failure: { reason: 'transport', message: 'No answer.' } }),
+		'unanswered',
+		'lesser did not answer at all'
+	);
+
+	// AND THE ONE COLLAPSION THIS FACE FORBIDS, asserted as the inequality it is.
+	// `unanswered` and `not-owner` both mount nothing, which makes folding them
+	// the tempting simplification — and folding them tells an owner whose read hit
+	// a network fault that this instance said they do not own their agent. That is
+	// asserting access lesser has not confirmed, in the negative direction, which
+	// is the same substitution the invariant rules out in the positive one.
+	assert.notEqual(
+		ownershipState({ ok: false, failure: { reason: 'transport', message: 'No answer.' } }),
+		ownershipState({ ok: true, isOwner: false }),
+		'a read that failed is not a served no'
+	);
+});
+
+test('the gate mounts on one state and speaks on one other', () => {
+	// `unknown` and `not-owner` render NOTHING and say nothing: a management
+	// surface that is absent is not a claim, and announcing the absence to every
+	// visitor who does not own the agent is noise about a question they did not
+	// ask. `unanswered` is the one branch that speaks, because it is the one where
+	// silence would be read as an answer. What this pins is that those are the
+	// only two branches the component has — a third comparison is a third way to
+	// mount, and it would not be `owner`.
+	const ast = parse(readFileSync(join(repoRoot, 'src/lib/agents', OWNER_GATE_FILE), 'utf8'), {
+		modern: true,
+	});
+
+	const branches = [];
+	for (const { node } of walkTemplate(ast.fragment)) {
+		if (node.type !== 'IfBlock') continue;
+		if (!expressionReads(node.test, GATE_BINDING)) continue;
+		const test = node.test;
+		branches.push(
+			test?.type === 'BinaryExpression' && test.right?.type === 'Literal'
+				? test.right.value
+				: `<${test?.type ?? 'missing'}>`
+		);
+	}
+
+	assert.deepEqual(
+		branches,
+		['owner', 'unanswered'],
+		'the ownership gate branches on `owner` to mount and on `unanswered` to explain, and on nothing else'
+	);
+});
+
+test('the agent page’s server pass asks nothing about the viewer', async () => {
+	// THE PUBLIC HALF OF THE SPLIT. This route's props are serialized into
+	// contentus's public hydration endpoint, so a server-side ownership read
+	// would put one reader's answer behind a URL anyone could request — the
+	// defect `myAgents is never fetched on the server pass` holds against the
+	// roster, on the page the owner's panels moved to. What the server paint
+	// costs is therefore part of this milestone's contract: one anonymous detail
+	// read, and nothing about the viewer.
+	const handler = await loadHandler();
+	const { value, requests } = await withStubbedGraphql(
+		({ operation }) =>
+			operation === 'ContentusAgent' ? { data: { agent: agentNode() } } : { data: null },
+		() => renderRoute(handler, route('agent-detail'))
+	);
+
+	assert.equal(value.status, 200);
+	assert.deepEqual(
+		requests.filter((r) => r.operation === 'ContentusAgentOwnership'),
+		[],
+		'the ownership read is client-only'
+	);
+	assert.equal(
+		requests.filter((r) => r.operation === 'ContentusAgent').length,
+		1,
+		'and the page’s own read is still exactly one'
+	);
+	assert.equal(requests[0].authorization, null, 'which the server makes anonymously');
+
+	// Nothing of the client-only half is in the paint either: no ownership copy,
+	// and neither owner panel — which is also what makes the notice's wording safe
+	// to write at all, since it can only ever be read by the viewer it is about.
+	assert.ok(!value.html.includes('is yours'), 'no ownership statement is served publicly');
+	assert.ok(!value.html.includes('Sharing @weatherbot'), 'and no owner panel is in the paint');
+});
+
+test('neither list on the agents route reads per agent', () => {
+	// THE TWO COUNTS THIS MILESTONE EXISTS TO CHANGE, held at their new values.
+	// Opening `/agents` used to cost 2M requests for M owned agents — a share
+	// grant list and an activity log per owned agent, mounted from the roster
+	// before anyone had said which agent they cared about — and one MCP-access
+	// read per shared-with-me row on top. A list is navigation: it costs one read
+	// for itself and nothing per row.
+	//
+	// STRUCTURAL, and labelled as one, because the repo has no DOM harness: this
+	// reads each component's COMPILED client script and counts dispatch sites.
+	// What that proves is stronger than a request count over one render — no
+	// per-agent reader is even in scope on either list, so a loop this probe
+	// cannot see would still have to name one to call it.
+	const LISTS = [
+		{
+			file: 'MyAgents.svelte',
+			reads: ['fetchMyAgents'],
+			neverNames: [
+				'listShareGrants',
+				'loadAgentDrivers',
+				'fetchAgentOwnership',
+				'fetchAgentMcpAccess',
+			],
+			neverMounts: ['AgentSharingPanel', 'AgentDriversPanel', 'AgentOwnerPanels'],
+		},
+		{
+			file: 'AgentSharedWithMePanel.svelte',
+			reads: ['listSharedWithMe'],
+			neverNames: [
+				'listShareGrants',
+				'loadAgentDrivers',
+				'fetchAgentOwnership',
+				'fetchAgentMcpAccess',
+			],
+			neverMounts: [],
+		},
+	];
+
+	for (const list of LISTS) {
+		const source = readFileSync(join(repoRoot, 'src/lib/agents', list.file), 'utf8');
+		const ast = parse(source, { modern: true });
+		const named = sourceIdentifiers(liveScript(list.file, source));
+
+		for (const read of list.reads) {
+			assert.ok(named.includes(read), `${list.file} reads its own list, through ${read}`);
+			const dispatches = [...walkAst(ast.instance)].filter(
+				(node) => node.type === 'CallExpression' && node.callee?.name === read
+			);
+			assert.equal(
+				dispatches.length,
+				1,
+				`${list.file} dispatches ${read} from exactly one place: a second dispatch is a second reader, and a dispatch inside a row loop is the fan-out returning`
+			);
+		}
+
+		for (const reader of list.neverNames) {
+			assert.ok(
+				!named.includes(reader),
+				`${list.file} must not name ${reader} — a per-agent read on a list is one request per row on it, for agents the reader has not chosen`
+			);
+		}
+
+		// COMPILED SOURCE, not the file: both components discuss where the owner's
+		// panels went at length, so a text search matches the explanation and
+		// passes on a component that put the mount back.
+		for (const panel of list.neverMounts) {
+			assert.ok(
+				!named.includes(panel),
+				`${list.file} must not mount ${panel}: the owner's panels are on the agent page (equaltoai/contentus#119)`
+			);
+		}
+	}
+});
+
+test('no component on the face binds a rune’s name', () => {
+	// WHY THIS IS A PROBE AND NOT A STYLE PREFERENCE. `$state` in a Svelte
+	// component is ambiguous: it is the rune, and it is also the auto-subscription
+	// of a store named `state`. A component that BINDS that name and calls
+	// `$state<T>(…)` anywhere else in the same file has every one of those calls
+	// read as the subscription instead, and what `svelte-check` then reports is not
+	// "you named a variable badly" but six errors about untyped calls taking type
+	// arguments and values inferred as `any` from a circularity that does not exist
+	// — including the ownership gate's own classification. Found on this face in
+	// equaltoai/contentus#119, where the binding was
+	// `const state = $derived(ownershipState(ownership))` beside two `$state<…>`
+	// declarations, and the fix was a rename.
+	//
+	// THE BUILD IS THE REAL GATE AND THIS IS THE CHEAP ONE. `pnpm build` runs
+	// `svelte-check --threshold error`, so that combination cannot ship. What the
+	// build does NOT catch is the same collision in a file that spells `$state(…)`
+	// with no type argument: the rune still resolves to the subscription, the
+	// binding is simply `any`, and nothing reports. That case is silent, which is
+	// why the name is refused outright rather than only in the reported
+	// combination — and why the refusal covers every rune, not only `state`.
+	//
+	// SCOPED TO THE FACE because that is the tree this change touched. The rest of
+	// the repository has two `state` bindings today and neither is in the reported
+	// combination (`components/auth/Root.svelte` makes no other `$state` call,
+	// `review/VerdictPanel.svelte` makes none at all), so widening this is a
+	// follow-up rather than something this milestone can assert honestly.
+	const RUNE_NAMES = ['state', 'derived', 'props', 'effect', 'bindable', 'inspect'];
+
+	const offenders = [];
+	for (const path of trackedSource(repoRoot, 'src/lib/agents', /\.svelte$/)) {
+		const ast = parse(readFileSync(path, 'utf8'), { modern: true });
+		for (const node of walkAst(ast.instance)) {
+			if (node.type !== 'VariableDeclarator') continue;
+			const names =
+				node.id?.type === 'Identifier'
+					? [node.id.name]
+					: node.id?.type === 'ObjectPattern'
+						? node.id.properties
+								.map((property) => property.value?.name ?? property.key?.name)
+								.filter(Boolean)
+						: [];
+			for (const name of names)
+				if (RUNE_NAMES.includes(name)) offenders.push(`${relative(repoRoot, path)}: ${name}`);
+		}
+	}
+
+	assert.deepEqual(
+		offenders,
+		[],
+		'a binding named after a rune makes every call of that rune in the file ambiguous to the language tooling — rename the binding, not the rune'
+	);
 });
 
 /* -------------------------------------------------------------------------
@@ -1017,7 +1572,7 @@ function scriptStrings(file) {
 	return strings.filter((value) => typeof value === 'string');
 }
 
-test('the grantee’s panel reads the connect endpoint and assembles no part of it', () => {
+test('the grantee’s panel assembles no part of an endpoint, and links to the page that states it', () => {
 	// PARSED, not grepped: the panel's prose discusses `api.<domain>` and
 	// `/mcp/<actor>` at length precisely because it must not build them, so a
 	// text search over this file matches the documentation and proves nothing.
@@ -1032,21 +1587,63 @@ test('the grantee’s panel reads the connect endpoint and assembles no part of 
 		}
 	}
 
-	// And the positive half, because "no URL literals" is also true of a panel
-	// that shows no endpoint at all: the value must arrive through lesser's read
-	// and be classified by the one function that refuses to substitute for it.
-	const named = sourceIdentifiers(
-		liveScript(
-			'AgentSharedWithMePanel.svelte',
-			readFileSync(join(repoRoot, 'src/lib/agents/AgentSharedWithMePanel.svelte'), 'utf8')
-		)
+	// THE POSITIVE HALF CHANGED WITH THE ROW (equaltoai/contentus#119), AND IT IS
+	// STILL THE HALF THAT MATTERS. "No URL literals" is equally true of a panel
+	// that shows no endpoint at all, so what the panel DOES is asserted beside it.
+	// It used to be a read: `fetchAgentMcpAccess` once per grant, classified by
+	// `sharedMcpAccess`, printing one URL beside the link that led to it. It is now
+	// the link — lesser's whole bundle is rendered on the agent page from
+	// `AGENT_DETAIL_QUERY`, for the one agent the reader actually opened — so the
+	// assertion is that every row goes there, and that no MCP reader is in scope
+	// here to reach the fan-out by. Both classifier and reader left with their
+	// only caller: an export nothing calls is a rule nobody is following.
+	const source = readFileSync(
+		join(repoRoot, 'src/lib/agents/AgentSharedWithMePanel.svelte'),
+		'utf8'
 	);
-	assert.ok(named.includes('fetchAgentMcpAccess'), 'the endpoint comes from lesser’s bundle');
-	assert.ok(named.includes('sharedMcpAccess'), 'and is classified without being added to');
+	const named = sourceIdentifiers(liveScript('AgentSharedWithMePanel.svelte', source));
+	assert.ok(
+		!named.includes('fetchAgentMcpAccess'),
+		'the panel reads no MCP bundle: one read per row to restate a URL is a request per row for the page that states it in full'
+	);
 	assert.ok(
 		!named.includes('location'),
 		'never from the page origin, which is the app host and a different one'
 	);
+	assert.ok(
+		named.includes('agentHref'),
+		'and the way off a row is the routing helper, not an address this file spelled'
+	);
+
+	// EVERY ROW, rather than "there is a link in the file". A row with no way off
+	// it is the defect the endpoint's removal would otherwise leave behind: the
+	// grantee is told they hold access to an agent and given nowhere to go.
+	const ast = parse(source, { modern: true });
+	const lists = [...walkAst(ast.fragment)].filter(
+		(node) =>
+			node.type === 'EachBlock' &&
+			node.expression?.type === 'MemberExpression' &&
+			node.expression.object?.name === 'ledger' &&
+			node.expression.property?.name === 'current'
+	);
+	assert.equal(lists.length, 1, 'the panel lists the classifier’s active side exactly once');
+
+	const links = [...walkAst(lists[0].body)].filter(
+		(node) => node.type === 'RegularElement' && node.name === 'a'
+	);
+	assert.ok(links.length > 0, 'and a row is not a dead end');
+	for (const link of links) {
+		const href = [...walkAst(link.attributes)].find(
+			(node) => node.type === 'CallExpression' && node.callee?.name === 'agentHref'
+		);
+		assert.ok(href, 'the way off a row is the agent page, through the routing helper');
+		assert.equal(
+			href.arguments?.[0]?.object?.name,
+			'grant',
+			'and it is THIS row’s agent — a link built from anything else sends every row to one page'
+		);
+		assert.equal(href.arguments?.[0]?.property?.name, 'agent_username');
+	}
 });
 
 /**
@@ -1354,143 +1951,47 @@ function isCurrentListBranch(node) {
 	);
 }
 
-/**
- * The node types that decide, at the fan-out's own level, whether a row is
- * reached — every spelling of "this one, not that one" that does not need a
- * `.filter` to be written.
+/* THE MCP FAN-OUT'S PROVING MACHINERY WENT WITH THE FAN-OUT
+ * (equaltoai/contentus#119), and what it proved is recorded here rather than
+ * left as a hole, because it was a large piece of this file and a reader will
+ * look for it.
  *
- * CLOSED OVER JAVASCRIPT'S CONDITIONALS, not over the three shapes that occurred
- * to the author. The first version of this set held `IfStatement`,
- * `ConditionalExpression` and `ContinueStatement`, and a mutant sweep walked
- * `grant.active && void fetchAgentMcpAccess(…)` straight through it: a
- * `LogicalExpression` guards a dispatch with no `if` anywhere, and a `switch`
- * whose losing case `break`s does the same in a third spelling. A probe a
- * one-character bypass survives is not the proof the comment above claims, so
- * the set is now enumerated from the language — `if`, `?:`, `&&`/`||`/`??`,
- * `switch`, and the two jumps that skip a row inside a loop — rather than from
- * the defect that prompted it.
+ * WHAT IT WAS. `AgentSharedWithMePanel` read one MCP-access bundle per grant —
+ * `fetchAgentMcpAccess` in a loop over `accessLedger(result).current`, each
+ * publish guarded by the session stamp and the abort. Two probes held it: that
+ * the loop was handed the classifier's ACTIVE side and not lesser's unsplit
+ * answer, and that it narrowed nothing on the way — no `if`, no `?:`, no `&&`,
+ * no `switch`, no `continue`/`break`, and one allowlisted read (`map`) of the
+ * list it was given. Behind them stood an enumerated closure over JavaScript's
+ * conditionals, a walk that stopped at nested scopes so a publish guard was not
+ * misread as a row selection, and a mutant sweep that had already found one
+ * bypass a narrower enumeration let through.
  *
- * WHAT IS STILL OUTSIDE IT, and why that is not a silent gap: a narrowing
- * written inside a nested callback, which `walkOwnScope` deliberately does not
- * reach, for the reason stated there. Everything the fan-out's own scope can use
- * to skip a row is in this set; if a spelling is found that is not, the sweep
- * that finds it is the one that adds it.
+ * WHY DELETING IT IS NOT A LOSS OF COVERAGE. The subject is gone: the panel
+ * makes one request, the grant list, and reads no MCP bundle at all. There is no
+ * second reader of the classified set for a second classifier to disagree with,
+ * which is the defect that machinery existed to make impossible. The properties
+ * it was built from are still held, and by stronger probes because they no
+ * longer have to reason about a loop: `the grantee list is the classifier's
+ * output` still holds the rendered list to `accessLedger` and forbids a
+ * `.filter` written back beside it; `neither list on the agents route reads per
+ * agent` counts the panel's dispatch sites and asserts no per-agent reader is
+ * even in scope on it; and `the grantee's panel assembles no part of an
+ * endpoint` holds what the fan-out was FOR — that the endpoint is lesser's
+ * string and never built here — now on the page that states the whole bundle.
+ *
+ * WHAT WOULD BRING IT BACK. A second per-row read on any list. If one is ever
+ * added, the provenance question returns with it and so does the enumeration —
+ * recovered from this file's history rather than rewritten, since the lesson it
+ * encoded was that a narrowing can be spelled six ways and a probe that lists
+ * three of them is a probe a one-character bypass survives.
  */
-const ROW_NARROWING = new Set([
-	'IfStatement',
-	'ConditionalExpression',
-	'LogicalExpression',
-	'SwitchStatement',
-	'ContinueStatement',
-	'BreakStatement',
-]);
-
-/**
- * The reads the fan-out may make on the classified list it was handed: `map`
- * seeds one loading state per row and touches no membership.
- *
- * ONE ENTRY, AND SHORT ON PURPOSE. `filter` is the defect by name, but `slice`,
- * `reduce`, `findIndex` and an index are selections too, and the honest closure
- * over "reads that cannot drop a row" is not a list this probe can be sure it
- * finished. So the allowlist names what the panel does rather than what it may
- * not do, and a new read fails until it is added deliberately.
- */
-const FAN_OUT_ROW_READS = ['map'];
-
-/** The expressions a walk must stop at, because they open a scope of their own. */
-const NESTED_SCOPES = new Set([
-	'ArrowFunctionExpression',
-	'FunctionExpression',
-	'FunctionDeclaration',
-]);
-
-/**
- * Every node in `root`'s OWN scope: the walk stops AT a nested function rather
- * than descending into it.
- *
- * THE BOUNDARY IS THE CLAIM, not an optimisation. What the fan-out probe asks is
- * which rows enter the dispatch loop, and that is settled by `loadAccess`'s own
- * statements. The guards inside its `.then` callbacks answer a different
- * question — whether a row's ANSWER may paint, which is the session stamp and
- * the abort, both probed above — so a walk that descended into them would read a
- * publish guard as a row selection and the assertion below would be
- * unsatisfiable by correct code. That is not hypothetical and it is checkable:
- * the callback's own guard is `if (signal.aborted || !scope.holds(stamp))`,
- * which is two members of `ROW_NARROWING` in one line, so the correct panel
- * passing the narrowing assertion is itself the evidence this walk stops where
- * it says it does.
- *
- * WHAT IT THEREFORE DOES NOT REACH, said rather than left as silence: a
- * selection written inside one of those callbacks. That would not change which
- * agents lesser is asked about; it would suppress a row's answer after the fact,
- * and it is the stamp/abort probes that own that surface.
- */
-function* walkOwnScope(root) {
-	function* visit(node, isRoot) {
-		if (!node || typeof node !== 'object') return;
-		if (Array.isArray(node)) {
-			for (const item of node) yield* visit(item, false);
-			return;
-		}
-		if (!isRoot && NESTED_SCOPES.has(node.type)) return;
-		yield node;
-		for (const [key, value] of Object.entries(node)) {
-			if (key === 'parent' || key === 'loc') continue;
-			yield* visit(value, false);
-		}
-	}
-
-	yield* visit(root, true);
-}
 
 /** The initializer of `<name> = …` in a parsed script, or null when nothing declares it. */
 function declaratorInit(script, name) {
 	for (const node of walkAst(script))
 		if (node.type === 'VariableDeclarator' && node.id?.name === name) return node.init ?? null;
 	return null;
-}
-
-/**
- * Whether an expression IS a call to `accessLedger`, followed one name at a time
- * through the script's own declarations.
- *
- * `$derived(accessLedger(grants))` is how this panel holds the classification for
- * the template, so both that and the bare call are the classifier — what is
- * refused is a set that merely resembles one. `seen` is not tidiness: `let a = b`
- * beside `let b = a` would otherwise spin, and a probe that hangs is a probe that
- * never says no.
- */
-function isClassifierCall(script, expression, seen) {
-	if (expression?.type === 'Identifier') {
-		if (seen.has(expression.name)) return false;
-		seen.add(expression.name);
-		return isClassifierCall(script, declaratorInit(script, expression.name), seen);
-	}
-	if (expression?.type !== 'CallExpression') return false;
-	if (expression.callee?.name === '$derived')
-		return isClassifierCall(script, expression.arguments?.[0], seen);
-	return expression.callee?.name === 'accessLedger';
-}
-
-/**
- * Whether an expression is the classifier's ACTIVE side — `accessLedger(…).current`.
- *
- * The side is named as strictly as the call is. `.revoked` and `.unreadable` are
- * the other two answers `accessLedger` gives, and a fan-out reading either would
- * be asking lesser about agents this reader is not being shown.
- */
-function isActiveSide(script, expression, seen = new Set()) {
-	if (expression?.type === 'Identifier') {
-		if (seen.has(expression.name)) return false;
-		seen.add(expression.name);
-		return isActiveSide(script, declaratorInit(script, expression.name), seen);
-	}
-	return (
-		expression?.type === 'MemberExpression' &&
-		expression.computed !== true &&
-		expression.property?.name === 'current' &&
-		isClassifierCall(script, expression.object, seen)
-	);
 }
 
 test('the grantee list is the classifier’s output, never a truthiness filter', () => {
@@ -1521,16 +2022,19 @@ test('the grantee list is the classifier’s output, never a truthiness filter',
 		'and never iterate lesser’s unsplit answer, which is where a revoked or unclassified row reaches the screen'
 	);
 
-	// The MCP fan-out is the second reader of the same set, and it carried its
-	// own copy of the truthiness filter. Two filters that must agree are one
-	// correction away from disagreeing, so the assertion is that only one
-	// classifier exists in the file.
+	// ONE CLASSIFIER IN THE FILE, and there used to be a reason to say it that has
+	// gone: the MCP fan-out was a second reader of the same set and carried its
+	// own copy of the truthiness filter, so two filters that had to agree were one
+	// correction away from disagreeing. equaltoai/contentus#119 removed that reader
+	// — the panel makes one request and links to the agent page — and the
+	// assertion stays, because a `.filter` written back beside `accessLedger` is
+	// the same defect whether or not anything else reads the set.
 	//
 	// THIS IS THE FILTER'S ABSENCE AND NOTHING MORE. It says no `.filter` was
-	// written back; it does not say the fan-out reads the classification, which
-	// is a claim about provenance and is asserted in the probe below. Neither
-	// stands in for the other: a fan-out handed lesser's unsplit answer passes
-	// this assertion exactly, and a fan-out that filters passes the next one.
+	// written back; it does not say what the panel reads instead, which
+	// `neither list on the agents route reads per agent` counts, and it does not
+	// say where a row goes, which `the grantee's panel assembles no part of an
+	// endpoint` holds. Neither stands in for the other.
 	assert.ok(
 		!callsFn(ast.instance, 'filter'),
 		'the panel must not filter the grant list itself: `accessLedger` is the classification, and a second filter beside it is the half a fix forgets'
@@ -1538,70 +2042,6 @@ test('the grantee list is the classifier’s output, never a truthiness filter',
 	assert.ok(
 		callsFn(ast.instance, 'accessLedger'),
 		'and it must actually classify — a list rendered straight from lesser’s answer is the defect with the filter merely deleted'
-	);
-});
-
-test('the MCP fan-out is handed the classifier’s active side, and narrows nothing of its own', () => {
-	// WHAT THE MISSING `.filter` DOES NOT PROVE, and this probe exists because it
-	// does not: three bypasses satisfy the assertion above untouched. Handing the
-	// fan-out lesser's unsplit answer — `loadAccess(result, …)` — writes no filter
-	// at all. A loop over the module's own `grants` state ignores what it was
-	// given. A `continue` drops rows one at a time. Each is the second classifier
-	// returning in a spelling the first probe cannot see, and the panel's
-	// correctness rests on the claim it cannot make: that the rows the fan-out
-	// asks lesser about ARE the rows the list renders — one classification of one
-	// answer, not two sets that happen to agree today.
-	const ast = sharedPanelAst();
-
-	// HALF ONE — WHAT IT IS HANDED, followed by name through the instance script
-	// because the panel may pass either `accessLedger(result).current` or the
-	// `$derived` it already holds, and both are the classification.
-	const dispatches = [];
-	for (const node of walkAst(ast.instance))
-		if (node.type === 'CallExpression' && node.callee?.name === 'loadAccess') dispatches.push(node);
-
-	assert.equal(dispatches.length, 1, 'the fan-out is dispatched from exactly one place');
-	assert.ok(
-		isActiveSide(ast.instance, dispatches[0].arguments?.[0]),
-		'and is handed the classifier’s active side — `accessLedger(…).current`, not lesser’s unsplit answer and not another side of the ledger, either of which asks about agents the reader is not being shown'
-	);
-
-	// HALF TWO — WHAT IT DOES WITH IT. Provenance at the call site is undone by a
-	// narrowing inside the callee, so the parameter has to reach the dispatch loop
-	// as it arrived.
-	const fanOut = [...walkAst(ast.instance)].find(
-		(node) => node.type === 'FunctionDeclaration' && node.id?.name === 'loadAccess'
-	);
-	assert.ok(fanOut, 'the fan-out is a declaration this probe can read, not a value it cannot');
-
-	const rows = fanOut.params?.[0]?.name;
-	assert.ok(rows, 'and binds its classified list to a plain name');
-
-	const iterated = [];
-	const narrowing = [];
-	const reads = [];
-	for (const node of walkOwnScope(fanOut.body)) {
-		if (node.type === 'ForOfStatement') iterated.push(node.right);
-		if (ROW_NARROWING.has(node.type)) narrowing.push(node.type);
-		if (node.type === 'MemberExpression' && node.object?.name === rows)
-			reads.push(node.computed ? '[computed]' : (node.property?.name ?? '[unnamed]'));
-	}
-
-	assert.equal(iterated.length, 1, 'the fan-out dispatches from exactly one loop');
-	assert.equal(
-		iterated[0]?.type === 'Identifier' ? iterated[0].name : `<${iterated[0]?.type}>`,
-		rows,
-		'which iterates the list it was handed, bare — a loop over the module’s own `grants`, or over a re-selection of the parameter, is the classification being redone by the half that must not redo it'
-	);
-	assert.deepEqual(
-		narrowing,
-		[],
-		`and drops no row of it on the way: ${narrowing.join(', ')} decides per row whether lesser is asked, which is a second classifier however few lines it takes`
-	);
-	assert.deepEqual(
-		[...new Set(reads)].sort(),
-		FAN_OUT_ROW_READS,
-		`and reads the list only to seed one loading state per row: ${JSON.stringify([...new Set(reads)].sort())}. The allowlist is deliberately one entry long — a new read is not assumed to be a selection, it is asked to be shown not to be`
 	);
 });
 
@@ -1740,9 +2180,15 @@ test('the owner grant list is read on the owner path and nowhere else', () => {
 	// construction — `ListByAgent` authorizes first, and the grantee's
 	// `shared-with-me` list has revoked rows filtered out at the index. What
 	// contentus owes is not to widen that: the read stays in the panel
-	// `MyAgents` mounts behind lesser's `agent.owner` statement (probed above),
-	// and any second caller would be a surface reaching for the audit view
-	// without that gate over it.
+	// `AgentOwnerPanels` mounts on the agent page behind lesser's served
+	// `viewerIsOwner` (probed above), and any second caller would be a surface
+	// reaching for the audit view without that gate over it.
+	//
+	// THE MOUNT MOVED IN equaltoai/contentus#119 AND THIS ASSERTION DID NOT, which
+	// is the point of keeping it as a caller sweep rather than as a fact about one
+	// file's template: it names no parent, so relocating the panel changed where
+	// the gate is and left the claim — one caller, the owner's panel — exactly as
+	// it was.
 	const callers = [];
 
 	for (const path of trackedSource(repoRoot, 'src', MODULE_SOURCE)) {

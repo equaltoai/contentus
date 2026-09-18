@@ -19,6 +19,15 @@
  * the roster and the MCP detail separately, and the page that arranges them is
  * contentus's until it does.
  *
+ * THE DETAIL SEAM IS NOT ONLY THE PUBLIC HALF. It also owns the owner's two
+ * panels and the client-only gate that mounts them, moved off the roster seam by
+ * equaltoai/contentus#119 — see the comment on that `owns` list for the argument
+ * this file used to make the other way, and why it stopped holding. A seam's
+ * declaration is a statement about what a swap takes with it, not about which
+ * viewers may see it: replacing `AgentDetail.svelte` replaces the owner's grant
+ * ledger and activity log too, and saying so is what keeps them from being
+ * orphaned by that swap.
+ *
  * `owns` is what a seam takes with it when it is replaced. `nests` is a seam
  * composed by another seam — the only cross-seam import that is not a defect,
  * because it is the one that keeps the MCP panel independently swappable.
@@ -34,24 +43,38 @@ export const SEAMS = {
 	'AgentRoster.svelte': {
 		owns: [
 			'AgentCard.svelte',
-			// The owner's "who has been driving" view (M2.4,
-			// equaltoai/contentus#95) sits behind this seam for the same reason
-			// `AgentSharingPanel` does: `MyAgents` mounts it per owned agent, so a
-			// swap that replaces the roster orphans it. It is not SHARED — the
-			// detail route has no owner-only surface to mount it on — and it is not
-			// a seam of its own, because there is no greater component in prospect
-			// that would replace an activity-log view independently of the roster
-			// that carries it.
-			'AgentDriversPanel.svelte',
 			'AgentRosterFilters.svelte',
 			'AgentSharedWithMePanel.svelte',
-			'AgentSharingPanel.svelte',
 			'MyAgents.svelte',
 		],
 		nests: [],
 	},
 	'AgentDetail.svelte': {
-		owns: ['AgentCapabilities.svelte', 'AgentTrustDetail.svelte'],
+		owns: [
+			'AgentCapabilities.svelte',
+			// The owner's two panels and the gate that mounts them, moved here from
+			// the roster seam in equaltoai/contentus#119. The comment this replaces
+			// argued they belonged behind `AgentRoster.svelte` because `MyAgents`
+			// mounted them per owned agent, and said in terms that they could not
+			// move: "the detail route has no owner-only surface to mount it on".
+			// That was true of the route's ANONYMOUS server paint, which is what it
+			// was read as — and it is why the move needed `AgentOwnerPanels.svelte`,
+			// a client-only component that asks lesser the ownership question the
+			// server pass structurally cannot answer. The detail page has an
+			// owner-only surface now, and it is the right home: these are per-agent
+			// reads, so they belong on the per-agent page a human navigates to, not
+			// on a list that eagerly issued two of them for every agent the viewer
+			// owned.
+			//
+			// Still not a seam of its own, for the reason that has not changed:
+			// there is no greater component in prospect that would replace an
+			// owner's grant ledger or activity log independently of the page that
+			// arranges them.
+			'AgentDriversPanel.svelte',
+			'AgentOwnerPanels.svelte',
+			'AgentSharingPanel.svelte',
+			'AgentTrustDetail.svelte',
+		],
 		nests: ['AgentMcpPanel.svelte'],
 	},
 	'AgentMcpPanel.svelte': {

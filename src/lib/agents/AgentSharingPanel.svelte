@@ -36,17 +36,22 @@ CMS — that surface was the M7 tree's one mistake and went in M2.1. Saying
 "the ability to act as" here, as this lede once did, is how an owner comes to
 believe they granted the thing the CMS no longer offers.
 
-CLIENT-ONLY, FOR THE SAME REASON THE OWNED ROSTER IS. The grants are
+CLIENT-ONLY, AND ON THIS PAGE THAT IS NOT A PREFERENCE. The grants are
 owner-private (who holds access to your agent is the sensitive half of the
-capability), the token lives in `sessionStorage`, and the route's props are
-serialized into the PUBLIC hydration endpoint. So nothing renders on the
-server; `MyAgents.svelte` mounts this only for an authenticated reader.
+capability), the token lives in `sessionStorage`, and this route's props are
+serialized into the PUBLIC hydration endpoint. So nothing renders on the server;
+`AgentOwnerPanels.svelte` — the client-only gate the agent page composes — mounts
+this only for an authenticated reader lesser has answered `viewerIsOwner` to.
+Until equaltoai/contentus#119 the parent was `MyAgents.svelte`, whose whole read
+was authenticated and client-only anyway; the parent changed and this rule did
+not.
 
-IT ENDS WITH THE SESSION, the same way its parent does: cancelled first, then
-the stamps it was taken under stop being held, then the screen is emptied.
-A response already parsed is not un-parsed by an abort, so `session-scope` is
-what decides what publishes — the same discipline as the owned roster, on a
-smaller surface with the same private subject.
+IT ENDS WITH THE SESSION, the same way the gate that mounts it does: cancelled
+first, then the stamps it was taken under stop being held, then the screen is
+emptied. A response already parsed is not un-parsed by an abort, so
+`session-scope` is what decides what publishes — the same discipline as the owned
+roster this panel used to hang off, on a smaller surface with the same private
+subject.
 
 HONEST DEGRADE, NOT A DEAD CONTROL, AND NOT AN INSTANCE-WIDE CLAIM. The
 vendored OpenAPI defines 404 as one of this route's normal responses on a

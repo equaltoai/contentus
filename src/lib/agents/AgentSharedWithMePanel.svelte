@@ -17,17 +17,27 @@ button is gone. lesser still records the real caller, the review workspace
 still displays it, and `$lib/review/ActAsBanner` still names an active
 selection wherever one exists.
 
-THE ENDPOINT IS LESSER'S, AND THIS PANEL BUILDS NO PART OF IT. `mcpAccess`
-comes from `BuildPublicMCPAccessBundle` (lesser `pkg/auth/mcp_access.go`),
-which is documented as the client-neutral actor-scoped MCP access surface
-"that can be shown by agent UIs without provisioning connector state" — so
-showing it is exactly its published purpose, and nothing here provisions a
-lease, a token, or connector state of any kind. The instance canonicalises MCP
-onto `api.<domain>` while the authorization server stays on the apex; only the
-instance knows that, so the URL is read, never assembled. Only the endpoint is
-shown here — `AgentDetail`'s MCP panel is where the REST of the bundle lives
-(OAuth parameters, scopes, guidance, reachability), and the row links to it
-rather than restating it.
+THE ENDPOINT IS NOT SHOWN HERE ANY MORE, AND THIS PANEL STILL BUILDS NO PART OF
+IT. It used to read one MCP-access bundle per row — `fetchAgentMcpAccess` once
+per grant, dispatched together — so a grantee with M shares cost M GraphQL reads
+to paint M links, and what all of them bought was one URL that the row's own link
+leads to in full (equaltoai/contentus#119). `AgentDetail`'s MCP panel is where
+lesser's bundle is rendered — endpoint, OAuth parameters, scopes, guidance,
+reachability — from `AGENT_DETAIL_QUERY`, for the one agent the reader actually
+opened. This panel lists the grants and links there.
+
+The bundle is still entirely lesser's: `mcpAccess` comes from
+`BuildPublicMCPAccessBundle` (lesser `pkg/auth/mcp_access.go`), documented as the
+client-neutral actor-scoped MCP access surface "that can be shown by agent UIs
+without provisioning connector state", and nothing here provisions a lease, a
+token, or connector state of any kind. The instance canonicalises MCP onto
+`api.<domain>` while the authorization server stays on the apex; only the instance
+knows that, so the URL is read, never assembled — which is the same reason it is
+read on the agent page rather than derived here.
+
+ONE REQUEST, AND IT IS THE GRANT LIST. This panel is on the `/agents` route
+beside the public roster, so what it costs to open that page is part of its
+contract and not an implementation detail.
 
 STALE SELECTIONS DIE HERE, AND THAT IS NOT TIDINESS. Nothing in this face
 writes an act-as selection any more, so a stored one can only be the artifact
@@ -53,14 +63,17 @@ with this reader is not, so they are emptied with everything else.
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 	import { accessTokenOrNull, isAuthenticated } from '$lib/auth/session';
 	import { onSessionChange, sessionGeneration } from '$lib/auth/session-events';
-	import { createSessionScope, type SessionStamp } from '$lib/auth/session-scope';
+	import { createSessionScope } from '$lib/auth/session-scope';
 
 	import { agentHref } from '../../facetheory/routing';
 	import { clearActAs } from './act-as';
-	import { fetchAgentMcpAccess } from './contract';
-	import { sharedMcpAccess, type SharedMcpAccess } from './mcp';
 	import { listSharedWithMe, ShareClientError, type AgentShareGrant } from './share-client';
-	import { accessLedger, noSharedAgentsStatement, unlistedSharesNotice } from './share-view';
+	import {
+		accessLedger,
+		grantStamp,
+		noSharedAgentsStatement,
+		unlistedSharesNotice,
+	} from './share-view';
 
 	let session = $state<'unknown' | 'anonymous' | 'authenticated'>('unknown');
 
@@ -75,17 +88,8 @@ with this reader is not, so they are emptied with everything else.
 		| { status: 'unavailable'; message: string }
 		| { status: 'ready' };
 
-	/**
-	 * What lesser answered about one agent's MCP surface, plus the state before
-	 * it has answered. The three served answers — and the reason `none` and
-	 * `unavailable` are not one answer — are `sharedMcpAccess`'s to define; this
-	 * only adds the row's own "not back yet".
-	 */
-	type RowAccess = SharedMcpAccess | { status: 'loading' };
-
 	let shareState = $state<PanelShareState>({ status: 'loading' });
 	let grants = $state<AgentShareGrant[]>([]);
-	let access = $state<Record<string, RowAccess>>({});
 
 	const scope = createSessionScope(sessionGeneration);
 	let controller: AbortController | null = null;
@@ -103,7 +107,6 @@ with this reader is not, so they are emptied with everything else.
 		session = 'anonymous';
 		shareState = { status: 'loading' };
 		grants = [];
-		access = {};
 	}
 
 	/**
@@ -147,19 +150,12 @@ with this reader is not, so they are emptied with everything else.
 		// every other session-scoped surface on this route.
 		const stamp = scope.stamp();
 		shareState = { status: 'loading' };
-		access = {};
 
 		void listSharedWithMe({ accessToken: token, signal })
 			.then((result) => {
 				if (!scope.holds(stamp)) return;
 				grants = result;
 				shareState = { status: 'ready' };
-				// THE SAME CLASSIFIER THE LIST RENDERS THROUGH, called on the same
-				// answer: the rows this fans out over and the rows the reader sees are
-				// one set by construction rather than two filters that happen to agree
-				// today. The previous shape wrote the truthiness filter out twice, so a
-				// correction to either was a correction to half the panel.
-				loadAccess(accessLedger(result).current, token, stamp, signal);
 			})
 			.catch((error: unknown) => {
 				if (!scope.holds(stamp)) return;
@@ -175,48 +171,6 @@ with this reader is not, so they are emptied with everything else.
 							: 'This instance could not answer the sharing request.',
 				};
 			});
-	}
-
-	/**
-	 * One MCP-access read per shared agent, dispatched together.
-	 *
-	 * lesser has no batch-by-username query, and the roster's filters are applied
-	 * to a page after it is fetched, so a single roster read cannot be trusted to
-	 * contain every agent this caller was granted. A grant list is a handful of
-	 * rows.
-	 *
-	 * Each read publishes on its own, and each publish is guarded twice, because
-	 * the two guards fail differently. The STAMP is the session guard: a row that
-	 * lands after the reader signed out paints nothing, for the same reason the
-	 * grant list itself does not. The ABORT is the dispatch guard, and it is not
-	 * redundant with the stamp — `fetchAgentMcpAccess` reports a cancelled read
-	 * as an ordinary failure, so a superseded read that is still inside the
-	 * current session would otherwise paint "unavailable" over a fresh row that
-	 * is loading correctly. Today every re-dispatch also advances the session
-	 * generation, so the stamp happens to catch it; that is a property of a
-	 * different module, and this panel should not be the thing that breaks when
-	 * it changes.
-	 */
-	function loadAccess(
-		active: AgentShareGrant[],
-		token: string,
-		stamp: SessionStamp,
-		signal: AbortSignal
-	) {
-		access = Object.fromEntries(
-			active.map((grant) => [grant.agent_username, { status: 'loading' } as RowAccess])
-		);
-
-		for (const grant of active) {
-			const username = grant.agent_username;
-			void fetchAgentMcpAccess({ accessToken: token, signal }, username).then((result) => {
-				if (signal.aborted || !scope.holds(stamp)) return;
-				// lesser's answer, classified and not added to: an `ok` read with no
-				// `mcpURL` is the instance stating it publishes none for this agent,
-				// and no URL is substituted for it.
-				access = { ...access, [username]: sharedMcpAccess(result) };
-			});
-		}
 	}
 
 	onMount(() => {
@@ -269,41 +223,41 @@ with this reader is not, so they are emptied with everything else.
 			{#if ledger.current.length}
 				<ul class="contentus-shared__list">
 					{#each ledger.current as grant}
-						{@const mcp = access[grant.agent_username] ?? { status: 'loading' }}
 						<li class="contentus-shared__row">
 							<div class="contentus-shared__agent">
 								<span class="contentus-shared__handle">@{grant.agent_username}</span>
+								<!--
+									COMPOSED BY `grantStamp`, WHICH IS A CORRECTION AND NOT ONLY A
+									RELOCATION. This row inlined
+									`new Date(grant.granted_at).toLocaleDateString()`, so a grant
+									lesser served with a missing or unparseable `granted_at`
+									rendered "granted Invalid Date by @ada" — this client filling a
+									blank the instance left, on the one row whose job is to be
+									believed about what the instance said. `grantStamp` drops a
+									clause lesser did not serve instead of defaulting it, and it is
+									the same function the owner's panel composes its audit stamps
+									with, so the two readings of one grant cannot drift apart.
+								-->
 								<span class="contentus-shared__meta">
-									granted {new Date(grant.granted_at).toLocaleDateString()} by @{grant.granted_by}
+									{grantStamp('granted', grant.granted_at, grant.granted_by)}
 								</span>
-
-								{#if mcp.status === 'published'}
-									<!--
-										lesser's `mcpAccess.mcpURL`, verbatim. It is also the OAuth
-										`resource` value, which the agent's own page states in full.
-
-										SELECTABLE TEXT, NOT A `CopyBlock`, and the seam graph is what
-										decides that: `CopyBlock` is owned by the `AgentMcpPanel` seam
-										(`scripts/lib/agent-seams.mjs`), so importing it here would be
-										a cross-seam import — the copy-config affordance goes with the
-										MCP panel when greater M6a replaces it, and this row must not
-										be orphaned by that swap. The division it enforces is the right
-										one anyway: this list answers "which agent, and where", and the
-										agent's own page is the config surface, one link away.
-									-->
-									<span class="contentus-shared__endpoint-label">MCP endpoint</span>
-									<code class="contentus-shared__endpoint">{mcp.endpoint}</code>
-								{:else if mcp.status === 'none'}
-									<span class="contentus-shared__meta">
-										This instance publishes no MCP endpoint for this agent.
-									</span>
-								{:else if mcp.status === 'unavailable'}
-									<span class="contentus-shared__meta">{mcp.message}</span>
-								{:else}
-									<span class="contentus-shared__meta">Reading this agent's MCP endpoint…</span>
-								{/if}
 							</div>
 
+							<!--
+								THE ONLY WAY OFF THIS ROW, and it is where the endpoint this row
+								used to render actually lives: the agent's own page, whose MCP
+								panel states lesser's whole bundle — the `mcpURL` that is also the
+								OAuth `resource` value, the authorization server, registration,
+								scopes, guidance, and the live reachability probes. One link away,
+								for the one agent the reader chose, instead of one GraphQL read
+								per row to print a URL beside the link that leads to it.
+
+								`CopyBlock` is deliberately not imported for that here, and the
+								seam graph is what says so: `CopyBlock` is owned by the
+								`AgentMcpPanel` seam (`scripts/lib/agent-seams.mjs`), so the
+								copy-config affordance travels with the MCP panel when greater M6a
+								replaces it, and this row is not orphaned by the swap.
+							-->
 							<a class="contentus-shared__connect" href={agentHref(grant.agent_username)}>
 								How to connect
 							</a>
