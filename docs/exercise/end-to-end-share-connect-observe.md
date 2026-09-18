@@ -101,8 +101,11 @@ each one publishes is its own.
    and its absence is part of what this step verifies.
 2. Go to `/agents`. The **Agents shared with you** panel lists both agents, one
    row each: the handle, lesser's stamp for the grant, and **How to connect**.
-   The row names no endpoint of its own, and the panel costs one request — the
-   grant list — whatever it contains.
+   The row names no endpoint of its own. The panel dispatches one reader — the
+   grant list — whatever it contains; that is a structural property of the
+   component, pinned in `tests/agents-trust.test.mjs`, and not something this
+   runbook asks you to measure. What you check on screen here is the row's
+   content: the handle, the stamp, the link, and no endpoint.
 3. Open each agent's page through **How to connect** and copy the endpoint from
    its MCP panel. It is lesser's `mcpAccess.mcpURL` verbatim — contentus
    assembles no part of it, so what is on screen is what the instance published.

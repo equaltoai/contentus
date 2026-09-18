@@ -147,7 +147,14 @@ viewerIsOwner }`, and that one field is the whole selection.
   has asked yet — the server's frame and the client's first one), `owner`,
   `not-owner`, or `unanswered`.
 - **Mount** — `AgentOwnerPanels.svelte`, composed last by `AgentDetail` and the
-  only component on the page that issues a request.
+  only component `AgentDetail` composes that issues a request. The panels
+  composed beside it — `AgentMcpPanel`, `AgentCapabilitiesPanel`,
+  `AgentTrustBadge`, `AgentTrustDetail` — render from the props the server pass
+  already fetched and issue nothing. Every other client request on the page
+  therefore originates _inside_ `AgentOwnerPanels`' own subtree, from the grant
+  list and the activity log it mounts for an owner and for nobody else, which
+  makes the gate the page's single entry point for authenticated reads rather
+  than one more read beside them.
 
 Three properties are load-bearing, and each is probed in
 `tests/agents-trust.test.mjs`:
@@ -170,7 +177,13 @@ Three properties are load-bearing, and each is probed in
 - **Nothing about the viewer reaches the server pass.** The page's public half
   still costs one anonymous detail read; the ownership document is not among the
   requests that pass makes, and no ownership copy and no owner panel is in the
-  paint.
+  paint. **This one is measured, and is the only count on this page that is.**
+  `the agent page's server pass asks nothing about the viewer` renders the
+  audited route through the shipped SSR handler against a stubbed transport that
+  records every `fetch`, then asserts one `ContentusAgent`, zero
+  `ContentusAgentOwnership`, and `authorization: null` on the one it made. A
+  server pass is a function this repo can execute end to end; a client session
+  is not, which is exactly why the counts below are labelled differently.
 
 Two rejections belong beside those, because both look cheaper than the read. The
 gate is **not** `AGENT_DETAIL_QUERY` re-sent with the token: that answers the
@@ -258,8 +271,21 @@ the `sharedMcpAccess` classifier that reduced its answer went with it, because a
 export with no caller is a rule nobody is following. A row now renders the
 handle, lesser's audit stamp for the grant, and one link — **How to connect**, to
 `/agents/{username}` — where `AgentMcpPanel` states the whole bundle from
-`AGENT_DETAIL_QUERY` for the one agent the reader actually opened. The panel's
-request count is therefore **one**, the grant list, whatever that list contains.
+`AGENT_DETAIL_QUERY` for the one agent the reader actually opened. The panel
+therefore dispatches **one** reader — the grant list — whatever that list
+contains.
+
+**Structural, and labelled as one.** `listSharedWithMe` is dispatched from
+exactly one site in the component, and no per-row reader is in scope on it at
+all: `neither list on the agents route reads per agent` parses each list's
+compiled client script and asserts both halves. This repo has no DOM harness, so
+nothing mounts the panel and counts what it sends across a session; "one request"
+is the arithmetic consequence of one dispatch site and one mount, not an observed
+total. For the fan-out question that is the _stronger_ evidence — a per-row
+reader cannot be called by a loop the probe never sees, because it is not in
+scope to call — but it is a different kind of claim from a measurement, and the
+two are not interchangeable. The same discipline holds the ownership gate to one
+dispatch site, by the same helper.
 
 Batching was not the alternative, and it is worth saying why, because it is the
 first fix that occurs to a reader: lesser has no batch-by-username query for

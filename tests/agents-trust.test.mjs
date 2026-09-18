@@ -349,10 +349,24 @@ async function readAccess(answer, { accessToken } = {}) {
 }
 
 test('the access read asks for lesser’s bundle and for none of the private fields', () => {
-	// NARROWER THAN THE DETAIL READ, ON PURPOSE. This document is sent by the
-	// grantee's list about somebody else's agent, so it must not carry an
-	// ownership selection: every field asked for is a field a later panel can
-	// start rendering without anyone deciding it should.
+	// NARROWER THAN THE DETAIL READ, ON PURPOSE — and no shipped surface sends it
+	// any more, which this comment used to get wrong. It once read "this document
+	// is sent by the grantee's list about somebody else's agent"; that provenance
+	// ended at equaltoai/contentus#119, when the grantee's list stopped reading the
+	// bundle per row and started linking to the agent page, where
+	// `AGENT_DETAIL_QUERY` serves `mcpAccess` in full. What keeps the document and
+	// `fetchAgentMcpAccess` alive is `scripts/probe-share-flow.mjs`, which imports
+	// the document by name so the end-to-end exercise drives shipped text rather
+	// than a retyped copy of it — retargeting that probe and then deleting both is
+	// a named follow-up, not something #119 could do honestly in passing.
+	//
+	// THE PROPERTY OUTLIVES THE CALLER, which is why the assertions below stay. The
+	// document must not carry an ownership selection, because every field asked for
+	// is a field a later panel can start rendering without anyone deciding it
+	// should. That is a rule about the text, and the text is still shipped, still
+	// exported, and still exactly what the probe sends. A stale provenance sentence
+	// is what let this read as coverage of a live path; the narrowness it justified
+	// is real either way, and asserting it costs nothing.
 	assert.match(AGENT_MCP_ACCESS_QUERY, /query ContentusAgentMcpAccess\(/);
 	for (const field of [
 		'mcpURL',
@@ -964,6 +978,26 @@ function readerCallbackParam(script, fn) {
 }
 
 /**
+ * Every place `fn(…)` is dispatched in a compiled instance script.
+ *
+ * THE UNIT THE REQUEST-COUNT CLAIMS ARE ACTUALLY HELD TO, and the reason those
+ * claims are labelled structural rather than measured. This repo has no DOM
+ * harness, so nothing here mounts a component and counts what it sends over a
+ * session; what can be counted is dispatch SITES, and for the fan-out question
+ * that is the stronger statement — a reader that is not in scope cannot be called
+ * by a loop this probe never sees. It says nothing about how many times one site
+ * EXECUTES, so a total built from it is an arithmetic consequence of the sites and
+ * the mounts, not a measurement. Shared by the gate's pin and the two lists' probe
+ * so that "counted the same way" is a property of the code and not a claim in a
+ * comment.
+ */
+function dispatchSites(script, fn) {
+	return [...walkAst(script)].filter(
+		(node) => node.type === 'CallExpression' && node.callee?.name === fn
+	);
+}
+
+/**
  * The three viewers lesser distinguishes, as this client receives them.
  *
  * `admit` is what the owner-only panels must do for each. The ADMIN row is the
@@ -1063,6 +1097,20 @@ test('the owner-only panels admit the owner and refuse every other viewer', asyn
 		readerCallbackParam(ast.instance, 'fetchAgentOwnership'),
 		'result',
 		'and `result` is what the shipped reader’s own callback binds, not a name this probe happened to find'
+	);
+
+	// EXACTLY ONE DISPATCH SITE — the pin the line above cannot supply on its own.
+	// `readerCallbackParam` returns the FIRST match, so a component issuing two
+	// ownership reads would still bind `result` from the first and pass every
+	// assertion so far, while costing the page a second read of the one question it
+	// had already asked. This is the site the page's ownership read is dispatched
+	// from, counted the same way and by the same helper as the two lists are counted
+	// below, which is what makes "the gate costs one read" structural rather than a
+	// number transcribed from a scratch run.
+	assert.equal(
+		dispatchSites(ast.instance, 'fetchAgentOwnership').length,
+		1,
+		`${OWNER_GATE_FILE} dispatches fetchAgentOwnership from exactly one place: a second dispatch site is a second ownership read on a page that already made one`
 	);
 
 	for (const panel of OWNER_GATED_PANELS) {
@@ -1352,11 +1400,8 @@ test('neither list on the agents route reads per agent', () => {
 
 		for (const read of list.reads) {
 			assert.ok(named.includes(read), `${list.file} reads its own list, through ${read}`);
-			const dispatches = [...walkAst(ast.instance)].filter(
-				(node) => node.type === 'CallExpression' && node.callee?.name === read
-			);
 			assert.equal(
-				dispatches.length,
+				dispatchSites(ast.instance, read).length,
 				1,
 				`${list.file} dispatches ${read} from exactly one place: a second dispatch is a second reader, and a dispatch inside a row loop is the fan-out returning`
 			);
