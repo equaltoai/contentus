@@ -491,7 +491,7 @@ test('the seam check can still see an import, in every form a comment can hide i
 });
 
 test('the seam check reads the markup, which is where round 5 hid a dependency', () => {
-	// The reading returned a component's two `<script>` blocks and nothing else, so
+	// The reading returned a component's `<script>` blocks and nothing else, so
 	// a handler loading an interim piece was a dependency sitting in a region
 	// neither seam check looked at. Each form is planted with the compiler's own
 	// output as its witness, so it is a proven dependency before it is a caught one.

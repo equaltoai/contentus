@@ -984,11 +984,13 @@ function readerCallbackParam(script, fn) {
  * `parse(readFileSync(…)).instance` from `svelte/compiler`, so what gets counted
  * is the dispatch sites the author wrote. The reader-absence and mount-absence
  * halves beside it consume no generated output either — `liveScript` runs that
- * same `parse` and slices the SOURCE TEXT of the two script blocks out of the
- * component, appending any markup `import(…)` call text, and `sourceIdentifiers`
- * reads the slice. Neither instrument compiles, and neither needs to: a dispatch
- * site is a call the author wrote, which the source states exactly and generated
- * output only restates.
+ * same `parse` and slices SOURCE TEXT out of the component: whichever `<script>`
+ * blocks it has, plus any markup `import(…)` call text. Not "the two script
+ * blocks" as a rule — every component this helper is pointed at carries an
+ * instance block and no `module` block, so the slice is one block — and never
+ * generated JavaScript. `sourceIdentifiers` reads that slice. Neither instrument
+ * compiles, and neither needs to: a dispatch site is a call the author wrote,
+ * which the source states exactly and generated output only restates.
  *
  * THE UNIT THE REQUEST-COUNT CLAIMS ARE ACTUALLY HELD TO, and the reason those
  * claims are labelled structural rather than measured. This repo has no DOM
@@ -1377,13 +1379,15 @@ test('neither list on the agents route reads per agent', () => {
 	// instruments, and NEITHER of them consumes generated output: the dispatch-site
 	// counts are a SOURCE-AST parse of each component (`parse()` over the `.svelte`
 	// file), and the reader/mount-absence halves below analyse identifiers in the
-	// text `liveScript` slices out of its own `parse()` of that file — the two
-	// script blocks' source, plus any markup `import(…)` call text. Nothing here
-	// compiles a component, and nothing needs to: the unit under test is the call
-	// site the author wrote, which the source states exactly and the compiled
-	// bundle only restates. What the counts prove is stronger than a request count
-	// over one render — no per-agent reader is even in scope on either list, so a
-	// loop this probe cannot see would still have to name one to call it.
+	// text `liveScript` slices out of its own `parse()` of that file — the source of
+	// whichever `<script>` blocks it has, plus any markup `import(…)` call text. For
+	// BOTH files here that is one instance block and no `module` block, so the slice
+	// is one block's text and not two. Nothing here compiles a component, and
+	// nothing needs to: the unit under test is the call site the author wrote, which
+	// the source states exactly and the compiled bundle only restates. What the
+	// counts prove is stronger than a request count over one render — no per-agent
+	// reader is even in scope on either list, so a loop this probe cannot see would
+	// still have to name one to call it.
 	const LISTS = [
 		{
 			file: 'MyAgents.svelte',
@@ -1430,9 +1434,17 @@ test('neither list on the agents route reads per agent', () => {
 			);
 		}
 
-		// COMPILED SOURCE, not the file: both components discuss where the owner's
+		// A SYNTAX-TREE READING of the component's script SOURCE — not the file's
+		// text, and not compiled output. Both components discuss where the owner's
 		// panels went at length, so a text search matches the explanation and
-		// passes on a component that put the mount back.
+		// passes on a component that put the mount back, while a name in prose is
+		// trivia to the parser and never an identifier. What is asserted absent is
+		// the NAME in THIS component's slice, which is what a mount written here
+		// cannot do without: markup holds no declarations, so mounting a panel in
+		// this component means importing it in one of its script blocks. A mount
+		// reached through a snippet a parent hands in carries the PARENT's import
+		// instead, so this line reads the component it names and not the tree
+		// above it.
 		for (const panel of list.neverMounts) {
 			assert.ok(
 				!named.includes(panel),
@@ -1523,12 +1535,20 @@ const SELECTION_WRITER = 'selectActAs';
 const SELECTION_MODULE = 'src/lib/agents/act-as.ts';
 
 test('no surface in the app elects an act-as selection', () => {
-	// PARSED, not grepped, and compiled for the CLIENT: `liveScript` hands back
-	// the JavaScript a component actually executes, so a call written in a
-	// markup event handler is in the reading and a name written in a comment or
-	// a string is not. Repository-wide over tracked source, because "the panel
-	// that used to have the button" is the file a reviewer checks and any other
-	// file is where the control would come back unnoticed.
+	// PARSED, not grepped — and NOT compiled. `liveScript` runs `svelte/compiler`'s
+	// `parse` and hands back SOURCE TEXT: whichever `<script>` blocks the component
+	// has, plus the text of any `import(…)` in its markup. No JavaScript is
+	// generated, so the bound is stated here rather than left for a reader to
+	// assume: a call written ONLY in a markup event handler is outside the slice.
+	// That is not a hole in this check, because markup holds no declarations — a
+	// handler can only call a name a script block brought into scope, and that
+	// import IS in the reading. A name written only in a comment is not in it, and
+	// a string is not either unless it is an element-access key, which
+	// `sourceIdentifiers` reads as the same structural name as the dotted form
+	// (`w['selectActAs']` is `w.selectActAs`) — over-reading, which on an absence
+	// check fails red rather than green. Repository-wide over tracked source,
+	// because "the panel that used to have the button" is the file a reviewer
+	// checks and any other file is where the control would come back unnoticed.
 	const named = [];
 
 	for (const path of trackedSource(repoRoot, 'src', MODULE_SOURCE)) {

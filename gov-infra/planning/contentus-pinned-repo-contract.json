@@ -203,25 +203,25 @@
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1216,
+        "line": 1223,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which initialises a scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1232,
+        "line": 1239,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which stages the fixture files the probe has just written into that scratch repository. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1266,
+        "line": 1273,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which initialises a second scratch repository in a temp directory. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
       {
         "file": "tests/agents-mobile.test.mjs",
-        "line": 1269,
+        "line": 1276,
         "expression": "execFileSync",
         "reason": "Runs the system `git` binary, which stages one of the two fixture files, so the assertion can tell tracked from untracked. Asserting the tracked-file reading against a scratch repository is what keeps this probe from planting files in THIS one to test which planted files are read — the race `./helpers/tracked-source.mjs` exists to end. No repository file is executed."
       },
@@ -273,7 +273,7 @@
       "scripts/lib/agent-seams.mjs": "3e834ef308a7e8a781e89e41a2e34b4877063e5334b1f64bd84e86a44de0359c",
       "scripts/lib/drone-seams.mjs": "750a0cc91a7d938c6b503943ab2ba9c67696a822faf41a56ef7f5b5cc13a8bb8",
       "scripts/lib/graphql-inventory.mjs": "140057e075c2c3481c9d19c04ecad0ab8f585fc19fc6c43f4e84f65bd636b21e",
-      "scripts/lib/module-imports.mjs": "03ef1380e131c9ae8625d9d2ac6f7a66cc608cfce5e0c689c0a0f011a2e7cd5c",
+      "scripts/lib/module-imports.mjs": "17cdca3e8def34c8c92e1b9d713545b3590f9b89f3702380bc6fb6b31f26ba99",
       "scripts/lib/schema-pin.mjs": "e173e93932ed0fa671d1082891da514f2b8df6dc6115804af18c9ebd0526e856",
       "scripts/lib/strip-comments.mjs": "45f0e11f35e1d930a30d84a6f532a25ebaa2a3b69313c20d4fe131d83f9974dd",
       "scripts/probe-live-contract.mjs": "9b2f71f2d9dce3d4a829c2317586e8792265099a44f2e9b77afb25f20f625a5d",
@@ -287,9 +287,9 @@
       "tests/agent-share-client.test.mjs": "80e1a01a1c2fc2d06ee29508e8cf2eb163b1f51a8ae8e2449ae41fa32b4c442e",
       "tests/agent-share-view.test.mjs": "5a14d92e831ee95ff4a5aa6d11e2a50faf5bab376185650d2d227e00dd1b6107",
       "tests/agents-mcp.test.mjs": "15ee4678e3de87b484a31475b821abbbda9741bc8314ed55b4584475273fcab3",
-      "tests/agents-mobile.test.mjs": "3a29b0b13c62c6acc44ba7e8fc49b16a0cd5d4893738f44969beac4730e25e4e",
-      "tests/agents-roster.test.mjs": "efdaf1519e35365b0a44f9daa27e214d58a0e603cde9a607970fdb98d88ed629",
-      "tests/agents-trust.test.mjs": "9a06dd40dbd94b07ecfb4f96f8019760e33bff1ca9ab6a342a5a90f42be196bc",
+      "tests/agents-mobile.test.mjs": "d5d0dd4421fc0d3f81c0e0406bcf8b109227b096430b86963a9fe9f9ae320e8a",
+      "tests/agents-roster.test.mjs": "0a04378e3a6f8875d2702e38c03f9a537af575669e61d75254309a5809fe2c5c",
+      "tests/agents-trust.test.mjs": "f607b6fb8ea3644727816cd5f30662e92b4cf82552ffde8cdbdbc34d01f86acf",
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",

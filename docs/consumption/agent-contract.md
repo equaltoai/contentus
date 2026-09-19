@@ -285,11 +285,12 @@ exactly one site in the component, and no per-row reader is in scope on it at
 all: `neither list on the agents route reads per agent` asserts both halves from
 `svelte/compiler`'s **parse of each list component's source** — the dispatch-site
 counts from the instance-script AST, and reader and mount absence from identifiers
-in the text `liveScript` slices out of its own `parse()` of that file (the two
-script blocks, plus any markup `import(…)` call text). Neither half consumes
-generated client output, and neither needs to: the unit under test is the call
-site the author wrote, which the source states exactly and the compiled bundle
-only restates.
+in the text `liveScript` slices out of its own `parse()` of that file (whichever
+`<script>` blocks it has — both list components carry one instance block and no
+`module` block, so the slice is one block's text — plus any markup `import(…)`
+call text). Neither half consumes generated client output, and neither needs to:
+the unit under test is the call site the author wrote, which the source states
+exactly and the compiled bundle only restates.
 This repo has no DOM harness, so nothing mounts the panel and counts what it
 sends across a session; "one request" is the arithmetic consequence of one
 dispatch site and one mount, not an observed
