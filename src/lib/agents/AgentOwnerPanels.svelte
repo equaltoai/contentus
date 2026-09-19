@@ -18,8 +18,13 @@ The gate therefore has to be asked for, and asking is a read with a session, an
 abort and a stamp — the same machinery every neighbour on this face carries. That
 is a component's worth of logic, not a detail page's, and `AgentDetail.svelte` is
 the identity seam: it arranges what lesser already served and renders on the
-server. This file is the client-only half, and it is the only thing on the agent
-page that issues a request.
+server. This file is the client-only half, and it is the only component
+`AgentDetail` composes that issues a request: the panels composed beside it
+render from the props the server pass already fetched and issue nothing. Every
+other client request on the page originates inside this component's own subtree —
+the grant list and the activity log it mounts for an owner and for nobody else —
+which makes the gate the page's single entry point for authenticated reads rather
+than one more read beside them.
 
 WHAT IT MOUNTS, AND IN WHICH ORDER. `AgentSharingPanel` — who holds access — then
 `AgentDriversPanel` — who has been driving. The order is the owner's reading

@@ -277,10 +277,12 @@ contains.
 
 **Structural, and labelled as one.** `listSharedWithMe` is dispatched from
 exactly one site in the component, and no per-row reader is in scope on it at
-all: `neither list on the agents route reads per agent` parses each list's
-compiled client script and asserts both halves. This repo has no DOM harness, so
-nothing mounts the panel and counts what it sends across a session; "one request"
-is the arithmetic consequence of one dispatch site and one mount, not an observed
+all: `neither list on the agents route reads per agent` asserts both halves —
+a source-AST parse of each list component for the dispatch-site counts, and
+identifier analysis of its compiled client script for reader and mount absence.
+This repo has no DOM harness, so nothing mounts the panel and counts what it
+sends across a session; "one request" is the arithmetic consequence of one
+dispatch site and one mount, not an observed
 total. For the fan-out question that is the _stronger_ evidence — a per-row
 reader cannot be called by a loop the probe never sees, because it is not in
 scope to call — but it is a different kind of claim from a measurement, and the

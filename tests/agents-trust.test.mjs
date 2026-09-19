@@ -978,7 +978,13 @@ function readerCallbackParam(script, fn) {
 }
 
 /**
- * Every place `fn(…)` is dispatched in a compiled instance script.
+ * Every place `fn(…)` is dispatched in a component's instance script.
+ *
+ * THE INSTRUMENT IS A SOURCE-AST PARSE, not compiled output: both callers hand it
+ * `parse(readFileSync(…)).instance` from `svelte/compiler`, so what gets counted
+ * is the dispatch sites the author wrote. The reader-absence and mount-absence
+ * halves beside it are the ones that consume compiled script, through
+ * `liveScript`.
  *
  * THE UNIT THE REQUEST-COUNT CLAIMS ARE ACTUALLY HELD TO, and the reason those
  * claims are labelled structural rather than measured. This repo has no DOM
@@ -1363,11 +1369,14 @@ test('neither list on the agents route reads per agent', () => {
 	// read per shared-with-me row on top. A list is navigation: it costs one read
 	// for itself and nothing per row.
 	//
-	// STRUCTURAL, and labelled as one, because the repo has no DOM harness: this
-	// reads each component's COMPILED client script and counts dispatch sites.
-	// What that proves is stronger than a request count over one render — no
-	// per-agent reader is even in scope on either list, so a loop this probe
-	// cannot see would still have to name one to call it.
+	// STRUCTURAL, and labelled as one, because the repo has no DOM harness. Two
+	// instruments, and only one of them is compiled output: the dispatch-site
+	// counts are a SOURCE-AST parse of each component (`parse()` over the
+	// `.svelte` file), while the reader/mount-absence halves below analyse
+	// identifiers in its COMPILED client script (`liveScript`). What the counts
+	// prove is stronger than a request count over one render — no per-agent reader
+	// is even in scope on either list, so a loop this probe cannot see would still
+	// have to name one to call it.
 	const LISTS = [
 		{
 			file: 'MyAgents.svelte',

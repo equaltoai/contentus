@@ -289,7 +289,7 @@
       "tests/agents-mcp.test.mjs": "15ee4678e3de87b484a31475b821abbbda9741bc8314ed55b4584475273fcab3",
       "tests/agents-mobile.test.mjs": "3a29b0b13c62c6acc44ba7e8fc49b16a0cd5d4893738f44969beac4730e25e4e",
       "tests/agents-roster.test.mjs": "efdaf1519e35365b0a44f9daa27e214d58a0e603cde9a607970fdb98d88ed629",
-      "tests/agents-trust.test.mjs": "db64fd74bc588bc27adef02ffa757ae97d70e2ccd24ed9e702b347a2c3c7e542",
+      "tests/agents-trust.test.mjs": "dd373c5a0c15fbd137fa7121725e0ddea12d71a69bcacf1a102feb44e5f216c6",
       "tests/article-tombstones.test.mjs": "124e458b5db45ff3175a3ca630888b21601615bd242fda12fedcfcd86814bc48",
       "tests/articles-index-pagination.test.mjs": "082ba1530d35bbf2496186679712b6085f0dc808dba2c54c41fa187fdd948b62",
       "tests/auth-session.test.mjs": "9f2ae76ef45888e7b25040fb608689cbc1632b44777038f0055d3ca8c4807636",
