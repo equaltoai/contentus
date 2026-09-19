@@ -17,7 +17,8 @@
  * its own renderer. `tests/review.test.mjs` asserts that over every exported
  * document, so a field added in a hurry fails the build rather than shipping.
  *
- * Verified against lesser release v1.6.4.
+ * Verified against lesser release v1.6.28 (the contract greater-v0.13.7 pins;
+ * the v1.6.4 notes below are the history of how this selection grew).
  */
 
 import type {
@@ -156,10 +157,23 @@ export const DRAFT_REVIEW_QUERY = `
  * a preview that failed has to be able to say so specifically. lesser's limits
  * are 256 KiB of source and 512 KiB of rendered output, and a draft that
  * crossed one is a different problem from a draft whose Markdown did not parse.
+ *
+ * `includeAccessUrls: true` is the media opt-in lesser v1.6.28 added to this
+ * operation, and it is ON HERE AND NOWHERE ELSE in this face. Bearer URL
+ * minting is intentionally opt-in upstream: the default branch renders media
+ * references with no usable `src`, while the opted-in branch
+ * (`RenderDraftPreviewWithMedia`, `graph/query_resolvers_cms.go`) mints the
+ * per-usage short-lived access URLs and composes them into the very
+ * `renderedHtml` this document selects — a bound image reaches the reviewer as
+ * the `<figure><img …></figure>` lesser authored, with nothing to mint or
+ * resolve client-side. The URLs are short-lived bearer artifacts, so the opt-in
+ * lives only on the authenticated preview read: never on a queue projection,
+ * never server-side, and never in a fixture, log, or document that an
+ * unauthenticated caller could reach.
  */
 export const DRAFT_PREVIEW_QUERY = `
 	query ContentusDraftPreview($id: ID!) {
-		draftPreview(id: $id) {
+		draftPreview(id: $id, includeAccessUrls: true) {
 			draftId
 			success
 			renderedHtml
@@ -584,59 +598,6 @@ export function toDraftPreview(raw: unknown): DraftPreview | null {
 		sourceBytes: typeof preview['sourceBytes'] === 'number' ? preview['sourceBytes'] : 0,
 		renderedBytes: typeof preview['renderedBytes'] === 'number' ? preview['renderedBytes'] : 0,
 		errors,
-	};
-}
-
-export interface PreviewFaceArticle {
-	id: string;
-	slug: string;
-	content: string;
-	contentFormat: 'html';
-	title: string;
-	author: { id: string; displayName?: string; username?: string };
-	isPublished: false;
-}
-
-/**
- * Shape a rendered preview for the vendored blog face's `Article` compound.
- *
- * `contentFormat` is `'html'` unconditionally, and that is a statement of fact
- * rather than a choice: the only value this function is ever handed is
- * `DraftPreview.renderedHtml`, which lesser produced with its own renderer.
- * There is no branch that could pass unrendered source and label it HTML —
- * `toDraftPreview` already nulled the field on any preview that did not
- * succeed, and this function refuses both a null and an unsuccessful preview.
- *
- * The author is the recorded generator when there is one. The preview panel
- * renders `Article.Content` alone, so nothing displays it; it is populated
- * because the face's view model asks for it, and populating it with the actor
- * lesser named beats populating it with a placeholder.
- */
-export function toPreviewFaceArticle(
-	preview: DraftPreview,
-	review: DraftReviewData | null
-): PreviewFaceArticle | null {
-	if (!preview.success || !preview.html) return null;
-
-	const generator = review?.generatedBy ?? null;
-
-	return {
-		id: preview.draftId,
-		// A draft has no published address, and inventing one here would put a
-		// slug on screen that names nothing.
-		slug: '',
-		content: preview.html,
-		contentFormat: 'html',
-		title: review?.title?.trim() || 'Untitled draft',
-		author: {
-			id: generator?.id ?? '',
-			...(generator?.displayName ? { displayName: generator.displayName } : {}),
-			...(generator?.username ? { username: generator.username } : {}),
-		},
-		// Never true on this surface. A draft under review has not published, and
-		// the whole point of the gate is that reaching this screen is not
-		// publication.
-		isPublished: false,
 	};
 }
 

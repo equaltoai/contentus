@@ -1571,6 +1571,83 @@ function siteRepositoryTargets(file, literals, base, execPath) {
 }
 
 /**
+ * The `node <path>` and `bash <path>` targets of every workflow `run:` step —
+ * the workflow legs that run BEFORE the rubric (fetching and authenticating
+ * the greater CLI asset, DCO, main-guard) and the rubric entrypoint itself.
+ * The workflows use a deliberately small YAML vocabulary: a `run:` may be
+ * inline (`- run: node scripts/dco-check.mjs …`) or a block scalar
+ * (`run: |` with the command on the next indented line), and both spellings
+ * are read here.
+ */
+function workflowCommandTargets(prefix) {
+	const targets = [];
+	let files = [];
+	try {
+		files = readdirSync('.github/workflows').filter((name) => /\.ya?ml$/i.test(name));
+	} catch {
+		return targets;
+	}
+	for (const file of files) {
+		let text;
+		try {
+			text = readFileSync(join('.github/workflows', file), 'utf8');
+		} catch {
+			continue;
+		}
+		const lines = text.split(/\r?\n/);
+		let blockIndent = null;
+		for (const line of lines) {
+			const indent = line.match(/^\s*/)[0].length;
+			if (blockIndent !== null) {
+				if (line.trim() === '' || indent >= blockIndent) {
+					const match = line.match(new RegExp(`^\\s*${prefix}\\s+["']?([^\\s"']+)`));
+					if (match) targets.push(match[1]);
+					continue;
+				}
+				blockIndent = null;
+			}
+			const header = line.match(/^\s*(?:-\s*)?run:\s*(.*)$/);
+			if (!header) continue;
+			const value = header[1].trim();
+			const inline = value.match(new RegExp(`^${prefix}\\s+["']?([^\\s"']+)`));
+			if (inline) {
+				targets.push(inline[1]);
+				continue;
+			}
+			if (value === '|' || value === '>' || value === '') blockIndent = indent + 2;
+		}
+	}
+	return targets;
+}
+
+/**
+ * The `node "$VERIFY/<name>.mjs"` invocations of the rubric shell — the
+ * verifiers the rubric itself runs as its CON/COM/SEC controls. Each is a
+ * direct executable leg, and each now carries a CON-5 pin like any other
+ * reached target. The `$VERIFY` variable is the shell's own spelling of
+ * `gov-infra/verifiers`, fixed at the top of the script.
+ */
+function rubricNodeTargets() {
+	const targets = [];
+	let text;
+	try {
+		text = readFileSync('gov-infra/verifiers/gov-verify-rubric.sh', 'utf8');
+	} catch {
+		return targets;
+	}
+	for (const line of text.split(/\r?\n/)) {
+		const quoted = line.match(/"\$VERIFY\/([A-Za-z0-9._-]+\.mjs)"/);
+		if (quoted) {
+			targets.push(`gov-infra/verifiers/${quoted[1]}`);
+			continue;
+		}
+		const bare = line.match(/\$VERIFY\/([A-Za-z0-9._-]+\.mjs)/);
+		if (bare) targets.push(`gov-infra/verifiers/${bare[1]}`);
+	}
+	return targets;
+}
+
+/**
  * Everything the guarded commands execute, as repository-relative paths. Starts
  * at each `node` invocation's targets and closes over their relative imports.
  */
@@ -1629,6 +1706,27 @@ function executableClosure() {
 		}
 	}
 
+	// R5-2: THE WORKFLOW AND RUBRIC LEGS. The pinned-script loop above covers
+	// what `pnpm run` executes; the release-authentication path runs from
+	// `.github/workflows/*.yml` `run:` steps and from
+	// `gov-infra/verifiers/gov-verify-rubric.sh`, and round-5 review
+	// established that those executables — `install-greater-cli.mjs`,
+	// `check-greater-provenance.mjs`, `check-greater-doctor.mjs`, the rubric's
+	// own verifiers, and the rubric shell itself — carried no CON-5 pin at
+	// all. Every `node <path>` (and `bash <path>`) invocation in a workflow
+	// `run:` step, and every `node "$VERIFY/<name>.mjs"` invocation in the
+	// rubric shell, is admitted to the SAME closure here, so a pin for it is
+	// required and enforced before the release binding and rubric consume
+	// anything. The walk over each admitted file then applies unchanged: a
+	// workflow-leg verifier's imports are walked, its unfollowable loads are
+	// disclosed, and its bytes are pinned.
+	const workflowRoots = [
+		...workflowCommandTargets('node'),
+		...workflowCommandTargets('bash'),
+		...rubricNodeTargets(),
+	];
+	for (const target of workflowRoots) admit(normalizePath(target), 'workflow/rubric invocation');
+
 	while (queue.length) {
 		const { path, origin } = queue.shift();
 		const absolute = resolve(root, path);
@@ -1644,6 +1742,13 @@ function executableClosure() {
 			continue;
 		}
 		if (!statSync(absolute).isFile()) continue;
+		if (/\.sh$/i.test(path)) {
+			// A shell script is not module code: it has no relative imports for
+			// this walk to follow, and its `node` invocations are admitted above
+			// as workflow/rubric roots. It still carries a pinned SHA-256 like
+			// every other reached target, which is the part that binds it.
+			continue;
+		}
 
 		let loads;
 		let unfollowable;

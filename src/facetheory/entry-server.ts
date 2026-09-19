@@ -27,6 +27,7 @@ import { CLIENT_ASSET_BASE, HYDRATION_DATA_PATH } from '$lib/config/base-path';
 import { fetchActor, fetchTimelinePage } from '$lib/timelines/transport';
 import { isServerFetchable, tabFor } from '$lib/timelines/tabs';
 import { getServerInstanceInfo, subscriptionConnectOrigin } from '$lib/instance/info';
+import { cspDirectivesForPage } from './csp';
 
 import App from './App.svelte';
 import { queryFromSearchString } from './query-parser';
@@ -54,10 +55,15 @@ const SITE_STYLESHEET_HREF = `${CLIENT_ASSET_BASE}brand/contentus.css`;
 /**
  * Strict CSP, applied to every SSR response.
  *
- * lesser does not inject a CSP on `/l` routes — the origin owns it
- * (`CLIENT_APP_GUIDE.md` → "Routing model"). `inlineScripts: false` and
- * `inlineStyles: false` are what force hydration data out of the document and
- * into the external JSON endpoint below.
+ * lesser does not inject a CSP on `/l` routes — the ORIGIN owns it. lesser-host
+ * does attach a CloudFront response-headers fallback for the client install
+ * surface (`NewClientSSRResponseHeadersPolicy`: `img-src 'self' data: https:`
+ * and the rest of its policy) with `Override:false`, which means it is a
+ * non-overriding default: whatever the origin serves wins, and where the origin
+ * serves nothing the fallback applies. The authoritative header for these
+ * documents is the one built here. `inlineScripts: false` and `inlineStyles:
+ * false` are what force hydration data out of the document and into the
+ * external JSON endpoint below.
  */
 const STRICT_CSP = {
 	inlineScripts: false,
@@ -465,6 +471,14 @@ const SOCKET_ROUTES: ReadonlySet<string> = new Set(['timelines', 'messages', 'me
  * third-party origin.
  */
 async function cspOptionsForRoute(props: RouteProps, endpoint: string | null) {
+	// The review workspace is the one route that displays lesser-minted media:
+	// `draftPreview(includeAccessUrls: true)` composes a five-minute presigned
+	// HTTPS URL into the `<figure><img …>` it returns. The extension is exactly
+	// the one route and exactly `img-src` — see `./csp.ts` for the reasoning,
+	// and for why the short-lived URL is fetched eagerly and never persisted.
+	const media = cspDirectivesForPage(props.page.key);
+	if (media) return media;
+
 	if (props.page.key === 'agent-detail') {
 		const mcpOrigin = mcpConnectOrigin(props.agentDetail?.agent?.mcpAccess);
 		return mcpOrigin ? { directives: { 'connect-src': [mcpOrigin] } } : {};

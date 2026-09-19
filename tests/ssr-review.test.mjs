@@ -50,8 +50,10 @@ test('the review queue server-renders a complete document', async () => {
 test('an auth-required route is never cached and never indexed', async () => {
 	// The residual risk in that 200 is a shared cache or a crawler treating a
 	// protected surface as ordinary public content. Both are the origin's to
-	// prevent — lesser injects no headers on `/l` routes — so contentus sets
-	// them, on every route whose descriptor carries `requiresAuth`.
+	// prevent — the origin owns its headers on `/l` routes (lesser-host's
+	// CloudFront policy for the client install is a non-overriding fallback,
+	// and it sets neither of these) — so contentus sets them, on every route
+	// whose descriptor carries `requiresAuth`.
 	for (const path of ['/l/review', '/l/review/drafts/draft-123', '/l/compose']) {
 		const { headers, status } = await render(path);
 
@@ -160,6 +162,20 @@ test('the review workspace server-renders its sign-in state, never a draft', asy
 	// preview renders into, so its absence is the absence of a rendered draft.
 	assert.doesNotMatch(result.html, /gr-blog-article__content/);
 	assert.doesNotMatch(result.html, /gr-blog-review-attribution/);
+
+	// #112's bound media is the sharp case: the figure the authenticated DOM
+	// must show is exactly what the anonymous document must not carry. No
+	// `<figure>` anywhere; an `<img>` only as chrome (the shell's brand
+	// wordmark), never as draft media with a minted access URL.
+	assert.doesNotMatch(result.html, /<figure/i);
+	assert.doesNotMatch(result.html, /includeAccessUrls/);
+	const imgs = [...result.html.matchAll(/<img\b[^>]*>/gi)];
+	for (const img of imgs)
+		assert.match(
+			img[0],
+			/contentus-brand__wordmark/,
+			`the only permitted <img> in the anonymous document is the brand wordmark: ${img[0]}`
+		);
 });
 
 test('rendering the review workspace makes no GraphQL request whatsoever', async () => {
@@ -192,7 +208,17 @@ test('the workspace hydration payload carries the address and no draft body', as
 
 	// The DRAFT does not.
 	const serialized = JSON.stringify(props);
-	for (const forbidden of ['renderedHtml', 'editorNotes', 'reviewStatus', 'verdicts']) {
+	for (const forbidden of [
+		'renderedHtml',
+		'editorNotes',
+		'reviewStatus',
+		'verdicts',
+		// #112's media half: no figure markup and no minted access URL may sit
+		// one fetch away in the public payload.
+		'<figure',
+		'<img',
+		'accessUrl',
+	]) {
 		assert.ok(
 			!serialized.includes(forbidden),
 			`the public hydration payload must not carry "${forbidden}"`

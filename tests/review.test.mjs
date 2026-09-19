@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
+import { withSourceLock } from './helpers/source-lock.mjs';
+
 import {
 	REVIEW_DOCUMENTS,
 	emptyHalfCopy,
@@ -10,7 +12,6 @@ import {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toPreviewFaceArticle,
 	toReviewActor,
 	toVerdictRecord,
 } from '../src/lib/cms/review-contract.ts';
@@ -85,10 +86,33 @@ test('every document names the operation lesser actually exposes', () => {
 	assert.match(REVIEW_DOCUMENTS.SHARED_DRAFT_REVIEWS_QUERY, /sharedDraftReviews\(/);
 	assert.match(REVIEW_DOCUMENTS.MY_DRAFT_REVIEWS_QUERY, /myDraftReviews\(/);
 	assert.match(REVIEW_DOCUMENTS.DRAFT_REVIEW_QUERY, /draftReview\(id: \$id\)/);
-	assert.match(REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY, /draftPreview\(id: \$id\)/);
+	assert.match(
+		REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY,
+		/draftPreview\(id: \$id, includeAccessUrls: true\)/
+	);
 	assert.match(REVIEW_DOCUMENTS.SUBMIT_DRAFT_REVIEW_MUTATION, /submitDraftReview\(draftId:/);
 	assert.match(REVIEW_DOCUMENTS.PUBLISH_DRAFT_MUTATION, /publishDraft\(id: \$id\)/);
 	assert.match(REVIEW_DOCUMENTS.SCHEDULE_DRAFT_MUTATION, /scheduleDraft\(id: \$id, scheduledAt:/);
+});
+
+test('the short-lived media opt-in rides ONLY the authenticated preview document', () => {
+	// lesser v1.6.28 makes bearer URL minting opt-in per operation. Contentus
+	// opts in on the one authenticated read that DISPLAYS a body, and on
+	// nothing else: not on the queue projections, not on the verdict
+	// submission, not on the publish mutation. A minted access URL is a
+	// short-lived credential; asking for one where nothing displays it is a
+	// credential waiting to be misplaced, so the opt-in is pinned to the
+	// single document that needs it.
+	const carrying = Object.entries(REVIEW_DOCUMENTS)
+		.filter(([, document]) => document.includes('includeAccessUrls'))
+		.map(([name]) => name);
+
+	assert.deepEqual(carrying, ['DRAFT_PREVIEW_QUERY']);
+	assert.match(
+		REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY,
+		/draftPreview\(id: \$id, includeAccessUrls: true\)/,
+		'the preview opts in with a literal true — a variable would leave the opt-in to a caller'
+	);
 });
 
 /* ---------------------------------------------------------------------------
@@ -302,17 +326,7 @@ test('a failed preview carries no HTML even when lesser returned some', () => {
 	assert.deepEqual(preview.errors, ['unclosed code fence at line 40']);
 });
 
-test('a failed preview cannot become a renderable article', () => {
-	const preview = toDraftPreview({
-		draftId: 'draft-3',
-		success: false,
-		renderedHtml: '<p>partial</p>',
-		errors: ['nope'],
-	});
-	assert.equal(toPreviewFaceArticle(preview, null), null);
-});
-
-test('a successful preview renders as html, unpublished, with the generator as author', () => {
+test('a successful preview carries lesser rendered bytes verbatim, and never the source', () => {
 	const preview = toDraftPreview({
 		draftId: 'draft-4',
 		success: true,
@@ -323,18 +337,15 @@ test('a successful preview renders as html, unpublished, with the generator as a
 		errors: [],
 	});
 
-	const article = toPreviewFaceArticle(preview, {
-		draftId: 'draft-4',
-		title: 'Draft title',
-		updatedAt: '',
-		generatedBy: actor({ displayName: 'Scribe', username: 'scribe' }),
-	});
-
-	assert.equal(article.content, '<h2>Rendered by lesser</h2>');
-	assert.equal(article.contentFormat, 'html');
-	assert.equal(article.isPublished, false, 'a draft under review has not published');
-	assert.equal(article.slug, '', 'a draft has no published address to claim');
-	assert.equal(article.author.displayName, 'Scribe');
+	// `html` is the field the one owned sink displays verbatim
+	// (`src/lib/review/PreviewBody.svelte`), so this projection is the last
+	// place contentus could alter lesser's output on the way to the DOM — and
+	// it does not: the bytes come through unchanged, and the format lesser
+	// named is recorded beside them rather than acted on.
+	assert.equal(preview.html, '<h2>Rendered by lesser</h2>');
+	assert.equal(preview.sourceFormat, 'markdown', 'lesser names the format it rendered from');
+	assert.equal(preview.renderedBytes, 200);
+	assert.deepEqual(preview.errors, []);
 });
 
 /* ---------------------------------------------------------------------------
@@ -519,7 +530,10 @@ test('no review source imports a Markdown renderer or holds an {@html} sink', ()
 		// a bare package name, so the one file that discusses remark-parse in a
 		// comment does not trip it. Nothing had to be excluded, which is the
 		// cheapest way to be sure nothing was excluded by mistake.
-		const source = readFileSync(file, 'utf8');
+		// The workspace is one of these files and the renderer-authority probes
+		// MUTATE it concurrently, so the read is locked: a fixture (a removed
+		// import, a second invocation) must never answer for the shipped file.
+		const source = withSourceLock(() => readFileSync(file, 'utf8'), { shared: true });
 
 		assert.doesNotMatch(source, /\{@html\b/, `${file} contains an {@html} sink`);
 		assert.doesNotMatch(
@@ -537,4 +551,67 @@ test('the publish path never decides the gate for itself', () => {
 	// say so), but it must not count verdicts or compare them to a reviewer set.
 	assert.doesNotMatch(source, /verdicts\s*\.\s*(filter|length|every|some|reduce)/);
 	assert.doesNotMatch(source, /activeReviewerCount/);
+});
+
+/* ---------------------------------------------------------------------------
+ * The preview display sink — the one owned `{@html}`, content-bound here
+ *
+ * `scripts/audit-renderer-authority.mjs` admits exactly one owned sink and
+ * binds its shape at build time; these probes pin the same contract from the
+ * test side, against the files that run, so the two readings disagree loudly
+ * if either one drifts. The display exists because the vendored fediverse
+ * allowlist pass strips the lesser-authored `<figure>`/`<img>` that
+ * `includeAccessUrls: true` serves (#112); lesser already rendered AND
+ * sanitized these bytes, so the panel displays them without a second pass.
+ * ------------------------------------------------------------------------ */
+
+test('the preview display is one sink, bound to lesser preview output, and nothing more', () => {
+	// Locked: the renderer-authority probes plant fixture sinks OVER this file
+	// for the duration of an audit run, and a fixture (two `{@html}` tags, a
+	// value import) must never answer for the shipped sink.
+	const body = withSourceLock(() => readFileSync('src/lib/review/PreviewBody.svelte', 'utf8'), {
+		shared: true,
+	});
+
+	// Exactly one sink — the disclosure admits no second.
+	assert.equal(
+		[...body.matchAll(/\{@html\b/g)].length,
+		1,
+		'PreviewBody carries the one pinned sink and no other'
+	);
+
+	// Bound to the projection field verbatim: `toDraftPreview` nulls it unless
+	// lesser reported success, so the sink can only ever display lesser's
+	// rendered preview output. Anything computed from the field would be a
+	// transform, which is the renderer's job, and lesser is the renderer.
+	assert.match(body, /\{@html\s+preview\.html\s*\}/);
+
+	// Type-only imports: nothing runtime-reachable stands between lesser's
+	// bytes and the DOM.
+	for (const match of body.matchAll(/^\s*import\s+(?!type\b)[^;]+;?/gm))
+		assert.fail(`PreviewBody carries a value import: ${match[0].trim()}`);
+
+	// No second sanitization, no rewrite, no renderer by any name.
+	assert.doesNotMatch(body, /sanitizeHtml|DOMPurify|linkify|marked|remark/);
+});
+
+test('the workspace displays the preview through that sink and that sink alone', () => {
+	// Locked like the sink read above: the probes mutate the workspace while
+	// they audit it, and a fixture must never answer for the shipped file.
+	const workspace = withSourceLock(
+		() => readFileSync('src/lib/routes/ReviewWorkspace.svelte', 'utf8'),
+		{ shared: true }
+	);
+
+	assert.match(workspace, /import PreviewBody from '\$lib\/review\/PreviewBody\.svelte'/);
+	assert.match(workspace, /<PreviewBody \{preview\} \/>/);
+
+	// The preview no longer goes through the vendored `Article.Content`: its
+	// fediverse allowlist is the pass that strips lesser's figures, and a
+	// display that re-filtered trusted server output would reintroduce #112.
+	assert.doesNotMatch(workspace, /ArticleContent|ArticleRoot|normalizeArticleData/);
+
+	// And the workspace holds no sink of its own — the display component is
+	// the only place the preview HTML meets the DOM.
+	assert.doesNotMatch(workspace, /\{@html\b/);
 });
