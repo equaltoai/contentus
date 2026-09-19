@@ -308,6 +308,12 @@ test('a wildcard glob naming no component is a cross-seam edge per component', a
 	// prose did not — a number in a name that nothing checks is a number that
 	// goes stale silently. The list below is the assertion and it is exhaustive;
 	// adding a component to the face is expected to add a line to it.
+	//
+	// AND NOT ONLY A LINE. A component that MOVES BETWEEN SEAMS changes the owner
+	// named on its existing line, which is how equaltoai/contentus#119 reads here:
+	// `AgentOwnerPanels` added, and `AgentSharingPanel` with `AgentDriversPanel`
+	// re-owned from `AgentRoster.svelte` to `AgentDetail.svelte` because the panels
+	// themselves moved from the roster to the agent page.
 	const helper = './seam-probe.ts';
 	const pattern = './[A-Z]*.svelte';
 	assert.deepEqual(
@@ -320,12 +326,13 @@ test('a wildcard glob naming no component is a cross-seam edge per component', a
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentCapabilities.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentCard.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentDetail.svelte (a seam imported from behind no seam)',
-			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentDriversPanel.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
+			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentDriversPanel.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentMcpPanel.svelte (a seam imported from behind no seam)',
+			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentOwnerPanels.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentRoster.svelte (a seam imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentRosterFilters.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentSharedWithMePanel.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
-			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentSharingPanel.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
+			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentSharingPanel.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/AgentTrustDetail.svelte (owned by AgentDetail.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/CopyBlock.svelte (owned by AgentMcpPanel.svelte, imported from behind no seam)',
 			'src/lib/agents/seam-probe.ts → src/lib/agents/MyAgents.svelte (owned by AgentRoster.svelte, imported from behind no seam)',
@@ -421,14 +428,31 @@ test('a face file the build never loads is a finding, not a silence', async () =
 	// passing unexamined.
 	//
 	// Planted by replacing the seam that composes them: with the detail page's
-	// imports gone, two tracked components stop being reachable from any entry.
+	// imports gone, every file only the detail page reaches stops being reachable
+	// from any entry — the components it composes, and the modules behind them.
+	//
+	// FIVE OF THESE TEN ARRIVED WITH equaltoai/contentus#119, and their presence
+	// is the move recorded rather than a coverage regression to explain away: the
+	// owner's two panels used to hang off `MyAgents`, on the roster, so they were
+	// reachable from the roster's entry however the detail page was written. They
+	// are on the agent page now — behind `AgentOwnerPanels`, which only
+	// `AgentDetail` composes — so stubbing the detail page takes them, and the two
+	// activity modules the drivers panel reads through, out of reach with it. That
+	// is the honest cost of putting per-agent surfaces on the per-agent page: what
+	// a page composes is unreachable without that page. In the shipped tree nothing
+	// is stubbed, both build passes reach all ten, and this gate judges them.
 	const detail = `<script lang="ts">\n\tconst face = 'detail';\n</script>\n\n<div>{face}</div>\n`;
 	assert.deepEqual(await audit({ 'src/lib/agents/AgentDetail.svelte': detail }), [
 		'src/lib/agents/Accordion.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 		'src/lib/agents/AgentCapabilities.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
+		'src/lib/agents/AgentDriversPanel.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 		'src/lib/agents/AgentMcpPanel.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
+		'src/lib/agents/AgentOwnerPanels.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
+		'src/lib/agents/AgentSharingPanel.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 		'src/lib/agents/AgentTrustDetail.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 		'src/lib/agents/CopyBlock.svelte is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
+		'src/lib/agents/activity-client.ts is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
+		'src/lib/agents/activity-view.ts is tracked inside the face and no build pass loads it, so no edge of its own is recorded and this gate cannot judge it',
 	]);
 });
 
@@ -992,6 +1016,12 @@ test('the declared nesting is the one cross-seam import that is not a defect', a
 		`\timport Panel from ${JSON.stringify('./AgentMcpPanel.svelte')};\n` +
 		`\timport Capabilities from ${JSON.stringify('./AgentCapabilities.svelte')};\n` +
 		`\timport TrustDetail from ${JSON.stringify('./AgentTrustDetail.svelte')};\n` +
-		`</script>\n\n<div><Capabilities /><TrustDetail /><Panel /></div>\n`;
+		// The owner's half of the page, composed by this seam since
+		// equaltoai/contentus#119. It is in the plant because it is in the page:
+		// without it the assertion below would be satisfied by the coverage rule
+		// reporting the whole owner subtree as unreachable, which is a finding and
+		// not a clean graph.
+		`\timport OwnerPanels from ${JSON.stringify('./AgentOwnerPanels.svelte')};\n` +
+		`</script>\n\n<div><Capabilities /><TrustDetail /><Panel /><OwnerPanels /></div>\n`;
 	assert.deepEqual(await audit({ 'src/lib/agents/AgentDetail.svelte': detail }), []);
 });
