@@ -147,14 +147,19 @@ viewerIsOwner }`, and that one field is the whole selection.
   has asked yet — the server's frame and the client's first one), `owner`,
   `not-owner`, or `unanswered`.
 - **Mount** — `AgentOwnerPanels.svelte`, composed last by `AgentDetail` and the
-  only component `AgentDetail` composes that issues a request. The panels
-  composed beside it — `AgentMcpPanel`, `AgentCapabilitiesPanel`,
-  `AgentTrustBadge`, `AgentTrustDetail` — render from the props the server pass
-  already fetched and issue nothing. Every other client request on the page
-  therefore originates _inside_ `AgentOwnerPanels`' own subtree, from the grant
-  list and the activity log it mounts for an owner and for nobody else, which
-  makes the gate the page's single entry point for authenticated reads rather
-  than one more read beside them.
+  only component `AgentDetail` composes that issues an **authenticated read of
+  lesser's CMS surface**. The panels composed beside it — `AgentMcpPanel`,
+  `AgentCapabilitiesPanel`, `AgentTrustBadge`, `AgentTrustDetail` — render from
+  the props the server pass already fetched and issue no such read; the only
+  requests among them are `AgentMcpPanel`'s two **anonymous** discovery-document
+  probes (`mcp.json`, and the OAuth protected-resource document), which fire only
+  where lesser published an endpoint for the agent, carry `credentials: 'omit'`
+  and no bearer, and cross to the MCP origin lesser named for this agent rather
+  than to lesser's CMS — the crossing §CSP widens `connect-src` for. Every
+  authenticated read of that surface on the page therefore originates _inside_
+  `AgentOwnerPanels`' own subtree, from the grant list and the activity log it
+  mounts for an owner and for nobody else, which makes the gate the page's single
+  entry point for authenticated reads rather than one more read beside them.
 
 Three properties are load-bearing, and each is probed in
 `tests/agents-trust.test.mjs`:
@@ -277,9 +282,14 @@ contains.
 
 **Structural, and labelled as one.** `listSharedWithMe` is dispatched from
 exactly one site in the component, and no per-row reader is in scope on it at
-all: `neither list on the agents route reads per agent` asserts both halves —
-a source-AST parse of each list component for the dispatch-site counts, and
-identifier analysis of its compiled client script for reader and mount absence.
+all: `neither list on the agents route reads per agent` asserts both halves from
+`svelte/compiler`'s **parse of each list component's source** — the dispatch-site
+counts from the instance-script AST, and reader and mount absence from identifiers
+in the text `liveScript` slices out of its own `parse()` of that file (the two
+script blocks, plus any markup `import(…)` call text). Neither half consumes
+generated client output, and neither needs to: the unit under test is the call
+site the author wrote, which the source states exactly and the compiled bundle
+only restates.
 This repo has no DOM harness, so nothing mounts the panel and counts what it
 sends across a session; "one request" is the arithmetic consequence of one
 dispatch site and one mount, not an observed

@@ -983,8 +983,12 @@ function readerCallbackParam(script, fn) {
  * THE INSTRUMENT IS A SOURCE-AST PARSE, not compiled output: both callers hand it
  * `parse(readFileSync(…)).instance` from `svelte/compiler`, so what gets counted
  * is the dispatch sites the author wrote. The reader-absence and mount-absence
- * halves beside it are the ones that consume compiled script, through
- * `liveScript`.
+ * halves beside it consume no generated output either — `liveScript` runs that
+ * same `parse` and slices the SOURCE TEXT of the two script blocks out of the
+ * component, appending any markup `import(…)` call text, and `sourceIdentifiers`
+ * reads the slice. Neither instrument compiles, and neither needs to: a dispatch
+ * site is a call the author wrote, which the source states exactly and generated
+ * output only restates.
  *
  * THE UNIT THE REQUEST-COUNT CLAIMS ARE ACTUALLY HELD TO, and the reason those
  * claims are labelled structural rather than measured. This repo has no DOM
@@ -1370,13 +1374,16 @@ test('neither list on the agents route reads per agent', () => {
 	// for itself and nothing per row.
 	//
 	// STRUCTURAL, and labelled as one, because the repo has no DOM harness. Two
-	// instruments, and only one of them is compiled output: the dispatch-site
-	// counts are a SOURCE-AST parse of each component (`parse()` over the
-	// `.svelte` file), while the reader/mount-absence halves below analyse
-	// identifiers in its COMPILED client script (`liveScript`). What the counts
-	// prove is stronger than a request count over one render — no per-agent reader
-	// is even in scope on either list, so a loop this probe cannot see would still
-	// have to name one to call it.
+	// instruments, and NEITHER of them consumes generated output: the dispatch-site
+	// counts are a SOURCE-AST parse of each component (`parse()` over the `.svelte`
+	// file), and the reader/mount-absence halves below analyse identifiers in the
+	// text `liveScript` slices out of its own `parse()` of that file — the two
+	// script blocks' source, plus any markup `import(…)` call text. Nothing here
+	// compiles a component, and nothing needs to: the unit under test is the call
+	// site the author wrote, which the source states exactly and the compiled
+	// bundle only restates. What the counts prove is stronger than a request count
+	// over one render — no per-agent reader is even in scope on either list, so a
+	// loop this probe cannot see would still have to name one to call it.
 	const LISTS = [
 		{
 			file: 'MyAgents.svelte',
