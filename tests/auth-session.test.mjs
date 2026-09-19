@@ -867,6 +867,188 @@ test('the pre-transplant single-bucket cache key is dropped, not migrated', asyn
 });
 
 // ---------------------------------------------------------------------------
+// A cache entry whose `createdAt` cannot be true (#117)
+// ---------------------------------------------------------------------------
+
+/**
+ * Poison the bucket cache with a client created at `createdAt`, exactly the way
+ * a browser's own storage would hold it.
+ *
+ * Written as a helper because every case below is the same shape — one stored
+ * entry, one flow driven over it — and the value of `createdAt` is the whole
+ * subject of the section.
+ */
+function poisonCachedClient(createdAt, clientId = 'poisoned-client') {
+	localStorage.setItem(
+		'contentus:oauth_client_default',
+		JSON.stringify({
+			clientId,
+			redirectUri: REDIRECT_URI,
+			createdAt,
+			tokenEndpointAuthMethod: 'none',
+		})
+	);
+}
+
+test('a future-dated cached client is discarded and re-registered, and the same attempt signs in', async () => {
+	// THE SHAPE THE FIELD PRODUCED. A Windows/Chrome browser cached this entry
+	// while its clock read ahead, the clock was corrected afterwards, and every
+	// sign-in from then on met a client "created" in the future: newer than any
+	// stamp any tab would ever take, so the rotation guard refused the callback,
+	// left the entry untouched, and refused the next one identically — forever,
+	// with no path back that did not involve clearing site data by hand. The
+	// captured value was 969370ms ahead of a `nowMs` verified correct against
+	// server logs; the row below is that row.
+	//
+	// The skews are all comfortably past the tolerance on purpose. A value one
+	// millisecond over the line would make this test a claim about how long the
+	// two statements around it took to run, and the boundary is asserted
+	// separately, in the case that can be exact about it.
+	for (const skewMs of [5 * 60_000, 969_370, 3_600_000, 365 * 86_400_000]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		requests = [];
+		poisonCachedClient(Date.now() + skewMs);
+		serveLesser({ registration: { client_id: 'replacement-client' } });
+
+		const result = await signIn();
+
+		assert.equal(
+			result.ok,
+			true,
+			`a client cached ${skewMs}ms in the future must not lock out sign-in: ${JSON.stringify(result)}`
+		);
+		// ONE attempt, which is the requirement: discarded on read, re-registered
+		// through the cache-miss path the flow already had, and carried through to
+		// a token by the same redirect and the same exchange.
+		assert.equal(
+			requests.filter(({ url }) => url === '/api/v1/apps').length,
+			1,
+			`skew ${skewMs}: the corrupt entry must be replaced by exactly one registration`
+		);
+		assert.equal(
+			authorizeUrl().searchParams.get('client_id'),
+			'replacement-client',
+			`skew ${skewMs}: the redirect must carry the re-registered client, not the corrupt one`
+		);
+		assert.equal(
+			requests.some(({ url }) => url === '/oauth/token'),
+			true,
+			`skew ${skewMs}: recovery means the flow completes, not that it restarts`
+		);
+
+		const cached = JSON.parse(localStorage.getItem('contentus:oauth_client_default'));
+		assert.equal(cached.clientId, 'replacement-client');
+		assert.ok(
+			cached.createdAt <= Date.now(),
+			`skew ${skewMs}: the entry left behind must be one this clock can have written`
+		);
+		assert.equal(isAuthenticated(), true);
+		noSecretAnywhere();
+	}
+});
+
+test('a cached client with no usable createdAt is corrupt too, not defaulted to now', async () => {
+	// The same permanent refusal wearing a different costume. A stored entry
+	// with no numeric `createdAt` used to be handed `Date.now()`, which is by
+	// construction newer than the stamp this flow takes a moment later — so the
+	// guard refused the callback, the entry stayed as it was, and the next
+	// attempt defaulted it to a fresh `Date.now()` and was refused again. Every
+	// value below is one this client could not have written.
+	for (const createdAt of [
+		undefined,
+		null,
+		'1789603453690',
+		NaN,
+		Infinity,
+		-Infinity,
+		{},
+		[],
+		1789603453690.5,
+		Number.MAX_VALUE,
+	]) {
+		sessionStorage.clear();
+		localStorage.clear();
+		assigned.length = 0;
+		requests = [];
+		poisonCachedClient(createdAt);
+		serveLesser({ registration: { client_id: 'replacement-client' } });
+
+		const result = await signIn();
+
+		assert.equal(
+			result.ok,
+			true,
+			`createdAt ${JSON.stringify(createdAt) ?? String(createdAt)} must not lock out sign-in: ${JSON.stringify(result)}`
+		);
+		assert.equal(
+			authorizeUrl().searchParams.get('client_id'),
+			'replacement-client',
+			`createdAt ${JSON.stringify(createdAt) ?? String(createdAt)} must be re-registered, not trusted`
+		);
+		assert.equal(isAuthenticated(), true);
+		noSecretAnywhere();
+	}
+});
+
+test('a client cached just inside the clock tolerance is left alone, and the refusal it causes is bounded', async () => {
+	// THE OTHER SIDE OF THE TOLERANCE, because a recovery path that discarded
+	// every future-dated value would be a blanket rather than a boundary. An
+	// entry inside the tolerance is not corrupt — ordinary slew and a suspend
+	// that resumed into a different time both land here — so it is read as
+	// written and the rotation guard fails closed on it exactly as before.
+	const insideSkewMs = 30_000;
+	poisonCachedClient(Date.now() + insideSkewMs);
+	serveLesser();
+
+	await startLogin();
+	const state = authorizeUrl().searchParams.get('state');
+
+	assert.equal(
+		requests.some(({ url }) => url === '/api/v1/apps'),
+		false,
+		'an entry inside the tolerance must be reused, not re-registered'
+	);
+	assert.equal(authorizeUrl().searchParams.get('client_id'), 'poisoned-client');
+	assert.deepEqual(await completeLogin(new URLSearchParams({ code: 'c', state })), {
+		ok: false,
+		error: 'OAuth client changed before callback. Please sign in again.',
+	});
+	assert.equal(
+		JSON.parse(localStorage.getItem('contentus:oauth_client_default')).clientId,
+		'poisoned-client',
+		'a plausible entry is refused, never quietly deleted'
+	);
+	assert.equal(
+		requests.some(({ url }) => url === '/oauth/token'),
+		false
+	);
+
+	// AND THAT REFUSAL ENDS ON ITS OWN. The bytes above are what the same entry
+	// looks like once the skew has aged out of it, which is what the clock
+	// passing does to it without anyone touching storage: the value is in the
+	// past, the guard has nothing to refuse, and the SAME client signs in. This
+	// is the difference between a bounded refusal and #117's permanent one.
+	sessionStorage.clear();
+	assigned.length = 0;
+	requests = [];
+	poisonCachedClient(Date.now() - 1, 'poisoned-client');
+	serveLesser();
+
+	const recovered = await signIn();
+
+	assert.equal(recovered.ok, true, JSON.stringify(recovered));
+	assert.equal(
+		requests.some(({ url }) => url === '/api/v1/apps'),
+		false,
+		'the aged-out entry is the same client, so nothing re-registers'
+	);
+	assert.equal(authorizeUrl().searchParams.get('client_id'), 'poisoned-client');
+	assert.equal(isAuthenticated(), true);
+});
+
+// ---------------------------------------------------------------------------
 // Scope buckets
 // ---------------------------------------------------------------------------
 
@@ -1005,17 +1187,28 @@ test('a client rotated after the flow started is refused rather than exchanged',
 	serveLesser();
 	await startLogin();
 	const state = authorizeUrl().searchParams.get('state');
+	const notAfter = Number(sessionStorage.getItem('contentus:oauth_client_not_after'));
 
 	// Another tab replaced the cached client with a newer registration.
-	localStorage.setItem(
-		'contentus:oauth_client_default',
-		JSON.stringify({
-			clientId: 'rotated-client',
-			redirectUri: REDIRECT_URI,
-			createdAt: Date.now() + 60_000,
-			tokenEndpointAuthMethod: 'none',
-		})
+	//
+	// PLAUSIBLE, AND THAT IS THE POINT OF THE FIXTURE. This value used to be
+	// `Date.now() + 60_000` — a client created a minute in the FUTURE, which no
+	// registration ever produces and which the corrupt-cache discard now reads as
+	// corruption rather than as a rotation. A real rotation is created after this
+	// flow stamped its bound and before the callback reads it, so it is newer than
+	// `notAfter` and still in the past: the guard's own case, and the one that
+	// must keep failing closed while corrupt entries get recovered.
+	while (Date.now() <= notAfter) await new Promise((resolve) => setTimeout(resolve, 1));
+	const rotatedCreatedAt = Date.now();
+	assert.ok(
+		rotatedCreatedAt > notAfter,
+		'the fixture must be newer than the flow’s bound, or the guard is not being asked anything'
 	);
+	assert.ok(
+		rotatedCreatedAt <= Date.now(),
+		'the fixture must not be future-dated, or this is the corrupt case, not a rotation'
+	);
+	poisonCachedClient(rotatedCreatedAt, 'rotated-client');
 
 	assert.deepEqual(await completeLogin(new URLSearchParams({ code: 'c', state })), {
 		ok: false,
@@ -1024,6 +1217,12 @@ test('a client rotated after the flow started is refused rather than exchanged',
 	assert.equal(
 		requests.some(({ url }) => url === '/oauth/token'),
 		false
+	);
+	// Refused, and NOT recovered: a plausible rotation is another tab's real
+	// client, so discarding it here would be the guard guessing.
+	assert.equal(
+		JSON.parse(localStorage.getItem('contentus:oauth_client_default')).clientId,
+		'rotated-client'
 	);
 });
 
@@ -1274,6 +1473,74 @@ test('a token whose stated lifetime has already elapsed is refused, not stored',
 		assert.equal(readSession(), null);
 		assert.equal(isAuthenticated(), false);
 	}
+});
+
+test('an already-expired token strands nothing, and the next attempt signs in', async () => {
+	// THE FIRST HALF OF THE REPORTED LOOP (#117). The instance answered with a
+	// token this client judged already expired, because the browser's clock was
+	// running ahead of the one that minted it. The judgement is correct and it
+	// stays — see `completeLogin` for why no skew tolerance is added there — but
+	// what the refusal LEFT BEHIND was not acceptable: the five keys of a spent
+	// attempt, still matching each other, so the callback URL the browser is
+	// sitting on could be refreshed into presenting a dead authorization code
+	// again and reporting the instance's `invalid_grant` as though it were news.
+	serveLesser({ token: { created_at: 0 } });
+
+	const first = await signIn();
+	const spentState = authorizeUrl().searchParams.get('state');
+
+	assert.deepEqual(first, {
+		ok: false,
+		error: 'The instance issued a token that had already expired. Please sign in again.',
+	});
+	assert.equal(sessionStorage.getItem('contentus:auth_session'), null);
+	for (const key of [
+		'contentus:oauth_state',
+		'contentus:oauth_verifier',
+		'contentus:oauth_client_bucket',
+		'contentus:oauth_client_not_after',
+		'contentus:oauth_return_to',
+	]) {
+		assert.equal(
+			sessionStorage.getItem(key),
+			null,
+			`${key} survived a sign-in attempt that had already spent its code`
+		);
+	}
+
+	// A refreshed callback URL now fails closed on state, and the instance is not
+	// asked anything at all.
+	const requestsBeforeReplay = requests.length;
+	assert.deepEqual(
+		await completeLogin(new URLSearchParams({ code: 'authorization-code', state: spentState })),
+		{ ok: false, error: 'OAuth state mismatch. Please sign in again.' }
+	);
+	assert.equal(
+		requests.length,
+		requestsBeforeReplay,
+		'a replayed callback must not reach the network'
+	);
+
+	// AND AN IMMEDIATE RETRY SUCCEEDS, which is the requirement the clearing
+	// exists to meet. Deliberately run on whatever the failure left in storage —
+	// no `sessionStorage.clear()` here — because "the next attempt can succeed"
+	// is a claim about the state the refusal produced, not about a clean slate
+	// this test tidied for it. The cached client survives the failure, since it
+	// is not a credential, so the retry reuses it and registers nothing.
+	assigned.length = 0;
+	requests = [];
+	serveLesser();
+
+	const second = await signIn();
+
+	assert.equal(second.ok, true, JSON.stringify(second));
+	assert.equal(isAuthenticated(), true);
+	assert.notEqual(readSession(), null);
+	assert.equal(
+		requests.filter(({ url }) => url === '/api/v1/apps').length,
+		0,
+		'the retry reuses the client the failed attempt registered'
+	);
 });
 
 test('an extreme but exactly storable future lifetime is accepted, not swept up', async () => {

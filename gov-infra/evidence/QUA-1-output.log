@@ -22,17 +22,17 @@ vite v8.2.0 building client environment for production...
 [2Ktransforming...✓ 815 modules transformed.
 rendering chunks...
 computing gzip size...
-build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.21 kB
+build/client/.vite/manifest.json                              0.45 kB │ gzip:   0.22 kB
 build/client/assets/greater-default-profile-M9Kq3kIs.png  1,539.33 kB
 build/client/assets/entry-client-B-zYatAu.css                25.07 kB │ gzip:   4.33 kB
-build/client/assets/entry-client-f1nlQjth.js                726.24 kB │ gzip: 219.82 kB
+build/client/assets/entry-client-mu5kC_pJ.js                725.20 kB │ gzip: 219.54 kB
 
-✓ built in 1.10s
 [plugin builtin:vite-reporter] 
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
 - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1.05s
 
 > @equaltoai/contentus@0.1.0 build:server /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > vite build --ssr src/facetheory/entry-server.ts
@@ -41,15 +41,15 @@ vite v8.2.0 building ssr environment for production...
 [2Ktransforming...✓ 792 modules transformed.
 rendering chunks...
 computing gzip size...
-build/server/handler.mjs  1,159.33 kB │ gzip: 280.50 kB
+build/server/handler.mjs  1,165.43 kB │ gzip: 282.52 kB
 
-✓ built in 1.05s
+✓ built in 1.01s
 
 > @equaltoai/contentus@0.1.0 build:assets /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
 > node scripts/copy-facetheory-manifest.mjs && node scripts/build-stylesheet.mjs && node scripts/copy-brand-assets.mjs
 
 manifest: copied client manifest to build/server/client-manifest.json
-stylesheet: brand/contentus.css — 351709 bytes, 144 --tc-* definitions, integrity assertions passed
+stylesheet: brand/contentus.css — 349923 bytes, 144 --tc-* definitions, integrity assertions passed
 brand assets: copied 13 files to build/client/brand/
 
 > @equaltoai/contentus@0.1.0 validate /home/aron/ai-workspace/codebases/equaltoai/factory/products/contentus
@@ -62,13 +62,13 @@ brand assets: copied 13 files to build/client/brand/
 # GraphQL contract audit
 
 Schema:     contracts/lesser/graphql-schema.graphql
-            125619 chars, sha256 900d7a5b2d35a19933d809229b5bbd7424702d0c5273f943c6fd5a8ff7369f0e
-            equaltoai/lesser@8f483cc5f9fe46ffc845d70297f32f6ab8d7bcbf:docs/contracts/graphql-schema.graphql
-            blob 458453ea0c117bf0bbc9f5b365fe8832cfa4ecae (contracts/lesser/provenance.json)
+            112322 chars, sha256 21fc0d07e7a5af3065a6fb4c2b9d0f3770a4df1b607975209b310e293ff0a736
+            equaltoai/lesser@1ce2dc975bd212c11ffc6b4fca0035bae039bd60:docs/contracts/graphql-schema.graphql
+            blob 558c4cf1fbc2d369cc2909786ad50fbe8f68bb58 (contracts/lesser/provenance.json)
             Integrity checked here; PROVENANCE is the blob id above compared against lesser —
             dereferenced by scripts/verify-schema-provenance.mjs (CI: schema-provenance.yml).
-Documents:  49 in 11 inventoried module(s), 49 operation(s)
-Swept:      64 contentus-authored .ts module(s) under src/, out of 1729 tracked file(s) there
+Documents:  50 in 11 inventoried module(s), 50 operation(s)
+Swept:      65 contentus-authored .ts module(s) under src/, out of 1730 tracked file(s) there
 
 graphql-contract: PASS
 
@@ -82,10 +82,6 @@ graphql-contract: PASS
 - owned-source {@html} sinks: clean
 - vendored blog-face escape fallback: clean
 - owned-source coverage: clean
-- executable source universe: clean
-- preview display sink binding: clean
-- alternate raw-HTML sinks: clean
-- preview value path: clean
 
 - Forbidden renderer packages checked: 17
 - Contentus-owned source roots scanned: 17
@@ -139,7 +135,7 @@ CSP audit: clean.
 - Build passes recorded: client, server
 - Modules the client build resolved / loaded: 814 / 814
 - Modules the server build resolved / loaded: 798 / 791
-- Dependency edges recorded: 4607
+- Dependency edges recorded: 4620
 - Distinct edges into the face: 49
 - Findings: 0
 
@@ -150,6 +146,7 @@ CSP audit: clean.
 - src/lib/agents/AgentCard.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentCapabilities.svelte [client:import, server:import]
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentMcpPanel.svelte [client:import, server:import]
+- src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentOwnerPanels.svelte [client:import, server:import]
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustBadge.svelte [client:import, server:import]
 - src/lib/agents/AgentDetail.svelte → src/lib/agents/AgentTrustDetail.svelte [client:import, server:import]
 - src/lib/agents/AgentDriversPanel.svelte → src/lib/agents/activity-client.ts [client:import, server:import]
@@ -157,6 +154,9 @@ CSP audit: clean.
 - src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/Accordion.svelte [client:import, server:import]
 - src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/CopyBlock.svelte [client:import, server:import]
 - src/lib/agents/AgentMcpPanel.svelte → src/lib/agents/mcp.ts [client:import, server:import]
+- src/lib/agents/AgentOwnerPanels.svelte → src/lib/agents/AgentDriversPanel.svelte [client:import, server:import]
+- src/lib/agents/AgentOwnerPanels.svelte → src/lib/agents/AgentSharingPanel.svelte [client:import, server:import]
+- src/lib/agents/AgentOwnerPanels.svelte → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
 - src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentRosterFilters.svelte [client:import, server:import]
 - src/lib/agents/AgentRoster.svelte → src/lib/agents/AgentSharedWithMePanel.svelte [client:import, server:import]
@@ -164,15 +164,11 @@ CSP audit: clean.
 - src/lib/agents/AgentRoster.svelte → src/lib/agents/filters.ts [client:import, server:import]
 - src/lib/agents/AgentRosterFilters.svelte → src/lib/agents/filters.ts [client:import, server:import]
 - src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/act-as.ts [client:import, server:import]
-- src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/contract.ts [client:import, server:import]
-- src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/mcp.ts [client:import, server:import]
 - src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/share-client.ts [client:import, server:import]
 - src/lib/agents/AgentSharedWithMePanel.svelte → src/lib/agents/share-view.ts [client:import, server:import]
 - src/lib/agents/AgentSharingPanel.svelte → src/lib/agents/share-client.ts [client:import, server:import]
 - src/lib/agents/AgentSharingPanel.svelte → src/lib/agents/share-view.ts [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/AgentCard.svelte [client:import, server:import]
-- src/lib/agents/MyAgents.svelte → src/lib/agents/AgentDriversPanel.svelte [client:import, server:import]
-- src/lib/agents/MyAgents.svelte → src/lib/agents/AgentSharingPanel.svelte [client:import, server:import]
 - src/lib/agents/MyAgents.svelte → src/lib/agents/contract.ts [client:import, server:import]
 - src/lib/agents/act-as.ts → src/lib/agents/share-client.ts [client:import, server:import]
 - src/lib/agents/activity-client.ts → src/lib/agents/activity-view.ts [client:import, server:import]

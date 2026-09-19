@@ -216,17 +216,46 @@ const CAPABILITY_FIELDS = `
 `;
 
 /**
- * Roster card fields.
+ * What a NAVIGATION CARD renders, and nothing more.
  *
- * `agentType`/`agentVersion`/`agentCapabilities` are the REST-parity names
- * lesser marks preferred; the legacy `type`/`version`/`capabilities` aliases
- * are deprecated in the schema and deliberately unused here.
+ * ONE SELECTION FOR BOTH LISTS, because both lists are navigation: `AgentCard`
+ * is the only component the public roster and the owned list mount per agent,
+ * and every other surface on this face is a per-agent page whose superset is
+ * `AGENT_DETAIL_QUERY`. Splitting the two is equaltoai/contentus#119 — the
+ * lists became pure navigation when the owner's panels moved to the agent page,
+ * and a selection that had been written for the detail page went on being sent
+ * once per card on both lists. On a roster of M agents that was M reads of eight
+ * capability subfields and four timestamps no card renders.
  *
- * `mcpAccess` is selected on the ROSTER as well as the detail because it is not
- * redacted for anonymous callers, and the roster's value is telling a reader
- * which agents actually expose an MCP surface before they open one.
+ * WHAT WAS LEFT OUT, AND WHY LEAVING IT OUT IS SAFE. A field this selection does
+ * not ask for normalizes to its absent value — `verifiedAt` to null,
+ * `agentCapabilities` to a null `capabilities` — and for every field moved into
+ * the detail selection that is the safe direction: `AgentCard`, `AgentTrustBadge`
+ * and the drones' `DroneCard` render none of them, and `AgentCapabilities`
+ * renders NOTHING AT ALL for a null rather than a claim about what the agent may
+ * do. So an unasked field hides; it never fabricates. That is the rule
+ * `toAgentSummary` states for the viewer booleans, applied to a selection rather
+ * than to a redaction.
+ *
+ * `mcpAccess` IS STILL SELECTED WHOLE, AND THAT IS A DELIBERATE EXCEPTION to the
+ * narrowing above. `AgentCard` reads one field of it — `mcpURL`, to say whether
+ * this agent exposes an MCP surface at all — so five of the six are unread here,
+ * and the roster's reason for asking is unchanged: `mcpAccess` is not redacted
+ * for anonymous callers, so a reader learns which agents are reachable before
+ * opening one. But unlike a null `capabilities`, a PARTIAL `mcpAccess` is not an
+ * absent value; it is a bundle with holes in it, and every hole normalizes to
+ * something that means something — a null `authorizationServerURL` and an empty
+ * `scopes` are exactly what `AgentMcpPanel` renders as "this instance published
+ * none". Asking for one field of a bundle this client renders in full on the
+ * detail page would put "not asked" and "lesser published none" behind the same
+ * bytes, on the one subject where that ambiguity is a false statement about
+ * access. The bundle is lesser's unit and it stays lesser's unit.
+ *
+ * `agentType`/`agentVersion` are the REST-parity names lesser marks preferred;
+ * the legacy `type`/`version`/`capabilities` aliases are deprecated in the
+ * schema and deliberately unused here.
  */
-const AGENT_SUMMARY_FIELDS = `
+const AGENT_CARD_FIELDS = `
 	id
 	username
 	displayName
@@ -234,15 +263,26 @@ const AGENT_SUMMARY_FIELDS = `
 	agentType
 	agentVersion
 	verified
-	verifiedAt
 	quarantineStatus
+	quarantineActive
+	activityCount
+	mcpAccess { ${MCP_ACCESS_FIELDS} }
+`;
+
+/**
+ * The detail page's half of the superset: what `AgentDetail`, `AgentTrustDetail`
+ * and `AgentCapabilities` render and no card does.
+ *
+ * `id` is not here and is not optional. `toAgentSummary` returns null without
+ * it, and both lists key their `{#each}` on it — so it travels with the card
+ * selection for that reason rather than because a card renders it.
+ */
+const AGENT_DETAIL_ONLY_FIELDS = `
+	verifiedAt
 	quarantineStart
 	quarantineEnd
-	quarantineActive
 	createdAt
-	activityCount
 	agentCapabilities { ${CAPABILITY_FIELDS} }
-	mcpAccess { ${MCP_ACCESS_FIELDS} }
 `;
 
 /**
@@ -287,7 +327,7 @@ export const AGENTS_ROSTER_QUERY = `
 			pageInfo { hasNextPage endCursor }
 			edges {
 				cursor
-				node { ${AGENT_SUMMARY_FIELDS} }
+				node { ${AGENT_CARD_FIELDS} }
 			}
 		}
 	}
@@ -300,11 +340,19 @@ export const AGENTS_ROSTER_QUERY = `
  * the answer states what this viewer was shown. The split this replaced gated a
  * second document on token presence and inferred ownership from a non-null
  * `agentOwner` — an inference over values redaction exists to make ambiguous.
+ *
+ * THE DETAIL SUPERSET, and the one selection on this face that is. It is the
+ * card's fields plus the detail-only ones plus both viewer statements, so the
+ * agent page renders a whole agent from one read. That is also what makes the
+ * split in `AGENT_CARD_FIELDS` worth making rather than merely tidy: a list is
+ * navigation, and navigation has no business carrying eight capability subfields
+ * and four timestamps per row for a page the reader may never open.
  */
 export const AGENT_DETAIL_QUERY = `
 	query ContentusAgent($username: String!) {
 		agent(username: $username) {
-			${AGENT_SUMMARY_FIELDS}
+			${AGENT_CARD_FIELDS}
+			${AGENT_DETAIL_ONLY_FIELDS}
 			${AGENT_VIEWER_FIELDS}
 		}
 	}
@@ -313,7 +361,7 @@ export const AGENT_DETAIL_QUERY = `
 export const MY_AGENTS_QUERY = `
 	query ContentusMyAgents {
 		myAgents {
-			${AGENT_SUMMARY_FIELDS}
+			${AGENT_CARD_FIELDS}
 			${AGENT_VIEWER_FIELDS}
 		}
 	}
@@ -332,6 +380,20 @@ export const MY_AGENTS_QUERY = `
  * read wider than the thing it renders, and every extra field is a field a
  * later panel can start showing without anyone deciding it should.
  *
+ * NO SHIPPED SURFACE SENDS THIS ANY MORE, AND THAT IS RECORDED RATHER THAN
+ * QUIETLY LEFT BEHIND. The grantee's "shared with you" list read the endpoint
+ * per row through this document until equaltoai/contentus#119 moved that reading
+ * to the agent page, where the row's own link already went and where
+ * `AGENT_DETAIL_QUERY` serves `mcpAccess` in full. What keeps the document and
+ * its reader here is `scripts/probe-share-flow.mjs`, which imports the document
+ * by name so the end-to-end exercise drives the shipped text rather than a
+ * retyped copy of it — and that file is outside the write scope #119 was given,
+ * so retargeting it is a follow-up rather than something this change could do
+ * honestly in passing. Deleting the document here would break that probe; deleting
+ * the reader while keeping the document would leave a document no shipped
+ * transport can send, which is worse than either. Both stay, named as what they
+ * now are: the exercise probe's transport.
+ *
  * ANONYMOUS-SAFE AND UNREDACTED, which is what makes the narrow document
  * possible: `mcpAccess` is absent from lesser's `redactGraphAgentPrivateFields`
  * (`graph/agent_model_helpers.go`), because the bundle is the *public*
@@ -344,6 +406,57 @@ export const AGENT_MCP_ACCESS_QUERY = `
 	query ContentusAgentMcpAccess($username: String!) {
 		agent(username: $username) {
 			mcpAccess { ${MCP_ACCESS_FIELDS} }
+		}
+	}
+`;
+
+/**
+ * The one question an owner-only mount has to ask, asked on its own.
+ *
+ * WHY THE AGENT PAGE NEEDS A SECOND READ. `/agents/{username}` is server-rendered
+ * ANONYMOUSLY — `entry-server.ts` calls `fetchAgent({ endpoint }, username)` with
+ * no token, because the token is in the reader's `sessionStorage` where no server
+ * pass can reach it, and because the route's props are serialized into contentus's
+ * PUBLIC hydration endpoint. So `viewerIsOwner` arrives on this page as a served
+ * `false` for everybody, the owner included, and it is not a stale value that a
+ * refresh would fix: it is the correct answer to the question an anonymous caller
+ * asks. Until equaltoai/contentus#119 the owner's panels lived on the owned
+ * roster, whose whole read is authenticated and client-only, so this never arose.
+ * Moving them here moved the mount onto a page whose first paint cannot answer it.
+ *
+ * WHY NOT RE-SEND `AGENT_DETAIL_QUERY` WITH THE TOKEN. It would answer the
+ * question, and it would also re-read an entire agent the page already has,
+ * leaving two copies of one subject on one screen — the server's anonymous one,
+ * painted, and the client's authenticated one, differing in exactly the fields
+ * lesser redacts. A reader of that page could not tell which copy a given
+ * sentence came from. This asks the one thing the mount needs and changes
+ * nothing else on the page.
+ *
+ * WHY NOT SKIP THE READ AND LET LESSER REFUSE. `listShareGrants` and
+ * `agentActivity` are both owner-gated server-side, so mounting the panels
+ * unconditionally would leak nothing. It would still be wrong twice over: two
+ * doomed requests on every authenticated visit by someone who does not own the
+ * agent, and a management surface — a grant form — drawn for a viewer lesser has
+ * not confirmed may use it. `toAgentSummary`'s own rule is that an owner-only
+ * panel stays unmounted rather than being drawn on an unanswered question, and
+ * "we did not ask" is an unanswered question.
+ *
+ * ONE FIELD. Not `id`, not `username`: the read is addressed by username, so
+ * echoing it back proves nothing, and every field added here is a field a later
+ * surface can start rendering as an ownership claim. The narrowness is the same
+ * discipline `AGENT_MCP_ACCESS_QUERY` states for its own selection.
+ *
+ * SAME FORWARD DEPENDENCY AS THE DETAIL DOCUMENT, and no new one: `viewerIsOwner`
+ * exists from lesser 1ce2dc97 (#1418) onward, and an instance predating it
+ * rejects the whole document rather than answering the rest. This route already
+ * crosses that pin — `AGENT_DETAIL_QUERY` selects the same field, on the server
+ * pass, for every visitor — so this read adds no deploy ordering of its own. See
+ * contracts/lesser/provenance.json, `inspected.forward_pin`.
+ */
+export const AGENT_OWNERSHIP_QUERY = `
+	query ContentusAgentOwnership($username: String!) {
+		agent(username: $username) {
+			viewerIsOwner
 		}
 	}
 `;
@@ -691,6 +804,100 @@ export async function fetchAgent(
 		}
 
 		return { ok: true, agent };
+	} catch (error) {
+		return { ok: false, failure: agentUnavailableFromFailure(error) };
+	}
+}
+
+export type AgentOwnershipResult =
+	{ ok: true; isOwner: boolean } | { ok: false; failure: AgentUnavailable };
+
+/**
+ * What a mount may conclude from an ownership read.
+ *
+ * FOUR STATES BECAUSE THREE OF THEM ARE DIFFERENT FACTS that all permit nothing.
+ * `unknown` is "nothing has asked yet" — the server's answer and the client's
+ * first frame, since the token lives in `sessionStorage` where no server pass
+ * can reach it. `not-owner` is lesser's served `false`. `unanswered` is lesser
+ * not answering at all. Only `owner` mounts anything.
+ *
+ * They are kept apart because collapsing them is a claim. Folding `unanswered`
+ * into `not-owner` — the one simplification a gate like this is tempted by,
+ * since both mount nothing — would tell an owner whose read hit a network fault
+ * that this instance said they do not own their agent. That is exactly the
+ * substitution the security invariant on this face forbids: never assert access
+ * lesser has not confirmed, in either direction. A gate that cannot confirm
+ * stays shut AND says which of the two it is, so the copy beside it can be
+ * honest about the difference.
+ *
+ * A PURE FUNCTION, so a probe drives it with lesser's answer rather than reading
+ * a mount decision off a rendered screen — the same reason `share-view.ts`
+ * composes its sentences beside the classifier they describe.
+ */
+export type AgentOwnershipState = 'unknown' | 'owner' | 'not-owner' | 'unanswered';
+
+export function ownershipState(result: AgentOwnershipResult | null): AgentOwnershipState {
+	if (result === null) return 'unknown';
+	if (!result.ok) return 'unanswered';
+	return result.isOwner ? 'owner' : 'not-owner';
+}
+
+/**
+ * Whether the caller owns one agent — lesser's `viewerIsOwner`, and nothing
+ * else. See `AGENT_OWNERSHIP_QUERY` for why the agent page cannot take this from
+ * the read it already made.
+ *
+ * AUTHENTICATED BY DEFINITION, like `fetchMyAgents`: ownership is a statement
+ * about a caller, so an anonymous form of the question has no answer, and a
+ * missing token is answered here rather than by sending a request that can only
+ * come back false-or-refused. That is also what keeps an anonymous reader of the
+ * agent page at zero client requests for this.
+ *
+ * READ STRICTLY, in the direction that mounts nothing. `viewerIsOwner` is
+ * `Boolean!` in lesser's schema, so a conforming answer is true or false;
+ * anything else — absent, null, a string — normalizes to false, which shuts the
+ * gate. `toAgentSummary` reads the same field the same way, and this does not
+ * reuse that normalizer because this read selects one field of an `Agent` and
+ * building a whole `AgentSummary` out of it would populate twelve properties
+ * nobody asked for with values nobody served.
+ */
+export async function fetchAgentOwnership(
+	ctx: AgentRequestContext,
+	username: string
+): Promise<AgentOwnershipResult> {
+	const handle = username.trim().replace(/^@/, '');
+	if (!handle) {
+		return { ok: false, failure: { reason: 'not-found', message: 'No agent was requested.' } };
+	}
+	if (!ctx.accessToken) {
+		return {
+			ok: false,
+			failure: { reason: 'unauthenticated', message: 'Sign in to see this.' },
+		};
+	}
+
+	try {
+		const result = await graphqlRequest<{ agent: unknown }>(
+			AGENT_OWNERSHIP_QUERY,
+			{ username: handle },
+			requestOptions(ctx)
+		);
+
+		const failure = agentUnavailableFromErrors(result.errors);
+		const node = record(result.data?.agent);
+		if (!node) {
+			return {
+				ok: false,
+				failure:
+					failure ??
+					({
+						reason: 'not-found',
+						message: 'No agent matches this address.',
+					} satisfies AgentUnavailable),
+			};
+		}
+
+		return { ok: true, isOwner: node.viewerIsOwner === true };
 	} catch (error) {
 		return { ok: false, failure: agentUnavailableFromFailure(error) };
 	}

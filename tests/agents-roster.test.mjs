@@ -89,7 +89,20 @@ test('the roster asks for the preferred field names, not the deprecated aliases'
 	// still be wrong.
 	assert.match(AGENTS_ROSTER_QUERY, /agentType/);
 	assert.match(AGENTS_ROSTER_QUERY, /agentVersion/);
-	assert.match(AGENTS_ROSTER_QUERY, /agentCapabilities/);
+
+	// `agentCapabilities` IS NO LONGER SELECTED HERE, and that is the narrowing
+	// equaltoai/contentus#119 made, not an absence this test now tolerates. No
+	// card on either list renders a capability — `AgentCard` shows the handle, the
+	// display name, the type, the bio, the activity count, the version, the trust
+	// badge and whether an MCP endpoint exists — so eight subfields per row were
+	// being read in order to be dropped, on a page whose whole output is a list of
+	// links. The PREFERRED NAME is still the one this repo selects; the detail
+	// document is the one that renders capabilities, and
+	// `tests/agents-trust.test.mjs` asserts the name there.
+	assert.ok(
+		!AGENTS_ROSTER_QUERY.includes('agentCapabilities'),
+		'a navigation list must not read a capability block that no card on it renders'
+	);
 
 	// `ownerUsername` is not anonymous-safe, and the roster is. Asking for it
 	// here would make the public roster error for every anonymous visitor.
@@ -478,7 +491,7 @@ test('the seam check can still see an import, in every form a comment can hide i
 });
 
 test('the seam check reads the markup, which is where round 5 hid a dependency', () => {
-	// The reading returned a component's two `<script>` blocks and nothing else, so
+	// The reading returned a component's `<script>` blocks and nothing else, so
 	// a handler loading an interim piece was a dependency sitting in a region
 	// neither seam check looked at. Each form is planted with the compiler's own
 	// output as its witness, so it is a proven dependency before it is a caught one.

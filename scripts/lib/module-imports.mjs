@@ -217,14 +217,20 @@ import { parse } from 'svelte/compiler';
 import ts from 'typescript';
 
 /**
- * The script a file executes.
+ * The script a file executes, as SOURCE TEXT — not the JavaScript a build
+ * generates from it. This module imports `parse` from `svelte/compiler` and
+ * never `compile`, so no caller of this function is handed generated output.
  *
- * For a component that is its `<script>` blocks, both of them — instance and
- * `module` — taken from the compiler's own parse rather than from a tag-shaped
- * regex. The compiler is what decides where a script begins and ends, which is
- * the entire content of the second bypass above: a `<script>` written inside a
- * markup comment is a comment, and no amount of care with a pattern makes that
- * distinction reliably, because the distinction is the parser's.
+ * For a component that is whichever `<script>` blocks it has — instance and
+ * `module`, or one of them — taken from the compiler's own parse rather than
+ * from a tag-shaped regex. WHICH OF THEM is a measurement and not a rule: of
+ * the 570 tracked components under `src/`, 568 carry an instance block alone
+ * and two carry both, so the answer this returns for almost every component in
+ * this repository is ONE block's text. The compiler is what decides where a
+ * script begins and ends, which is the entire content of the second bypass
+ * above: a `<script>` written inside a markup comment is a comment, and no
+ * amount of care with a pattern makes that distinction reliably, because the
+ * distinction is the parser's.
  *
  * A component with no script executes no import and yields the empty string.
  *
@@ -233,7 +239,7 @@ import ts from 'typescript';
  * old text-reading fallback had to go — but it holds import CALLS, and
  * `<button onclick={async () => (await import('…/CopyBlock.svelte')).default}>`
  * is a dependency the client build takes. Round 5's review compiled exactly that
- * and both seam checks stayed green, because this function returned two script
+ * and both seam checks stayed green, because this function returned the script
  * blocks and nothing else. So `markupImports` walks the rest of the component's
  * tree and appends every `import(…)` it finds, as source text, to be read by the
  * same TypeScript pass that reads the script blocks: one extraction, one set of
@@ -251,7 +257,7 @@ import ts from 'typescript';
  * Silence would be the fail-open answer — an unreadable file and a file with no
  * cross-seam import would return the same green — and a thrown error is a red
  * gate, which is the direction a seam check should fail in. Nothing in this
- * repository's tree trips it: all 1246 files the two walks touch parse.
+ * repository's tree trips it: every file the two walks touch parses.
  */
 export function liveScript(file, source) {
 	if (!/\.svelte$/i.test(file)) return source;
@@ -277,9 +283,10 @@ export function liveScript(file, source) {
  * Every `import(…)` the component's markup runs, as source text ready to be read
  * as a statement.
  *
- * WHERE IT LOOKS. Everywhere in the component's tree except the two script
- * blocks — which the caller has already taken, and skipping them is what keeps a
- * script import from being counted twice. That covers an event handler, an
+ * WHERE IT LOOKS. Everywhere in the component's tree except the script blocks,
+ * whichever of them the component has — the caller has already taken those, and
+ * skipping them is what keeps a script import from being counted twice. That
+ * covers an event handler, an
  * attribute, `{@const …}`, `{#await import(…)}`, `{#if}`, a snippet body and
  * every position a future Svelte release adds, because the walk is over the
  * tree's shape rather than over a list of the node types that may carry an
@@ -398,9 +405,28 @@ function eachNode(node, visit) {
  * This is deliberately a syntax-tree reading, not source text with comments
  * removed. A string containing `<!--` cannot erase the live nodes before a
  * later string containing `-->`, and names written only in comments never
- * become nodes. Callers that start with a Svelte component should hand this
- * function the compiler's client JavaScript so expressions in markup event
- * handlers are included as well as the component's script blocks.
+ * become nodes.
+ *
+ * WHAT A CALLER STARTING FROM A SVELTE COMPONENT HANDS THIS, and what each of the
+ * two choices can see. They are not interchangeable, and an earlier version of
+ * this header named only the second as the one a component's caller "should" use:
+ *
+ *   1. `liveScript`'s slice — the `<script>` blocks' SOURCE TEXT plus any markup
+ *      `import(…)` text. The seam and absence checks use this, and it compiles
+ *      nothing. Its bound, stated because it is the one a claim is most likely to
+ *      get wrong: an expression in a markup event handler is NOT in the slice, so
+ *      a call written only in markup is invisible here. That is still sound for an
+ *      absence check on an imported name, because markup holds no declarations — a
+ *      handler can only call what a script block brought into scope, and that
+ *      import IS in the slice.
+ *
+ *   2. `compile(…, { generate: 'client' }).js.code` — GENERATED output, which does
+ *      carry markup event handlers, so a handler-only name is in the reading.
+ *      `tests/drones-roster.test.mjs` reads persistence sinks this way —
+ *      `localStorage.setItem` in an `onclick` is reachable from markup, which
+ *      choice 1 would miss. `generate:
+ *      'server'` is not a substitute for it: the server build drops event handlers,
+ *      so a handler-only name is absent from that output.
  *
  * Static element-access names are included so `storage['setItem']()` is the
  * same structural name as `storage.setItem()`. The result is unique in source

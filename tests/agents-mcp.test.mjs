@@ -8,7 +8,6 @@ import {
 	mcpClientConfigs,
 	mcpConnectOrigin,
 	resolveMcpProbeTargets,
-	sharedMcpAccess,
 	toMcpDiscoveryDocument,
 	toOAuthProtectedResourceDocument,
 } from '../src/lib/agents/mcp.ts';
@@ -116,48 +115,30 @@ test('the CSP origin is the one lesser returned, or nothing at all', () => {
 });
 
 /* -------------------------------------------------------------------------
- * What a grantee is shown about a shared agent (M2.2, equaltoai/contentus#93)
+ * What a grantee is shown about a shared agent — REMOVED, AND WHY
+ *
+ * Three tests here drove `sharedMcpAccess`, the classifier that reduced
+ * lesser's MCP bundle to the one line the grantee's "shared with you" row
+ * printed (M2.2, equaltoai/contentus#93). equaltoai/contentus#119 deleted the
+ * row's endpoint and the per-grant read behind it: a grantee with M shares cost
+ * M GraphQL reads to restate one URL that the row's own link leads to in full,
+ * on the agent page, where `AgentMcpPanel` renders lesser's whole bundle from
+ * `AGENT_DETAIL_QUERY`.
+ *
+ * The classifier went with its only caller, because an export nothing calls is a
+ * rule nobody is following — and keeping these tests green against it would have
+ * been the more damaging choice, since a passing test is what tells the next
+ * reader that a behaviour is still load-bearing.
+ *
+ * WHAT THE TESTS PROVED IS NOT LOST, it moved. The distinction they existed for
+ * — "this instance publishes no MCP endpoint for this agent" is a SERVED FACT
+ * and is not the same sentence as "the read failed" — is `AgentMcpPanel`'s to
+ * carry, and it carries it off the detail document, where a null `mcpURL` and an
+ * unanswered read are still two different things. The half about the grantee's
+ * list is now asserted where the list is: `tests/agents-trust.test.mjs` holds
+ * that the panel issues one read, assembles no part of an endpoint, and links
+ * every row to the agent page.
  * ---------------------------------------------------------------------- */
-
-test('a shared agent’s row gets lesser’s endpoint, carried through untouched', () => {
-	assert.deepEqual(sharedMcpAccess({ ok: true, access: ACCESS }), {
-		status: 'published',
-		endpoint: 'https://api.example.invalid/mcp/weatherbot',
-	});
-});
-
-test('“no endpoint published” and “could not ask” stay two different sentences', () => {
-	// THE DISTINCTION IS THE POINT OF THE FUNCTION. A served bundle with no
-	// `mcpURL` is the instance stating it publishes no MCP surface for this
-	// agent — a fact a grantee can act on by stopping. A failed read is the
-	// instance not answering, which a grantee acts on by trying again. Reporting
-	// either as the other tells one of them to do the wrong thing.
-	assert.deepEqual(sharedMcpAccess({ ok: true, access: { ...ACCESS, mcpURL: null } }), {
-		status: 'none',
-	});
-	assert.deepEqual(sharedMcpAccess({ ok: true, access: { ...ACCESS, mcpURL: '' } }), {
-		status: 'none',
-	});
-	// Whitespace is not an endpoint either: `BuildPublicMCPAccessBundle` builds
-	// its URLs by concatenation, so a blank base URL is the shape that reaches a
-	// client, and a row that printed it would show a grantee an empty box it
-	// could not paste anywhere.
-	assert.deepEqual(sharedMcpAccess({ ok: true, access: { ...ACCESS, mcpURL: '   ' } }), {
-		status: 'none',
-	});
-	// An agent lesser will not resolve at all, and its message rather than a
-	// substitute one.
-	assert.deepEqual(
-		sharedMcpAccess({ ok: false, failure: { reason: 'not-found', message: 'No such agent.' } }),
-		{ status: 'unavailable', message: 'No such agent.' }
-	);
-});
-
-test('a bundle with no access object at all is “none”, not a crash', () => {
-	// `{ ok: true, access: null }` is reachable: `fetchAgentMcpAccess` normalizes
-	// a served `mcpAccess: null` to it rather than inventing a bundle.
-	assert.deepEqual(sharedMcpAccess({ ok: true, access: null }), { status: 'none' });
-});
 
 /* -------------------------------------------------------------------------
  * Documents
