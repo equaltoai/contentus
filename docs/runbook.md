@@ -172,6 +172,20 @@ moved shows up as a named failing step instead of an empty screen. Its run with
 an MCP credential needs the expected MCP host named up front (`--mcp-host`);
 that credential is not sent to a host only the instance vouched for.
 
+### Preview media, the review gate, and the CSP that carries them (#112)
+
+The authenticated preview path — `draftPreview(id:, includeAccessUrls: true)`,
+the bound image lesser composes into it, the `img-src` widening that lets that
+image load, and lesser's per-viewer authorization for the read — carries three
+live checks no committed probe can perform, because each needs a real instance, a
+real browser, or a real presigned URL:
+`docs/exercise/preview-media-live-checklist.md`.
+
+**They are deferred to the operator's deploy and recorded there as open, not as
+covered.** Run them after the install that carries #112. The install smoke is the
+first of the three, so that checklist and the verification above are one sitting
+rather than two.
+
 ## Milestone-zero discipline
 
 The manifest and this install path are milestone-zero artifacts: they exist
