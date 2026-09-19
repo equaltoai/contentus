@@ -7,7 +7,6 @@ import {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toPreviewFaceArticle,
 } from '../src/lib/cms/review-contract.ts';
 
 /**
@@ -211,14 +210,18 @@ test('round trip 2: the preview is lesser rendered HTML, and Markdown source nev
 	const preview = toDraftPreview(
 		ask(REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY, { id: DRAFT_ID }).draftPreview
 	);
-	const article = toPreviewFaceArticle(preview, { draftId: DRAFT_ID, title: 'x', updatedAt: '' });
 
-	assert.equal(article.contentFormat, 'html', "the face hands the blog face lesser's HTML");
-	assert.match(article.content, /<h1>What the agent wrote<\/h1>/);
+	// `preview.html` is the field the review workspace hands to the one owned
+	// `{@html}` sink (`src/lib/review/PreviewBody.svelte`), so asserting on it
+	// is asserting on the bytes that reach the DOM — not on a view model built
+	// beside them.
+	assert.equal(preview.success, true);
+	assert.equal(preview.sourceFormat, 'markdown', 'lesser names the format it rendered from');
+	assert.match(preview.html, /<h1>What the agent wrote<\/h1>/);
 
 	// The source the agent typed is nowhere in what reaches the DOM, and the
 	// document that fetched this never asked for it.
-	assert.doesNotMatch(article.content, /^#\s/m, 'no Markdown heading syntax reaches the reader');
+	assert.doesNotMatch(preview.html, /^#\s/m, 'no Markdown heading syntax reaches the reader');
 	assert.doesNotMatch(REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY, /\bcontent\b/);
 });
 
@@ -241,8 +244,8 @@ test('round trip 2b: a render failure shows lesser errors and no body at all', (
 		ask(REVIEW_DOCUMENTS.DRAFT_PREVIEW_QUERY, { id: DRAFT_ID }).draftPreview
 	);
 
+	assert.equal(preview.success, false);
 	assert.equal(preview.html, null, 'partial output from a failed render is dropped');
-	assert.equal(toPreviewFaceArticle(preview, null), null, 'and it cannot become an article');
 	assert.deepEqual(preview.errors, ['draft source exceeds the 256 KiB limit']);
 });
 

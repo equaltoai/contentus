@@ -601,59 +601,6 @@ export function toDraftPreview(raw: unknown): DraftPreview | null {
 	};
 }
 
-export interface PreviewFaceArticle {
-	id: string;
-	slug: string;
-	content: string;
-	contentFormat: 'html';
-	title: string;
-	author: { id: string; displayName?: string; username?: string };
-	isPublished: false;
-}
-
-/**
- * Shape a rendered preview for the vendored blog face's `Article` compound.
- *
- * `contentFormat` is `'html'` unconditionally, and that is a statement of fact
- * rather than a choice: the only value this function is ever handed is
- * `DraftPreview.renderedHtml`, which lesser produced with its own renderer.
- * There is no branch that could pass unrendered source and label it HTML —
- * `toDraftPreview` already nulled the field on any preview that did not
- * succeed, and this function refuses both a null and an unsuccessful preview.
- *
- * The author is the recorded generator when there is one. The preview panel
- * renders `Article.Content` alone, so nothing displays it; it is populated
- * because the face's view model asks for it, and populating it with the actor
- * lesser named beats populating it with a placeholder.
- */
-export function toPreviewFaceArticle(
-	preview: DraftPreview,
-	review: DraftReviewData | null
-): PreviewFaceArticle | null {
-	if (!preview.success || !preview.html) return null;
-
-	const generator = review?.generatedBy ?? null;
-
-	return {
-		id: preview.draftId,
-		// A draft has no published address, and inventing one here would put a
-		// slug on screen that names nothing.
-		slug: '',
-		content: preview.html,
-		contentFormat: 'html',
-		title: review?.title?.trim() || 'Untitled draft',
-		author: {
-			id: generator?.id ?? '',
-			...(generator?.displayName ? { displayName: generator.displayName } : {}),
-			...(generator?.username ? { username: generator.username } : {}),
-		},
-		// Never true on this surface. A draft under review has not published, and
-		// the whole point of the gate is that reaching this screen is not
-		// publication.
-		isPublished: false,
-	};
-}
-
 /* -------------------------------------------------------------------------
  * Queue assembly
  * ---------------------------------------------------------------------- */

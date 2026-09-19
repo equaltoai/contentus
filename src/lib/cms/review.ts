@@ -73,13 +73,11 @@ export {
 	toDraftActedBy,
 	toDraftPreview,
 	toDraftReview,
-	toPreviewFaceArticle,
 	toReviewActor,
 	toVerdictRecord,
 } from './review-contract';
 export type {
 	DraftPreview,
-	PreviewFaceArticle,
 	QueueHalfState,
 	QueueSource,
 	ReviewFailure,

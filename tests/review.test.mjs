@@ -12,7 +12,6 @@ import {
 	orderQueueEntries,
 	toDraftPreview,
 	toDraftReview,
-	toPreviewFaceArticle,
 	toReviewActor,
 	toVerdictRecord,
 } from '../src/lib/cms/review-contract.ts';
@@ -327,17 +326,7 @@ test('a failed preview carries no HTML even when lesser returned some', () => {
 	assert.deepEqual(preview.errors, ['unclosed code fence at line 40']);
 });
 
-test('a failed preview cannot become a renderable article', () => {
-	const preview = toDraftPreview({
-		draftId: 'draft-3',
-		success: false,
-		renderedHtml: '<p>partial</p>',
-		errors: ['nope'],
-	});
-	assert.equal(toPreviewFaceArticle(preview, null), null);
-});
-
-test('a successful preview renders as html, unpublished, with the generator as author', () => {
+test('a successful preview carries lesser rendered bytes verbatim, and never the source', () => {
 	const preview = toDraftPreview({
 		draftId: 'draft-4',
 		success: true,
@@ -348,18 +337,15 @@ test('a successful preview renders as html, unpublished, with the generator as a
 		errors: [],
 	});
 
-	const article = toPreviewFaceArticle(preview, {
-		draftId: 'draft-4',
-		title: 'Draft title',
-		updatedAt: '',
-		generatedBy: actor({ displayName: 'Scribe', username: 'scribe' }),
-	});
-
-	assert.equal(article.content, '<h2>Rendered by lesser</h2>');
-	assert.equal(article.contentFormat, 'html');
-	assert.equal(article.isPublished, false, 'a draft under review has not published');
-	assert.equal(article.slug, '', 'a draft has no published address to claim');
-	assert.equal(article.author.displayName, 'Scribe');
+	// `html` is the field the one owned sink displays verbatim
+	// (`src/lib/review/PreviewBody.svelte`), so this projection is the last
+	// place contentus could alter lesser's output on the way to the DOM — and
+	// it does not: the bytes come through unchanged, and the format lesser
+	// named is recorded beside them rather than acted on.
+	assert.equal(preview.html, '<h2>Rendered by lesser</h2>');
+	assert.equal(preview.sourceFormat, 'markdown', 'lesser names the format it rendered from');
+	assert.equal(preview.renderedBytes, 200);
+	assert.deepEqual(preview.errors, []);
 });
 
 /* ---------------------------------------------------------------------------
