@@ -201,8 +201,10 @@ const agentsDir = join(repoRoot, 'src', 'lib', 'agents');
 /**
  * The readings this file's walks are built on live in
  * `../scripts/lib/module-imports.mjs`, imported above, and its header carries the
- * reasoning: `liveScript` is the script a file executes, `moduleSpecifiers` and
- * `computedImports` are what that script depends on.
+ * reasoning: `liveScript` is the SOURCE TEXT of the script a file executes — its
+ * `<script>` blocks plus any markup `import(…)` text, parsed and sliced rather
+ * than compiled — and `moduleSpecifiers` and `computedImports` are what that
+ * script depends on.
  *
  * WHAT MOVED AND WHY. Both lived here as line-anchored regexes over raw text.
  * Round 3 of this pull request's review compiled four legal files that took a
@@ -438,12 +440,15 @@ const faceOnDisk = () =>
  * A component the way a component is actually written, which every planted
  * `.svelte` fixture below goes through.
  *
- * IT IS NOT DECORATION. Svelte executes `<script>` and nothing else, so a
- * `.svelte` file holding a bare import statement is a file whose template
- * happens to read like code — it compiles to a component that imports nothing.
- * The reading these walks use is the compiler's, so it says so, and a fixture
- * written as a bare line would be asserting the checker sees a dependency that
- * does not exist. The earlier version of this file planted bare lines and was
+ * IT IS NOT DECORATION. Svelte runs `<script>` blocks as script and treats the
+ * rest of the file as markup, so a `.svelte` file holding a bare import
+ * STATEMENT is a file whose template happens to read like code — it compiles to a
+ * component that imports nothing. The reading these walks use is the compiler's
+ * PARSE, so it says so, and a fixture written as a bare line would be asserting
+ * the checker sees a dependency that does not exist. Markup is not inert for
+ * every form: an `import(…)` CALL in a handler is a dependency the build takes,
+ * which is the next fixture's subject and what `markupImports` exists for. The
+ * earlier version of this file planted bare lines and was
  * answered by a fallback that read markup as script; that fallback is gone with
  * the patterns, and the fixtures are components instead.
  */
@@ -607,7 +612,7 @@ test('a dynamic import cannot walk past the cross-seam check', () => {
 });
 
 test('an import in MARKUP cannot walk past either seam check', () => {
-	// ROUND 5's FIRST FORM. The reading returned a component's two `<script>`
+	// ROUND 5's FIRST FORM. The reading returned a component's `<script>`
 	// blocks and nothing else, so a handler that loads a component behind a seam
 	// took the dependency in front of a check that could not see the region it sat
 	// in. Every form below is planted with its own WITNESS — the compiler's output,
@@ -967,7 +972,9 @@ test('markup cannot hide the script, on the real face map', () => {
 test('a `module` script is script too', () => {
 	// `<script module>` runs once per module rather than once per instance, and an
 	// import in it loads exactly what an import in the instance block loads. The
-	// compiler hands back both blocks, so both are read.
+	// compiler's parse exposes both block slots and `liveScript` reads whichever
+	// are present — this fixture carries a `module` block and no instance block,
+	// so the slice is that one block's text.
 	const face = faceOnDisk();
 	const source = `<script module>\nimport X from '../src/lib/agents/CopyBlock.svelte';\n</script>\n\n<div>face</div>\n`;
 

@@ -79,8 +79,12 @@ verification followed.
 ### B1. The owner shares the agent
 
 1. Sign in as the **owner** and go to `/agents`.
-2. In **Agents you own**, find the agent. Its **`Sharing @<agent>`** panel is
-   the M2.2/M2.3 surface — it appears only for agents lesser reports you own.
+2. Open the agent's page, `/agents/<agent-username>` — one link away from
+   **Agents you own**, which is navigation and nothing more since
+   equaltoai/contentus#119. Its **`Sharing @<agent>`** panel is the M2.2/M2.3
+   surface — it appears only for agents lesser reports you own, which on this
+   page is a question the client has to ask rather than one the paint can
+   answer (§2b of `docs/consumption/agent-contract.md`).
 3. Enter the grantee's username in **Local account to grant** and press
    **Grant access**.
 4. The account appears under **Who has access now**, stamped with when it was
@@ -95,17 +99,25 @@ each one publishes is its own.
 1. Sign out. Sign in as the **grantee** — as themselves, not as the agent and
    not through any act-as control. There is no such control: M2.1 removed it,
    and its absence is part of what this step verifies.
-2. Go to `/agents`. The **Agents shared with you** panel lists both agents, each
-   with its own **MCP endpoint**.
-3. Copy each endpoint. It is lesser's `mcpAccess.mcpURL` verbatim — contentus
+2. Go to `/agents`. The **Agents shared with you** panel lists both agents, one
+   row each: the handle, lesser's stamp for the grant, and **How to connect**.
+   The row names no endpoint of its own. The panel dispatches one reader — the
+   grant list — whatever it contains; that is a structural property of the
+   component, pinned in `tests/agents-trust.test.mjs`, and not something this
+   runbook asks you to measure. What you check on screen here is the row's
+   content: the handle, the stamp, the link, and no endpoint.
+3. Open each agent's page through **How to connect** and copy the endpoint from
+   its MCP panel. It is lesser's `mcpAccess.mcpURL` verbatim — contentus
    assembles no part of it, so what is on screen is what the instance published.
 
-If a row says _"This instance publishes no MCP endpoint for this agent"_, that
-is the instance stating it publishes none, not a failure to load. Stop and route
-that upstream rather than working around it.
+If that panel says _"This instance publishes no MCP endpoint for this agent"_,
+that is the instance stating it publishes none, not a failure to load. Stop and
+route that upstream rather than working around it.
 
-For the full connection bundle — authorization server, registration endpoint,
-scopes, and copy-paste client configs — open `/agents/<agent-username>`.
+The rest of the connection bundle — authorization server, registration endpoint,
+scopes, and copy-paste client configs — is on the same panel of the same page,
+`/agents/<agent-username>`, which is why B2 reads the endpoint there rather than
+off a list row.
 
 ### B3. The grantee connects and drives
 
@@ -121,7 +133,8 @@ For **each** shared agent, from the grantee's own MCP client:
 
 ### B4. The owner observes
 
-Back as the **owner**, on `/agents`:
+Back as the **owner**, on the agent's page — `/agents/<agent-username>`, where
+both owner panels have lived since equaltoai/contentus#119:
 
 1. **`Sharing @<agent>`** still shows the grantee under **Who has access now**.
 2. **`Who has been driving @<agent>`** — the M2.4 surface — names the grantee

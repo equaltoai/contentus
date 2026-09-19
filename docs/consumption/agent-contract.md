@@ -16,8 +16,8 @@ this document and lesser disagree, lesser is right and this is a bug.
 | `/agents/{username}` | `agent(username)`                             | anonymous                 |
 | "Agents you own"     | `myAgents`                                    | bearer token, client only |
 | MCP addresses        | `Agent.mcpAccess`                             | anonymous (not redacted)  |
-| A shared agent's MCP | `agent(username) { mcpAccess }`               | bearer token, client only |
-| Capability badges    | `Agent.agentCapabilities`                     | anonymous                 |
+| Ownership gate       | `agent(username) { viewerIsOwner }`           | bearer token, client only |
+| Capability badges    | `Agent.agentCapabilities`                     | anonymous (detail only)   |
 | Trust state          | `Agent.verified`, `Agent.quarantine*`         | anonymous                 |
 
 `agents(ownerUsername:)` is **not used**. lesser rejects it for anonymous
@@ -77,11 +77,12 @@ distinguishing case in its own contract test
 `viewer.isOwner`. Which one a surface reads is a decision each surface makes
 explicitly:
 
-| Surface                                                      | Gate                                             | Why                                                                                                                          |
-| ------------------------------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Owner/scopes rows on the detail page                         | `viewer.canSeePrivateFields` (via `agent.owner`) | It renders the redacted values themselves, so the question is whether lesser served them. An admin who may read them should. |
-| `AgentSharingPanel`, `AgentDriversPanel` in "Agents you own" | `viewer.isOwner`                                 | They are the owner's management surfaces.                                                                                    |
-| Public roster                                                | neither — not selected                           | It renders no owner fields, so it asks no viewer question.                                                                   |
+| Surface                                                    | Gate                                             | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Owner/scopes rows on the detail page                       | `viewer.canSeePrivateFields` (via `agent.owner`) | It renders the redacted values themselves, so the question is whether lesser served them. An admin who may read them should.                                                                                                                                                                                                                                                                                                                           |
+| `AgentSharingPanel`, `AgentDriversPanel` on the agent page | `viewerIsOwner`, read by `AgentOwnerPanels`      | They are the owner's management surfaces. The page they now live on is painted anonymously, so the gate is asked for rather than inherited — see §2b.                                                                                                                                                                                                                                                                                                  |
+| Public roster                                              | neither — not selected                           | It renders no owner fields, so it asks no viewer question.                                                                                                                                                                                                                                                                                                                                                                                             |
+| "Agents you own"                                           | selected, and no surface reads them              | It renders no owner fields either: since equaltoai/contentus#119 the list is navigation and the owner's surfaces are on the agent page. The booleans are still asked for so `AgentSummary.viewer` stays a true statement about rows lesser served _as the owner_ — dropping them would normalize `viewer.isOwner` to `false` for every agent the caller demonstrably owns, which is the one list where that would be a lie rather than a safe default. |
 
 **Neither boolean is derived from the other, and neither is derived from a
 username.** The obvious client-side ownership test — compare the viewer's
@@ -119,6 +120,93 @@ existing one rolled back or redeployed to one — which no gate here can see,
 because both pin checks compare bytes to a repository and a repository is not a
 running instance. See `contracts/lesser/provenance.json`,
 `inspected.forward_pin` and `inspected.forward_pin_resolved`.
+
+**2b. On the agent page the ownership question has to be ASKED, because that page
+is painted anonymously.** §2a's booleans arrive inside the document that fetched
+the agent, which is enough on a page whose read is authenticated and useless on
+one whose read is not. `/agents/{username}` is server-rendered with no token —
+the token is in the reader's `sessionStorage`, where no server pass can reach
+it — and the route's props are serialized into contentus's **public** hydration
+endpoint, where an ownership answer about one reader would be served to any
+other. So lesser answers `viewerIsOwner: false` on that page for everybody, the
+owner included, and it is not a stale value a refresh repairs: it is the correct
+answer to the question an anonymous caller asks.
+
+Until equaltoai/contentus#119 this never arose. The owner's panels hung off the
+owned roster, whose whole read is authenticated and client-only, so
+`agent.viewer.isOwner` was already in hand and the mount was one `{#if}`. Moving
+them to the agent page moved the mount onto a page whose first paint cannot
+answer the question, and the gate became a read of its own:
+
+- **Document** — `AGENT_OWNERSHIP_QUERY`: `agent(username: $username) {
+viewerIsOwner }`, and that one field is the whole selection.
+- **Reader** — `fetchAgentOwnership` (`src/lib/agents/contract.ts`), bearer
+  token, client only, and refused in the reader rather than sent when there is
+  no token to send it with.
+- **Classifier** — `ownershipState`, a pure function returning `unknown` (nothing
+  has asked yet — the server's frame and the client's first one), `owner`,
+  `not-owner`, or `unanswered`.
+- **Mount** — `AgentOwnerPanels.svelte`, composed last by `AgentDetail` and the
+  only component `AgentDetail` composes that issues an **authenticated read of
+  lesser's CMS surface**. The panels composed beside it — `AgentMcpPanel`,
+  `AgentCapabilitiesPanel`, `AgentTrustBadge`, `AgentTrustDetail` — render from
+  the props the server pass already fetched and issue no such read; the only
+  requests among them are `AgentMcpPanel`'s two **anonymous** discovery-document
+  probes (`mcp.json`, and the OAuth protected-resource document), which fire only
+  where lesser published an endpoint for the agent, carry `credentials: 'omit'`
+  and no bearer, and cross to the MCP origin lesser named for this agent rather
+  than to lesser's CMS — the crossing §CSP widens `connect-src` for. Every
+  authenticated read of that surface on the page therefore originates _inside_
+  `AgentOwnerPanels`' own subtree, from the grant list and the activity log it
+  mounts for an owner and for nobody else, which makes the gate the page's single
+  entry point for authenticated reads rather than one more read beside them.
+
+Three properties are load-bearing, and each is probed in
+`tests/agents-trust.test.mjs`:
+
+- **One field, asserted as the selection set rather than as a search for the
+  field's name.** Not `id`, not `username` — the read is addressed by username,
+  so echoing it back proves nothing — and nothing lesser redacts. A match on
+  `viewerIsOwner` passes on a document that also asks for `agentOwner`; the
+  selection-set assertion does not. Every field added here is a field a later
+  surface can start rendering as an ownership claim.
+- **`unanswered` is not `not-owner`.** Both mount nothing, which makes folding
+  them the one simplification a gate like this is tempted by, and folding them
+  tells an owner whose read hit a network fault that this instance _said_ they do
+  not own their agent. That is asserting access lesser has not confirmed, in the
+  negative direction, which §2a's rule forbids in the positive one. It is also
+  the one state that speaks on screen: the other three render nothing and say
+  nothing, because a management surface that is absent is not a claim and
+  announcing the absence to every visitor who does not own the agent is noise
+  about a question they did not ask.
+- **Nothing about the viewer reaches the server pass.** The page's public half
+  still costs one anonymous detail read; the ownership document is not among the
+  requests that pass makes, and no ownership copy and no owner panel is in the
+  paint. **This one is measured, and is the only count on this page that is.**
+  `the agent page's server pass asks nothing about the viewer` renders the
+  audited route through the shipped SSR handler against a stubbed transport that
+  records every `fetch`, then asserts one `ContentusAgent`, zero
+  `ContentusAgentOwnership`, and `authorization: null` on the one it made. A
+  server pass is a function this repo can execute end to end; a client session
+  is not, which is exactly why the counts below are labelled differently.
+
+Two rejections belong beside those, because both look cheaper than the read. The
+gate is **not** `AGENT_DETAIL_QUERY` re-sent with the token: that answers the
+question and re-reads an entire agent the page already has, leaving two copies of
+one subject on one screen — the server's anonymous one, painted, and the client's
+authenticated one, differing in exactly the fields lesser redacts — and a reader
+could not tell which copy a sentence came from. And the panels are **not**
+mounted unconditionally on the strength of lesser refusing them: `listShareGrants`
+and `agentActivity` are both owner-gated server-side, so nothing would leak, but
+every authenticated visit by a non-owner would spend two doomed requests and draw
+a grant form for a viewer lesser has not confirmed may use it. "We did not ask"
+is an unanswered question, and this face does not mount on one.
+
+**No new deploy ordering.** `viewerIsOwner` is the same field §2a's forward pin
+covers — lesser `1ce2dc97`, resolved 2026-08-15 — and this route already crosses
+that pin on its server pass, where `AGENT_DETAIL_QUERY` selects the field for
+every visitor. An instance predating it rejects this document too, and it already
+rejected the detail one.
 
 **3. `quarantineActive` is lesser's projection, not a date comparison.** It
 comes from `QuarantineSummaryAt` against lesser's own clock. contentus never
@@ -179,35 +267,85 @@ and the grantee's `AgentSharedWithMePanel` when they read what they hold.
 `tests/agents-trust.test.mjs` holds both halves — that each panel names MCP
 access, and that neither describes a grant as the ability to act as the agent.
 
-The grantee's list reads `mcpAccess` through `AGENT_MCP_ACCESS_QUERY`, one read
-per shared agent, dispatched under the grant list's abort signal and session
-stamp. Three things about that document are deliberate:
+**The grantee's list does not read the bundle; it links to the page that does.**
+It used to — `fetchAgentMcpAccess` once per grant, dispatched together under the
+grant list's abort signal and session stamp — so a grantee with M shares paid M
+GraphQL reads to paint M links, and what all of them bought was one URL that the
+row's own link leads to in full. equaltoai/contentus#119 removed the read, and
+the `sharedMcpAccess` classifier that reduced its answer went with it, because an
+export with no caller is a rule nobody is following. A row now renders the
+handle, lesser's audit stamp for the grant, and one link — **How to connect**, to
+`/agents/{username}` — where `AgentMcpPanel` states the whole bundle from
+`AGENT_DETAIL_QUERY` for the one agent the reader actually opened. The panel
+therefore dispatches **one** reader — the grant list — whatever that list
+contains.
 
-- **It is narrower than `AGENT_DETAIL_QUERY`.** The surface sending it asks one
-  question about somebody _else's_ agent, so it selects no `agentOwner`,
-  `delegatedScopes`, `viewerCanSeePrivateFields` or `viewerIsOwner` — neither
-  the redacted values nor either statement about the viewer's relationship to
-  the agent. Every extra field is one a later panel can start rendering without
-  anyone deciding it should.
-- **It is one read per agent, not a roster read.** lesser has no
-  batch-by-username query for agents, and the roster's filters are applied after
-  paging (above), so no single roster page can be trusted to contain every agent
-  a caller was granted.
+**Structural, and labelled as one.** `listSharedWithMe` is dispatched from
+exactly one site in the component, and no per-row reader is in scope on it at
+all: `neither list on the agents route reads per agent` asserts both halves from
+`svelte/compiler`'s **parse of each list component's source** — the dispatch-site
+counts from the instance-script AST, and reader and mount absence from identifiers
+in the text `liveScript` slices out of its own `parse()` of that file (whichever
+`<script>` blocks it has — both list components carry one instance block and no
+`module` block, so the slice is one block's text — plus any markup `import(…)`
+call text). Neither half consumes generated client output, and neither needs to:
+the unit under test is the call site the author wrote, which the source states
+exactly and the compiled bundle only restates.
+This repo has no DOM harness, so nothing mounts the panel and counts what it
+sends across a session; "one request" is the arithmetic consequence of one
+dispatch site and one mount, not an observed
+total. For the fan-out question that is the _stronger_ evidence — a per-row
+reader cannot be called by a loop the probe never sees, because it is not in
+scope to call — but it is a different kind of claim from a measurement, and the
+two are not interchangeable. The same discipline holds the ownership gate to one
+dispatch site, by the same helper.
+
+Batching was not the alternative, and it is worth saying why, because it is the
+first fix that occurs to a reader: lesser has no batch-by-username query for
+agents, and the roster's filters are applied after paging (§1), so no single
+roster read can be trusted to contain every agent a caller was granted. The
+fan-out could not have been collapsed into one read. The honest fix was to stop
+reading the bundle on a list at all.
+
+`AGENT_MCP_ACCESS_QUERY` and `fetchAgentMcpAccess` **survive with no shipped
+caller**, which is recorded here rather than left to be discovered. What keeps
+them is `scripts/probe-share-flow.mjs`, which imports the document by name so the
+end-to-end exercise drives the shipped text rather than a retyped copy of it.
+Deleting the document would break that probe; deleting the reader while keeping
+the document would leave a document no shipped transport can send, which is worse
+than either. `contract.ts` names both as what they now are — the exercise probe's
+transport — and retargeting the probe onto the detail document is a follow-up
+rather than something this change could do honestly in passing.
+
+Two properties of that document outlive its shipped reader, and both are now
+`AgentMcpPanel`'s on the detail page:
+
+- **It is narrower than `AGENT_DETAIL_QUERY`.** The surface that sends it asks
+  one question about somebody _else's_ agent, so it selects no `agentOwner`,
+  `delegatedScopes`, `viewerCanSeePrivateFields` or `viewerIsOwner` — neither the
+  redacted values nor either statement about the viewer's relationship to the
+  agent. Every extra field is one a later panel can start rendering without
+  anyone deciding it should. `AGENT_OWNERSHIP_QUERY` (§2b) is the same discipline
+  taken one field further.
 - **It is display, never provisioning.** `BuildPublicMCPAccessBundle` is
   documented as the client-neutral actor-scoped MCP access surface "that can be
   shown by agent UIs without provisioning connector state". contentus provisions
   no lease, no token and no connector state, and has no surface that could.
 
-An `ok` read whose `mcpURL` is empty is the instance **stating** it publishes no
-MCP endpoint for that agent. That is a served fact and renders as one; it is a
-different sentence from a read that failed, and `sharedMcpAccess`
-(`src/lib/agents/mcp.ts`) is where the two are kept apart. A grantee who reads
-"none published" stops looking; one who reads a failure tries again.
+An `mcpAccess` with no `mcpURL` is the instance **stating** it publishes no MCP
+endpoint for that agent. That is a served fact and renders as one —
+`AgentMcpPanel` says "This instance publishes no MCP endpoint for this agent" —
+and it is a different sentence from an agent the instance would not resolve,
+which renders as the route's failure. A grantee who reads "none published" stops
+looking; one who reads a failure tries again. The distinction used to be a
+function of its own because a row had to render it beside a link; the row is gone
+and the distinction is the panel's, unchanged.
 
-The row shows the endpoint and links to the agent's own page for the rest of the
-bundle. It deliberately does not reuse `CopyBlock`: that component sits behind
-the `AgentMcpPanel` seam (`scripts/lib/agent-seams.mjs`), and greater M6a
-replacing that panel must not orphan the grantee's list.
+The row deliberately does not reuse `CopyBlock` for the endpoint it no longer
+shows: that component sits behind the `AgentMcpPanel` seam
+(`scripts/lib/agent-seams.mjs`), so the copy-config affordance travels with the
+MCP panel when greater M6a replaces it, and greater M6a replacing that panel must
+not orphan the grantee's list.
 
 ### Who holds access, and who held it
 
@@ -223,11 +361,16 @@ So the audit half is owner-only by lesser's construction, and no arrangement of
 this client widens or narrows it.
 
 What contentus owes is not to widen the READER. The one call site is
-`AgentSharingPanel`, which `MyAgents` mounts only behind lesser's served
-`viewerIsOwner` (§2a), and `tests/agents-trust.test.mjs` sweeps tracked source
-to assert `listShareGrants` has no second caller. The client gate is now
-**narrower** than the server's — lesser would answer an admin — and narrower is
-the right direction for a panel that lives under the heading "Agents you own".
+`AgentSharingPanel`, which `AgentOwnerPanels` mounts on the agent page only
+behind lesser's served `viewerIsOwner` (§2a, which on that page has to be asked
+for — §2b), and `tests/agents-trust.test.mjs` sweeps tracked source to assert
+`listShareGrants` has no second caller. That sweep names no parent, so moving the
+panel changed where the gate is and left the claim — one caller, the owner's
+panel — exactly as it was. The client gate is still **narrower** than the
+server's — lesser would answer an admin — and narrower is the right direction for
+a panel that is the owner's management surface. This sentence used to justify
+itself with the heading the panel sat under, "Agents you own"; the heading it
+sits under now is the agent's own name, and the reason is unchanged.
 
 The panel shows the two halves apart — **who has access now**, and **access that
 was revoked** — with each entry's audit stamps: `granted_at`/`granted_by` on
@@ -304,8 +447,9 @@ through the same transport as every other contentus read.
 requires a caller, requires `read` scope, and answers `Forbidden` unless the
 caller is the agent's owner, an admin, or the agent itself
 (`lesser/graph/agent_resolvers_stubs.go:376-395`). The panel mounts behind
-lesser's own served `viewerIsOwner` (§2a) — the same gate as the sharing panel
-— and sends the owner's own token.
+lesser's own served `viewerIsOwner` (§2a) — the same gate as the sharing panel,
+and since equaltoai/contentus#119 the same mount, `AgentOwnerPanels` on the agent
+page (§2b) — and sends the owner's own token.
 
 **Two attribution keys, two mechanisms, and one row can carry both.**
 `delegated_by` is written from the token's `DelegatedBy` claim
@@ -444,18 +588,32 @@ no `unsafe-inline`, no `unsafe-eval`, no third-party origin.
 greater M6a will land vendored agent-roster and MCP-detail components. Face 6 is
 built so that lands at **three component boundaries** and nothing else moves.
 
-| Seam                                  | Owns (replaced with it)                                                                                           | Imported by                      |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentDriversPanel`, `AgentRosterFilters`, `AgentSharedWithMePanel`, `AgentSharingPanel`, `MyAgents` | `routes/Agents.svelte`           |
-| `src/lib/agents/AgentDetail.svelte`   | `AgentTrustDetail`, `AgentCapabilities`                                                                           | `routes/AgentDetailRoute.svelte` |
-| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering                                                                 | `AgentDetail.svelte`             |
+| Seam                                  | Owns (replaced with it)                                                                               | Imported by                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `src/lib/agents/AgentRoster.svelte`   | `AgentCard`, `AgentRosterFilters`, `AgentSharedWithMePanel`, `MyAgents`                               | `routes/Agents.svelte`           |
+| `src/lib/agents/AgentDetail.svelte`   | `AgentCapabilities`, `AgentDriversPanel`, `AgentOwnerPanels`, `AgentSharingPanel`, `AgentTrustDetail` | `routes/AgentDetailRoute.svelte` |
+| `src/lib/agents/AgentMcpPanel.svelte` | `CopyBlock`, `Accordion`, and the probe rendering                                                     | `AgentDetail.svelte`             |
 
 The `Owns` column is `SEAMS` in `scripts/lib/agent-seams.mjs`, and it is
 reproduced here rather than summarized: this table listed three of the roster's
 components while the declaration named five, because the panels landed in M7,
 M2.2 and M2.3 and the prose did not follow them. A seam table that is a partial
 copy of the declaration is worse than none — it reads as the answer while the
-gate is checking something wider.
+gate is checking something wider. The same discipline applies to a table that is
+merely out of date, which is what equaltoai/contentus#119 made it: the owner's
+two panels and the gate that mounts them moved from the roster's column to the
+detail's, so the roster now names four and the detail five.
+
+**A seam's declaration is a statement about what a swap takes with it, not about
+which viewers may see it.** That is the argument the roster's column used to make
+the other way — the owner's panels sat behind `AgentRoster.svelte` because
+`MyAgents` mounted them, and the comment said in terms that they could not move:
+"the detail route has no owner-only surface to mount it on". True of the route's
+anonymous server paint, which is how it read, and the reason the move needed
+`AgentOwnerPanels.svelte` — a client-only component that asks lesser the
+ownership question the server pass structurally cannot answer (§2b). Replacing
+`AgentDetail.svelte` replaces the owner's grant ledger and activity log too, and
+saying so in the declaration is what keeps them from being orphaned by that swap.
 
 `AgentTrustBadge` is **shared** on purpose: it is the one pill the roster card
 and the detail header both show, and greater's `AgentStateBadge` replaces it on
@@ -466,7 +624,9 @@ both at once. It is the only component imported from more than one seam.
 listed as one — and an undeclared boundary is the one nobody checks. It stays a
 seam rather than being dissolved into the route, because the detail page has a
 component-shaped middle: the identity header, trust and capabilities arranged
-around a nested MCP panel. `AgentMcpPanel` sits INSIDE it and is still its own
+around a nested MCP panel — and, since equaltoai/contentus#119, below all of
+that the owner's half of the page behind one client-only gate. `AgentMcpPanel`
+sits INSIDE it and is still its own
 seam, which is what lets the MCP detail be swapped without the page around it.
 
 What does **not** change when the swap happens: the routes, the URL grammar

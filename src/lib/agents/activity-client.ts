@@ -25,7 +25,9 @@
  * sends the owner's own token; it never asks on behalf of anyone else and it
  * builds no index of its own. The client gate is NARROWER than the server's
  * here — lesser would answer an admin — and narrower is the safe direction for
- * a panel that lives under the heading "Agents you own".
+ * a panel that is the owner's management surface. It lived under the heading
+ * "Agents you own" until equaltoai/contentus#119 moved it to the agent page it
+ * reads about; the heading changed and the reason did not.
  *
  * WHAT THE SURFACE DOES NOT OFFER, recorded here because a consumer that does
  * not know a boundary will eventually render past it:
