@@ -25,4 +25,10 @@ jobs:
       # uncompiled-rune guard walks build/, where an absent build passes
       # vacuously. `pnpm test` alone is not evidence on a clean checkout.
       - run: pnpm run build
+      # The CON-4 release-binding tests drive the real verifier, which
+      # re-derives vendored bytes from the digest-verified greater CLI release
+      # asset. That asset is not on the npm registry and is not committed; this
+      # step verifies its SHA-256 against the repo contract and leaves the
+      # tarball on disk, the same warm-up the governance workflow runs.
+      - run: node gov-infra/verifiers/install-greater-cli.mjs
       - run: pnpm test

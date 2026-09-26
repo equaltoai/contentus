@@ -72,6 +72,11 @@ const requiredWorkflows = {
 		// is no archive to extract and the control reports BLOCKED; MAI-4 binds the
 		// step so it cannot be quietly dropped to convert a hard gate into a soft one.
 		'node gov-infra/verifiers/install-greater-cli.mjs',
+		// The R2-3 anchor step: fetches the release's own immutable registry
+		// manifest and requires it to match the pin AND the committed copy, so a
+		// coordinated same-diff edit to the index + pin digest cannot authenticate.
+		// The step is bound here so removing it to soften the anchor fails MAI-4.
+		'node gov-infra/verifiers/authenticate-release-index.mjs',
 	],
 	// Both of the workflows that carry event-derived data run their logic from a
 	// script pinned by content in the repo contract, because event-derived data may
@@ -1228,6 +1233,7 @@ const execSentinels = new Set([
 	'pnpm run lint',
 	'bash gov-infra/verifiers/gov-verify-rubric.sh',
 	'node gov-infra/verifiers/install-greater-cli.mjs',
+	'node gov-infra/verifiers/authenticate-release-index.mjs',
 	'node scripts/dco-check.mjs "${BASE_SHA}" "${HEAD_SHA}"',
 	'node scripts/main-guard-check.mjs "${BASE_REF}" "${HEAD_REF}" "${HEAD_REPOSITORY}" "${CURRENT_REPOSITORY}"',
 ]);
@@ -1455,6 +1461,19 @@ export function validateRequiredWorkflows(
 							`${file}: required workflow executable sentinel missing (${sentinel})${/\bcase\b/.test(executable) ? '; case syntax is unsupported' : ''}`
 						);
 				}
+			if (name === 'gov-rubric.yml' && !allJobsDisabled) {
+				const authentication = 'node gov-infra/verifiers/authenticate-release-index.mjs';
+				const rubric = 'bash gov-infra/verifiers/gov-verify-rubric.sh';
+				const occurrences = executable.split(authentication).length - 1;
+				if (occurrences !== 1)
+					findings.push(
+						`${file}: release authentication must occur exactly once, found ${occurrences}`
+					);
+				if (executable.indexOf(authentication) > executable.indexOf(rubric))
+					findings.push(
+						`${file}: release authentication must complete before the governance rubric consumes release binding`
+					);
+			}
 		} catch (error) {
 			if (!isWorkflowStructureError(error)) throw error;
 			findings.push(`${file}: invalid workflow structure (${error.message})`);

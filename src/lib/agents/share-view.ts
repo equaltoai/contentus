@@ -19,7 +19,9 @@
  * `shared-with-me` list filters revoked rows out at the index. So the audit
  * half of what this module classifies is owner-only by lesser's construction,
  * not by a client-side filter — and `AgentSharingPanel`, mounted only behind
- * lesser's `agent.owner` statement, is its one consumer.
+ * lesser's served `viewerIsOwner` (lesser#1418), is its one consumer. That gate
+ * read `agent.owner` until the pin bump to 1ce2dc97, which was a VISIBILITY
+ * statement standing in for an ownership one and therefore true of admins too.
  *
  * WHAT THE LIST IS, AND WHAT IT IS NOT, said here because the panel renders it
  * under a heading and a heading is a claim. lesser stores ONE ROW PER GRANTEE

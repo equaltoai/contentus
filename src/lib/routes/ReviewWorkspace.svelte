@@ -3,11 +3,16 @@ Face 2 — the review workspace (product design §5) · journal surface.
 
 TWO PANES, ONE SOURCE OF TRUTH. The rail carries the draft's metadata and its
 attribution; the panel carries the body. The body is `draftPreview.renderedHtml`
-and only ever that — lesser's `cms.RenderDraftPreview` output, handed to the
-vendored blog face's `Article.Content`, which sanitizes it again on the way to
-the DOM. Contentus renders no Markdown, holds no renderer, and never displays
-raw draft source. A preview lesser could not produce is an explained failure
-carrying lesser's own deterministic errors, never a fallback to the source.
+and only ever that — lesser's `cms.RenderDraftPreviewWithMedia` output, fetched
+with `includeAccessUrls: true` so the bound media reaches it as lesser authored
+it, `<figure>` and all. The display is `PreviewBody`, the repository's one
+pinned HTML display sink, bound to that projection field and nothing else:
+lesser already rendered AND sanitized these bytes, so the panel applies no
+second sanitization — the vendored fediverse allowlist pass would strip
+lesser's own figures, which is the #112 failure this surface previously had. Contentus
+renders no Markdown, holds no renderer, and never displays raw draft source. A
+preview lesser could not produce is an explained failure carrying lesser's own
+deterministic errors, never a fallback to the source.
 
 WHY THE RAIL HAS NO EDITOR, stated because the design contemplated one and the
 contract does not currently permit it. Two independent blocks:
@@ -41,15 +46,11 @@ counting the verdict history instead would be wrong.
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 
-	import {
-		Content as ArticleContent,
-		Root as ArticleRoot,
-		normalizeArticleData,
-	} from '$lib/greater/faces/blog/components/Article/index.js';
 	import AttributionStrip from '$lib/components/Review/AttributionStrip.svelte';
 	import { describeApprovalRequirement } from '$lib/components/Review/state.js';
 	import Panel from '$lib/greater/shell/components/Panel.svelte';
 	import ActAsBanner from '$lib/review/ActAsBanner.svelte';
+	import PreviewBody from '$lib/review/PreviewBody.svelte';
 	import PublishAction from '$lib/review/PublishAction.svelte';
 	import VerdictPanel from '$lib/review/VerdictPanel.svelte';
 	import {
@@ -57,7 +58,6 @@ counting the verdict history instead would be wrong.
 		loadDraftActedBy,
 		loadDraftPreview,
 		loadDraftReview,
-		toPreviewFaceArticle,
 		type DraftPreview,
 		type PublishedArticle,
 		type ReviewFailure,
@@ -205,19 +205,6 @@ counting the verdict history instead would be wrong.
 	 * progress — which is the true thing to say.
 	 */
 	const approvalRequirement = $derived(review ? describeApprovalRequirement(review) : undefined);
-
-	/**
-	 * The preview body, shaped for the vendored `Article.Content`.
-	 *
-	 * `contentFormat` is hard-coded `'html'` because that is what this value IS:
-	 * lesser's renderer output. It is not a format flag contentus chooses — a
-	 * preview that did not render carries no content at all (`preview.html` is
-	 * null), so there is no branch here that could hand the face something
-	 * unrendered and label it HTML.
-	 */
-	const previewArticle = $derived(
-		preview ? (toPreviewFaceArticle(preview, review) ?? null) : null
-	);
 
 	const isMarkdownSource = $derived(review?.contentFormat === 'MARKDOWN');
 </script>
@@ -384,18 +371,19 @@ counting the verdict history instead would be wrong.
 			aria-label="Rendered preview"
 		>
 			<Panel class="contentus-review-panel" padding="md" aria-label="Draft preview">
-				{#if previewArticle}
+				{#if preview && preview.success && preview.html}
 					<!--
-						`Article.Content` reads its article from the compound's context,
-						so it needs `Article.Root` around it. Only Content is rendered:
-						the header, footer, share bar, and reading progress belong to a
-						PUBLISHED article, and putting them on a draft would dress an
-						unpublished thing as a published one.
+						lesser's rendered output, displayed exactly as lesser produced it.
+						The display is `PreviewBody` — the one pinned sink bound to
+						`preview.html`: never the raw source, never a client-side render,
+						and never the fediverse allowlist pass that strips the
+						lesser-authored `<figure>`/`<img>` this preview exists to show
+						(#112). The bound media URLs lesser minted into this HTML are
+						short-lived bearer artifacts; they arrive only on this
+						authenticated client-side read.
 					-->
 					<article class="contentus-reader">
-						<ArticleRoot article={normalizeArticleData(previewArticle)}>
-							<ArticleContent />
-						</ArticleRoot>
+						<PreviewBody {preview} />
 					</article>
 				{:else if previewFailure}
 					<Notice

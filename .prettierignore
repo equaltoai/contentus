@@ -58,3 +58,10 @@ components.json
 
 # Design authority — operator-owned baseline.
 docs/product-design.md
+
+# Pinned greater release artifacts — byte-for-byte copies of the releases own
+# registry manifest and source files at the pinned vendoring commit, bound by the
+# digest in contentus-pinned-repo-contract.json and by the manifests own per-file
+# checksums. Not this repositorys source to style: reformatting any of them would
+# break the release binding.
+gov-infra/release/

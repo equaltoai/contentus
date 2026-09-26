@@ -20,9 +20,14 @@
  * (`lesser/graph/agent_resolvers_stubs.go:376-395`). The audit trail is
  * owner/admin-only BY THE SERVER, not by a client-side filter — which is what
  * makes it safe to render, and what this client must not widen. The panel
- * mounts behind lesser's own `agent.owner` statement and sends the owner's own
- * token; it never asks on behalf of anyone else and it builds no index of its
- * own.
+ * mounts behind lesser's own served `viewerIsOwner` (lesser#1418; it read
+ * `agent.owner`, a visibility statement, until the pin bump to 1ce2dc97) and
+ * sends the owner's own token; it never asks on behalf of anyone else and it
+ * builds no index of its own. The client gate is NARROWER than the server's
+ * here — lesser would answer an admin — and narrower is the safe direction for
+ * a panel that is the owner's management surface. It lived under the heading
+ * "Agents you own" until equaltoai/contentus#119 moved it to the agent page it
+ * reads about; the heading changed and the reason did not.
  *
  * WHAT THE SURFACE DOES NOT OFFER, recorded here because a consumer that does
  * not know a boundary will eventually render past it:

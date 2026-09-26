@@ -24,8 +24,13 @@ const root = fileURLToPath(new URL('.', import.meta.url));
  * on purpose: a `greater` CLI pin bump that adds another rune-bearing module
  * under a plain name should keep working, not reintroduce a runtime crash.
  *
- * `tests/vendored-runes.test.mjs` keeps this honest, and the naming defect is
- * reported upstream — the file wants to be `context.svelte.ts`.
+ * `tests/vendored-runes.test.mjs` keeps this honest. The naming defect was fixed
+ * upstream: at greater-v0.13.7 the release renamed the module to
+ * `context.svelte.ts`, which the plugin compiles by filename convention, and the
+ * R2-4 vendored-universe cleanup removed the unlisted v0.11.9 `context.ts`
+ * leftover. The widening stays: it is the supported hook, scoped to the whole
+ * vendored greater tree, so a future pin bump that adds another rune-bearing
+ * module under a plain name keeps working.
  */
 const VENDORED_GREATER_MODULES = /\/src\/lib\/greater\/.*\.(?:js|ts)(?:[?#]|$)/;
 

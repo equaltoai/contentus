@@ -206,14 +206,32 @@ Open questions — resolved 2026-08-13 and routed to
 - **Served capability flag: dropped, no lesser change.** Mode gating is not
   necessary given the pre-release state; the behavioral degradation on older
   instances is honest enough.
-- **`myAgents` ownership: escalated.** Accessible agents must be clearly
-  visible to a given user, with a subtle indication when the agent has a
-  different owner, and a granted-access (non-owner) user must not be able to
-  re-share such an agent. The pinned schema (`myAgents: [Agent!]!`) does not
-  say whether membership means ownership, so if lesser needs an update to
-  serve ownership, that is important to address. Panels remain mounted on
-  lesser's served `viewerCanSeePrivateFields` (adversarial review of PR #89,
-  finding 4).
+- ~~**`myAgents` ownership: escalated.**~~ — **ANSWERED UPSTREAM AND CONSUMED
+  2026-08-15** (lesser#1417 → lesser#1418, pinned here at 1ce2dc97). The entry
+  read: "Accessible agents must be clearly visible to a given user, with a
+  subtle indication when the agent has a different owner, and a
+  granted-access (non-owner) user must not be able to re-share such an agent.
+  The pinned schema (`myAgents: [Agent!]!`) does not say whether membership
+  means ownership, so if lesser needs an update to serve ownership, that is
+  important to address. Panels remain mounted on lesser's served
+  `viewerCanSeePrivateFields` (adversarial review of PR #89, finding 4)."
+
+  It is kept rather than deleted because the workaround it records was live in
+  this repository for two milestones, and a reader tracing why the mount moved
+  needs the state it moved from. What each half resolved to:
+
+  - **Re-sharing** was never a client gap: the share-grant route sits behind
+    `requireManageAgents`, verified during the M2.3 contract inspection.
+  - **Membership** is owner-only and always was — the resolver filters through
+    `AgentOwnerMatchesLocalPrincipal` — and from lesser#1418 the schema says
+    so, so the ambiguity that made this an ask is closed in the contract
+    rather than in an observation.
+  - **The mount** no longer stands on the visibility proxy. `viewerIsOwner` is
+    served per agent, and `MyAgents.svelte` gates the owner-only panels on it.
+    The proxy remains correct where it answers a VISIBILITY question and is
+    still read there (`AgentDetail.svelte`); what ended is its use as an
+    ownership answer, which was true of admins too.
+
 - ~~**`DraftReview` attribution: escalated**~~ — **RETIRED 2026-08-14**
   (upstream ask G in `docs/consumption/review-contract.md`). The entry read:
   "`DraftReview` is an important delegation path and must be supported in

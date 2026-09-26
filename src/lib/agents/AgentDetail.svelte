@@ -12,6 +12,16 @@ greater M6a is expected to land the roster and the MCP detail as separate
 components, and a single seam covering both would force them to be swapped
 together. That nesting is the one seam-to-seam import face 6 allows, and
 `tests/agents-mobile.test.mjs` declares it as such rather than tolerating it.
+
+THE OWNER'S HALF CAME HERE IN equaltoai/contentus#119, and it is the fourth thing
+this seam owns. `AgentOwnerPanels.svelte` mounts the sharing panel and the
+drivers panel — who holds access, and who has been driving — behind lesser's
+served `viewerIsOwner`. They used to hang off the owned roster, per owned agent,
+which made the roster read every owner's grant list and activity log eagerly, for
+agents the reader might never open. Per-agent metadata belongs on the per-agent
+page. This seam still renders on the server and still composes only what lesser
+served anonymously; the owner half is client-only behind that one component, and
+`AgentDetail` itself issues no request.
 -->
 
 <script lang="ts">
@@ -19,6 +29,7 @@ together. That nesting is the one seam-to-seam import face 6 allows, and
 
 	import AgentCapabilitiesPanel from './AgentCapabilities.svelte';
 	import AgentMcpPanel from './AgentMcpPanel.svelte';
+	import AgentOwnerPanels from './AgentOwnerPanels.svelte';
 	import AgentTrustDetail from './AgentTrustDetail.svelte';
 	import AgentTrustBadge from './AgentTrustBadge.svelte';
 	import { agentsHref } from '../../facetheory/routing';
@@ -84,6 +95,15 @@ together. That nesting is the one seam-to-seam import face 6 allows, and
 			and admins. For everyone else lesser redacts the fields to null and
 			`[]`, and those blanks are indistinguishable from real values — so the
 			section is absent rather than showing "no owner".
+
+			STILL THE VISIBILITY GATE, DELIBERATELY, now that `viewer.isOwner`
+			exists beside it (lesser#1418). This section renders the redacted
+			values themselves, so the question it asks is "did lesser serve these
+			to me", and an admin who may read them should. The owner-only
+			MANAGEMENT surfaces moved to the ownership boolean in the same change
+			(MyAgents.svelte); a display of served fields is not one of them, and
+			migrating it too would have hidden data from admins lesser chose to
+			show it to.
 		-->
 		{#if agent.owner}
 			<dl class="contentus-mcp__facts">
@@ -112,4 +132,20 @@ together. That nesting is the one seam-to-seam import face 6 allows, and
 	</Panel>
 
 	<AgentMcpPanel {agent} />
+
+	<!--
+		LAST, BELOW EVERYTHING THE INSTANCE PUBLISHES TO ANY READER. The three
+		sections above describe the agent as lesser serves it to everybody; these
+		two are the owner's management surface over it — who holds access, and who
+		has been driving — and they exist for one viewer only. Ordering them above
+		the published description would put a private ledger where a reader
+		expects the agent's own contract, and would make the page's shape depend on
+		who is reading it before it has said anything public.
+
+		The gate, the read behind it and the reason this page needs one at all are
+		`AgentOwnerPanels`' to carry: it renders nothing on the server, issues the
+		one request this page issues, and mounts both panels only on lesser's
+		served `viewerIsOwner`.
+	-->
+	<AgentOwnerPanels {agent} />
 {/if}
