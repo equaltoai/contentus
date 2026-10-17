@@ -40,8 +40,8 @@ importers:
         specifier: ^3.13.13
         version: 3.13.35(svelte@5.56.8)
       '@theory-cloud/facetheory':
-        specifier: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.9/theory-cloud-facetheory-4.0.9.tgz
-        version: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.9/theory-cloud-facetheory-4.0.9.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)
+        specifier: https://github.com/theory-cloud/FaceTheory/releases/download/v5.0.0/theory-cloud-facetheory-5.0.0.tgz
+        version: https://github.com/theory-cloud/FaceTheory/releases/download/v5.0.0/theory-cloud-facetheory-5.0.0.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)
       hast-util-sanitize:
         specifier: ^5.0.2
         version: 5.0.2
@@ -327,10 +327,10 @@ packages:
   '@tanstack/virtual-core@3.17.7':
     resolution: {integrity: sha512-bp+v10y65sp2H7WpWfIMyxTNfl8ZVfxFTLRjPIFRryi6FV/J33z4IS53WO4pTk36KlvJ4iLiQz+oaydDC1xbcA==}
 
-  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.9/theory-cloud-facetheory-4.0.9.tgz':
-    resolution: {tarball: https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.9/theory-cloud-facetheory-4.0.9.tgz}
-    version: 4.0.9
-    engines: {node: '>=20'}
+  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v5.0.0/theory-cloud-facetheory-5.0.0.tgz':
+    resolution: {tarball: https://github.com/theory-cloud/FaceTheory/releases/download/v5.0.0/theory-cloud-facetheory-5.0.0.tgz}
+    version: 5.0.0
+    engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
       '@emotion/cache': '>=11'
@@ -893,8 +893,8 @@ packages:
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
-  source-map-js@1.2.1:
-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
+  source-map-js@1.2.2:
+    resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
   space-separated-tokens@2.0.2:
@@ -1283,7 +1283,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.17.7': {}
 
-  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v4.0.9/theory-cloud-facetheory-4.0.9.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)':
+  '@theory-cloud/facetheory@https://github.com/theory-cloud/FaceTheory/releases/download/v5.0.0/theory-cloud-facetheory-5.0.0.tgz(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)':
     dependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -1906,7 +1906,7 @@ snapshots:
     dependencies:
       nanoid: 3.3.18
       picocolors: 1.1.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   prettier@3.9.6: {}
 
@@ -1974,7 +1974,7 @@ snapshots:
 
   scheduler@0.27.0: {}
 
-  source-map-js@1.2.1: {}
+  source-map-js@1.2.2: {}
 
   space-separated-tokens@2.0.2: {}
 
